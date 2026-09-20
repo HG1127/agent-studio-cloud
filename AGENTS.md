@@ -1,7 +1,7 @@
 # AGENTS.md — 项目落地规则
 
 任何工程师或 AI 编码工具在本仓库工作时必须遵守本文件。完整设计背景见
-`docs/superpowers/specs/2026-09-20-cloud-rebuild-nextjs-supabase-vercel-design.md`。
+`docs/specs/2026-09-20-cloud-rebuild-nextjs-supabase-vercel-design.md`。
 
 ## 项目状态（双轨期）
 
