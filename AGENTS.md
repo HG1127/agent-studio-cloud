@@ -1,7 +1,7 @@
 # AGENTS.md — 项目落地规则
 
 任何工程师或 AI 编码工具在本仓库工作时必须遵守本文件。完整设计背景见
-`docs/specs/2026-09-20-cloud-rebuild-nextjs-supabase-vercel-design.md`。
+`docs/specs/2026-09-20-cloud-rebuild-nextjs-neon-vercel-design.md`。
 
 ## 项目状态（双轨期）
 
@@ -17,10 +17,10 @@
 | UI | React + Tailwind CSS + shadcn/ui（按需引入） |
 | 画布 | React Flow（@xyflow/react） |
 | 校验 | Zod |
-| 数据库 | Supabase Postgres + Drizzle ORM |
+| 数据库 | Neon Postgres + Drizzle ORM |
 | 执行引擎 | Vercel Workflow SDK + @workflow/ai |
 | 模型调用 | Vercel AI SDK |
-| 文件/登录/推送 | Supabase Storage / Supabase Auth（后置）/ Supabase Realtime |
+| 文件/登录/推送 | Vercel Blob / Auth.js（后置）/ SSE 自建 |
 | 测试 | Vitest + Testing Library + @workflow/vitest + Playwright |
 | CI/CD | GitHub Actions + Vercel |
 | 包管理 | pnpm |
@@ -42,7 +42,7 @@ src/
   db/             # schema/（Drizzle 表定义，按域分文件）+ migrations/
   contracts/      # Zod 契约（前后端共享结构的唯一来源）
   components/ui/  # 通用组件
-  lib/            # 客户端单例：db.ts / supabase.ts / model.ts
+  lib/            # 客户端单例：db.ts / model.ts
 ```
 
 ## 分层铁律
@@ -76,7 +76,7 @@ server/workflows → server/steps → server/domain + lib/
 - 组件文件 PascalCase（`UserCard.tsx`）；其余模块文件 kebab-case（`run-agent.ts`）。
 - Hook 以 `use` 开头；Zod schema 以大写域名词命名（`AgentCreateInput`），导出类型一律 `z.infer` 推导。
 - 默认不写注释；只在隐藏约束、反直觉决策处写一行 why。
-- 禁止把密钥、连接串写进代码；一律走 Vercel/Supabase 环境变量。
+- 禁止把密钥、连接串写进代码；一律走 Vercel/Neon 环境变量。
 
 ## UI 文案铁律（面向用户界面）
 
