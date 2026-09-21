@@ -31,7 +31,7 @@ export interface RuntimeBusinessPolicyDecision {
   allowed: boolean;
   code: "forbidden_business_action" | "allowed";
   reason: string;
-  match: ForbiddenActionMatch;
+  match?: ForbiddenActionMatch;
 }
 
 const NEGATIVE_PREFIX =
@@ -143,5 +143,5 @@ export function runtimeBusinessPolicyDecision(
         reason: `用户明确要求“${match.directive}”，当前步骤“${node?.title || node?.id}”与该禁止项冲突。`,
         match,
       }
-    : { allowed: true, code: "allowed", reason: "未命中用户明确禁止项", match };
+    : { allowed: true, code: "allowed", reason: "未命中用户明确禁止项" };
 }

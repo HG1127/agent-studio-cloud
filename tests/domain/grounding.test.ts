@@ -1,5 +1,6 @@
-// 归一化说明：agt_/WF- 两条随机 id 正则同 Task 4/5；createdAt 归一为同型处理——grounding 产出
-// 不含 createdAt 字段（reqId 为 sha1 确定性 id），此替换为空操作，防 fixture 扩展后漂移。
+// 归一化说明：agt_/WF- 两条随机 id 正则同 Task 4/5；createdAt 归一为两侧同值——输出经
+// structuredClone 透传了 requirementContract.createdAt，占位替换用于两侧对齐，并防 fixture
+// 重生成时时间戳漂移。
 // fixture 链：grounding-golden-1 的 input.workflow 取自 intent-golden-1.json 的 output.workflow，
 // sourceText 取 intent-golden-1 的 input.text，answers 固定为 {}（旧仓库 node --input-type=module
 // 直接运行旧 businessGroundingV57.mjs 产出，生成命令同 Task 4/5 模式）。
@@ -117,11 +118,7 @@ describe("运行时业务策略门禁（Task 11 rule 节点消费面）", () => 
     expect(hit.match).toMatchObject({ matched: true, directive: "不要给客户发促销邮件", actionFamilies: ["send"], objectFamilies: ["mail"] });
 
     const allow = runtimeBusinessPolicyDecision(wf, { id: "n2", title: "读取客户资料", type: "ai" });
-    expect(allow).toEqual({
-      allowed: true,
-      code: "allowed",
-      reason: "未命中用户明确禁止项",
-      match: { matched: false, directive: null, actionFamilies: [], objectFamilies: [], nodeText: "读取客户资料" },
-    });
+    expect(Object.keys(allow).sort()).toEqual(["allowed", "code", "reason"]);
+    expect(allow).toEqual({ allowed: true, code: "allowed", reason: "未命中用户明确禁止项" });
   });
 });
