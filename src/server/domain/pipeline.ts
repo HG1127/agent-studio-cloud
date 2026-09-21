@@ -30,6 +30,8 @@ export function buildAgentDraft(options: { name: string; intentText: string }): 
   const { name, intentText } = options;
   try {
     const compiled = compileIntentWorkflow({ text: intentText, name, caps: [], humanReasons: [], sourceType: "idea" });
+    // M1 工具裁定：仅演示工具，sandbox 执行；M2 真实连接后移除
+    bindDemoCapabilities(compiled.workflow);
     const intent = { orderedSteps: compiled.orderedSteps, trigger: undefined, outputs: [] };
     const grounded = groundBusinessWorkflow(compiled.workflow, {
       sourceText: intentText,
@@ -53,6 +55,57 @@ export function buildAgentDraft(options: { name: string; intentText: string }): 
       diagnostics: { error: error instanceof Error ? error.message : String(error) },
     };
   }
+}
+
+// M1 工具裁定（M2 真实连接后移除）：编译器对未注册工具打未绑定标记（registryToolId=null、
+// protocol/connector='unbound'、scope 以 unbound. 开头、unresolved=true），通用知识库步骤同样无真实来源；
+// grounding 的 executableTool/knowledgeBound 会据此全部判死 → business_source_unresolved 恒为 critical，
+// 发布成功路径在 M1 永远不可达。此处在 compile 之后、grounding 之前把未绑定能力统一改绑演示来源，
+// 并清空编译器填的 runtimeRequirements.unresolvedTools（列表已失效，留着会让运行前置校验直接拒绝）。
+export function bindDemoCapabilities(workflow: WorkflowDraft): void {
+  for (const node of Object.values(workflow.nodes)) {
+    if (
+      node.type === "tool" &&
+      node.tool &&
+      (node.tool.unresolved === true || node.tool.registryToolId == null || node.tool.protocol === "unbound")
+    ) {
+      // connector/scope 必须一并改绑：executableTool 还要求 connector!=='unbound' 且 scope 不以 unbound. 开头
+      node.tool.registryToolId = "demo";
+      node.tool.protocol = "demo";
+      node.tool.unresolved = false;
+      if (node.tool.connector === "unbound") node.tool.connector = "demo";
+      if (/^unbound\./.test(node.tool.scope)) node.tool.scope = "demo";
+    }
+    if (node.type === "knowledge" && node.knowledge && /^(业务知识库|knowledge|知识库)?$/i.test(node.knowledge.space)) {
+      node.knowledge.space = "演示资料库";
+    }
+  }
+  const requirements = (workflow.runtimeRequirements ??= { externalTools: [], unresolvedTools: [], toolReceiptVerification: true });
+  requirements.unresolvedTools = [];
+}
+
+// M1 演示发布策略（蓝图问答/自动修复在 M2 上线后移除本豁免）：编译产物必然携带的三类
+// 「设计检查」阻塞（输出契约缺失、结束前未交付、控制节点标题误标）在演示期放行；
+// 数据来源未落实（business_source_unresolved）与流程死路（dead_end）照常拦截——
+// 来源未落实的版本发布了也无法运行，豁免只会误导。
+const DEMO_EXEMPT_CODES: ReadonlySet<string> = new Set(["output_contract_missing", "end_without_delivery", "meta_node_detected"]);
+
+function isControlDraftNode(nodeId: string | null, draft: WorkflowDraft): boolean {
+  if (!nodeId) return false;
+  const node = draft.nodes[nodeId];
+  return node?.ui?.visibility === "control" || node?.controlPlane?.hiddenByDefault === true;
+}
+
+export function filterPublishBlockers(issues: AuditIssue[], draft: WorkflowDraft): { blocking: AuditIssue[]; exempted: AuditIssue[] } {
+  const blocking: AuditIssue[] = [];
+  const exempted: AuditIssue[] = [];
+  for (const issue of issues) {
+    // 只有 critical 参与裁决：warning/info 本就不拦发布，也不进豁免提醒
+    if (issue.severity !== "critical") continue;
+    const exempt = DEMO_EXEMPT_CODES.has(issue.code) && (issue.code !== "meta_node_detected" || isControlDraftNode(issue.nodeId, draft));
+    (exempt ? exempted : blocking).push(issue);
+  }
+  return { blocking, exempted };
 }
 
 // 指纹要求同一草稿在不同键序下产出同一序列化：递归排序对象键；undefined 字段按 JSON 规则丢弃

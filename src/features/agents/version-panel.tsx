@@ -15,12 +15,17 @@ export function VersionPanel({ agentId, versions }: { agentId: string; versions:
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<{ error: string; issues: string[] } | null>(null);
+  const [demoNotice, setDemoNotice] = useState<string[] | null>(null);
 
   async function handlePublish() {
     setPending(true);
     setFailure(null);
+    setDemoNotice(null);
     const result = await publishVersionAction(agentId);
     if (result.ok) {
+      // 契约要求成功必带 exempted；防御运行期缺字段的历史调用方
+      const exempted = result.exempted ?? [];
+      if (exempted.length > 0) setDemoNotice(exempted.map((issue) => issue.title));
       router.refresh();
     } else {
       setFailure({ error: result.error, issues: result.issues });
@@ -51,6 +56,16 @@ export function VersionPanel({ agentId, versions }: { agentId: string; versions:
               ))}
             </ul>
           ) : null}
+        </div>
+      ) : null}
+      {demoNotice ? (
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
+          <p>已发布。演示期提醒：还有 {demoNotice.length} 个设计检查问题待处理</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            {demoNotice.map((title, index) => (
+              <li key={index}>{title}</li>
+            ))}
+          </ul>
         </div>
       ) : null}
       {versions.length > 0 ? (

@@ -10,8 +10,10 @@ export const VersionSummary = z.object({
 });
 export type VersionSummary = z.infer<typeof VersionSummary>;
 
+// 成功分支的 exempted 是 M1 演示发布策略的豁免问题标题列表（filterPublishBlockers 产出），
+// 由版本面板转成「演示期提醒」展示；空数组表示没有豁免项
 export const PublishVersionResult = z.discriminatedUnion("ok", [
-  z.object({ ok: z.literal(true) }),
+  z.object({ ok: z.literal(true), exempted: z.array(z.object({ title: z.string() })) }),
   z.object({ ok: z.literal(false), error: z.string(), issues: z.array(z.string()) }),
 ]);
 export type PublishVersionResult = z.infer<typeof PublishVersionResult>;

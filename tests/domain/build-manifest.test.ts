@@ -6,8 +6,8 @@ import { describe, expect, it } from "vitest";
 import golden1 from "../fixtures/domain/plan-golden-1.json";
 import { AgentManifest } from "@/contracts/manifest";
 import { WorkflowDraft, type WorkflowDraft as WorkflowDraftType } from "@/contracts/workflow";
-import { auditWorkflow } from "@/server/domain/audit";
-import { buildManifest, deriveDesignAuditStatus, stableStringify } from "@/server/domain/pipeline";
+import { auditWorkflow, type AuditIssue } from "@/server/domain/audit";
+import { buildManifest, deriveDesignAuditStatus, filterPublishBlockers, stableStringify } from "@/server/domain/pipeline";
 
 const draft: WorkflowDraftType = WorkflowDraft.parse(golden1.output.workflow);
 const options = { modelId: "test-model", mock: true };
@@ -101,5 +101,68 @@ describe("buildManifest", () => {
   it("AgentManifest 契约可直接 parse buildManifest 真实产物（T2 Minor ②）", () => {
     const manifest = buildManifest(draft, options);
     expect(AgentManifest.parse(manifest)).toEqual(manifest);
+  });
+});
+
+// filterPublishBlockers（M1 演示发布策略）用例：issues/draft 均为手造最小结构，只裁决 code 与
+// nodeId 指向节点的 control 身份，与具体草稿内容解耦
+function blockerIssue(code: string, nodeId: string | null, overrides: Partial<AuditIssue> = {}): AuditIssue {
+  return {
+    id: `issue-${code}-${nodeId ?? "root"}`,
+    severity: "critical",
+    category: "data",
+    title: `标题-${code}`,
+    detail: "细节",
+    nodeId,
+    fixable: true,
+    code,
+    ...overrides,
+  };
+}
+
+const blockerDraft: WorkflowDraftType = WorkflowDraft.parse({
+  id: "WF-blocker",
+  rootAgent: { id: "agt_demo", name: "演示助手", role: "演示" },
+  nodes: {
+    ctrl: {
+      id: "ctrl", title: "交付前检查结果", type: "rule", next: "finish",
+      ui: { visibility: "control" }, controlPlane: { kind: "quality", hiddenByDefault: true },
+    },
+    biz: { id: "biz", title: "整理结果", type: "ai", next: null },
+    finish: { id: "finish", title: "本次任务已完成", type: "end", next: null },
+  },
+  memoryPolicy: { taskContext: true, longTerm: false },
+});
+
+describe("filterPublishBlockers（M1 演示发布策略）", () => {
+  it("演示豁免码进 exempted；business_source_unresolved 与 dead_end 留在 blocking", () => {
+    const issues = [
+      blockerIssue("output_contract_missing", null),
+      blockerIssue("end_without_delivery", "finish"),
+      blockerIssue("meta_node_detected", "ctrl"),
+      blockerIssue("business_source_unresolved", null),
+      blockerIssue("dead_end", "biz"),
+    ];
+    const { blocking, exempted } = filterPublishBlockers(issues, blockerDraft);
+    expect(exempted.map((issue) => issue.code)).toEqual(["output_contract_missing", "end_without_delivery", "meta_node_detected"]);
+    expect(blocking.map((issue) => issue.code)).toEqual(["business_source_unresolved", "dead_end"]);
+  });
+
+  it("业务节点的 meta_node_detected 不豁免；nodeId 缺失或指向未知节点也不豁免", () => {
+    const { blocking, exempted } = filterPublishBlockers(
+      [blockerIssue("meta_node_detected", "biz"), blockerIssue("meta_node_detected", null), blockerIssue("meta_node_detected", "ghost")],
+      blockerDraft,
+    );
+    expect(exempted).toEqual([]);
+    expect(blocking).toHaveLength(3);
+  });
+
+  it("非 critical 问题不参与裁决：不拦截发布，也不进豁免提醒", () => {
+    const { blocking, exempted } = filterPublishBlockers(
+      [blockerIssue("dead_end", "biz", { severity: "warning" }), blockerIssue("output_contract_missing", null, { severity: "info" })],
+      blockerDraft,
+    );
+    expect(blocking).toEqual([]);
+    expect(exempted).toEqual([]);
   });
 });

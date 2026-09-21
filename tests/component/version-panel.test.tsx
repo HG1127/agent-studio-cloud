@@ -99,4 +99,29 @@ describe("VersionPanel", () => {
       expect(screen.getByRole("button", { name: "发布新版本" })).toBeEnabled();
     });
   });
+
+  it("发布成功但存在豁免项时展示演示期提醒与问题标题", async () => {
+    actionMock.mockResolvedValue({
+      ok: true,
+      exempted: [{ title: "没有定义最终交付物" }, { title: "目标声明被误识别为工作流节点" }],
+    });
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(screen.getByRole("button", { name: "发布新版本" }));
+    expect(await screen.findByText("已发布。演示期提醒：还有 2 个设计检查问题待处理")).toBeInTheDocument();
+    expect(screen.getByText("没有定义最终交付物")).toBeInTheDocument();
+    expect(screen.getByText("目标声明被误识别为工作流节点")).toBeInTheDocument();
+    expect(refreshMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("发布成功且没有豁免项时不显示提醒", async () => {
+    actionMock.mockResolvedValue({ ok: true, exempted: [] });
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(screen.getByRole("button", { name: "发布新版本" }));
+    await waitFor(() => {
+      expect(refreshMock).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.queryByText(/演示期提醒/)).not.toBeInTheDocument();
+  });
 });

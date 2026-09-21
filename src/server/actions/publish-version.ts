@@ -9,7 +9,7 @@ import { agentVersions, agents, workflowDefinitions } from "@/db/schema";
 import { DEMO_USER_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { auditWorkflow } from "@/server/domain/audit";
-import { buildManifest } from "@/server/domain/pipeline";
+import { buildManifest, filterPublishBlockers } from "@/server/domain/pipeline";
 
 export async function publishVersionAction(agentId: string): Promise<PublishVersionResult> {
   if (!z.string().uuid().safeParse(agentId).success) {
@@ -39,12 +39,13 @@ export async function publishVersionAction(agentId: string): Promise<PublishVers
       return { ok: false, error: "流程草稿没有通过校验，请在画布上重新保存后再发布", issues: [] };
     }
     const audit = auditWorkflow(parsed.data);
-    const criticals = audit.issues.filter((issue) => issue.severity === "critical");
-    if (criticals.length > 0) {
+    // M1 演示发布策略：critical 门禁交给 filterPublishBlockers 裁决，豁免项随成功返回值透出给面板提醒
+    const { blocking, exempted } = filterPublishBlockers(audit.issues, parsed.data);
+    if (blocking.length > 0) {
       return {
         ok: false,
-        error: `设计检查未通过：还有 ${criticals.length} 个阻塞问题，解决后才能发布`,
-        issues: criticals.map((issue) => `${issue.title}：${issue.detail}`),
+        error: `设计检查未通过：还有 ${blocking.length} 个阻塞问题，解决后才能发布`,
+        issues: blocking.map((issue) => `${issue.title}：${issue.detail}`),
       };
     }
     const modelId = process.env.MODEL_ID || "";
@@ -69,7 +70,7 @@ export async function publishVersionAction(agentId: string): Promise<PublishVers
       });
     });
     revalidatePath(`/agents/${agentId}`);
-    return { ok: true };
+    return { ok: true, exempted: exempted.map((issue) => ({ title: issue.title })) };
   } catch {
     return { ok: false, error: "发布失败，请稍后重试", issues: [] };
   }

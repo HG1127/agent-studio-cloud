@@ -51,6 +51,12 @@ function isToolUnbound(node: WorkflowNode): boolean {
   return node.type === "tool" && (Boolean(node.tool?.unresolved) || !node.tool?.registryToolId);
 }
 
+// M1 演示发布策略的画布标识：演示绑定（registryToolId/protocol 为 demo）的工具节点标注「演示」；
+// 未绑定判定保留在前，真正未绑定的节点仍显示「未绑定工具」
+function isDemoTool(node: WorkflowNode): boolean {
+  return node.type === "tool" && (node.tool?.registryToolId === "demo" || node.tool?.protocol === "demo");
+}
+
 // 出边句柄与草稿字段一一对应：next/reject/error/default/body/exit/branch-N
 export function WorkflowNodeView(props: NodeProps) {
   const node = (props.data as WorkflowFlowNodeData).node;
@@ -120,6 +126,8 @@ export function WorkflowNodeView(props: NodeProps) {
         ) : null}
         {isToolUnbound(node) ? (
           <span className="ml-auto rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-500">未绑定工具</span>
+        ) : isDemoTool(node) ? (
+          <span className="ml-auto rounded-full bg-violet-100 px-2 py-0.5 text-[11px] text-violet-700">演示</span>
         ) : null}
       </div>
       <p className="mt-1 text-sm font-medium leading-snug text-gray-900">{node.title}</p>
