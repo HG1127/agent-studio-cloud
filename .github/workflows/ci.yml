@@ -1,0 +1,28 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Next 16 的 LayoutProps 等路由类型由 typegen 生成（.next/ 不入库），tsc 前必须先生成
+      - run: pnpm exec next typegen
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
+        env:
+          # 构建期仅要求变量存在（db 模块导入即校验），占位值不发起真实连接
+          DATABASE_URL_POOLED: postgresql://build:build@localhost:5432/build
