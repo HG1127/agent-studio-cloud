@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { HealthCard } from "@/features/dashboard/health-card";
 
 function mockFetchJson(payload: unknown) {
@@ -10,6 +10,8 @@ function mockFetchJson(payload: unknown) {
 }
 
 describe("HealthCard", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it("加载中显示检查提示", () => {
     vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
     render(<HealthCard />);

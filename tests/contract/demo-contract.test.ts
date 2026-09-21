@@ -10,6 +10,10 @@ describe("DemoStartInput", () => {
     const result = DemoStartInput.safeParse({ message: "" });
     expect(result.success).toBe(false);
   });
+  it("接受恰好 500 字的任务描述", () => {
+    const result = DemoStartInput.safeParse({ message: "长".repeat(500) });
+    expect(result.success).toBe(true);
+  });
   it("拒绝超过 500 字的任务描述", () => {
     const result = DemoStartInput.safeParse({ message: "长".repeat(501) });
     expect(result.success).toBe(false);
