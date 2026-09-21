@@ -1,0 +1,957 @@
+{
+  "input": {
+    "text": "每天读取新的报销单，如果金额超过五千由财务复核，否则直接进入付款流程，若读取失败则跳过并记录异常，最后输出处理清单",
+    "name": "报销助手",
+    "domain": {
+      "name": "财务"
+    },
+    "caps": [],
+    "trigger": {
+      "value": "每天"
+    },
+    "humanReasons": []
+  },
+  "output": {
+    "workflow": {
+      "id": "WF-f1706b68-3e95-43a6-840c-5b05ba38a254",
+      "versionId": null,
+      "startNodeId": "start",
+      "rootAgent": {
+        "id": "agt_2a7b8b85",
+        "name": "报销助手",
+        "role": "财务助手"
+      },
+      "nodes": {
+        "start": {
+          "id": "start",
+          "title": "每天",
+          "type": "trigger",
+          "agent": {
+            "id": "agt_2a7b8b85",
+            "name": "报销助手",
+            "role": "财务助手"
+          },
+          "next": "step_1",
+          "description": "收到任务后开始",
+          "requirementIds": [
+            "REQ_ed75b67c8d"
+          ]
+        },
+        "step_1": {
+          "id": "step_1",
+          "title": "读取新的报销单",
+          "type": "ai",
+          "agent": {
+            "id": "agt_2a7b8b85",
+            "name": "报销助手",
+            "role": "财务助手"
+          },
+          "next": "step_2",
+          "description": "读取新的报销单",
+          "sourceLabel": "来自你的描述",
+          "modelClass": "balanced",
+          "purpose": "execute",
+          "onErrorNext": "recovery_3",
+          "retry": {
+            "maxAttempts": 1,
+            "backoffMs": 250
+          },
+          "requirementIds": [
+            "REQ_9ca87465d0",
+            "REQ_5a7ca8d958"
+          ]
+        },
+        "step_2": {
+          "id": "step_2",
+          "title": "财务确认处理结果",
+          "type": "human",
+          "agent": {
+            "id": "agt_2a7b8b85",
+            "name": "报销助手",
+            "role": "财务助手"
+          },
+          "next": "quality_review",
+          "description": "如果金额超过五千由财务复核",
+          "sourceLabel": "来自你的描述",
+          "approval": {
+            "role": "财务",
+            "reason": "确认「财务确认处理结果」后流程才会继续"
+          },
+          "rejectNext": "not_approved",
+          "requirementIds": [
+            "REQ_1bc0193d5f",
+            "REQ_f8da96baec"
+          ]
+        },
+        "recovery_3": {
+          "id": "recovery_3",
+          "title": "跳过",
+          "type": "ai",
+          "agent": {
+            "id": "agt_2a7b8b85",
+            "name": "报销助手",
+            "role": "财务助手"
+          },
+          "next": "recovery_4",
+          "description": "跳过",
+          "sourceLabel": "来自你的描述",
+          "modelClass": "balanced",
+          "purpose": "execute",
+          "requirementIds": [
+            "REQ_1eef3a2d3c"
+          ]
+        },
+        "recovery_4": {
+          "id": "recovery_4",
+          "title": "记录异常，最后输出处理清单",
+          "type": "system",
+          "agent": {
+            "id": "agt_2a7b8b85",
+            "name": "报销助手",
+            "role": "财务助手"
+          },
+          "next": "quality_review",
+          "description": "记录异常，最后输出处理清单",
+          "sourceLabel": "来自你的描述",
+          "requirementIds": [
+            "REQ_5a7ca8d958",
+            "REQ_2f5aff28da"
+          ]
+        },
+        "not_approved": {
+          "id": "not_approved",
+          "title": "未获确认，保留草稿并结束",
+          "type": "system",
+          "agent": {
+            "id": "agt_2a7b8b85",
+            "name": "报销助手",
+            "role": "财务助手"
+          },
+          "next": "quality_review",
+          "description": "不会执行后续对外发送、付款或写回动作"
+        },
+        "quality_review": {
+          "id": "quality_review",
+          "title": "交付前检查结果",
+          "type": "rule",
+          "agent": {
+            "id": "agt_2a7b8b85",
+            "name": "报销助手",
+            "role": "财务助手"
+          },
+          "next": "done",
+          "quality": {
+            "requiredOutputTitles": [
+              "读取新的报销单",
+              "跳过"
+            ],
+            "minOutputCount": 1,
+            "checkToolReceipts": false,
+            "checkHumanBoundary": true
+          },
+          "description": "完成前自动核对是否形成结果、业务系统是否有回执，以及重要操作是否经过员工确认"
+        },
+        "done": {
+          "id": "done",
+          "title": "本次任务已完成",
+          "type": "end",
+          "agent": {
+            "id": "agt_2a7b8b85",
+            "name": "报销助手",
+            "role": "财务助手"
+          },
+          "next": null,
+          "description": "结果、执行记录与人工决定均已保存",
+          "requirementIds": [
+            "REQ_2f5aff28da"
+          ]
+        }
+      },
+      "variables": [],
+      "memoryPolicy": {
+        "taskContext": true,
+        "longTerm": false,
+        "description": "仅保留本次任务所需信息"
+      },
+      "intentSource": {
+        "mode": "semantic-graph-v3.6",
+        "schema": "intent-contract/v3.6",
+        "clauses": [
+          "每天读取新的报销单",
+          "如果金额超过五千由财务复核",
+          "若读取失败则跳过并记录异常，最后输出处理清单"
+        ],
+        "conditionCount": 0,
+        "parallelCount": 0,
+        "waitCount": 0,
+        "recoveryRouteCount": 1,
+        "collectionLoop": false,
+        "dynamicToolBinding": false,
+        "qualityGate": true,
+        "harnessPlanningRequired": false,
+        "requirementCoverage": {
+          "schema": "agent-requirement-coverage/v3.6",
+          "covered": [
+            {
+              "id": "REQ_ed75b67c8d",
+              "kind": "trigger",
+              "label": "什么时候开始",
+              "text": "每天",
+              "required": true,
+              "source": "intent-trigger",
+              "sources": [
+                "intent-trigger",
+                "user"
+              ],
+              "stepRef": null,
+              "covered": true,
+              "nodeIds": [
+                "start"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "start",
+                  "title": "每天",
+                  "type": "trigger",
+                  "confidence": 1
+                }
+              ]
+            },
+            {
+              "id": "REQ_9ca87465d0",
+              "kind": "action",
+              "label": "需要完成的工作",
+              "text": "读取新的报销单",
+              "required": true,
+              "source": "intent-step",
+              "sources": [
+                "intent-step"
+              ],
+              "stepRef": "intent_1",
+              "covered": true,
+              "nodeIds": [
+                "step_1"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "step_1",
+                  "title": "读取新的报销单",
+                  "type": "ai",
+                  "confidence": 1
+                }
+              ]
+            },
+            {
+              "id": "REQ_1bc0193d5f",
+              "kind": "human",
+              "label": "哪些决定交给员工",
+              "text": "如果金额超过五千由财务复核",
+              "required": true,
+              "source": "intent-step",
+              "sources": [
+                "intent-step"
+              ],
+              "stepRef": "intent_2",
+              "covered": true,
+              "nodeIds": [
+                "step_2"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "step_2",
+                  "title": "财务确认处理结果",
+                  "type": "human",
+                  "confidence": 1
+                }
+              ]
+            },
+            {
+              "id": "REQ_1eef3a2d3c",
+              "kind": "action",
+              "label": "需要完成的工作",
+              "text": "跳过",
+              "required": true,
+              "source": "intent-step",
+              "sources": [
+                "intent-step"
+              ],
+              "stepRef": "intent_3",
+              "covered": true,
+              "nodeIds": [
+                "recovery_3"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "recovery_3",
+                  "title": "跳过",
+                  "type": "ai",
+                  "confidence": 1
+                }
+              ]
+            },
+            {
+              "id": "REQ_5a7ca8d958",
+              "kind": "recovery",
+              "label": "失败后怎么办",
+              "text": "记录异常，最后输出处理清单",
+              "required": true,
+              "source": "intent-step",
+              "sources": [
+                "intent-step"
+              ],
+              "stepRef": "intent_4",
+              "covered": true,
+              "nodeIds": [
+                "recovery_4",
+                "step_1"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "recovery_4",
+                  "title": "记录异常，最后输出处理清单",
+                  "type": "system",
+                  "confidence": 1
+                },
+                {
+                  "id": "step_1",
+                  "title": "读取新的报销单",
+                  "type": "ai",
+                  "confidence": 0.5
+                }
+              ]
+            },
+            {
+              "id": "REQ_f8da96baec",
+              "kind": "condition",
+              "label": "如何分情况处理",
+              "text": "如果金额超过五千由财务复核",
+              "required": true,
+              "source": "user",
+              "sources": [
+                "user"
+              ],
+              "stepRef": null,
+              "covered": true,
+              "nodeIds": [
+                "step_2"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "step_2",
+                  "title": "财务确认处理结果",
+                  "type": "human",
+                  "confidence": 1
+                }
+              ]
+            },
+            {
+              "id": "REQ_2f5aff28da",
+              "kind": "output",
+              "label": "最终交付什么",
+              "text": "最后输出处理清单",
+              "required": true,
+              "source": "user",
+              "sources": [
+                "user"
+              ],
+              "stepRef": null,
+              "covered": true,
+              "nodeIds": [
+                "recovery_4",
+                "done"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "recovery_4",
+                  "title": "记录异常，最后输出处理清单",
+                  "type": "system",
+                  "confidence": 1
+                },
+                {
+                  "id": "done",
+                  "title": "本次任务已完成",
+                  "type": "end",
+                  "confidence": 0.55
+                }
+              ]
+            }
+          ],
+          "uncovered": [
+            {
+              "id": "REQ_4e490dd8ea",
+              "kind": "condition",
+              "label": "如何分情况处理",
+              "text": "若读取失败则跳过并记录异常",
+              "required": true,
+              "source": "user",
+              "sources": [
+                "user"
+              ],
+              "stepRef": null,
+              "covered": false,
+              "nodeIds": [],
+              "matchedSteps": []
+            }
+          ],
+          "requiredCount": 8,
+          "coveredRequiredCount": 7,
+          "percent": 88,
+          "complete": false
+        },
+        "complexityProfile": {
+          "schema": "agent-complexity-profile/v3.6",
+          "level": "structured",
+          "label": "多步骤任务",
+          "score": 67,
+          "capabilities": [
+            {
+              "id": "branches",
+              "label": "按不同情况走不同路径",
+              "needed": true,
+              "implemented": false
+            },
+            {
+              "id": "parallel",
+              "label": "多项工作可以同时进行",
+              "needed": false,
+              "implemented": false
+            },
+            {
+              "id": "loop",
+              "label": "能逐项处理一批内容",
+              "needed": false,
+              "implemented": false
+            },
+            {
+              "id": "wait",
+              "label": "能等待时间或外部消息后继续",
+              "needed": false,
+              "implemented": false
+            },
+            {
+              "id": "subflow",
+              "label": "复杂工作可拆成独立子任务",
+              "needed": false,
+              "implemented": false
+            },
+            {
+              "id": "human",
+              "label": "关键决定会交给员工",
+              "needed": true,
+              "implemented": true
+            },
+            {
+              "id": "tools",
+              "label": "能调用已连接的真实业务系统",
+              "needed": false,
+              "implemented": false
+            },
+            {
+              "id": "memory",
+              "label": "能按要求参考和保存经验",
+              "needed": false,
+              "implemented": false
+            },
+            {
+              "id": "recovery",
+              "label": "局部失败可重试或走备用路径",
+              "needed": true,
+              "implemented": true
+            }
+          ],
+          "missing": [
+            {
+              "id": "branches",
+              "label": "按不同情况走不同路径",
+              "needed": true,
+              "implemented": false
+            }
+          ],
+          "summary": "已识别 3 类任务结构，还有 1 类需要补齐。"
+        },
+        "compilerVersion": "3.6"
+      },
+      "requirementContract": {
+        "schema": "agent-requirements/v3.6",
+        "sourceText": "每天读取新的报销单，如果金额超过五千由财务复核，否则直接进入付款流程，若读取失败则跳过并记录异常，最后输出处理清单",
+        "requirements": [
+          {
+            "id": "REQ_ed75b67c8d",
+            "kind": "trigger",
+            "label": "什么时候开始",
+            "text": "每天",
+            "required": true,
+            "source": "intent-trigger",
+            "sources": [
+              "intent-trigger",
+              "user"
+            ],
+            "stepRef": null
+          },
+          {
+            "id": "REQ_9ca87465d0",
+            "kind": "action",
+            "label": "需要完成的工作",
+            "text": "读取新的报销单",
+            "required": true,
+            "source": "intent-step",
+            "sources": [
+              "intent-step"
+            ],
+            "stepRef": "intent_1"
+          },
+          {
+            "id": "REQ_1bc0193d5f",
+            "kind": "human",
+            "label": "哪些决定交给员工",
+            "text": "如果金额超过五千由财务复核",
+            "required": true,
+            "source": "intent-step",
+            "sources": [
+              "intent-step"
+            ],
+            "stepRef": "intent_2"
+          },
+          {
+            "id": "REQ_1eef3a2d3c",
+            "kind": "action",
+            "label": "需要完成的工作",
+            "text": "跳过",
+            "required": true,
+            "source": "intent-step",
+            "sources": [
+              "intent-step"
+            ],
+            "stepRef": "intent_3"
+          },
+          {
+            "id": "REQ_5a7ca8d958",
+            "kind": "recovery",
+            "label": "失败后怎么办",
+            "text": "记录异常，最后输出处理清单",
+            "required": true,
+            "source": "intent-step",
+            "sources": [
+              "intent-step"
+            ],
+            "stepRef": "intent_4"
+          },
+          {
+            "id": "REQ_f8da96baec",
+            "kind": "condition",
+            "label": "如何分情况处理",
+            "text": "如果金额超过五千由财务复核",
+            "required": true,
+            "source": "user",
+            "sources": [
+              "user"
+            ],
+            "stepRef": null
+          },
+          {
+            "id": "REQ_4e490dd8ea",
+            "kind": "condition",
+            "label": "如何分情况处理",
+            "text": "若读取失败则跳过并记录异常",
+            "required": true,
+            "source": "user",
+            "sources": [
+              "user"
+            ],
+            "stepRef": null
+          },
+          {
+            "id": "REQ_2f5aff28da",
+            "kind": "output",
+            "label": "最终交付什么",
+            "text": "最后输出处理清单",
+            "required": true,
+            "source": "user",
+            "sources": [
+              "user"
+            ],
+            "stepRef": null
+          }
+        ],
+        "createdAt": "2026-09-21T05:57:46.643Z",
+        "coverage": {
+          "schema": "agent-requirement-coverage/v3.6",
+          "covered": [
+            {
+              "id": "REQ_ed75b67c8d",
+              "kind": "trigger",
+              "label": "什么时候开始",
+              "text": "每天",
+              "required": true,
+              "source": "intent-trigger",
+              "sources": [
+                "intent-trigger",
+                "user"
+              ],
+              "stepRef": null,
+              "covered": true,
+              "nodeIds": [
+                "start"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "start",
+                  "title": "每天",
+                  "type": "trigger",
+                  "confidence": 1
+                }
+              ]
+            },
+            {
+              "id": "REQ_9ca87465d0",
+              "kind": "action",
+              "label": "需要完成的工作",
+              "text": "读取新的报销单",
+              "required": true,
+              "source": "intent-step",
+              "sources": [
+                "intent-step"
+              ],
+              "stepRef": "intent_1",
+              "covered": true,
+              "nodeIds": [
+                "step_1"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "step_1",
+                  "title": "读取新的报销单",
+                  "type": "ai",
+                  "confidence": 1
+                }
+              ]
+            },
+            {
+              "id": "REQ_1bc0193d5f",
+              "kind": "human",
+              "label": "哪些决定交给员工",
+              "text": "如果金额超过五千由财务复核",
+              "required": true,
+              "source": "intent-step",
+              "sources": [
+                "intent-step"
+              ],
+              "stepRef": "intent_2",
+              "covered": true,
+              "nodeIds": [
+                "step_2"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "step_2",
+                  "title": "财务确认处理结果",
+                  "type": "human",
+                  "confidence": 1
+                }
+              ]
+            },
+            {
+              "id": "REQ_1eef3a2d3c",
+              "kind": "action",
+              "label": "需要完成的工作",
+              "text": "跳过",
+              "required": true,
+              "source": "intent-step",
+              "sources": [
+                "intent-step"
+              ],
+              "stepRef": "intent_3",
+              "covered": true,
+              "nodeIds": [
+                "recovery_3"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "recovery_3",
+                  "title": "跳过",
+                  "type": "ai",
+                  "confidence": 1
+                }
+              ]
+            },
+            {
+              "id": "REQ_5a7ca8d958",
+              "kind": "recovery",
+              "label": "失败后怎么办",
+              "text": "记录异常，最后输出处理清单",
+              "required": true,
+              "source": "intent-step",
+              "sources": [
+                "intent-step"
+              ],
+              "stepRef": "intent_4",
+              "covered": true,
+              "nodeIds": [
+                "recovery_4",
+                "step_1"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "recovery_4",
+                  "title": "记录异常，最后输出处理清单",
+                  "type": "system",
+                  "confidence": 1
+                },
+                {
+                  "id": "step_1",
+                  "title": "读取新的报销单",
+                  "type": "ai",
+                  "confidence": 0.5
+                }
+              ]
+            },
+            {
+              "id": "REQ_f8da96baec",
+              "kind": "condition",
+              "label": "如何分情况处理",
+              "text": "如果金额超过五千由财务复核",
+              "required": true,
+              "source": "user",
+              "sources": [
+                "user"
+              ],
+              "stepRef": null,
+              "covered": true,
+              "nodeIds": [
+                "step_2"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "step_2",
+                  "title": "财务确认处理结果",
+                  "type": "human",
+                  "confidence": 1
+                }
+              ]
+            },
+            {
+              "id": "REQ_2f5aff28da",
+              "kind": "output",
+              "label": "最终交付什么",
+              "text": "最后输出处理清单",
+              "required": true,
+              "source": "user",
+              "sources": [
+                "user"
+              ],
+              "stepRef": null,
+              "covered": true,
+              "nodeIds": [
+                "recovery_4",
+                "done"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "recovery_4",
+                  "title": "记录异常，最后输出处理清单",
+                  "type": "system",
+                  "confidence": 1
+                },
+                {
+                  "id": "done",
+                  "title": "本次任务已完成",
+                  "type": "end",
+                  "confidence": 0.55
+                }
+              ]
+            }
+          ],
+          "uncovered": [
+            {
+              "id": "REQ_4e490dd8ea",
+              "kind": "condition",
+              "label": "如何分情况处理",
+              "text": "若读取失败则跳过并记录异常",
+              "required": true,
+              "source": "user",
+              "sources": [
+                "user"
+              ],
+              "stepRef": null,
+              "covered": false,
+              "nodeIds": [],
+              "matchedSteps": []
+            }
+          ],
+          "requiredCount": 8,
+          "coveredRequiredCount": 7,
+          "percent": 88,
+          "complete": false
+        }
+      },
+      "complexityProfile": {
+        "schema": "agent-complexity-profile/v3.6",
+        "level": "structured",
+        "label": "多步骤任务",
+        "score": 67,
+        "capabilities": [
+          {
+            "id": "branches",
+            "label": "按不同情况走不同路径",
+            "needed": true,
+            "implemented": false
+          },
+          {
+            "id": "parallel",
+            "label": "多项工作可以同时进行",
+            "needed": false,
+            "implemented": false
+          },
+          {
+            "id": "loop",
+            "label": "能逐项处理一批内容",
+            "needed": false,
+            "implemented": false
+          },
+          {
+            "id": "wait",
+            "label": "能等待时间或外部消息后继续",
+            "needed": false,
+            "implemented": false
+          },
+          {
+            "id": "subflow",
+            "label": "复杂工作可拆成独立子任务",
+            "needed": false,
+            "implemented": false
+          },
+          {
+            "id": "human",
+            "label": "关键决定会交给员工",
+            "needed": true,
+            "implemented": true
+          },
+          {
+            "id": "tools",
+            "label": "能调用已连接的真实业务系统",
+            "needed": false,
+            "implemented": false
+          },
+          {
+            "id": "memory",
+            "label": "能按要求参考和保存经验",
+            "needed": false,
+            "implemented": false
+          },
+          {
+            "id": "recovery",
+            "label": "局部失败可重试或走备用路径",
+            "needed": true,
+            "implemented": true
+          }
+        ],
+        "missing": [
+          {
+            "id": "branches",
+            "label": "按不同情况走不同路径",
+            "needed": true,
+            "implemented": false
+          }
+        ],
+        "summary": "已识别 3 类任务结构，还有 1 类需要补齐。"
+      },
+      "runtimePolicy": {
+        "schema": "agent-runtime-policy/v3.6",
+        "durable": true,
+        "resumable": true,
+        "checkpointEveryStep": true,
+        "maxSteps": 160,
+        "maxDurationMs": 1800000,
+        "localRecoveryFirst": true
+      }
+    },
+    "orderedSteps": [
+      {
+        "id": "intent_1",
+        "order": 1,
+        "title": "读取新的报销单",
+        "type": "ai",
+        "owner": "财务助手",
+        "toolId": null,
+        "toolLabel": null,
+        "source": "user",
+        "sourceLabel": "来自你的描述",
+        "evidence": "读取新的报销单",
+        "branch": null,
+        "retry": null
+      },
+      {
+        "id": "intent_2",
+        "order": 2,
+        "title": "财务确认处理结果",
+        "type": "human",
+        "owner": "财务",
+        "toolId": null,
+        "toolLabel": null,
+        "source": "user",
+        "sourceLabel": "来自你的描述",
+        "evidence": "如果金额超过五千由财务复核",
+        "branch": null,
+        "retry": null
+      },
+      {
+        "id": "intent_3",
+        "order": 3,
+        "title": "跳过",
+        "type": "ai",
+        "owner": "财务助手",
+        "toolId": null,
+        "toolLabel": null,
+        "source": "user",
+        "sourceLabel": "来自你的描述",
+        "evidence": "跳过",
+        "branch": "读取新的报销单失败时",
+        "retry": null
+      },
+      {
+        "id": "intent_4",
+        "order": 4,
+        "title": "记录异常，最后输出处理清单",
+        "type": "system",
+        "owner": "财务助手",
+        "toolId": null,
+        "toolLabel": null,
+        "source": "user",
+        "sourceLabel": "来自你的描述",
+        "evidence": "记录异常，最后输出处理清单",
+        "branch": "读取新的报销单失败时",
+        "retry": null
+      },
+      {
+        "id": "intent_5",
+        "order": 5,
+        "title": "交付前检查结果",
+        "type": "rule",
+        "owner": "系统自动检查",
+        "toolId": null,
+        "toolLabel": null,
+        "source": "system",
+        "sourceLabel": "根据完整闭环要求加入",
+        "evidence": "没有结果或缺少业务系统回执时不会直接标记完成"
+      }
+    ],
+    "analysis": {
+      "schema": "local-complex-intent/v3.6",
+      "clauses": [
+        "每天读取新的报销单",
+        "如果金额超过五千由财务复核",
+        "若读取失败则跳过并记录异常，最后输出处理清单"
+      ],
+      "conditionGroups": [],
+      "usesPlanning": false,
+      "usesParallel": false,
+      "usesDurableWait": false,
+      "usesRecovery": true,
+      "usesLongTermMemory": false,
+      "usesCollectionLoop": false,
+      "usesQualityGate": true,
+      "dynamicToolBindings": [],
+      "inputHints": []
+    }
+  }
+}

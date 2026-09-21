@@ -33,4 +33,8 @@ describe("WorkflowDraft", () => {
     const result = WorkflowDraft.parse(baseDraft);
     expect(result.ui).toEqual({ positions: {} });
   });
+  it("ui 内层缺 positions 时同样得到空对象默认值", () => {
+    const result = WorkflowDraft.parse({ ...baseDraft, ui: {} });
+    expect(result.ui).toEqual({ positions: {} });
+  });
 });

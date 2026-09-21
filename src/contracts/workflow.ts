@@ -15,7 +15,7 @@ export const ToolSpec = z.object({
   intentAction: z.string().optional(), scope: z.string(), risk: z.enum(["low", "medium", "high"]).default("high"),
   maxRetries: z.number().int().min(1).max(8).default(3),
   registryToolId: z.string().nullable().default(null),
-  protocol: z.string(), operationKind: z.enum(["read", "action"]),
+  protocol: z.string(), operationKind: z.enum(["read", "action"]).optional(), // 旧意图编译器 toolSpec 不产出该字段，放宽为可选
   unresolved: z.boolean().optional(),
   inputSchema: z.record(z.string(), z.unknown()).default({ type: "object" }),
   outputSchema: z.record(z.string(), z.unknown()).default({ type: "object" }),
