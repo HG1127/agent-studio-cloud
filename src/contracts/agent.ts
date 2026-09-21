@@ -15,3 +15,10 @@ export const AgentSummary = z.object({
   updatedAt: z.string(),
 });
 export type AgentSummary = z.infer<typeof AgentSummary>;
+
+// 创建动作返回的判别联合唯一来源（自 create-agent.ts 迁入）；agentId 由数据库生成
+export const CreateAgentResult = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), agentId: z.string() }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+export type CreateAgentResult = z.infer<typeof CreateAgentResult>;

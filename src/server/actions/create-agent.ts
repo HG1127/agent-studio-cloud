@@ -1,14 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { AgentCreateInput } from "@/contracts/agent";
+import { AgentCreateInput, type CreateAgentResult } from "@/contracts/agent";
 import { WorkflowDraft } from "@/contracts/workflow";
 import { agents, workflowDefinitions } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { buildAgentDraft } from "@/server/domain/pipeline";
 import { db } from "@/lib/db";
-
-export type CreateAgentResult = { ok: true; agentId: string } | { ok: false; error: string };
 
 export async function createAgentAction(input: AgentCreateInput): Promise<CreateAgentResult> {
   const parsedInput = AgentCreateInput.safeParse(input);

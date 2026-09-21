@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { VersionPanel } from "@/features/agents/version-panel";
 import { FlowCanvas } from "@/features/workflow-canvas/flow-canvas";
 import { auditWorkflow, type DesignAuditResult } from "@/server/domain/audit";
 import { getAgentDetail } from "@/server/queries/agents";
+import { listVersions } from "@/server/queries/versions";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +27,7 @@ export default async function AgentDetailPage({
   const detail = await getAgentDetail(agentId);
   if (!detail) notFound();
   const audit = detail.draft ? auditWorkflow(detail.draft) : null;
+  const versions = await listVersions(agentId);
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-6 p-8">
       <Link href="/agents" className="w-fit text-sm text-gray-500 hover:text-gray-700">
@@ -44,6 +47,7 @@ export default async function AgentDetailPage({
           这个助手还没有流程草稿
         </section>
       )}
+      <VersionPanel agentId={agentId} versions={versions} />
     </main>
   );
 }
