@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { HealthSchema } from "@/contracts/health";
+import { HealthResponse } from "@/contracts/health";
 import { db } from "@/lib/db";
 
 export async function GET() {
@@ -10,6 +10,6 @@ export async function GET() {
   } catch {
     dbOk = false;
   }
-  const body = HealthSchema.parse({ ok: dbOk, db: dbOk, workflow: true });
+  const body = HealthResponse.parse({ ok: dbOk, db: dbOk, workflow: true });
   return Response.json(body, { status: dbOk ? 200 : 503 });
 }
