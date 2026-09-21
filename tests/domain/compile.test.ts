@@ -9,8 +9,12 @@
 // （start→fetch 入边非人工，插入审批门禁并把 start 重接线）。因此金测按旧系统实际产出断言，
 // verify_reply/approval_reply 的插入逻辑另用绑定 registryTools 的补充用例验证（期望值同样以
 // 旧系统实测为准）。
+// 旧系统实测产出（Task 5 修复轮 1）：环引用回退五分支（skipInto/显式 next/条件分支/defaultNext/
+// 错误目标回指）加 loop 豁免与审批门禁重接线的 condition/wait/loop 入边臂，全部在同一输入内触发，
+// 期望值取自旧仓库 node --input-type=module 运行 workflowPlanCompilerV30.mjs 的真实输出。
 import { describe, expect, it } from "vitest";
 import golden1 from "../fixtures/domain/plan-golden-1.json";
+import golden2 from "../fixtures/domain/plan-golden-2.json";
 import { WorkflowDraft } from "@/contracts/workflow";
 import { compileModelWorkflowPlan } from "@/server/domain/compile";
 
@@ -93,5 +97,53 @@ describe("流程编译器移植对齐金测", () => {
     expect(nodes.fetch.next).toBe("approval_reply");
     expect(nodes.approval_reply.next).toBe("reply");
     expect((nodes.reply.tool as Record<string, unknown> | undefined)?.businessApprovalAccepted).toBe(true);
+  });
+});
+
+describe("流程编译器环引用回退（回指输入按旧系统处置）", () => {
+  // 旧实现把 bodyNext/exitNext 写回输入的 loop 对象（共享引用），克隆保证每次编译从 fixture 原始输入出发
+  const compile = () => compileModelWorkflowPlan(structuredClone(golden2.input));
+
+  it("plan-golden-2：回指输入逐字节对齐旧系统产出", () => {
+    const out = compile();
+    if (!out) throw new Error("compileModelWorkflowPlan 不应返回 null");
+    expect(() => WorkflowDraft.parse(out.workflow)).not.toThrow();
+    const actual = normalize(JSON.stringify(out));
+    const expected = normalize(JSON.stringify(golden2.output));
+    expect(actual).toEqual(expected);
+  });
+
+  it("五类回指回退逐分支断言（含 loop 豁免与前向对照）", () => {
+    const out = compile();
+    if (!out) throw new Error("compileModelWorkflowPlan 不应返回 null");
+    const nodes = out.workflow.nodes;
+    // skipInto→quality_review：顺序落点为分支/错误目标（fetch→review）、分支目标（handle→send）、拒绝目标（analyze→handle）时直落 quality_review
+    expect(nodes.fetch.next).toBe("quality_review");
+    expect(nodes.handle.next).toBe("quality_review");
+    // 显式 nextStepId 回指（review 在 analyze 之前）→ quality_review；未被改写时会是 "review"
+    expect(nodes.analyze.next).toBe("quality_review");
+    // 前向显式 next 保留（对照：回退只作用于回指）
+    expect(nodes.prepare.next).toBe("analyze");
+    // review.rejectNext 指向 handle，构成 rejectTargetIds，喂给 analyze 的 skipInto
+    expect(nodes.review.rejectNext).toBe("handle");
+    const condition = nodes.decide.condition;
+    if (!condition) throw new Error("decide.condition 不应缺失");
+    // 条件分支回指 → quality_review；前向分支保留并经审批门禁重接线
+    expect(condition.branches[0]).toMatchObject({ label: "严重", next: "quality_review" });
+    expect(condition.branches[1].next).toBe("approval_send");
+    // defaultNext 回指 → safe_stop
+    expect(condition.defaultNext).toBe("safe_stop");
+    // 错误目标回指：onErrorNext 置 null（:743-748 的处置）
+    expect(nodes.handle.onErrorNext).toBeNull();
+    // loop 步骤豁免（step.type!=='loop' 守卫）：错误回指保留、bodyNext 允许回指
+    expect(nodes.loop.onErrorNext).toBe("review");
+    const loopData = nodes.loop.loop;
+    if (!loopData) throw new Error("loop.loop 不应缺失");
+    expect(loopData.bodyNext).toBe("fetch");
+    // incoming/rewire 的 condition/wait/loop 三条入边臂：分支、超时、循环出口均改指 approval_send
+    expect(loopData.exitNext).toBe("approval_send");
+    expect(nodes.pause.wait?.onTimeoutNext).toBe("approval_send");
+    expect(nodes.approval_send.next).toBe("send");
+    expect((nodes.send.tool as Record<string, unknown> | undefined)?.businessApprovalAccepted).toBe(true);
   });
 });
