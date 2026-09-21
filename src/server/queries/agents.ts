@@ -1,0 +1,64 @@
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { z } from "zod";
+import { AgentSummary } from "@/contracts/agent";
+import { WorkflowDraft } from "@/contracts/workflow";
+import { db } from "@/lib/db";
+import { agentVersions, agents, workflowDefinitions } from "@/db/schema";
+
+export async function listAgents(workspaceId: string): Promise<AgentSummary[]> {
+  const rows = await db
+    .select({
+      id: agents.id,
+      name: agents.name,
+      description: agents.description,
+      status: agents.status,
+      updatedAt: agents.updatedAt,
+      versionCount:
+        sql<number>`(select count(*) from ${agentVersions} where ${agentVersions.agentId} = ${agents.id})`.mapWith(
+          Number,
+        ),
+    })
+    .from(agents)
+    .where(and(eq(agents.workspaceId, workspaceId), isNull(agents.archivedAt)))
+    .orderBy(desc(agents.updatedAt));
+  return rows.map((row) =>
+    AgentSummary.parse({
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      status: row.status ?? "draft",
+      versionCount: row.versionCount,
+      updatedAt: row.updatedAt.toISOString(),
+    }),
+  );
+}
+
+export interface AgentDetail {
+  agent: typeof agents.$inferSelect;
+  draft: WorkflowDraft | null;
+  versions: Array<typeof agentVersions.$inferSelect>;
+}
+
+export async function getAgentDetail(agentId: string): Promise<AgentDetail | null> {
+  if (!z.string().uuid().safeParse(agentId).success) return null;
+  const [agent] = await db
+    .select()
+    .from(agents)
+    .where(and(eq(agents.id, agentId), isNull(agents.archivedAt)))
+    .limit(1);
+  if (!agent) return null;
+  const [definition] = await db
+    .select({ draft: workflowDefinitions.draft })
+    .from(workflowDefinitions)
+    .where(eq(workflowDefinitions.agentId, agentId))
+    .orderBy(desc(workflowDefinitions.createdAt))
+    .limit(1);
+  const versions = await db
+    .select()
+    .from(agentVersions)
+    .where(eq(agentVersions.agentId, agentId))
+    .orderBy(desc(agentVersions.version));
+  // 草稿写入时已过契约校验；读取再 safeParse 一次，坏数据降级为空草稿而不是让页面崩掉
+  const parsed = definition ? WorkflowDraft.safeParse(definition.draft) : null;
+  return { agent, draft: parsed?.success ? parsed.data : null, versions };
+}
