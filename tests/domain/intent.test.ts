@@ -1,6 +1,8 @@
 // 偏差说明：金测归一化在任务书给定的两条随机 id 正则之外，追加 `"createdAt":"…"` 归一化——
 // 旧算法 buildRequirementContract 写入 new Date().toISOString()，与 randomUUID 同属不可复现值，
 // 不做此替换则对齐测试永远红。除此之外与旧系统输出逐字节对齐。
+// 另记（T5 补录）：caps 为 undefined 时新代码 `caps ?? []` 按空数组继续、旧代码在 caps.find/some
+// 处崩溃（T4 审查发现的第 4 处等价改写偏差，当时漏记）。
 import { describe, expect, it } from "vitest";
 import golden1 from "../fixtures/domain/intent-golden-1.json";
 import golden2 from "../fixtures/domain/intent-golden-2.json";
