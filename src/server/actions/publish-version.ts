@@ -7,6 +7,7 @@ import type { PublishVersionResult } from "@/contracts/version";
 import { WorkflowDraft } from "@/contracts/workflow";
 import { agentVersions, agents, workflowDefinitions } from "@/db/schema";
 import { DEMO_USER_ID } from "@/lib/constants";
+import { resolvePublishModel } from "@/lib/model";
 import { db } from "@/lib/db";
 import { auditWorkflow } from "@/server/domain/audit";
 import { buildManifest, filterPublishBlockers } from "@/server/domain/pipeline";
@@ -48,9 +49,12 @@ export async function publishVersionAction(agentId: string): Promise<PublishVers
         issues: blocking.map((issue) => `${issue.title}：${issue.detail}`),
       };
     }
-    const modelId = process.env.MODEL_ID || "";
-    // env 只在 Server Action 读取；MODEL_ID 缺省时视同 MODEL_MOCK=1，走 mock 运行
-    const manifest = buildManifest(parsed.data, { modelId, mock: !modelId || process.env.MODEL_MOCK === "1" });
+    // T10 携带裁定：模型配置守卫——无 MODEL_ID 且未显式 MODEL_MOCK=1 时不写入永久版本记录
+    const resolved = resolvePublishModel({ modelId: process.env.MODEL_ID, modelMock: process.env.MODEL_MOCK });
+    if (!resolved.ok) {
+      return { ok: false, error: resolved.error, issues: [] };
+    }
+    const manifest = buildManifest(parsed.data, { modelId: resolved.modelId, mock: resolved.mock });
     await db.transaction(async (tx) => {
       await tx
         .update(agentVersions)

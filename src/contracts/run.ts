@@ -6,6 +6,13 @@ export const RunStartInput = z.object({
 });
 export type RunStartInput = z.infer<typeof RunStartInput>;
 
+// 启动动作返回的判别联合唯一来源：失败时不创建 run，只返回中文错误
+export const StartRunResult = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), runId: z.string().uuid() }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+export type StartRunResult = z.infer<typeof StartRunResult>;
+
 export const RunView = z.object({
   id: z.string().uuid(),
   agentId: z.string().uuid(),

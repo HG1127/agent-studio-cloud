@@ -144,6 +144,7 @@ function inputContractFor(draft: WorkflowDraft): AgentManifest["inputContract"] 
       (source): source is string => typeof source === "string" && source.startsWith("input."),
     );
     for (const source of sources) {
+      // 嵌套引用（input.a.b）收敛为首段字段：M1 输入契约只声明一层扁平字段
       const name = source.slice("input.".length).split(".")[0];
       if (!name || seen.has(name)) continue;
       seen.add(name);

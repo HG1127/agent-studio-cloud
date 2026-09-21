@@ -10,8 +10,11 @@ export const runs = pgTable("runs", {
   status: text("status").notNull().default("queued"),
   input: jsonb("input").$type<Record<string, unknown>>().notNull().default({}),
   context: jsonb("context").$type<Record<string, unknown>>().notNull().default({}),
+  result: jsonb("result").$type<Record<string, unknown>>(),
   stepStates: jsonb("step_states").$type<Record<string, unknown>>().notNull().default({}),
   error: text("error"),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
