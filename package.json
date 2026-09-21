@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
+    "test:workflow": "vitest run --config vitest.workflow.config.mts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push"
@@ -32,6 +33,7 @@
     "@types/node": "^24.13.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@workflow/vitest": "^4.0.25",
     "dotenv": "^18.0.1",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",

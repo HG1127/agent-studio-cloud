@@ -4,3 +4,5 @@ allowBuilds:
   esbuild: false
   '@swc/core': false
   cbor-extract: false
+patchedDependencies:
+  builtin-modules@5.0.0: patches/builtin-modules@5.0.0.patch

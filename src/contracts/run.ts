@@ -46,6 +46,7 @@ export const ApprovalView = z.object({
   status: z.enum(["pending", "approved", "rejected"]),
   role: z.string(),
   reason: z.string(),
+  note: z.string().nullable(),
   decidedAt: z.string().nullable(),
 });
 export type ApprovalView = z.infer<typeof ApprovalView>;
@@ -55,3 +56,10 @@ export const ApprovalDecisionInput = z.object({
   note: z.string().max(500).optional(),
 });
 export type ApprovalDecisionInput = z.infer<typeof ApprovalDecisionInput>;
+
+// 审批动作返回：失败时不改任何数据，只返回中文错误
+export const ApprovalDecisionResult = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true) }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+export type ApprovalDecisionResult = z.infer<typeof ApprovalDecisionResult>;

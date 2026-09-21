@@ -2,7 +2,7 @@
 // 质量门禁步骤：verify_*（rule.kind=tool_result）核对来源工具回执；
 // quality_review 按 quality 配置核对产出完整性 / 工具回执 / 人工确认（查 approvals 表）。
 // M1 简化：任一检查不通过 → failRun + FatalError（重写返工记 M2 债务）。
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { FatalError } from "workflow";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { db } from "@/lib/db";
@@ -75,6 +75,30 @@ export async function runQualityGate(args: RunQualityGateInput): Promise<string 
     }
   } else if (node.quality) {
     const quality = node.quality;
+    // 拒绝收尾：run 已有 rejected 决定即走 not_approved 语义（保留当前结果并停止高影响动作），
+    // 被拒绝分支的交付物/回执按设计不会产生，完整核对不适用，只要求人工决定记录存在
+    const [rejectedStop] = await db
+      .select({ id: approvals.id })
+      .from(approvals)
+      .where(and(eq(approvals.runId, args.runId), eq(approvals.status, "rejected")))
+      .limit(1);
+    if (rejectedStop) {
+      await persistStep({
+        runId: args.runId,
+        nodeId: node.id,
+        nodeTitle: node.title,
+        nodeType: node.type,
+        status: "succeeded",
+        output: { passed: true, rejectedStop: true },
+      });
+      await appendTrace({
+        runId: args.runId,
+        nodeId: node.id,
+        kind: "quality.passed",
+        title: `「${node.title}」检查通过（未获确认，保留当前结果并停止高影响动作）`,
+      });
+      return node.next;
+    }
     const missingOutputs = quality.requiredOutputTitles.filter((title) => {
       const sourceNode = Object.values(args.nodes).find((item) => item.title === title);
       return !sourceNode || !hasContent(args.outputs[sourceNode.id]);
@@ -91,12 +115,13 @@ export async function runQualityGate(args: RunQualityGateInput): Promise<string 
       }
     }
     if (quality.checkHumanBoundary) {
-      const [approved] = await db
+      // approved 与 rejected 都算人工责任已履行：拒绝路径经 not_approved 仍要到质量门禁，若只认 approved 会永远 failRun
+      const [decided] = await db
         .select({ id: approvals.id })
         .from(approvals)
-        .where(and(eq(approvals.runId, args.runId), eq(approvals.status, "approved")))
+        .where(and(eq(approvals.runId, args.runId), inArray(approvals.status, ["approved", "rejected"])))
         .limit(1);
-      if (!approved) {
+      if (!decided) {
         return reject("交付前检查未通过：需要人工确认的步骤还没有确认记录");
       }
     }

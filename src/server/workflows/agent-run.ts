@@ -1,7 +1,8 @@
 // 运行编排工作流：只做控制流与状态机推进，所有 I/O 与业务逻辑都在 "use step" 里。
-import { FatalError } from "workflow";
+import { createHook, FatalError } from "workflow";
 import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
+import { requestApproval, recordDecision } from "@/server/steps/approval-step";
 import { evaluateCondition } from "@/server/steps/condition-step";
 import { runKnowledgeStep } from "@/server/steps/knowledge-step";
 import { runModelStep } from "@/server/steps/model-step";
@@ -59,7 +60,15 @@ export async function agentRunWorkflow(runId: string, manifest: AgentManifest, i
       currentId = node.next;
       continue;
     }
-    // human 在 Task 12 接入；其余节点类型 M1 不支持自动执行
+    if (node.type === "human") {
+      const { approvalId, token } = await requestApproval({ runId, node });
+      const hook = createHook<{ decision: "approved" | "rejected"; note?: string }>({ token });
+      const decision = await hook;
+      await recordDecision({ runId, node, approvalId, decision });
+      currentId = decision.decision === "approved" ? node.next : (node.rejectNext ?? "not_approved");
+      continue;
+    }
+    // 其余节点类型 M1 不支持自动执行
     throw new FatalError(`步骤「${node.title}」暂不支持自动执行`);
   }
   await failRun(runId, guard >= 200 ? "步骤数超过安全上限，已停止" : "流程没有后续步骤，已停止");
