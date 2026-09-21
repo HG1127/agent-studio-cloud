@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { FlowCanvas } from "@/features/workflow-canvas/flow-canvas";
 import { auditWorkflow, type DesignAuditResult } from "@/server/domain/audit";
 import { getAgentDetail } from "@/server/queries/agents";
 
@@ -25,7 +26,7 @@ export default async function AgentDetailPage({
   if (!detail) notFound();
   const audit = detail.draft ? auditWorkflow(detail.draft) : null;
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 p-8">
+    <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-6 p-8">
       <Link href="/agents" className="w-fit text-sm text-gray-500 hover:text-gray-700">
         ← 返回助手列表
       </Link>
@@ -36,9 +37,13 @@ export default async function AgentDetailPage({
         ) : null}
         <p className="text-sm text-gray-500">{auditStatusLine(audit)}</p>
       </header>
-      <section className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">
-        画布编排即将上线
-      </section>
+      {detail.draft ? (
+        <FlowCanvas agentId={agentId} draft={detail.draft} />
+      ) : (
+        <section className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">
+          这个助手还没有流程草稿
+        </section>
+      )}
     </main>
   );
 }
