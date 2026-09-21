@@ -48,6 +48,13 @@ const businessTables = [
   approvals,
 ] as const;
 
+const createdByTables = [
+  agents,
+  agentVersions,
+  workflowDefinitions,
+  runs,
+] as const;
+
 const tableSqlNames: Array<[PgTable, string]> = [
   [users, "users"],
   [workspaces, "workspaces"],
@@ -74,7 +81,7 @@ describe("M1 schema 形状", () => {
     }
   });
 
-  it("八张业务表都带租户样板列 workspace_id/created_at/updated_at", () => {
+  it("八张业务表都带租户样板列 workspace_id/created_at/updated_at，四张核心表另带 created_by", () => {
     for (const table of businessTables) {
       expect(expectColumn(table, "workspaceId", "workspace_id", "PgUUID").notNull).toBe(true);
       for (const prop of ["createdAt", "updatedAt"] as const) {
@@ -82,6 +89,12 @@ describe("M1 schema 形状", () => {
         expect(col.notNull, `${tableName(table)}.${prop} 应 notNull`).toBe(true);
         expect(col.hasDefault, `${tableName(table)}.${prop} 应有默认值 now()`).toBe(true);
       }
+    }
+    for (const table of createdByTables) {
+      expect(
+        expectColumn(table, "createdBy", "created_by", "PgUUID").notNull,
+        `${tableName(table)}.created_by 应存在且 notNull`,
+      ).toBe(true);
     }
   });
 
@@ -110,6 +123,7 @@ describe("M1 schema 形状", () => {
     expectColumn(agents, "description", "description", "PgText");
     expect(expectColumn(agents, "intentText", "intent_text", "PgText").notNull).toBe(true);
     expect(cols(agents).status?.default).toBe("draft");
+    expect(cols(agents).status?.notNull).toBe(false);
     const archivedAt = expectColumn(agents, "archivedAt", "archived_at", "PgTimestamp");
     expect(archivedAt.notNull).toBe(false);
   });
