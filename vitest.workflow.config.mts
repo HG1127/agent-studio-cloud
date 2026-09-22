@@ -9,7 +9,7 @@ export default defineConfig({
   test: {
     name: "workflow",
     environment: "node",
-    include: ["tests/workflow/**/*.test.ts"],
+    include: ["tests/workflow/**/*.test.ts", "tests/integration/**/*.test.ts"],
     setupFiles: ["tests/workflow/env.ts"],
     // 本地队列可见性上限 5 秒：恢复钩子后队列最多等 5 秒重新投递，避免默认 30 秒等待造成测试抖动
     env: { WORKFLOW_LOCAL_QUEUE_MAX_VISIBILITY: "5" },

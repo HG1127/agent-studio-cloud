@@ -1,4 +1,4 @@
-import { asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { ApprovalView, RunSummary, RunView } from "@/contracts/run";
 import { agents, approvals, runSteps, runs, type Run, type RunStep } from "@/db/schema";
@@ -18,7 +18,7 @@ export async function listRuns(workspaceId: string): Promise<RunSummary[]> {
     })
     .from(runs)
     .innerJoin(agents, eq(agents.id, runs.agentId))
-    .where(eq(runs.workspaceId, workspaceId))
+    .where(and(eq(runs.workspaceId, workspaceId), isNull(agents.archivedAt)))
     .orderBy(desc(runs.createdAt));
   return rows.map((row) =>
     RunSummary.parse({
@@ -32,13 +32,13 @@ export async function listRuns(workspaceId: string): Promise<RunSummary[]> {
   );
 }
 
-export async function getRunView(runId: string): Promise<RunView | null> {
+export async function getRunView(runId: string, workspaceId: string): Promise<RunView | null> {
   if (!RUN_ID.safeParse(runId).success) return null;
   const [row] = await db
     .select({ run: runs, agentName: agents.name })
     .from(runs)
     .innerJoin(agents, eq(agents.id, runs.agentId))
-    .where(eq(runs.id, runId))
+    .where(and(eq(runs.id, runId), eq(runs.workspaceId, workspaceId)))
     .limit(1);
   if (!row) return null;
   // 读取再 safeParse 一次，坏数据降级为 404 而不是让页面崩掉
@@ -57,33 +57,41 @@ export async function getRunView(runId: string): Promise<RunView | null> {
 }
 
 // SSE 路由与详情页共用的原始行读取（context/result 等契约外字段）
-export async function getRunRow(runId: string): Promise<Run | null> {
+export async function getRunRow(runId: string, workspaceId: string): Promise<Run | null> {
   if (!RUN_ID.safeParse(runId).success) return null;
-  const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+  const [row] = await db
+    .select()
+    .from(runs)
+    .where(and(eq(runs.id, runId), eq(runs.workspaceId, workspaceId)))
+    .limit(1);
   return row ?? null;
 }
 
-export async function getRunContext(runId: string): Promise<Record<string, unknown> | null> {
+export async function getRunContext(runId: string, workspaceId: string): Promise<Record<string, unknown> | null> {
   if (!RUN_ID.safeParse(runId).success) return null;
-  const [row] = await db.select({ context: runs.context }).from(runs).where(eq(runs.id, runId)).limit(1);
+  const [row] = await db
+    .select({ context: runs.context })
+    .from(runs)
+    .where(and(eq(runs.id, runId), eq(runs.workspaceId, workspaceId)))
+    .limit(1);
   return row?.context ?? null;
 }
 
-export async function listRunSteps(runId: string): Promise<RunStep[]> {
+export async function listRunSteps(runId: string, workspaceId: string): Promise<RunStep[]> {
   if (!RUN_ID.safeParse(runId).success) return [];
   return db
     .select()
     .from(runSteps)
-    .where(eq(runSteps.runId, runId))
+    .where(and(eq(runSteps.runId, runId), eq(runSteps.workspaceId, workspaceId)))
     .orderBy(asc(runSteps.startedAt), asc(runSteps.createdAt));
 }
 
-export async function listApprovals(runId: string): Promise<ApprovalView[]> {
+export async function listApprovals(runId: string, workspaceId: string): Promise<ApprovalView[]> {
   if (!RUN_ID.safeParse(runId).success) return [];
   const rows = await db
     .select()
     .from(approvals)
-    .where(eq(approvals.runId, runId))
+    .where(and(eq(approvals.runId, runId), eq(approvals.workspaceId, workspaceId)))
     .orderBy(asc(approvals.createdAt));
   return rows.map((row) =>
     ApprovalView.parse({

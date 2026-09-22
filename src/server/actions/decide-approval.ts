@@ -6,6 +6,7 @@ import { z } from "zod";
 import { resumeHook } from "workflow/api";
 import { ApprovalDecisionInput, type ApprovalDecisionResult } from "@/contracts/run";
 import { approvals, runs } from "@/db/schema";
+import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 
 // 人工审批决定入口：先做从属与状态校验（防跨 run 审批、防重复决定），再落行并恢复工作流。
@@ -24,7 +25,7 @@ export async function decideApprovalAction(
     const [row] = await db
       .select()
       .from(approvals)
-      .where(and(eq(approvals.id, approvalId), eq(approvals.runId, runId)))
+      .where(and(eq(approvals.id, approvalId), eq(approvals.runId, runId), eq(approvals.workspaceId, DEMO_WORKSPACE_ID)))
       .limit(1);
     if (!row) {
       return { ok: false, error: "找不到这条确认记录，请刷新页面后重试" };

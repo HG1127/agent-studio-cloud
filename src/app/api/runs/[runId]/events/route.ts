@@ -3,6 +3,7 @@
 // 事件协议：event: trace（data 为 TraceEventView）；:ping 注释行心跳；run 终态且轨迹追平后
 // 发 event: done 并关闭连接。
 import { z } from "zod";
+import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { getRunRow } from "@/server/queries/runs";
 import { listTraceSince } from "@/server/queries/trace";
 
@@ -17,7 +18,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
   if (!z.string().uuid().safeParse(runId).success) {
     return Response.json({ error: "运行标识不正确" }, { status: 400 });
   }
-  const run = await getRunRow(runId);
+  const run = await getRunRow(runId, DEMO_WORKSPACE_ID);
   if (!run) {
     return Response.json({ error: "找不到这次运行" }, { status: 404 });
   }
@@ -45,13 +46,13 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
         let lastHeartbeat = Date.now();
         for (;;) {
           // 先追平轨迹，再判定终态：终态当轮没有新事件才发 done，保证不漏最后一批
-          const rows = await listTraceSince(runId, cursor);
+          const rows = await listTraceSince(runId, DEMO_WORKSPACE_ID, cursor);
           for (const row of rows) {
             cursor = row.seq;
             pushEvent("trace", row);
           }
           if (closed) break;
-          const current = await getRunRow(runId);
+          const current = await getRunRow(runId, DEMO_WORKSPACE_ID);
           if (current && TERMINAL_STATUSES.has(current.status) && rows.length === 0) {
             pushEvent("done", { status: current.status });
             break;

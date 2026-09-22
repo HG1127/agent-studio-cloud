@@ -6,7 +6,7 @@ import { start } from "workflow/api";
 import { AgentManifest } from "@/contracts/manifest";
 import { RunStartInput, type StartRunResult } from "@/contracts/run";
 import { agentVersions, agents, runs } from "@/db/schema";
-import { DEMO_USER_ID } from "@/lib/constants";
+import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
 
@@ -33,7 +33,7 @@ export async function startRunAction(input: RunStartInput): Promise<StartRunResu
     const [agent] = await db
       .select()
       .from(agents)
-      .where(and(eq(agents.id, agentId), isNull(agents.archivedAt)))
+      .where(and(eq(agents.id, agentId), isNull(agents.archivedAt), eq(agents.workspaceId, DEMO_WORKSPACE_ID)))
       .limit(1);
     if (!agent) {
       return { ok: false, error: "找不到这个助手，请刷新页面后重试" };

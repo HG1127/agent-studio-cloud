@@ -6,7 +6,7 @@ import { z } from "zod";
 import type { PublishVersionResult } from "@/contracts/version";
 import { WorkflowDraft } from "@/contracts/workflow";
 import { agentVersions, agents, workflowDefinitions } from "@/db/schema";
-import { DEMO_USER_ID } from "@/lib/constants";
+import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { resolvePublishModel } from "@/lib/model";
 import { db } from "@/lib/db";
 import { auditWorkflow } from "@/server/domain/audit";
@@ -20,7 +20,7 @@ export async function publishVersionAction(agentId: string): Promise<PublishVers
     const [agent] = await db
       .select()
       .from(agents)
-      .where(and(eq(agents.id, agentId), isNull(agents.archivedAt)))
+      .where(and(eq(agents.id, agentId), isNull(agents.archivedAt), eq(agents.workspaceId, DEMO_WORKSPACE_ID)))
       .limit(1);
     if (!agent) {
       return { ok: false, error: "找不到这个助手，请刷新页面后重试", issues: [] };

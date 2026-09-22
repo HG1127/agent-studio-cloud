@@ -4,6 +4,7 @@ import { ApprovalPanel } from "@/features/runs/approval-panel";
 import { RunStatusBadge } from "@/features/runs/run-list";
 import { TraceTimeline } from "@/features/runs/trace-timeline";
 import type { RunStatus } from "@/contracts/run";
+import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { getRunContext, getRunView, listApprovals, listRunSteps } from "@/server/queries/runs";
 import { listTrace } from "@/server/queries/trace";
 
@@ -37,13 +38,13 @@ function extractOutputs(context: Record<string, unknown> | null): Array<[string,
 }
 
 export async function RunDetail({ runId }: { runId: string }) {
-  const run = await getRunView(runId);
+  const run = await getRunView(runId, DEMO_WORKSPACE_ID);
   if (!run) notFound();
   const [steps, approvals, trace, context] = await Promise.all([
-    listRunSteps(runId),
-    listApprovals(runId),
-    listTrace(runId),
-    getRunContext(runId),
+    listRunSteps(runId, DEMO_WORKSPACE_ID),
+    listApprovals(runId, DEMO_WORKSPACE_ID),
+    listTrace(runId, DEMO_WORKSPACE_ID),
+    getRunContext(runId, DEMO_WORKSPACE_ID),
   ]);
   const live = LIVE_STATUSES.has(run.status);
   // 待确认的置顶，已决定的按时间在后
