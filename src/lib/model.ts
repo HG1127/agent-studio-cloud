@@ -33,7 +33,9 @@ export type PublishModelResolution =
 export function resolvePublishModel(env: { modelId?: string; modelMock?: string }): PublishModelResolution {
   const modelId = (env.modelId ?? "").trim();
   if (!modelId && env.modelMock !== "1") {
-    return { ok: false, error: "模型未配置：请先设置 MODEL_ID，或设置 MODEL_MOCK=1 使用演示模型后再发布" };
+    // 用户文案纯中文；环境变量名只进日志（T13 携带裁定）
+    console.error("[publish-model] 模型配置缺失：MODEL_ID 未设置且未显式设置 MODEL_MOCK=1");
+    return { ok: false, error: "模型尚未配置，请先在环境变量中完成模型设置后再发布" };
   }
   return { ok: true, modelId: modelId || "mock", mock: !modelId || env.modelMock === "1" };
 }

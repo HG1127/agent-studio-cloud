@@ -117,6 +117,40 @@ describe("人工审批暂停与恢复", () => {
     expect(kinds).toContain("quality.passed");
   }, 240_000);
 
+  it("拒绝直达：not_approved.next=done 时拒绝后直接完成且不经过质量门禁", async () => {
+    // T12 Minor ① rider：拒绝分支直接收尾的最小 manifest——not_approved 不再绕道质量门禁
+    const directDoneManifest = AgentManifest.parse({
+      ...manifest,
+      workflowSnapshot: {
+        ...manifest.workflowSnapshot,
+        nodes: {
+          ...manifest.workflowSnapshot.nodes,
+          not_approved: { ...manifest.workflowSnapshot.nodes.not_approved, next: "done" },
+        },
+      },
+    });
+    const runId = await insertRun();
+    const handle = await start(agentRunWorkflow, [runId, directDoneManifest, {}]);
+    await waitForHook(handle, { token: `approval:${runId}:confirm`, timeout: 90_000 });
+
+    await resumeHook(`approval:${runId}:confirm`, { decision: "rejected", note: "方案需要修改" });
+    expect(await handle.returnValue).toEqual({ status: "completed" });
+
+    const [runAfter] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(runAfter?.status).toBe("completed");
+    const [decidedRow] = await db
+      .select()
+      .from(approvals)
+      .where(and(eq(approvals.runId, runId), eq(approvals.nodeId, "confirm")))
+      .limit(1);
+    expect(decidedRow?.status).toBe("rejected");
+    // 质量门禁节点未被访问，不应出现其轨迹
+    const traces = await db.select().from(traceEvents).where(eq(traceEvents.runId, runId));
+    const kinds = traces.map((t) => t.kind);
+    expect(kinds).toContain("approval.decided");
+    expect(kinds).not.toContain("quality.passed");
+  }, 240_000);
+
   it("拒绝收尾：交付物按设计缺失时质量门禁仍放行到 completed", async () => {
     // 拒绝后 send 步骤不执行，requiredOutputTitles 里的交付物无法形成——门禁应按未获确认语义放行
     const rejectManifest = AgentManifest.parse({

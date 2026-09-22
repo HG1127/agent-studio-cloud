@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { RunLauncher } from "@/features/agents/run-launcher";
 import { VersionPanel } from "@/features/agents/version-panel";
 import { FlowCanvas } from "@/features/workflow-canvas/flow-canvas";
 import { auditWorkflow, type DesignAuditResult } from "@/server/domain/audit";
@@ -48,6 +49,7 @@ export default async function AgentDetailPage({
         </section>
       )}
       <VersionPanel agentId={agentId} versions={versions} />
+      <RunLauncher agentId={agentId} />
     </main>
   );
 }

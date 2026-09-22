@@ -6,6 +6,17 @@ export const RunStartInput = z.object({
 });
 export type RunStartInput = z.infer<typeof RunStartInput>;
 
+// 运行状态枚举唯一来源：runs 表写入侧与读取侧共用
+export const RunStatus = z.enum([
+  "queued",
+  "running",
+  "waiting_approval",
+  "completed",
+  "failed",
+  "cancelled",
+]);
+export type RunStatus = z.infer<typeof RunStatus>;
+
 // 启动动作返回的判别联合唯一来源：失败时不创建 run，只返回中文错误
 export const StartRunResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true), runId: z.string().uuid() }),
@@ -17,7 +28,7 @@ export const RunView = z.object({
   id: z.string().uuid(),
   agentId: z.string().uuid(),
   agentName: z.string(),
-  status: z.enum(["queued", "running", "waiting_approval", "completed", "failed", "cancelled"]),
+  status: RunStatus,
   input: z.record(z.string(), z.unknown()),
   result: z.unknown().nullable(),
   error: z.string().nullable(),
@@ -25,6 +36,17 @@ export const RunView = z.object({
   finishedAt: z.string().nullable(),
 });
 export type RunView = z.infer<typeof RunView>;
+
+// 运行列表行：runs join agents 后的投影（T13）
+export const RunSummary = z.object({
+  id: z.string().uuid(),
+  agentId: z.string().uuid(),
+  agentName: z.string(),
+  status: RunStatus,
+  startedAt: z.string().nullable(),
+  finishedAt: z.string().nullable(),
+});
+export type RunSummary = z.infer<typeof RunSummary>;
 
 export const TraceEventView = z.object({
   id: z.string().uuid(),

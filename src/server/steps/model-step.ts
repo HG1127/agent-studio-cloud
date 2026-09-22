@@ -48,7 +48,9 @@ export async function runModelStep(args: RunModelStepInput): Promise<{ output: s
     return { output };
   }
   if (!process.env.MODEL_BASE_URL || !process.env.MODEL_ID) {
-    const reason = "模型未配置：请设置 MODEL_BASE_URL 与 MODEL_ID，或设置 MODEL_MOCK=1 使用演示模型";
+    // 用户文案纯中文，该错误会进入 runs/步骤/轨迹并上界面；环境变量名只进日志（T13 携带裁定）
+    console.error("[model-step] 模型配置缺失：请检查 MODEL_BASE_URL / MODEL_ID，或设置 MODEL_MOCK=1");
+    const reason = "模型尚未配置，请先在环境变量中完成模型设置后再运行";
     await persistStep({
       runId: args.runId,
       nodeId: node.id,

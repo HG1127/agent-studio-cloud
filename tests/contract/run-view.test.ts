@@ -1,7 +1,15 @@
 // RunView / StartRunResult 契约 parse 用例（T2 Minor ② rider D + T11 启动入口返回契约）。
 // runFixture 按 startRunAction / 运行引擎产出的真实形状构造（runs 表行 + 关联助手名）。
+// T13 新增：RunSummary（运行列表行）/ TraceEventView（轨迹行）/ ApprovalView（审批行）parse 用例。
 import { describe, expect, it } from "vitest";
-import { RunStartInput, RunView, StartRunResult } from "@/contracts/run";
+import {
+  ApprovalView,
+  RunStartInput,
+  RunSummary,
+  RunView,
+  StartRunResult,
+  TraceEventView,
+} from "@/contracts/run";
 
 const runFixture = {
   id: "3f0d2c9e-8a7b-4c1d-9e2f-1a2b3c4d5e6f",
@@ -50,5 +58,71 @@ describe("StartRunResult", () => {
   });
   it("拒绝缺少 error 的失败分支", () => {
     expect(StartRunResult.safeParse({ ok: false }).success).toBe(false);
+  });
+});
+
+describe("RunSummary", () => {
+  const listFixture = {
+    id: runFixture.id,
+    agentId: runFixture.agentId,
+    agentName: "客户咨询回复助手",
+    status: "running",
+    startedAt: "2026-09-21T08:30:00.000Z",
+    finishedAt: null,
+  };
+  it("直接 parse 运行列表查询产出的行", () => {
+    const parsed = RunSummary.parse(listFixture);
+    expect(parsed.agentName).toBe("客户咨询回复助手");
+    expect(parsed.startedAt).toBe("2026-09-21T08:30:00.000Z");
+  });
+  it("排队中的行允许起止时间为空", () => {
+    expect(RunSummary.safeParse({ ...listFixture, status: "queued", startedAt: null }).success).toBe(true);
+  });
+  it("拒绝未知状态", () => {
+    expect(RunSummary.safeParse({ ...listFixture, status: "done" }).success).toBe(false);
+  });
+});
+
+describe("TraceEventView", () => {
+  const traceFixture = {
+    id: "b2c3d4e5-0000-4000-8000-0000000000b2",
+    seq: 3,
+    nodeId: "step_1",
+    kind: "step.succeeded",
+    level: "info",
+    title: "步骤「分析投诉原因」完成",
+    detail: null,
+    at: "2026-09-21T08:30:05.000Z",
+  };
+  it("直接 parse 轨迹行", () => {
+    const parsed = TraceEventView.parse(traceFixture);
+    expect(parsed.seq).toBe(3);
+    expect(parsed.kind).toBe("step.succeeded");
+  });
+  it("拒绝未知级别", () => {
+    expect(TraceEventView.safeParse({ ...traceFixture, level: "debug" }).success).toBe(false);
+  });
+  it("拒绝非整数序号", () => {
+    expect(TraceEventView.safeParse({ ...traceFixture, seq: 1.5 }).success).toBe(false);
+  });
+});
+
+describe("ApprovalView", () => {
+  const approvalFixture = {
+    id: "a1b2c3d4-0000-4000-8000-0000000000a1",
+    runId: runFixture.id,
+    nodeId: "confirm",
+    nodeTitle: "负责人确认处理方案",
+    status: "pending",
+    role: "业务负责人",
+    reason: "确认处理方案后流程才会继续",
+    note: null,
+    decidedAt: null,
+  };
+  it("直接 parse 审批行", () => {
+    expect(ApprovalView.parse(approvalFixture).status).toBe("pending");
+  });
+  it("拒绝未知审批状态", () => {
+    expect(ApprovalView.safeParse({ ...approvalFixture, status: "skipped" }).success).toBe(false);
   });
 });
