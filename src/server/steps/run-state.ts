@@ -1,7 +1,7 @@
 "use step";
 // 运行状态机步骤：initializeRun / persistStep / persistContext / finalizeRun / failRun。
 // 全部落在 runs / run_steps 两张表，状态机为 queued→running→completed|failed（等待审批在 T12 扩展）。
-import { eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { FatalError } from "workflow";
 import type { WorkflowDraft } from "@/contracts/workflow";
 import { db } from "@/lib/db";
@@ -119,7 +119,21 @@ export async function finalizeRun(runId: string, result: Record<string, unknown>
 
 export async function failRun(runId: string, error: string): Promise<void> {
   "use step";
+  console.error(`运行 ${runId} 失败：${error}`);
   const now = new Date();
-  await db.update(runs).set({ status: "failed", error, finishedAt: now, updatedAt: now }).where(eq(runs.id, runId));
+  const updated = await db
+    .update(runs)
+    .set({ status: "failed", error, finishedAt: now, updatedAt: now })
+    .where(and(eq(runs.id, runId), inArray(runs.status, ["queued", "running"])))
+    .returning({ id: runs.id });
+  if (updated.length === 0) return; // 已是终态（含终审修复的兜底重入），幂等
   await appendTrace({ runId, kind: "run.failed", level: "error", title: "流程执行失败", detail: error });
+}
+
+// 审批恢复后把 run 从 waiting_approval 拉回 running 并留下持久轨迹（瞬态状态不可断言，轨迹可）
+export async function markRunRunning(runId: string): Promise<void> {
+  "use step";
+  const now = new Date();
+  await db.update(runs).set({ status: "running", updatedAt: now }).where(eq(runs.id, runId));
+  await appendTrace({ runId, kind: "run.resumed", title: "流程继续执行" });
 }

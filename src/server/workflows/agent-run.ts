@@ -6,8 +6,9 @@ import { requestApproval, recordDecision } from "@/server/steps/approval-step";
 import { evaluateCondition } from "@/server/steps/condition-step";
 import { runKnowledgeStep } from "@/server/steps/knowledge-step";
 import { runModelStep } from "@/server/steps/model-step";
-import { failRun, finalizeRun, initializeRun } from "@/server/steps/run-state";
+import { failRun, finalizeRun, initializeRun, markRunRunning } from "@/server/steps/run-state";
 import { runQualityGate } from "@/server/steps/quality-step";
+import { appendTrace } from "@/server/steps/trace-step";
 import { runToolStep } from "@/server/steps/tool-step";
 
 export async function agentRunWorkflow(runId: string, manifest: AgentManifest, input: Record<string, unknown>) {
@@ -66,6 +67,13 @@ export async function agentRunWorkflow(runId: string, manifest: AgentManifest, i
         const hook = createHook<{ decision: "approved" | "rejected"; note?: string }>({ token });
         const decision = await hook;
         await recordDecision({ runId, node, approvalId, decision });
+        await markRunRunning(runId);
+        if (decision.decision === "rejected") {
+          await appendTrace({
+            runId, nodeId: node.id, kind: "run.rejected_stop", level: "warn",
+            title: `「${node.title}」未获确认，后续发送类步骤不执行`,
+          });
+        }
         currentId = decision.decision === "approved" ? node.next : (node.rejectNext ?? "not_approved");
         continue;
       }

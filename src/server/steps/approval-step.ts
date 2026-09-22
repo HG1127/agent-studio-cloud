@@ -2,7 +2,7 @@
 // 审批步骤：requestApproval 落 approvals pending 行并把 run 置 waiting_approval；
 // recordDecision 把审批决定写回 approvals 行。token 为确定性格式，供 createHook/resumeHook 服务端配对，
 // 不下发给前端（前端只拿 approvalId）。
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { FatalError } from "workflow";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { approvals, runs } from "@/db/schema";
@@ -64,15 +64,14 @@ export async function requestApproval(args: RequestApprovalInput): Promise<Appro
 
 export async function recordDecision(args: RecordDecisionInput): Promise<void> {
   "use step";
-  const now = new Date();
   const approved = args.decision.decision === "approved";
   await db
     .update(approvals)
     .set({
       status: approved ? "approved" : "rejected",
       note: args.decision.note ?? null,
-      decidedAt: now,
-      updatedAt: now,
+      decidedAt: sql`now()`,
+      updatedAt: sql`now()`,
     })
     .where(eq(approvals.id, args.approvalId));
   await appendTrace({

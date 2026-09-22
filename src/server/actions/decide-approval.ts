@@ -9,8 +9,8 @@ import { approvals, runs } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 
-// 人工审批决定入口：先做从属与状态校验（防跨 run 审批、防重复决定），再落行并恢复工作流。
-// token 由 runId + nodeId 按服务端约定重建，不经过前端。
+// 人工审批决定入口：原子条件更新抢占 pending 行（并发下只有一次提交生效），再恢复工作流；
+// 恢复失败则回滚确认行。token 由 runId + nodeId 按服务端约定重建，不经过前端。
 export async function decideApprovalAction(
   runId: string,
   approvalId: string,
@@ -33,30 +33,35 @@ export async function decideApprovalAction(
     const [run] = await db
       .select({ agentId: runs.agentId })
       .from(runs)
-      .where(eq(runs.id, runId))
+      .where(and(eq(runs.id, runId), eq(runs.workspaceId, DEMO_WORKSPACE_ID)))
       .limit(1);
     if (!run) {
       return { ok: false, error: "找不到这次运行，请刷新页面后重试" };
     }
-    if (row.status !== "pending") {
-      return { ok: false, error: "这条确认已经处理过，请勿重复提交" };
-    }
     const approved = parsedInput.data.decision === "approved";
     const note = parsedInput.data.note?.trim() ? parsedInput.data.note.trim() : null;
     const now = new Date();
-    await db
+    const claimed = await db
       .update(approvals)
-      .set({
-        status: approved ? "approved" : "rejected",
-        note,
-        decidedAt: now,
-        updatedAt: now,
-      })
-      .where(eq(approvals.id, approvalId));
-    await resumeHook(`approval:${runId}:${row.nodeId}`, {
-      decision: parsedInput.data.decision,
-      note: note ?? undefined,
-    });
+      .set({ status: approved ? "approved" : "rejected", note, decidedAt: now, updatedAt: now })
+      .where(and(eq(approvals.id, approvalId), eq(approvals.runId, runId), eq(approvals.status, "pending")))
+      .returning({ id: approvals.id });
+    if (claimed.length === 0) {
+      return { ok: false, error: "这条确认已经处理过，请勿重复提交" };
+    }
+    try {
+      await resumeHook(`approval:${runId}:${row.nodeId}`, {
+        decision: parsedInput.data.decision,
+        note: note ?? undefined,
+      });
+    } catch (error) {
+      console.error("恢复工作流失败，回滚确认记录", error);
+      await db
+        .update(approvals)
+        .set({ status: "pending", note: null, decidedAt: null, updatedAt: new Date() })
+        .where(eq(approvals.id, approvalId));
+      return { ok: false, error: "提交确认失败，请稍后重试" };
+    }
     revalidatePath(`/agents/${run.agentId}`);
     revalidatePath("/agents");
     return { ok: true };
