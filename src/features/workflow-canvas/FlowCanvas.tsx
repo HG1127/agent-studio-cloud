@@ -14,9 +14,9 @@ import {
 import "@xyflow/react/dist/style.css";
 import type { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
 import { saveWorkflowAction } from "@/server/actions/save-workflow";
-import { workflowNodeTypes, type WorkflowFlowNode } from "./custom-nodes";
+import { workflowNodeTypes, type WorkflowFlowNode } from "./CustomNodes";
 import { autoLayout } from "./layout";
-import { NodeInspector } from "./node-inspector";
+import { NodeInspector } from "./NodeInspector";
 
 interface FlowCanvasProps {
   agentId: string;

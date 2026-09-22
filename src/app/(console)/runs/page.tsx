@@ -1,4 +1,4 @@
-import { RunList } from "@/features/runs/run-list";
+import { RunList } from "@/features/runs/RunList";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { listRuns } from "@/server/queries/runs";
 

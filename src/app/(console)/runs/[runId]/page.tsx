@@ -1,4 +1,4 @@
-import { RunDetail } from "@/features/runs/run-detail";
+import { RunDetail } from "@/features/runs/RunDetail";
 
 export const dynamic = "force-dynamic";
 

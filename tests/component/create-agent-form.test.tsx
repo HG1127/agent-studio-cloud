@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CreateAgentForm } from "@/features/agents/create-agent-form";
+import { CreateAgentForm } from "@/features/agents/CreateAgentForm";
 
 const { actionMock, pushMock } = vi.hoisted(() => ({
   actionMock: vi.fn(),

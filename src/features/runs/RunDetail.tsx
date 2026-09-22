@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ApprovalPanel } from "@/features/runs/approval-panel";
-import { RunStatusBadge } from "@/features/runs/run-list";
-import { TraceTimeline } from "@/features/runs/trace-timeline";
+import { ApprovalPanel } from "@/features/runs/ApprovalPanel";
+import { RunStatusBadge } from "@/features/runs/RunList";
+import { TraceTimeline } from "@/features/runs/TraceTimeline";
 import type { RunStatus } from "@/contracts/run";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { getRunContext, getRunView, listApprovals, listRunSteps } from "@/server/queries/runs";

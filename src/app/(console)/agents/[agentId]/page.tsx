@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { RunLauncher } from "@/features/agents/run-launcher";
-import { VersionPanel } from "@/features/agents/version-panel";
-import { FlowCanvas } from "@/features/workflow-canvas/flow-canvas";
+import { RunLauncher } from "@/features/agents/RunLauncher";
+import { VersionPanel } from "@/features/agents/VersionPanel";
+import { FlowCanvas } from "@/features/workflow-canvas/FlowCanvas";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { auditWorkflow, type DesignAuditResult } from "@/server/domain/audit";
 import { getAgentDetail } from "@/server/queries/agents";
