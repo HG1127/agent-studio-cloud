@@ -1,0 +1,885 @@
+{
+  "input": {
+    "intent": {
+      "trigger": {
+        "value": "收到客户投诉"
+      },
+      "outputs": [
+        "处理结果清单"
+      ],
+      "orderedSteps": [
+        {
+          "id": "fetch",
+          "title": "读取投诉记录",
+          "type": "ai"
+        },
+        {
+          "id": "review",
+          "title": "由负责人复核",
+          "type": "human",
+          "rejectNextStepId": "handle"
+        },
+        {
+          "id": "decide",
+          "title": "判断严重程度",
+          "type": "condition",
+          "condition": {
+            "source": "input.severity",
+            "operator": "eq",
+            "branches": [
+              {
+                "label": "严重",
+                "value": "high",
+                "nextStepId": "review"
+              },
+              {
+                "label": "一般",
+                "value": "low",
+                "nextStepId": "send"
+              }
+            ],
+            "defaultNextStepId": "fetch"
+          }
+        },
+        {
+          "id": "prepare",
+          "title": "拟定处理方案",
+          "type": "ai",
+          "nextStepId": "analyze"
+        },
+        {
+          "id": "analyze",
+          "title": "分析投诉原因",
+          "type": "ai",
+          "nextStepId": "review"
+        },
+        {
+          "id": "handle",
+          "title": "跟进处理进度",
+          "type": "ai",
+          "onErrorNextStepId": "review"
+        },
+        {
+          "id": "send",
+          "title": "发送处理通知",
+          "type": "tool",
+          "tool": {
+            "action": "send_content"
+          }
+        },
+        {
+          "id": "pause",
+          "title": "等待客户回复",
+          "type": "wait",
+          "wait": {
+            "mode": "delay",
+            "durationMs": 60000,
+            "onTimeoutNextStepId": "send"
+          }
+        },
+        {
+          "id": "loop",
+          "title": "逐条执行跟进",
+          "type": "loop",
+          "loop": {
+            "collectionPath": "context.records",
+            "itemKey": "currentItem",
+            "maxIterations": 5,
+            "bodyNext": "fetch",
+            "exitNextStepId": "send"
+          },
+          "onErrorNextStepId": "review"
+        }
+      ]
+    }
+  },
+  "output": {
+    "workflow": {
+      "id": "WF-10ca2b43-8049-4d1b-bdab-9cf095a2cc96",
+      "versionId": null,
+      "startNodeId": "start",
+      "rootAgent": {
+        "id": "agt_b0a488c2",
+        "name": "业务 Agent",
+        "role": "通用业务助手"
+      },
+      "nodes": {
+        "start": {
+          "id": "start",
+          "title": "收到客户投诉",
+          "type": "trigger",
+          "agent": {
+            "id": "agt_b0a488c2",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": "fetch",
+          "description": "收到本次业务输入后开始"
+        },
+        "fetch": {
+          "id": "fetch",
+          "title": "读取投诉记录",
+          "type": "ai",
+          "agent": {
+            "id": "agt_b0a488c2",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": "quality_review",
+          "description": "读取投诉记录",
+          "sourceLabel": "AI 结构化理解",
+          "intentEvidence": {
+            "text": "读取投诉记录",
+            "source": "model",
+            "stepRef": "fetch"
+          },
+          "businessSpec": null,
+          "requirementIds": [],
+          "dependsOn": [],
+          "retry": {
+            "maxAttempts": 1,
+            "backoffMs": 250
+          },
+          "modelClass": "balanced",
+          "purpose": "execute",
+          "onErrorNext": null
+        },
+        "review": {
+          "id": "review",
+          "title": "由负责人复核",
+          "type": "human",
+          "agent": {
+            "id": "agt_b0a488c2",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": "decide",
+          "description": "由负责人复核",
+          "sourceLabel": "AI 结构化理解",
+          "intentEvidence": {
+            "text": "由负责人复核",
+            "source": "model",
+            "stepRef": "review"
+          },
+          "businessSpec": null,
+          "requirementIds": [],
+          "dependsOn": [],
+          "retry": {
+            "maxAttempts": 1,
+            "backoffMs": 250
+          },
+          "approval": {
+            "role": "业务负责人",
+            "reason": "确认“由负责人复核”后流程才会继续"
+          },
+          "rejectNext": "handle",
+          "onErrorNext": null
+        },
+        "decide": {
+          "id": "decide",
+          "title": "判断严重程度",
+          "type": "condition",
+          "agent": {
+            "id": "agt_b0a488c2",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": null,
+          "description": "判断严重程度",
+          "sourceLabel": "AI 结构化理解",
+          "intentEvidence": {
+            "text": "判断严重程度",
+            "source": "model",
+            "stepRef": "decide"
+          },
+          "businessSpec": null,
+          "requirementIds": [],
+          "dependsOn": [],
+          "retry": {
+            "maxAttempts": 1,
+            "backoffMs": 250
+          },
+          "condition": {
+            "source": "input.severity",
+            "operator": "eq",
+            "branches": [
+              {
+                "label": "严重",
+                "value": "high",
+                "next": "quality_review"
+              },
+              {
+                "label": "一般",
+                "value": "low",
+                "next": "approval_send"
+              }
+            ],
+            "defaultNext": "safe_stop"
+          },
+          "onErrorNext": null
+        },
+        "prepare": {
+          "id": "prepare",
+          "title": "拟定处理方案",
+          "type": "ai",
+          "agent": {
+            "id": "agt_b0a488c2",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": "analyze",
+          "description": "拟定处理方案",
+          "sourceLabel": "AI 结构化理解",
+          "intentEvidence": {
+            "text": "拟定处理方案",
+            "source": "model",
+            "stepRef": "prepare"
+          },
+          "businessSpec": null,
+          "requirementIds": [],
+          "dependsOn": [],
+          "retry": {
+            "maxAttempts": 1,
+            "backoffMs": 250
+          },
+          "modelClass": "balanced",
+          "purpose": "execute",
+          "onErrorNext": null
+        },
+        "analyze": {
+          "id": "analyze",
+          "title": "分析投诉原因",
+          "type": "ai",
+          "agent": {
+            "id": "agt_b0a488c2",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": "quality_review",
+          "description": "分析投诉原因",
+          "sourceLabel": "AI 结构化理解",
+          "intentEvidence": {
+            "text": "分析投诉原因",
+            "source": "model",
+            "stepRef": "analyze"
+          },
+          "businessSpec": null,
+          "requirementIds": [],
+          "dependsOn": [],
+          "retry": {
+            "maxAttempts": 1,
+            "backoffMs": 250
+          },
+          "modelClass": "reasoning",
+          "purpose": "execute",
+          "onErrorNext": null
+        },
+        "handle": {
+          "id": "handle",
+          "title": "跟进处理进度",
+          "type": "ai",
+          "agent": {
+            "id": "agt_b0a488c2",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": "quality_review",
+          "description": "跟进处理进度",
+          "sourceLabel": "AI 结构化理解",
+          "intentEvidence": {
+            "text": "跟进处理进度",
+            "source": "model",
+            "stepRef": "handle"
+          },
+          "businessSpec": null,
+          "requirementIds": [],
+          "dependsOn": [],
+          "retry": {
+            "maxAttempts": 1,
+            "backoffMs": 250
+          },
+          "modelClass": "balanced",
+          "purpose": "execute",
+          "onErrorNext": null
+        },
+        "send": {
+          "id": "send",
+          "title": "发送处理通知",
+          "type": "tool",
+          "agent": {
+            "id": "agt_b0a488c2",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": "pause",
+          "description": "发送处理通知",
+          "sourceLabel": "AI 结构化理解",
+          "intentEvidence": {
+            "text": "发送处理通知",
+            "source": "model",
+            "stepRef": "send"
+          },
+          "businessSpec": null,
+          "requirementIds": [],
+          "dependsOn": [],
+          "retry": {
+            "maxAttempts": 1,
+            "backoffMs": 250
+          },
+          "tool": {
+            "connector": "unbound",
+            "action": "send_content",
+            "intentAction": "send_content",
+            "scope": "unbound.tool",
+            "risk": "high",
+            "maxRetries": 3,
+            "checkpointOnFailure": true,
+            "registryToolId": null,
+            "protocol": "unbound",
+            "inputSchema": {
+              "type": "object"
+            },
+            "outputSchema": {
+              "type": "object"
+            },
+            "argumentsMode": "auto",
+            "operationKind": "action",
+            "unresolved": true,
+            "businessApprovalAccepted": true
+          },
+          "onErrorNext": null
+        },
+        "pause": {
+          "id": "pause",
+          "title": "等待客户回复",
+          "type": "wait",
+          "agent": {
+            "id": "agt_b0a488c2",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": "loop",
+          "description": "等待客户回复",
+          "sourceLabel": "AI 结构化理解",
+          "intentEvidence": {
+            "text": "等待客户回复",
+            "source": "model",
+            "stepRef": "pause"
+          },
+          "businessSpec": null,
+          "requirementIds": [],
+          "dependsOn": [],
+          "retry": {
+            "maxAttempts": 1,
+            "backoffMs": 250
+          },
+          "wait": {
+            "mode": "delay",
+            "durationMs": 60000,
+            "until": null,
+            "eventKey": "pause",
+            "eventLabel": "等待客户回复",
+            "payloadSchema": {
+              "type": "object"
+            },
+            "timeoutMs": 0,
+            "onTimeoutNext": "approval_send"
+          },
+          "onErrorNext": null
+        },
+        "loop": {
+          "id": "loop",
+          "title": "逐条执行跟进",
+          "type": "loop",
+          "agent": {
+            "id": "agt_b0a488c2",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": null,
+          "description": "逐条执行跟进",
+          "sourceLabel": "AI 结构化理解",
+          "intentEvidence": {
+            "text": "逐条执行跟进",
+            "source": "model",
+            "stepRef": "loop"
+          },
+          "businessSpec": null,
+          "requirementIds": [],
+          "dependsOn": [],
+          "retry": {
+            "maxAttempts": 1,
+            "backoffMs": 250
+          },
+          "loop": {
+            "collectionPath": "context.records",
+            "itemKey": "currentItem",
+            "maxIterations": 5,
+            "bodyNext": "fetch",
+            "exitNextStepId": "send",
+            "exitNext": "approval_send"
+          },
+          "onErrorNext": "review"
+        },
+        "not_approved": {
+          "id": "not_approved",
+          "title": "未获确认，保留当前结果并停止高影响动作",
+          "type": "system",
+          "agent": {
+            "id": "agt_b0a488c2",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": "quality_review",
+          "description": "拒绝后不执行后续外发、付款、删除或写回操作",
+          "controlPlane": {
+            "kind": "safety",
+            "hiddenByDefault": true
+          }
+        },
+        "safe_stop": {
+          "id": "safe_stop",
+          "title": "条件不满足，本次流程安全结束",
+          "type": "system",
+          "agent": {
+            "id": "agt_b0a488c2",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": "quality_review",
+          "description": "没有匹配到明确业务路径时，不猜测、不执行高影响动作",
+          "controlPlane": {
+            "kind": "safety",
+            "hiddenByDefault": true
+          }
+        },
+        "quality_review": {
+          "id": "quality_review",
+          "title": "交付前核对结果与系统回执",
+          "type": "rule",
+          "agent": {
+            "id": "agt_b0a488c2",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": "done",
+          "controlPlane": {
+            "kind": "quality",
+            "hiddenByDefault": true
+          },
+          "quality": {
+            "requiredOutputTitles": [
+              "处理结果清单"
+            ],
+            "minOutputCount": 1,
+            "checkToolReceipts": true,
+            "checkHumanBoundary": true
+          },
+          "description": "结束前确认已形成结果、外部系统返回回执，且应由员工决定的步骤已有记录"
+        },
+        "done": {
+          "id": "done",
+          "title": "处理结果清单",
+          "type": "end",
+          "agent": {
+            "id": "agt_b0a488c2",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": null,
+          "description": "结果、执行轨迹和人工决定均已保存"
+        },
+        "approval_send": {
+          "id": "approval_send",
+          "title": "业务负责人确认：发送处理通知",
+          "type": "human",
+          "agent": {
+            "id": "agt_b0a488c2",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": "send",
+          "controlPlane": {
+            "kind": "governance",
+            "hiddenByDefault": true
+          },
+          "ui": {
+            "visibility": "control"
+          },
+          "approval": {
+            "role": "业务负责人",
+            "reason": "这一步会修改外部业务系统，需要员工确认"
+          },
+          "rejectNext": "not_approved"
+        }
+      },
+      "variables": [
+        {
+          "name": "severity",
+          "label": "判断严重程度",
+          "type": "string",
+          "scope": "run",
+          "required": true,
+          "description": "用于判断“判断严重程度”"
+        }
+      ],
+      "memoryPolicy": {
+        "taskContext": true,
+        "longTerm": false,
+        "description": "仅保留本次任务所需信息"
+      },
+      "runtimeRequirements": {
+        "externalTools": [],
+        "unresolvedTools": [
+          {
+            "stepId": "send",
+            "title": "发送处理通知",
+            "requested": "未指明具体能力"
+          }
+        ],
+        "toolReceiptVerification": true
+      },
+      "intentSource": {
+        "mode": "model-structured-plan-v3.6",
+        "schema": "workflow-plan/v3.6",
+        "sourceText": "",
+        "orderedSteps": [
+          {
+            "id": "fetch",
+            "title": "读取投诉记录",
+            "type": "ai",
+            "evidence": "读取投诉记录",
+            "requirementIds": []
+          },
+          {
+            "id": "review",
+            "title": "由负责人复核",
+            "type": "human",
+            "evidence": "由负责人复核",
+            "requirementIds": []
+          },
+          {
+            "id": "decide",
+            "title": "判断严重程度",
+            "type": "condition",
+            "evidence": "判断严重程度",
+            "requirementIds": []
+          },
+          {
+            "id": "prepare",
+            "title": "拟定处理方案",
+            "type": "ai",
+            "evidence": "拟定处理方案",
+            "requirementIds": []
+          },
+          {
+            "id": "analyze",
+            "title": "分析投诉原因",
+            "type": "ai",
+            "evidence": "分析投诉原因",
+            "requirementIds": []
+          },
+          {
+            "id": "handle",
+            "title": "跟进处理进度",
+            "type": "ai",
+            "evidence": "跟进处理进度",
+            "requirementIds": []
+          },
+          {
+            "id": "send",
+            "title": "发送处理通知",
+            "type": "tool",
+            "evidence": "发送处理通知",
+            "requirementIds": []
+          },
+          {
+            "id": "pause",
+            "title": "等待客户回复",
+            "type": "wait",
+            "evidence": "等待客户回复",
+            "requirementIds": []
+          },
+          {
+            "id": "loop",
+            "title": "逐条执行跟进",
+            "type": "loop",
+            "evidence": "逐条执行跟进",
+            "requirementIds": []
+          }
+        ],
+        "diagnostics": {
+          "schema": "workflow-plan-diagnostics/v3.6",
+          "source": "connected-model-structured-plan",
+          "stepCount": 9,
+          "evidenceCount": 9,
+          "conditionCount": 1,
+          "branchCount": 3,
+          "parallelCount": 0,
+          "parallelBranchCount": 0,
+          "waitCount": 1,
+          "recoveryRouteCount": 1,
+          "toolBindings": [],
+          "unresolvedTools": [
+            {
+              "stepId": "send",
+              "title": "发送处理通知",
+              "requested": "未指明具体能力"
+            }
+          ],
+          "coverage": {
+            "stepsWithEvidence": 9,
+            "totalSteps": 9,
+            "percent": 100
+          },
+          "warnings": [
+            "“发送处理通知”尚未绑定真实工具"
+          ]
+        }
+      }
+    },
+    "orderedSteps": [
+      {
+        "id": "fetch",
+        "title": "读取投诉记录",
+        "type": "ai",
+        "order": 1,
+        "owner": "",
+        "evidence": "读取投诉记录",
+        "requirementIds": [],
+        "dependsOn": [],
+        "nextRef": null,
+        "rejectRef": null,
+        "errorRef": null,
+        "timeoutRef": null,
+        "condition": {
+          "source": null,
+          "operator": null,
+          "branches": [],
+          "defaultNext": null
+        }
+      },
+      {
+        "id": "review",
+        "title": "由负责人复核",
+        "type": "human",
+        "rejectNextStepId": "handle",
+        "order": 2,
+        "owner": "",
+        "evidence": "由负责人复核",
+        "requirementIds": [],
+        "dependsOn": [],
+        "nextRef": null,
+        "rejectRef": "handle",
+        "errorRef": null,
+        "timeoutRef": null,
+        "condition": {
+          "source": null,
+          "operator": null,
+          "branches": [],
+          "defaultNext": null
+        }
+      },
+      {
+        "id": "decide",
+        "title": "判断严重程度",
+        "type": "condition",
+        "condition": {
+          "source": "input.severity",
+          "operator": "eq",
+          "branches": [
+            {
+              "label": "严重",
+              "value": "high",
+              "nextStepId": "review"
+            },
+            {
+              "label": "一般",
+              "value": "low",
+              "nextStepId": "send"
+            }
+          ],
+          "defaultNextStepId": "fetch",
+          "defaultNext": "fetch"
+        },
+        "order": 3,
+        "owner": "",
+        "evidence": "判断严重程度",
+        "requirementIds": [],
+        "dependsOn": [],
+        "nextRef": null,
+        "rejectRef": null,
+        "errorRef": null,
+        "timeoutRef": null
+      },
+      {
+        "id": "prepare",
+        "title": "拟定处理方案",
+        "type": "ai",
+        "nextStepId": "analyze",
+        "order": 4,
+        "owner": "",
+        "evidence": "拟定处理方案",
+        "requirementIds": [],
+        "dependsOn": [],
+        "nextRef": "analyze",
+        "rejectRef": null,
+        "errorRef": null,
+        "timeoutRef": null,
+        "condition": {
+          "source": null,
+          "operator": null,
+          "branches": [],
+          "defaultNext": null
+        }
+      },
+      {
+        "id": "analyze",
+        "title": "分析投诉原因",
+        "type": "ai",
+        "nextStepId": "review",
+        "order": 5,
+        "owner": "",
+        "evidence": "分析投诉原因",
+        "requirementIds": [],
+        "dependsOn": [],
+        "nextRef": "review",
+        "rejectRef": null,
+        "errorRef": null,
+        "timeoutRef": null,
+        "condition": {
+          "source": null,
+          "operator": null,
+          "branches": [],
+          "defaultNext": null
+        }
+      },
+      {
+        "id": "handle",
+        "title": "跟进处理进度",
+        "type": "ai",
+        "onErrorNextStepId": "review",
+        "order": 6,
+        "owner": "",
+        "evidence": "跟进处理进度",
+        "requirementIds": [],
+        "dependsOn": [],
+        "nextRef": null,
+        "rejectRef": null,
+        "errorRef": "review",
+        "timeoutRef": null,
+        "condition": {
+          "source": null,
+          "operator": null,
+          "branches": [],
+          "defaultNext": null
+        }
+      },
+      {
+        "id": "send",
+        "title": "发送处理通知",
+        "type": "tool",
+        "tool": {
+          "action": "send_content"
+        },
+        "order": 7,
+        "owner": "",
+        "evidence": "发送处理通知",
+        "requirementIds": [],
+        "dependsOn": [],
+        "nextRef": null,
+        "rejectRef": null,
+        "errorRef": null,
+        "timeoutRef": null,
+        "condition": {
+          "source": null,
+          "operator": null,
+          "branches": [],
+          "defaultNext": null
+        }
+      },
+      {
+        "id": "pause",
+        "title": "等待客户回复",
+        "type": "wait",
+        "wait": {
+          "mode": "delay",
+          "durationMs": 60000,
+          "onTimeoutNextStepId": "send"
+        },
+        "order": 8,
+        "owner": "",
+        "evidence": "等待客户回复",
+        "requirementIds": [],
+        "dependsOn": [],
+        "nextRef": null,
+        "rejectRef": null,
+        "errorRef": null,
+        "timeoutRef": "send",
+        "condition": {
+          "source": null,
+          "operator": null,
+          "branches": [],
+          "defaultNext": null
+        }
+      },
+      {
+        "id": "loop",
+        "title": "逐条执行跟进",
+        "type": "loop",
+        "loop": {
+          "collectionPath": "context.records",
+          "itemKey": "currentItem",
+          "maxIterations": 5,
+          "bodyNext": "fetch",
+          "exitNextStepId": "send",
+          "exitNext": "approval_send"
+        },
+        "onErrorNextStepId": "review",
+        "order": 9,
+        "owner": "",
+        "evidence": "逐条执行跟进",
+        "requirementIds": [],
+        "dependsOn": [],
+        "nextRef": null,
+        "rejectRef": null,
+        "errorRef": "review",
+        "timeoutRef": null,
+        "condition": {
+          "source": null,
+          "operator": null,
+          "branches": [],
+          "defaultNext": null
+        }
+      }
+    ],
+    "diagnostics": {
+      "schema": "workflow-plan-diagnostics/v3.6",
+      "source": "connected-model-structured-plan",
+      "stepCount": 9,
+      "evidenceCount": 9,
+      "conditionCount": 1,
+      "branchCount": 3,
+      "parallelCount": 0,
+      "parallelBranchCount": 0,
+      "waitCount": 1,
+      "recoveryRouteCount": 1,
+      "toolBindings": [],
+      "unresolvedTools": [
+        {
+          "stepId": "send",
+          "title": "发送处理通知",
+          "requested": "未指明具体能力"
+        }
+      ],
+      "coverage": {
+        "stepsWithEvidence": 9,
+        "totalSteps": 9,
+        "percent": 100
+      },
+      "warnings": [
+        "“发送处理通知”尚未绑定真实工具"
+      ]
+    }
+  }
+}

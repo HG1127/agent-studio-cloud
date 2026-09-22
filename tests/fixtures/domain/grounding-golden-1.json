@@ -1,0 +1,1940 @@
+{
+  "input": {
+    "workflow": {
+      "id": "WF-f5ae3e7d-3956-4a1d-aca4-a48ea805efe9",
+      "versionId": null,
+      "startNodeId": "start",
+      "rootAgent": {
+        "id": "agt_9bb9769b",
+        "name": "客服助手",
+        "role": "客户服务助手"
+      },
+      "nodes": {
+        "start": {
+          "id": "start",
+          "title": "收到客户咨询",
+          "type": "trigger",
+          "agent": {
+            "id": "agt_9bb9769b",
+            "name": "客服助手",
+            "role": "客户服务助手"
+          },
+          "next": "step_1",
+          "description": "收到任务后开始",
+          "requirementIds": [
+            "REQ_e2e3b9458f"
+          ]
+        },
+        "step_1": {
+          "id": "step_1",
+          "title": "读取客户资料",
+          "type": "knowledge",
+          "agent": {
+            "id": "agt_9bb9769b",
+            "name": "客服助手",
+            "role": "客户服务助手"
+          },
+          "next": "step_2",
+          "description": "读取客户资料",
+          "sourceLabel": "来自你的描述",
+          "knowledge": {
+            "space": "业务知识库",
+            "query": "读取客户资料"
+          },
+          "requirementIds": [
+            "REQ_a7f4b4bb39"
+          ]
+        },
+        "step_2": {
+          "id": "step_2",
+          "title": "整理问题要点",
+          "type": "ai",
+          "agent": {
+            "id": "agt_9bb9769b",
+            "name": "客服助手",
+            "role": "客户服务助手"
+          },
+          "next": "step_3",
+          "description": "整理问题要点",
+          "sourceLabel": "来自你的描述",
+          "modelClass": "balanced",
+          "purpose": "execute",
+          "requirementIds": [
+            "REQ_e9e22b922c"
+          ]
+        },
+        "step_3": {
+          "id": "step_3",
+          "title": "生成回复方案",
+          "type": "ai",
+          "agent": {
+            "id": "agt_9bb9769b",
+            "name": "客服助手",
+            "role": "客户服务助手"
+          },
+          "next": "step_4",
+          "description": "生成回复方案",
+          "sourceLabel": "来自你的描述",
+          "modelClass": "balanced",
+          "purpose": "execute",
+          "requirementIds": [
+            "REQ_eef299d9c4"
+          ]
+        },
+        "step_4": {
+          "id": "step_4",
+          "title": "负责人确认发送内容",
+          "type": "human",
+          "agent": {
+            "id": "agt_9bb9769b",
+            "name": "客服助手",
+            "role": "客户服务助手"
+          },
+          "next": "step_5",
+          "description": "发送前由负责人确认",
+          "sourceLabel": "来自你的描述",
+          "approval": {
+            "role": "负责人",
+            "reason": "确认「负责人确认发送内容」后流程才会继续"
+          },
+          "rejectNext": "not_approved",
+          "requirementIds": [
+            "REQ_f1538b7830"
+          ]
+        },
+        "step_5": {
+          "id": "step_5",
+          "title": "输出回复邮件",
+          "type": "ai",
+          "agent": {
+            "id": "agt_9bb9769b",
+            "name": "客服助手",
+            "role": "客户服务助手"
+          },
+          "next": "quality_review",
+          "description": "输出回复邮件",
+          "sourceLabel": "来自你的描述",
+          "modelClass": "balanced",
+          "purpose": "execute",
+          "requirementIds": [
+            "REQ_5bc45c5443"
+          ]
+        },
+        "not_approved": {
+          "id": "not_approved",
+          "title": "未获确认，保留草稿并结束",
+          "type": "system",
+          "agent": {
+            "id": "agt_9bb9769b",
+            "name": "客服助手",
+            "role": "客户服务助手"
+          },
+          "next": "quality_review",
+          "description": "不会执行后续对外发送、付款或写回动作"
+        },
+        "quality_review": {
+          "id": "quality_review",
+          "title": "交付前检查结果",
+          "type": "rule",
+          "agent": {
+            "id": "agt_9bb9769b",
+            "name": "客服助手",
+            "role": "客户服务助手"
+          },
+          "next": "done",
+          "quality": {
+            "requiredOutputTitles": [
+              "读取客户资料",
+              "整理问题要点",
+              "生成回复方案",
+              "输出回复邮件"
+            ],
+            "minOutputCount": 1,
+            "checkToolReceipts": false,
+            "checkHumanBoundary": true
+          },
+          "description": "完成前自动核对是否形成结果、业务系统是否有回执，以及重要操作是否经过员工确认"
+        },
+        "done": {
+          "id": "done",
+          "title": "本次任务已完成",
+          "type": "end",
+          "agent": {
+            "id": "agt_9bb9769b",
+            "name": "客服助手",
+            "role": "客户服务助手"
+          },
+          "next": null,
+          "description": "结果、执行记录与人工决定均已保存",
+          "requirementIds": [
+            "REQ_eef299d9c4",
+            "REQ_5bc45c5443"
+          ]
+        }
+      },
+      "variables": [],
+      "memoryPolicy": {
+        "taskContext": true,
+        "longTerm": false,
+        "description": "仅保留本次任务所需信息"
+      },
+      "intentSource": {
+        "mode": "semantic-graph-v3.6",
+        "schema": "intent-contract/v3.6",
+        "clauses": [
+          "收到客户咨询后读取客户资料并整理问题要点",
+          "生成回复方案",
+          "发送前由负责人确认",
+          "最后输出回复邮件"
+        ],
+        "conditionCount": 0,
+        "parallelCount": 0,
+        "waitCount": 0,
+        "recoveryRouteCount": 0,
+        "collectionLoop": false,
+        "dynamicToolBinding": false,
+        "qualityGate": true,
+        "harnessPlanningRequired": true,
+        "requirementCoverage": {
+          "schema": "agent-requirement-coverage/v3.6",
+          "covered": [
+            {
+              "id": "REQ_e2e3b9458f",
+              "kind": "trigger",
+              "label": "什么时候开始",
+              "text": "收到客户咨询",
+              "required": true,
+              "source": "intent-trigger",
+              "sources": [
+                "intent-trigger",
+                "user"
+              ],
+              "stepRef": null,
+              "covered": true,
+              "nodeIds": [
+                "start"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "start",
+                  "title": "收到客户咨询",
+                  "type": "trigger",
+                  "confidence": 1
+                }
+              ]
+            },
+            {
+              "id": "REQ_a7f4b4bb39",
+              "kind": "action",
+              "label": "需要完成的工作",
+              "text": "读取客户资料",
+              "required": true,
+              "source": "intent-step",
+              "sources": [
+                "intent-step"
+              ],
+              "stepRef": "intent_1",
+              "covered": true,
+              "nodeIds": [
+                "step_1"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "step_1",
+                  "title": "读取客户资料",
+                  "type": "knowledge",
+                  "confidence": 1
+                }
+              ]
+            },
+            {
+              "id": "REQ_e9e22b922c",
+              "kind": "action",
+              "label": "需要完成的工作",
+              "text": "整理问题要点",
+              "required": true,
+              "source": "intent-step",
+              "sources": [
+                "intent-step"
+              ],
+              "stepRef": "intent_2",
+              "covered": true,
+              "nodeIds": [
+                "step_2"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "step_2",
+                  "title": "整理问题要点",
+                  "type": "ai",
+                  "confidence": 1
+                }
+              ]
+            },
+            {
+              "id": "REQ_eef299d9c4",
+              "kind": "output",
+              "label": "最终交付什么",
+              "text": "生成回复方案",
+              "required": true,
+              "source": "intent-step",
+              "sources": [
+                "intent-step",
+                "user"
+              ],
+              "stepRef": "intent_3",
+              "covered": true,
+              "nodeIds": [
+                "step_3",
+                "done"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "step_3",
+                  "title": "生成回复方案",
+                  "type": "ai",
+                  "confidence": 1
+                },
+                {
+                  "id": "done",
+                  "title": "本次任务已完成",
+                  "type": "end",
+                  "confidence": 0.55
+                }
+              ]
+            },
+            {
+              "id": "REQ_f1538b7830",
+              "kind": "human",
+              "label": "哪些决定交给员工",
+              "text": "发送前由负责人确认",
+              "required": true,
+              "source": "intent-step",
+              "sources": [
+                "intent-step",
+                "user"
+              ],
+              "stepRef": "intent_4",
+              "covered": true,
+              "nodeIds": [
+                "step_4"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "step_4",
+                  "title": "负责人确认发送内容",
+                  "type": "human",
+                  "confidence": 1
+                }
+              ]
+            },
+            {
+              "id": "REQ_5bc45c5443",
+              "kind": "output",
+              "label": "最终交付什么",
+              "text": "输出回复邮件",
+              "required": true,
+              "source": "intent-step",
+              "sources": [
+                "intent-step",
+                "user"
+              ],
+              "stepRef": "intent_5",
+              "covered": true,
+              "nodeIds": [
+                "step_5",
+                "done"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "step_5",
+                  "title": "输出回复邮件",
+                  "type": "ai",
+                  "confidence": 1
+                },
+                {
+                  "id": "done",
+                  "title": "本次任务已完成",
+                  "type": "end",
+                  "confidence": 0.55
+                }
+              ]
+            }
+          ],
+          "uncovered": [],
+          "requiredCount": 6,
+          "coveredRequiredCount": 6,
+          "percent": 100,
+          "complete": true
+        },
+        "complexityProfile": {
+          "schema": "agent-complexity-profile/v3.6",
+          "level": "simple",
+          "label": "简单任务",
+          "score": 100,
+          "capabilities": [
+            {
+              "id": "branches",
+              "label": "按不同情况走不同路径",
+              "needed": false,
+              "implemented": false
+            },
+            {
+              "id": "parallel",
+              "label": "多项工作可以同时进行",
+              "needed": false,
+              "implemented": false
+            },
+            {
+              "id": "loop",
+              "label": "能逐项处理一批内容",
+              "needed": false,
+              "implemented": false
+            },
+            {
+              "id": "wait",
+              "label": "能等待时间或外部消息后继续",
+              "needed": false,
+              "implemented": false
+            },
+            {
+              "id": "subflow",
+              "label": "复杂工作可拆成独立子任务",
+              "needed": false,
+              "implemented": false
+            },
+            {
+              "id": "human",
+              "label": "关键决定会交给员工",
+              "needed": true,
+              "implemented": true
+            },
+            {
+              "id": "tools",
+              "label": "能调用已连接的真实业务系统",
+              "needed": false,
+              "implemented": false
+            },
+            {
+              "id": "memory",
+              "label": "能按要求参考和保存经验",
+              "needed": false,
+              "implemented": false
+            },
+            {
+              "id": "recovery",
+              "label": "局部失败可重试或走备用路径",
+              "needed": false,
+              "implemented": false
+            }
+          ],
+          "missing": [],
+          "summary": "已覆盖 1 类任务结构，运行时会按画布执行。"
+        },
+        "compilerVersion": "3.6"
+      },
+      "requirementContract": {
+        "schema": "agent-requirements/v3.6",
+        "sourceText": "收到客户咨询后读取客户资料并整理问题要点，生成回复方案，发送前由负责人确认，最后输出回复邮件",
+        "requirements": [
+          {
+            "id": "REQ_e2e3b9458f",
+            "kind": "trigger",
+            "label": "什么时候开始",
+            "text": "收到客户咨询",
+            "required": true,
+            "source": "intent-trigger",
+            "sources": [
+              "intent-trigger",
+              "user"
+            ],
+            "stepRef": null
+          },
+          {
+            "id": "REQ_a7f4b4bb39",
+            "kind": "action",
+            "label": "需要完成的工作",
+            "text": "读取客户资料",
+            "required": true,
+            "source": "intent-step",
+            "sources": [
+              "intent-step"
+            ],
+            "stepRef": "intent_1"
+          },
+          {
+            "id": "REQ_e9e22b922c",
+            "kind": "action",
+            "label": "需要完成的工作",
+            "text": "整理问题要点",
+            "required": true,
+            "source": "intent-step",
+            "sources": [
+              "intent-step"
+            ],
+            "stepRef": "intent_2"
+          },
+          {
+            "id": "REQ_eef299d9c4",
+            "kind": "output",
+            "label": "最终交付什么",
+            "text": "生成回复方案",
+            "required": true,
+            "source": "intent-step",
+            "sources": [
+              "intent-step",
+              "user"
+            ],
+            "stepRef": "intent_3"
+          },
+          {
+            "id": "REQ_f1538b7830",
+            "kind": "human",
+            "label": "哪些决定交给员工",
+            "text": "发送前由负责人确认",
+            "required": true,
+            "source": "intent-step",
+            "sources": [
+              "intent-step",
+              "user"
+            ],
+            "stepRef": "intent_4"
+          },
+          {
+            "id": "REQ_5bc45c5443",
+            "kind": "output",
+            "label": "最终交付什么",
+            "text": "输出回复邮件",
+            "required": true,
+            "source": "intent-step",
+            "sources": [
+              "intent-step",
+              "user"
+            ],
+            "stepRef": "intent_5"
+          }
+        ],
+        "createdAt": "2026-09-21T05:57:46.636Z",
+        "coverage": {
+          "schema": "agent-requirement-coverage/v3.6",
+          "covered": [
+            {
+              "id": "REQ_e2e3b9458f",
+              "kind": "trigger",
+              "label": "什么时候开始",
+              "text": "收到客户咨询",
+              "required": true,
+              "source": "intent-trigger",
+              "sources": [
+                "intent-trigger",
+                "user"
+              ],
+              "stepRef": null,
+              "covered": true,
+              "nodeIds": [
+                "start"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "start",
+                  "title": "收到客户咨询",
+                  "type": "trigger",
+                  "confidence": 1
+                }
+              ]
+            },
+            {
+              "id": "REQ_a7f4b4bb39",
+              "kind": "action",
+              "label": "需要完成的工作",
+              "text": "读取客户资料",
+              "required": true,
+              "source": "intent-step",
+              "sources": [
+                "intent-step"
+              ],
+              "stepRef": "intent_1",
+              "covered": true,
+              "nodeIds": [
+                "step_1"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "step_1",
+                  "title": "读取客户资料",
+                  "type": "knowledge",
+                  "confidence": 1
+                }
+              ]
+            },
+            {
+              "id": "REQ_e9e22b922c",
+              "kind": "action",
+              "label": "需要完成的工作",
+              "text": "整理问题要点",
+              "required": true,
+              "source": "intent-step",
+              "sources": [
+                "intent-step"
+              ],
+              "stepRef": "intent_2",
+              "covered": true,
+              "nodeIds": [
+                "step_2"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "step_2",
+                  "title": "整理问题要点",
+                  "type": "ai",
+                  "confidence": 1
+                }
+              ]
+            },
+            {
+              "id": "REQ_eef299d9c4",
+              "kind": "output",
+              "label": "最终交付什么",
+              "text": "生成回复方案",
+              "required": true,
+              "source": "intent-step",
+              "sources": [
+                "intent-step",
+                "user"
+              ],
+              "stepRef": "intent_3",
+              "covered": true,
+              "nodeIds": [
+                "step_3",
+                "done"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "step_3",
+                  "title": "生成回复方案",
+                  "type": "ai",
+                  "confidence": 1
+                },
+                {
+                  "id": "done",
+                  "title": "本次任务已完成",
+                  "type": "end",
+                  "confidence": 0.55
+                }
+              ]
+            },
+            {
+              "id": "REQ_f1538b7830",
+              "kind": "human",
+              "label": "哪些决定交给员工",
+              "text": "发送前由负责人确认",
+              "required": true,
+              "source": "intent-step",
+              "sources": [
+                "intent-step",
+                "user"
+              ],
+              "stepRef": "intent_4",
+              "covered": true,
+              "nodeIds": [
+                "step_4"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "step_4",
+                  "title": "负责人确认发送内容",
+                  "type": "human",
+                  "confidence": 1
+                }
+              ]
+            },
+            {
+              "id": "REQ_5bc45c5443",
+              "kind": "output",
+              "label": "最终交付什么",
+              "text": "输出回复邮件",
+              "required": true,
+              "source": "intent-step",
+              "sources": [
+                "intent-step",
+                "user"
+              ],
+              "stepRef": "intent_5",
+              "covered": true,
+              "nodeIds": [
+                "step_5",
+                "done"
+              ],
+              "matchedSteps": [
+                {
+                  "id": "step_5",
+                  "title": "输出回复邮件",
+                  "type": "ai",
+                  "confidence": 1
+                },
+                {
+                  "id": "done",
+                  "title": "本次任务已完成",
+                  "type": "end",
+                  "confidence": 0.55
+                }
+              ]
+            }
+          ],
+          "uncovered": [],
+          "requiredCount": 6,
+          "coveredRequiredCount": 6,
+          "percent": 100,
+          "complete": true
+        }
+      },
+      "complexityProfile": {
+        "schema": "agent-complexity-profile/v3.6",
+        "level": "simple",
+        "label": "简单任务",
+        "score": 100,
+        "capabilities": [
+          {
+            "id": "branches",
+            "label": "按不同情况走不同路径",
+            "needed": false,
+            "implemented": false
+          },
+          {
+            "id": "parallel",
+            "label": "多项工作可以同时进行",
+            "needed": false,
+            "implemented": false
+          },
+          {
+            "id": "loop",
+            "label": "能逐项处理一批内容",
+            "needed": false,
+            "implemented": false
+          },
+          {
+            "id": "wait",
+            "label": "能等待时间或外部消息后继续",
+            "needed": false,
+            "implemented": false
+          },
+          {
+            "id": "subflow",
+            "label": "复杂工作可拆成独立子任务",
+            "needed": false,
+            "implemented": false
+          },
+          {
+            "id": "human",
+            "label": "关键决定会交给员工",
+            "needed": true,
+            "implemented": true
+          },
+          {
+            "id": "tools",
+            "label": "能调用已连接的真实业务系统",
+            "needed": false,
+            "implemented": false
+          },
+          {
+            "id": "memory",
+            "label": "能按要求参考和保存经验",
+            "needed": false,
+            "implemented": false
+          },
+          {
+            "id": "recovery",
+            "label": "局部失败可重试或走备用路径",
+            "needed": false,
+            "implemented": false
+          }
+        ],
+        "missing": [],
+        "summary": "已覆盖 1 类任务结构，运行时会按画布执行。"
+      },
+      "runtimePolicy": {
+        "schema": "agent-runtime-policy/v3.6",
+        "durable": true,
+        "resumable": true,
+        "checkpointEveryStep": true,
+        "maxSteps": 180,
+        "maxDurationMs": 1800000,
+        "localRecoveryFirst": true
+      }
+    },
+    "sourceText": "收到客户咨询后读取客户资料并整理问题要点，生成回复方案，发送前由负责人确认，最后输出回复邮件",
+    "answers": {}
+  },
+  "output": {
+    "id": "WF-f5ae3e7d-3956-4a1d-aca4-a48ea805efe9",
+    "versionId": null,
+    "startNodeId": "start",
+    "rootAgent": {
+      "id": "agt_9bb9769b",
+      "name": "客服助手",
+      "role": "客户服务助手"
+    },
+    "nodes": {
+      "start": {
+        "id": "start",
+        "title": "收到客户咨询",
+        "type": "trigger",
+        "agent": {
+          "id": "agt_9bb9769b",
+          "name": "客服助手",
+          "role": "客户服务助手"
+        },
+        "next": "step_1",
+        "description": "收到任务后开始",
+        "requirementIds": [
+          "REQ_e2e3b9458f"
+        ],
+        "ui": {
+          "visibility": "business"
+        },
+        "businessSpec": {
+          "schema": "business-node-spec/v5.7",
+          "objective": "收到任务后开始",
+          "inputs": [],
+          "rules": [],
+          "outputs": [],
+          "doneWhen": [
+            "已收到真实触发事件或必需输入，并记录触发来源"
+          ],
+          "evidence": [],
+          "assumptions": [],
+          "grounding": {
+            "status": "structural",
+            "score": 1,
+            "requirementIds": [],
+            "sourceSnippets": [],
+            "derivedFrom": "runtime-structure"
+          },
+          "executability": {
+            "status": "executable",
+            "sources": [],
+            "missingSources": [],
+            "checkedAt": "design-time"
+          }
+        }
+      },
+      "step_1": {
+        "id": "step_1",
+        "title": "读取客户资料",
+        "type": "knowledge",
+        "agent": {
+          "id": "agt_9bb9769b",
+          "name": "客服助手",
+          "role": "客户服务助手"
+        },
+        "next": "step_2",
+        "description": "读取客户资料",
+        "sourceLabel": "来自你的描述",
+        "knowledge": {
+          "space": "业务知识库",
+          "query": "读取客户资料"
+        },
+        "requirementIds": [
+          "REQ_a7f4b4bb39",
+          "BR-001-42c6af"
+        ],
+        "businessSpec": {
+          "schema": "business-node-spec/v5.7",
+          "objective": "收到客户咨询后读取客户资料并整理问题要点",
+          "inputs": [],
+          "rules": [],
+          "outputs": [
+            "检索到的事实与来源"
+          ],
+          "doneWhen": [
+            "返回与本步骤目标直接相关的事实，并保留资料来源"
+          ],
+          "evidence": [
+            "收到客户咨询后读取客户资料并整理问题要点"
+          ],
+          "executionEvidence": [],
+          "assumptions": [],
+          "grounding": {
+            "status": "grounded",
+            "score": 1,
+            "requirementIds": [
+              "BR-001-42c6af"
+            ],
+            "sourceSnippets": [
+              "收到客户咨询后读取客户资料并整理问题要点"
+            ],
+            "executionSnippets": [],
+            "derivedFrom": "business-requirements"
+          },
+          "executability": {
+            "status": "blocked",
+            "sources": [],
+            "missingSources": [
+              {
+                "kind": "knowledge_source",
+                "nodeId": "step_1",
+                "title": "读取客户资料",
+                "question": "“读取客户资料”应该从哪个知识库、文档集或资料源读取？",
+                "detail": "当前知识步骤没有选择真实知识源。"
+              }
+            ],
+            "checkedAt": "design-time"
+          }
+        },
+        "ui": {
+          "visibility": "business"
+        }
+      },
+      "step_2": {
+        "id": "step_2",
+        "title": "整理问题要点",
+        "type": "ai",
+        "agent": {
+          "id": "agt_9bb9769b",
+          "name": "客服助手",
+          "role": "客户服务助手"
+        },
+        "next": "step_3",
+        "description": "整理问题要点",
+        "sourceLabel": "来自你的描述",
+        "modelClass": "balanced",
+        "purpose": "execute",
+        "requirementIds": [
+          "REQ_e9e22b922c",
+          "BR-001-42c6af"
+        ],
+        "businessSpec": {
+          "schema": "business-node-spec/v5.7",
+          "objective": "收到客户咨询后读取客户资料并整理问题要点",
+          "inputs": [
+            {
+              "path": "context.outputs.step_1",
+              "label": "上一步“读取客户资料”产出的检索到的事实与来源",
+              "source": "upstream-business-output"
+            }
+          ],
+          "rules": [],
+          "outputs": [
+            "问题要点"
+          ],
+          "doneWhen": [
+            "已生成非空的“问题要点”，且可被下游或最终验收读取"
+          ],
+          "evidence": [
+            "收到客户咨询后读取客户资料并整理问题要点"
+          ],
+          "executionEvidence": [],
+          "assumptions": [],
+          "grounding": {
+            "status": "grounded",
+            "score": 1,
+            "requirementIds": [
+              "BR-001-42c6af"
+            ],
+            "sourceSnippets": [
+              "收到客户咨询后读取客户资料并整理问题要点"
+            ],
+            "executionSnippets": [],
+            "derivedFrom": "business-requirements"
+          },
+          "executability": {
+            "status": "executable",
+            "sources": [
+              {
+                "kind": "upstream-output",
+                "id": "context.outputs.step_1",
+                "label": "上一步“读取客户资料”产出的检索到的事实与来源",
+                "verified": true
+              }
+            ],
+            "missingSources": [],
+            "checkedAt": "design-time"
+          }
+        },
+        "ui": {
+          "visibility": "business"
+        }
+      },
+      "step_3": {
+        "id": "step_3",
+        "title": "生成回复方案",
+        "type": "ai",
+        "agent": {
+          "id": "agt_9bb9769b",
+          "name": "客服助手",
+          "role": "客户服务助手"
+        },
+        "next": "step_4",
+        "description": "生成回复方案",
+        "sourceLabel": "来自你的描述",
+        "modelClass": "balanced",
+        "purpose": "execute",
+        "requirementIds": [
+          "REQ_eef299d9c4",
+          "BR-002-4b59b8"
+        ],
+        "businessSpec": {
+          "schema": "business-node-spec/v5.7",
+          "objective": "生成回复方案",
+          "inputs": [
+            {
+              "path": "context.outputs.step_2",
+              "label": "上一步“整理问题要点”产出的问题要点",
+              "source": "upstream-business-output"
+            }
+          ],
+          "rules": [],
+          "outputs": [
+            "回复方案"
+          ],
+          "doneWhen": [
+            "已生成非空的“回复方案”，且可被下游或最终验收读取"
+          ],
+          "evidence": [
+            "生成回复方案"
+          ],
+          "executionEvidence": [],
+          "assumptions": [],
+          "grounding": {
+            "status": "grounded",
+            "score": 1,
+            "requirementIds": [
+              "BR-002-4b59b8"
+            ],
+            "sourceSnippets": [
+              "生成回复方案"
+            ],
+            "executionSnippets": [],
+            "derivedFrom": "business-requirements"
+          },
+          "executability": {
+            "status": "executable",
+            "sources": [
+              {
+                "kind": "upstream-output",
+                "id": "context.outputs.step_2",
+                "label": "上一步“整理问题要点”产出的问题要点",
+                "verified": true
+              }
+            ],
+            "missingSources": [],
+            "checkedAt": "design-time"
+          }
+        },
+        "ui": {
+          "visibility": "business"
+        }
+      },
+      "step_4": {
+        "id": "step_4",
+        "title": "负责人确认发送内容",
+        "type": "human",
+        "agent": {
+          "id": "agt_9bb9769b",
+          "name": "客服助手",
+          "role": "客户服务助手"
+        },
+        "next": "step_5",
+        "description": "发送前由负责人确认",
+        "sourceLabel": "来自你的描述",
+        "approval": {
+          "role": "负责人",
+          "reason": "确认「负责人确认发送内容」后流程才会继续"
+        },
+        "rejectNext": "not_approved",
+        "requirementIds": [
+          "REQ_f1538b7830",
+          "BR-003-5bb9fe"
+        ],
+        "businessSpec": {
+          "schema": "business-node-spec/v5.7",
+          "objective": "发送前由负责人确认",
+          "inputs": [
+            {
+              "path": "context.outputs.step_3",
+              "label": "上一步“生成回复方案”产出的回复方案",
+              "source": "upstream-business-output"
+            }
+          ],
+          "rules": [
+            "确认「负责人确认发送内容」后流程才会继续"
+          ],
+          "outputs": [
+            "人工决定"
+          ],
+          "doneWhen": [
+            "已记录指定负责人的明确决定、备注与时间"
+          ],
+          "evidence": [
+            "发送前由负责人确认"
+          ],
+          "executionEvidence": [],
+          "assumptions": [],
+          "grounding": {
+            "status": "grounded",
+            "score": 1,
+            "requirementIds": [
+              "BR-003-5bb9fe"
+            ],
+            "sourceSnippets": [
+              "发送前由负责人确认"
+            ],
+            "executionSnippets": [],
+            "derivedFrom": "business-requirements"
+          },
+          "executability": {
+            "status": "executable",
+            "sources": [
+              {
+                "kind": "upstream-output",
+                "id": "context.outputs.step_3",
+                "label": "上一步“生成回复方案”产出的回复方案",
+                "verified": true
+              }
+            ],
+            "missingSources": [],
+            "checkedAt": "design-time"
+          }
+        },
+        "ui": {
+          "visibility": "business"
+        }
+      },
+      "step_5": {
+        "id": "step_5",
+        "title": "输出回复邮件",
+        "type": "ai",
+        "agent": {
+          "id": "agt_9bb9769b",
+          "name": "客服助手",
+          "role": "客户服务助手"
+        },
+        "next": "quality_review",
+        "description": "输出回复邮件",
+        "sourceLabel": "来自你的描述",
+        "modelClass": "balanced",
+        "purpose": "execute",
+        "requirementIds": [
+          "REQ_5bc45c5443",
+          "BR-004-0f37de"
+        ],
+        "businessSpec": {
+          "schema": "business-node-spec/v5.7",
+          "objective": "最后输出回复邮件",
+          "inputs": [
+            {
+              "path": "context.outputs.step_4",
+              "label": "上一步“负责人确认发送内容”产出的人工决定",
+              "source": "upstream-business-output"
+            }
+          ],
+          "rules": [],
+          "outputs": [
+            "回复邮件"
+          ],
+          "doneWhen": [
+            "已生成非空的“回复邮件”，且可被下游或最终验收读取"
+          ],
+          "evidence": [
+            "最后输出回复邮件"
+          ],
+          "executionEvidence": [],
+          "assumptions": [],
+          "grounding": {
+            "status": "grounded",
+            "score": 1,
+            "requirementIds": [
+              "BR-004-0f37de"
+            ],
+            "sourceSnippets": [
+              "最后输出回复邮件"
+            ],
+            "executionSnippets": [],
+            "derivedFrom": "business-requirements"
+          },
+          "executability": {
+            "status": "executable",
+            "sources": [
+              {
+                "kind": "upstream-output",
+                "id": "context.outputs.step_4",
+                "label": "上一步“负责人确认发送内容”产出的人工决定",
+                "verified": true
+              }
+            ],
+            "missingSources": [],
+            "checkedAt": "design-time"
+          }
+        },
+        "ui": {
+          "visibility": "business"
+        }
+      },
+      "not_approved": {
+        "id": "not_approved",
+        "title": "未获确认，保留草稿并结束",
+        "type": "system",
+        "agent": {
+          "id": "agt_9bb9769b",
+          "name": "客服助手",
+          "role": "客户服务助手"
+        },
+        "next": "quality_review",
+        "description": "不会执行后续对外发送、付款或写回动作",
+        "controlPlane": {
+          "kind": "safety",
+          "hiddenByDefault": true,
+          "reason": "平台安全/恢复/交付控制节点"
+        },
+        "ui": {
+          "visibility": "control"
+        }
+      },
+      "quality_review": {
+        "id": "quality_review",
+        "title": "交付前检查结果",
+        "type": "rule",
+        "agent": {
+          "id": "agt_9bb9769b",
+          "name": "客服助手",
+          "role": "客户服务助手"
+        },
+        "next": "done",
+        "quality": {
+          "requiredOutputTitles": [
+            "读取客户资料",
+            "整理问题要点",
+            "生成回复方案",
+            "输出回复邮件"
+          ],
+          "minOutputCount": 1,
+          "checkToolReceipts": false,
+          "checkHumanBoundary": true
+        },
+        "description": "完成前自动核对是否形成结果、业务系统是否有回执，以及重要操作是否经过员工确认",
+        "controlPlane": {
+          "kind": "quality",
+          "hiddenByDefault": true,
+          "reason": "Harness/Release Gate 自动执行，不属于业务步骤"
+        },
+        "ui": {
+          "visibility": "control"
+        }
+      },
+      "done": {
+        "id": "done",
+        "title": "本次任务已完成",
+        "type": "end",
+        "agent": {
+          "id": "agt_9bb9769b",
+          "name": "客服助手",
+          "role": "客户服务助手"
+        },
+        "next": null,
+        "description": "结果、执行记录与人工决定均已保存",
+        "requirementIds": [
+          "REQ_eef299d9c4",
+          "REQ_5bc45c5443"
+        ],
+        "ui": {
+          "visibility": "business"
+        },
+        "businessSpec": {
+          "schema": "business-node-spec/v5.7",
+          "objective": "结果、执行记录与人工决定均已保存",
+          "inputs": [],
+          "rules": [],
+          "outputs": [],
+          "doneWhen": [
+            "所有必需业务输出均已通过验收并形成最终结果"
+          ],
+          "evidence": [],
+          "assumptions": [],
+          "grounding": {
+            "status": "structural",
+            "score": 1,
+            "requirementIds": [],
+            "sourceSnippets": [],
+            "derivedFrom": "runtime-structure"
+          },
+          "executability": {
+            "status": "executable",
+            "sources": [],
+            "missingSources": [],
+            "checkedAt": "design-time"
+          }
+        }
+      }
+    },
+    "variables": [],
+    "memoryPolicy": {
+      "taskContext": true,
+      "longTerm": false,
+      "description": "仅保留本次任务所需信息"
+    },
+    "intentSource": {
+      "mode": "semantic-graph-v3.6",
+      "schema": "intent-contract/v3.6",
+      "clauses": [
+        "收到客户咨询后读取客户资料并整理问题要点",
+        "生成回复方案",
+        "发送前由负责人确认",
+        "最后输出回复邮件"
+      ],
+      "conditionCount": 0,
+      "parallelCount": 0,
+      "waitCount": 0,
+      "recoveryRouteCount": 0,
+      "collectionLoop": false,
+      "dynamicToolBinding": false,
+      "qualityGate": true,
+      "harnessPlanningRequired": true,
+      "requirementCoverage": {
+        "schema": "agent-requirement-coverage/v3.6",
+        "covered": [
+          {
+            "id": "REQ_e2e3b9458f",
+            "kind": "trigger",
+            "label": "什么时候开始",
+            "text": "收到客户咨询",
+            "required": true,
+            "source": "intent-trigger",
+            "sources": [
+              "intent-trigger",
+              "user"
+            ],
+            "stepRef": null,
+            "covered": true,
+            "nodeIds": [
+              "start"
+            ],
+            "matchedSteps": [
+              {
+                "id": "start",
+                "title": "收到客户咨询",
+                "type": "trigger",
+                "confidence": 1
+              }
+            ]
+          },
+          {
+            "id": "REQ_a7f4b4bb39",
+            "kind": "action",
+            "label": "需要完成的工作",
+            "text": "读取客户资料",
+            "required": true,
+            "source": "intent-step",
+            "sources": [
+              "intent-step"
+            ],
+            "stepRef": "intent_1",
+            "covered": true,
+            "nodeIds": [
+              "step_1"
+            ],
+            "matchedSteps": [
+              {
+                "id": "step_1",
+                "title": "读取客户资料",
+                "type": "knowledge",
+                "confidence": 1
+              }
+            ]
+          },
+          {
+            "id": "REQ_e9e22b922c",
+            "kind": "action",
+            "label": "需要完成的工作",
+            "text": "整理问题要点",
+            "required": true,
+            "source": "intent-step",
+            "sources": [
+              "intent-step"
+            ],
+            "stepRef": "intent_2",
+            "covered": true,
+            "nodeIds": [
+              "step_2"
+            ],
+            "matchedSteps": [
+              {
+                "id": "step_2",
+                "title": "整理问题要点",
+                "type": "ai",
+                "confidence": 1
+              }
+            ]
+          },
+          {
+            "id": "REQ_eef299d9c4",
+            "kind": "output",
+            "label": "最终交付什么",
+            "text": "生成回复方案",
+            "required": true,
+            "source": "intent-step",
+            "sources": [
+              "intent-step",
+              "user"
+            ],
+            "stepRef": "intent_3",
+            "covered": true,
+            "nodeIds": [
+              "step_3",
+              "done"
+            ],
+            "matchedSteps": [
+              {
+                "id": "step_3",
+                "title": "生成回复方案",
+                "type": "ai",
+                "confidence": 1
+              },
+              {
+                "id": "done",
+                "title": "本次任务已完成",
+                "type": "end",
+                "confidence": 0.55
+              }
+            ]
+          },
+          {
+            "id": "REQ_f1538b7830",
+            "kind": "human",
+            "label": "哪些决定交给员工",
+            "text": "发送前由负责人确认",
+            "required": true,
+            "source": "intent-step",
+            "sources": [
+              "intent-step",
+              "user"
+            ],
+            "stepRef": "intent_4",
+            "covered": true,
+            "nodeIds": [
+              "step_4"
+            ],
+            "matchedSteps": [
+              {
+                "id": "step_4",
+                "title": "负责人确认发送内容",
+                "type": "human",
+                "confidence": 1
+              }
+            ]
+          },
+          {
+            "id": "REQ_5bc45c5443",
+            "kind": "output",
+            "label": "最终交付什么",
+            "text": "输出回复邮件",
+            "required": true,
+            "source": "intent-step",
+            "sources": [
+              "intent-step",
+              "user"
+            ],
+            "stepRef": "intent_5",
+            "covered": true,
+            "nodeIds": [
+              "step_5",
+              "done"
+            ],
+            "matchedSteps": [
+              {
+                "id": "step_5",
+                "title": "输出回复邮件",
+                "type": "ai",
+                "confidence": 1
+              },
+              {
+                "id": "done",
+                "title": "本次任务已完成",
+                "type": "end",
+                "confidence": 0.55
+              }
+            ]
+          }
+        ],
+        "uncovered": [],
+        "requiredCount": 6,
+        "coveredRequiredCount": 6,
+        "percent": 100,
+        "complete": true
+      },
+      "complexityProfile": {
+        "schema": "agent-complexity-profile/v3.6",
+        "level": "simple",
+        "label": "简单任务",
+        "score": 100,
+        "capabilities": [
+          {
+            "id": "branches",
+            "label": "按不同情况走不同路径",
+            "needed": false,
+            "implemented": false
+          },
+          {
+            "id": "parallel",
+            "label": "多项工作可以同时进行",
+            "needed": false,
+            "implemented": false
+          },
+          {
+            "id": "loop",
+            "label": "能逐项处理一批内容",
+            "needed": false,
+            "implemented": false
+          },
+          {
+            "id": "wait",
+            "label": "能等待时间或外部消息后继续",
+            "needed": false,
+            "implemented": false
+          },
+          {
+            "id": "subflow",
+            "label": "复杂工作可拆成独立子任务",
+            "needed": false,
+            "implemented": false
+          },
+          {
+            "id": "human",
+            "label": "关键决定会交给员工",
+            "needed": true,
+            "implemented": true
+          },
+          {
+            "id": "tools",
+            "label": "能调用已连接的真实业务系统",
+            "needed": false,
+            "implemented": false
+          },
+          {
+            "id": "memory",
+            "label": "能按要求参考和保存经验",
+            "needed": false,
+            "implemented": false
+          },
+          {
+            "id": "recovery",
+            "label": "局部失败可重试或走备用路径",
+            "needed": false,
+            "implemented": false
+          }
+        ],
+        "missing": [],
+        "summary": "已覆盖 1 类任务结构，运行时会按画布执行。"
+      },
+      "compilerVersion": "3.6"
+    },
+    "requirementContract": {
+      "schema": "agent-requirements/v3.6",
+      "sourceText": "收到客户咨询后读取客户资料并整理问题要点，生成回复方案，发送前由负责人确认，最后输出回复邮件",
+      "requirements": [
+        {
+          "id": "REQ_e2e3b9458f",
+          "kind": "trigger",
+          "label": "什么时候开始",
+          "text": "收到客户咨询",
+          "required": true,
+          "source": "intent-trigger",
+          "sources": [
+            "intent-trigger",
+            "user"
+          ],
+          "stepRef": null
+        },
+        {
+          "id": "REQ_a7f4b4bb39",
+          "kind": "action",
+          "label": "需要完成的工作",
+          "text": "读取客户资料",
+          "required": true,
+          "source": "intent-step",
+          "sources": [
+            "intent-step"
+          ],
+          "stepRef": "intent_1"
+        },
+        {
+          "id": "REQ_e9e22b922c",
+          "kind": "action",
+          "label": "需要完成的工作",
+          "text": "整理问题要点",
+          "required": true,
+          "source": "intent-step",
+          "sources": [
+            "intent-step"
+          ],
+          "stepRef": "intent_2"
+        },
+        {
+          "id": "REQ_eef299d9c4",
+          "kind": "output",
+          "label": "最终交付什么",
+          "text": "生成回复方案",
+          "required": true,
+          "source": "intent-step",
+          "sources": [
+            "intent-step",
+            "user"
+          ],
+          "stepRef": "intent_3"
+        },
+        {
+          "id": "REQ_f1538b7830",
+          "kind": "human",
+          "label": "哪些决定交给员工",
+          "text": "发送前由负责人确认",
+          "required": true,
+          "source": "intent-step",
+          "sources": [
+            "intent-step",
+            "user"
+          ],
+          "stepRef": "intent_4"
+        },
+        {
+          "id": "REQ_5bc45c5443",
+          "kind": "output",
+          "label": "最终交付什么",
+          "text": "输出回复邮件",
+          "required": true,
+          "source": "intent-step",
+          "sources": [
+            "intent-step",
+            "user"
+          ],
+          "stepRef": "intent_5"
+        }
+      ],
+      "createdAt": "2026-09-21T05:57:46.636Z",
+      "coverage": {
+        "schema": "agent-requirement-coverage/v3.6",
+        "covered": [
+          {
+            "id": "REQ_e2e3b9458f",
+            "kind": "trigger",
+            "label": "什么时候开始",
+            "text": "收到客户咨询",
+            "required": true,
+            "source": "intent-trigger",
+            "sources": [
+              "intent-trigger",
+              "user"
+            ],
+            "stepRef": null,
+            "covered": true,
+            "nodeIds": [
+              "start"
+            ],
+            "matchedSteps": [
+              {
+                "id": "start",
+                "title": "收到客户咨询",
+                "type": "trigger",
+                "confidence": 1
+              }
+            ]
+          },
+          {
+            "id": "REQ_a7f4b4bb39",
+            "kind": "action",
+            "label": "需要完成的工作",
+            "text": "读取客户资料",
+            "required": true,
+            "source": "intent-step",
+            "sources": [
+              "intent-step"
+            ],
+            "stepRef": "intent_1",
+            "covered": true,
+            "nodeIds": [
+              "step_1"
+            ],
+            "matchedSteps": [
+              {
+                "id": "step_1",
+                "title": "读取客户资料",
+                "type": "knowledge",
+                "confidence": 1
+              }
+            ]
+          },
+          {
+            "id": "REQ_e9e22b922c",
+            "kind": "action",
+            "label": "需要完成的工作",
+            "text": "整理问题要点",
+            "required": true,
+            "source": "intent-step",
+            "sources": [
+              "intent-step"
+            ],
+            "stepRef": "intent_2",
+            "covered": true,
+            "nodeIds": [
+              "step_2"
+            ],
+            "matchedSteps": [
+              {
+                "id": "step_2",
+                "title": "整理问题要点",
+                "type": "ai",
+                "confidence": 1
+              }
+            ]
+          },
+          {
+            "id": "REQ_eef299d9c4",
+            "kind": "output",
+            "label": "最终交付什么",
+            "text": "生成回复方案",
+            "required": true,
+            "source": "intent-step",
+            "sources": [
+              "intent-step",
+              "user"
+            ],
+            "stepRef": "intent_3",
+            "covered": true,
+            "nodeIds": [
+              "step_3",
+              "done"
+            ],
+            "matchedSteps": [
+              {
+                "id": "step_3",
+                "title": "生成回复方案",
+                "type": "ai",
+                "confidence": 1
+              },
+              {
+                "id": "done",
+                "title": "本次任务已完成",
+                "type": "end",
+                "confidence": 0.55
+              }
+            ]
+          },
+          {
+            "id": "REQ_f1538b7830",
+            "kind": "human",
+            "label": "哪些决定交给员工",
+            "text": "发送前由负责人确认",
+            "required": true,
+            "source": "intent-step",
+            "sources": [
+              "intent-step",
+              "user"
+            ],
+            "stepRef": "intent_4",
+            "covered": true,
+            "nodeIds": [
+              "step_4"
+            ],
+            "matchedSteps": [
+              {
+                "id": "step_4",
+                "title": "负责人确认发送内容",
+                "type": "human",
+                "confidence": 1
+              }
+            ]
+          },
+          {
+            "id": "REQ_5bc45c5443",
+            "kind": "output",
+            "label": "最终交付什么",
+            "text": "输出回复邮件",
+            "required": true,
+            "source": "intent-step",
+            "sources": [
+              "intent-step",
+              "user"
+            ],
+            "stepRef": "intent_5",
+            "covered": true,
+            "nodeIds": [
+              "step_5",
+              "done"
+            ],
+            "matchedSteps": [
+              {
+                "id": "step_5",
+                "title": "输出回复邮件",
+                "type": "ai",
+                "confidence": 1
+              },
+              {
+                "id": "done",
+                "title": "本次任务已完成",
+                "type": "end",
+                "confidence": 0.55
+              }
+            ]
+          }
+        ],
+        "uncovered": [],
+        "requiredCount": 6,
+        "coveredRequiredCount": 6,
+        "percent": 100,
+        "complete": true
+      }
+    },
+    "complexityProfile": {
+      "schema": "agent-complexity-profile/v3.6",
+      "level": "simple",
+      "label": "简单任务",
+      "score": 100,
+      "capabilities": [
+        {
+          "id": "branches",
+          "label": "按不同情况走不同路径",
+          "needed": false,
+          "implemented": false
+        },
+        {
+          "id": "parallel",
+          "label": "多项工作可以同时进行",
+          "needed": false,
+          "implemented": false
+        },
+        {
+          "id": "loop",
+          "label": "能逐项处理一批内容",
+          "needed": false,
+          "implemented": false
+        },
+        {
+          "id": "wait",
+          "label": "能等待时间或外部消息后继续",
+          "needed": false,
+          "implemented": false
+        },
+        {
+          "id": "subflow",
+          "label": "复杂工作可拆成独立子任务",
+          "needed": false,
+          "implemented": false
+        },
+        {
+          "id": "human",
+          "label": "关键决定会交给员工",
+          "needed": true,
+          "implemented": true
+        },
+        {
+          "id": "tools",
+          "label": "能调用已连接的真实业务系统",
+          "needed": false,
+          "implemented": false
+        },
+        {
+          "id": "memory",
+          "label": "能按要求参考和保存经验",
+          "needed": false,
+          "implemented": false
+        },
+        {
+          "id": "recovery",
+          "label": "局部失败可重试或走备用路径",
+          "needed": false,
+          "implemented": false
+        }
+      ],
+      "missing": [],
+      "summary": "已覆盖 1 类任务结构，运行时会按画布执行。"
+    },
+    "runtimePolicy": {
+      "schema": "agent-runtime-policy/v3.6",
+      "durable": true,
+      "resumable": true,
+      "checkpointEveryStep": true,
+      "maxSteps": 180,
+      "maxDurationMs": 1800000,
+      "localRecoveryFirst": true
+    },
+    "businessExecutability": {
+      "schema": "business-executability/v5.7",
+      "status": "blocked",
+      "businessNodeCount": 5,
+      "executableNodeCount": 4,
+      "blockerCount": 1,
+      "coveragePercent": 80,
+      "blockers": [
+        {
+          "kind": "knowledge_source",
+          "nodeId": "step_1",
+          "title": "读取客户资料",
+          "question": "“读取客户资料”应该从哪个知识库、文档集或资料源读取？",
+          "detail": "当前知识步骤没有选择真实知识源。"
+        }
+      ],
+      "policy": "业务节点不仅要有需求证据，还必须有可追溯的数据/能力来源；读取、查询、条件判断不得依靠未声明的数据源。"
+    },
+    "businessRequirements": {
+      "schema": "business-requirements/v5.7",
+      "sourceText": "收到客户咨询后读取客户资料并整理问题要点，生成回复方案，发送前由负责人确认，最后输出回复邮件",
+      "items": [
+        {
+          "id": "BR-001-42c6af",
+          "type": "action",
+          "text": "收到客户咨询后读取客户资料并整理问题要点",
+          "source": "user",
+          "explicit": true,
+          "confidence": 1
+        },
+        {
+          "id": "BR-002-4b59b8",
+          "type": "action",
+          "text": "生成回复方案",
+          "source": "user",
+          "explicit": true,
+          "confidence": 1
+        },
+        {
+          "id": "BR-003-5bb9fe",
+          "type": "action",
+          "text": "发送前由负责人确认",
+          "source": "user",
+          "explicit": true,
+          "confidence": 1
+        },
+        {
+          "id": "BR-004-0f37de",
+          "type": "output",
+          "text": "最后输出回复邮件",
+          "source": "user",
+          "explicit": true,
+          "confidence": 1
+        }
+      ]
+    },
+    "businessPolicies": {
+      "schema": "business-policy/v5.7",
+      "forbiddenActions": [],
+      "constraints": []
+    },
+    "businessGrounding": {
+      "schema": "business-grounding/v5.7",
+      "businessNodeCount": 5,
+      "controlNodeCount": 2,
+      "removedTemplateNodes": [],
+      "collapsedDuplicateNodes": 0,
+      "groundedNodeCount": 5,
+      "weakNodeIds": [],
+      "explicitRequirementCount": 4,
+      "coveredExplicitRequirementCount": 4,
+      "uncoveredExplicitRequirements": [],
+      "coveragePercent": 100,
+      "constraintCount": 0,
+      "executability": {
+        "status": "blocked",
+        "coveragePercent": 80,
+        "blockerCount": 1
+      },
+      "policy": "业务节点必须有需求证据；禁止/约束要求进入 Harness/Policy 而不是业务动作；平台控制节点默认隐藏；不为“显得完整”添加无来源业务步骤；读取/查询/判断节点必须能追溯到真实数据源"
+    }
+  }
+}

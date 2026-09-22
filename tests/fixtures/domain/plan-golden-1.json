@@ -1,0 +1,628 @@
+{
+  "input": {
+    "intent": {
+      "trigger": {
+        "value": "收到客户投诉"
+      },
+      "outputs": [
+        "处理结果清单"
+      ],
+      "orderedSteps": [
+        {
+          "id": "fetch",
+          "title": "读取投诉记录",
+          "type": "tool",
+          "tool": {
+            "registryToolId": null,
+            "action": "read_records"
+          }
+        },
+        {
+          "id": "analyze",
+          "title": "分析投诉原因",
+          "type": "ai"
+        },
+        {
+          "id": "decide",
+          "title": "判断严重程度",
+          "type": "condition",
+          "condition": {
+            "source": "input.severity",
+            "operator": "eq"
+          },
+          "branches": [
+            {
+              "label": "严重",
+              "value": "high",
+              "nextStepId": "confirm"
+            }
+          ]
+        },
+        {
+          "id": "confirm",
+          "title": "由负责人确认处理方案",
+          "type": "human"
+        },
+        {
+          "id": "reply",
+          "title": "发送回复",
+          "type": "tool",
+          "tool": {
+            "action": "send_content"
+          }
+        }
+      ]
+    }
+  },
+  "output": {
+    "workflow": {
+      "id": "WF-8e1e349a-86e5-4afb-bff6-d27b2a76ef0d",
+      "versionId": null,
+      "startNodeId": "start",
+      "rootAgent": {
+        "id": "agt_cdf69194",
+        "name": "业务 Agent",
+        "role": "通用业务助手"
+      },
+      "nodes": {
+        "start": {
+          "id": "start",
+          "title": "收到客户投诉",
+          "type": "trigger",
+          "agent": {
+            "id": "agt_cdf69194",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": "approval_fetch",
+          "description": "收到本次业务输入后开始"
+        },
+        "fetch": {
+          "id": "fetch",
+          "title": "读取投诉记录",
+          "type": "tool",
+          "agent": {
+            "id": "agt_cdf69194",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": "analyze",
+          "description": "读取投诉记录",
+          "sourceLabel": "AI 结构化理解",
+          "intentEvidence": {
+            "text": "读取投诉记录",
+            "source": "model",
+            "stepRef": "fetch"
+          },
+          "businessSpec": null,
+          "requirementIds": [],
+          "dependsOn": [],
+          "retry": {
+            "maxAttempts": 1,
+            "backoffMs": 250
+          },
+          "tool": {
+            "connector": "unbound",
+            "action": "read_records",
+            "intentAction": "read_records",
+            "scope": "unbound.tool",
+            "risk": "high",
+            "maxRetries": 2,
+            "checkpointOnFailure": true,
+            "registryToolId": null,
+            "protocol": "unbound",
+            "inputSchema": {
+              "type": "object"
+            },
+            "outputSchema": {
+              "type": "object"
+            },
+            "argumentsMode": "auto",
+            "operationKind": "read",
+            "unresolved": true,
+            "businessApprovalAccepted": true
+          },
+          "onErrorNext": null
+        },
+        "analyze": {
+          "id": "analyze",
+          "title": "分析投诉原因",
+          "type": "ai",
+          "agent": {
+            "id": "agt_cdf69194",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": "decide",
+          "description": "分析投诉原因",
+          "sourceLabel": "AI 结构化理解",
+          "intentEvidence": {
+            "text": "分析投诉原因",
+            "source": "model",
+            "stepRef": "analyze"
+          },
+          "businessSpec": null,
+          "requirementIds": [],
+          "dependsOn": [],
+          "retry": {
+            "maxAttempts": 1,
+            "backoffMs": 250
+          },
+          "modelClass": "reasoning",
+          "purpose": "execute",
+          "onErrorNext": null
+        },
+        "decide": {
+          "id": "decide",
+          "title": "判断严重程度",
+          "type": "condition",
+          "agent": {
+            "id": "agt_cdf69194",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": null,
+          "description": "判断严重程度",
+          "sourceLabel": "AI 结构化理解",
+          "intentEvidence": {
+            "text": "判断严重程度",
+            "source": "model",
+            "stepRef": "decide"
+          },
+          "businessSpec": null,
+          "requirementIds": [],
+          "dependsOn": [],
+          "retry": {
+            "maxAttempts": 1,
+            "backoffMs": 250
+          },
+          "condition": {
+            "source": "input.severity",
+            "operator": "eq",
+            "branches": [
+              {
+                "label": "严重",
+                "value": "high",
+                "next": "confirm"
+              }
+            ],
+            "defaultNext": "safe_stop"
+          },
+          "onErrorNext": null
+        },
+        "confirm": {
+          "id": "confirm",
+          "title": "由负责人确认处理方案",
+          "type": "human",
+          "agent": {
+            "id": "agt_cdf69194",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": "reply",
+          "description": "由负责人确认处理方案",
+          "sourceLabel": "AI 结构化理解",
+          "intentEvidence": {
+            "text": "由负责人确认处理方案",
+            "source": "model",
+            "stepRef": "confirm"
+          },
+          "businessSpec": null,
+          "requirementIds": [],
+          "dependsOn": [],
+          "retry": {
+            "maxAttempts": 1,
+            "backoffMs": 250
+          },
+          "approval": {
+            "role": "业务负责人",
+            "reason": "确认“由负责人确认处理方案”后流程才会继续"
+          },
+          "rejectNext": "not_approved",
+          "onErrorNext": null
+        },
+        "reply": {
+          "id": "reply",
+          "title": "发送回复",
+          "type": "tool",
+          "agent": {
+            "id": "agt_cdf69194",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": "quality_review",
+          "description": "发送回复",
+          "sourceLabel": "AI 结构化理解",
+          "intentEvidence": {
+            "text": "发送回复",
+            "source": "model",
+            "stepRef": "reply"
+          },
+          "businessSpec": null,
+          "requirementIds": [],
+          "dependsOn": [],
+          "retry": {
+            "maxAttempts": 1,
+            "backoffMs": 250
+          },
+          "tool": {
+            "connector": "unbound",
+            "action": "send_content",
+            "intentAction": "send_content",
+            "scope": "unbound.tool",
+            "risk": "high",
+            "maxRetries": 3,
+            "checkpointOnFailure": true,
+            "registryToolId": null,
+            "protocol": "unbound",
+            "inputSchema": {
+              "type": "object"
+            },
+            "outputSchema": {
+              "type": "object"
+            },
+            "argumentsMode": "auto",
+            "operationKind": "action",
+            "unresolved": true,
+            "businessApprovalAccepted": true
+          },
+          "onErrorNext": null
+        },
+        "not_approved": {
+          "id": "not_approved",
+          "title": "未获确认，保留当前结果并停止高影响动作",
+          "type": "system",
+          "agent": {
+            "id": "agt_cdf69194",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": "quality_review",
+          "description": "拒绝后不执行后续外发、付款、删除或写回操作",
+          "controlPlane": {
+            "kind": "safety",
+            "hiddenByDefault": true
+          }
+        },
+        "safe_stop": {
+          "id": "safe_stop",
+          "title": "条件不满足，本次流程安全结束",
+          "type": "system",
+          "agent": {
+            "id": "agt_cdf69194",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": "quality_review",
+          "description": "没有匹配到明确业务路径时，不猜测、不执行高影响动作",
+          "controlPlane": {
+            "kind": "safety",
+            "hiddenByDefault": true
+          }
+        },
+        "quality_review": {
+          "id": "quality_review",
+          "title": "交付前核对结果与系统回执",
+          "type": "rule",
+          "agent": {
+            "id": "agt_cdf69194",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": "done",
+          "controlPlane": {
+            "kind": "quality",
+            "hiddenByDefault": true
+          },
+          "quality": {
+            "requiredOutputTitles": [
+              "处理结果清单"
+            ],
+            "minOutputCount": 1,
+            "checkToolReceipts": true,
+            "checkHumanBoundary": true
+          },
+          "description": "结束前确认已形成结果、外部系统返回回执，且应由员工决定的步骤已有记录"
+        },
+        "done": {
+          "id": "done",
+          "title": "处理结果清单",
+          "type": "end",
+          "agent": {
+            "id": "agt_cdf69194",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": null,
+          "description": "结果、执行轨迹和人工决定均已保存"
+        },
+        "approval_fetch": {
+          "id": "approval_fetch",
+          "title": "业务负责人确认：读取投诉记录",
+          "type": "human",
+          "agent": {
+            "id": "agt_cdf69194",
+            "name": "业务 Agent",
+            "role": "通用业务助手"
+          },
+          "next": "fetch",
+          "controlPlane": {
+            "kind": "governance",
+            "hiddenByDefault": true
+          },
+          "ui": {
+            "visibility": "control"
+          },
+          "approval": {
+            "role": "业务负责人",
+            "reason": "这一步会修改外部业务系统，需要员工确认"
+          },
+          "rejectNext": "not_approved"
+        }
+      },
+      "variables": [
+        {
+          "name": "severity",
+          "label": "判断严重程度",
+          "type": "string",
+          "scope": "run",
+          "required": true,
+          "description": "用于判断“判断严重程度”"
+        }
+      ],
+      "memoryPolicy": {
+        "taskContext": true,
+        "longTerm": false,
+        "description": "仅保留本次任务所需信息"
+      },
+      "runtimeRequirements": {
+        "externalTools": [],
+        "unresolvedTools": [
+          {
+            "stepId": "fetch",
+            "title": "读取投诉记录",
+            "requested": "未指明具体能力"
+          },
+          {
+            "stepId": "reply",
+            "title": "发送回复",
+            "requested": "未指明具体能力"
+          }
+        ],
+        "toolReceiptVerification": true
+      },
+      "intentSource": {
+        "mode": "model-structured-plan-v3.6",
+        "schema": "workflow-plan/v3.6",
+        "sourceText": "",
+        "orderedSteps": [
+          {
+            "id": "fetch",
+            "title": "读取投诉记录",
+            "type": "tool",
+            "evidence": "读取投诉记录",
+            "requirementIds": []
+          },
+          {
+            "id": "analyze",
+            "title": "分析投诉原因",
+            "type": "ai",
+            "evidence": "分析投诉原因",
+            "requirementIds": []
+          },
+          {
+            "id": "decide",
+            "title": "判断严重程度",
+            "type": "condition",
+            "evidence": "判断严重程度",
+            "requirementIds": []
+          },
+          {
+            "id": "confirm",
+            "title": "由负责人确认处理方案",
+            "type": "human",
+            "evidence": "由负责人确认处理方案",
+            "requirementIds": []
+          },
+          {
+            "id": "reply",
+            "title": "发送回复",
+            "type": "tool",
+            "evidence": "发送回复",
+            "requirementIds": []
+          }
+        ],
+        "diagnostics": {
+          "schema": "workflow-plan-diagnostics/v3.6",
+          "source": "connected-model-structured-plan",
+          "stepCount": 5,
+          "evidenceCount": 5,
+          "conditionCount": 1,
+          "branchCount": 2,
+          "parallelCount": 0,
+          "parallelBranchCount": 0,
+          "waitCount": 0,
+          "recoveryRouteCount": 0,
+          "toolBindings": [],
+          "unresolvedTools": [
+            {
+              "stepId": "fetch",
+              "title": "读取投诉记录",
+              "requested": "未指明具体能力"
+            },
+            {
+              "stepId": "reply",
+              "title": "发送回复",
+              "requested": "未指明具体能力"
+            }
+          ],
+          "coverage": {
+            "stepsWithEvidence": 5,
+            "totalSteps": 5,
+            "percent": 100
+          },
+          "warnings": [
+            "“读取投诉记录”尚未绑定真实工具",
+            "“发送回复”尚未绑定真实工具"
+          ]
+        }
+      }
+    },
+    "orderedSteps": [
+      {
+        "id": "fetch",
+        "title": "读取投诉记录",
+        "type": "tool",
+        "tool": {
+          "registryToolId": null,
+          "action": "read_records"
+        },
+        "order": 1,
+        "owner": "",
+        "evidence": "读取投诉记录",
+        "requirementIds": [],
+        "dependsOn": [],
+        "nextRef": null,
+        "rejectRef": null,
+        "errorRef": null,
+        "timeoutRef": null,
+        "condition": {
+          "source": null,
+          "operator": null,
+          "branches": [],
+          "defaultNext": null
+        }
+      },
+      {
+        "id": "analyze",
+        "title": "分析投诉原因",
+        "type": "ai",
+        "order": 2,
+        "owner": "",
+        "evidence": "分析投诉原因",
+        "requirementIds": [],
+        "dependsOn": [],
+        "nextRef": null,
+        "rejectRef": null,
+        "errorRef": null,
+        "timeoutRef": null,
+        "condition": {
+          "source": null,
+          "operator": null,
+          "branches": [],
+          "defaultNext": null
+        }
+      },
+      {
+        "id": "decide",
+        "title": "判断严重程度",
+        "type": "condition",
+        "condition": {
+          "source": "input.severity",
+          "operator": "eq",
+          "branches": [
+            {
+              "label": "严重",
+              "value": "high",
+              "nextStepId": "confirm"
+            }
+          ],
+          "defaultNext": null
+        },
+        "branches": [
+          {
+            "label": "严重",
+            "value": "high",
+            "nextStepId": "confirm"
+          }
+        ],
+        "order": 3,
+        "owner": "",
+        "evidence": "判断严重程度",
+        "requirementIds": [],
+        "dependsOn": [],
+        "nextRef": null,
+        "rejectRef": null,
+        "errorRef": null,
+        "timeoutRef": null
+      },
+      {
+        "id": "confirm",
+        "title": "由负责人确认处理方案",
+        "type": "human",
+        "order": 4,
+        "owner": "",
+        "evidence": "由负责人确认处理方案",
+        "requirementIds": [],
+        "dependsOn": [],
+        "nextRef": null,
+        "rejectRef": null,
+        "errorRef": null,
+        "timeoutRef": null,
+        "condition": {
+          "source": null,
+          "operator": null,
+          "branches": [],
+          "defaultNext": null
+        }
+      },
+      {
+        "id": "reply",
+        "title": "发送回复",
+        "type": "tool",
+        "tool": {
+          "action": "send_content"
+        },
+        "order": 5,
+        "owner": "",
+        "evidence": "发送回复",
+        "requirementIds": [],
+        "dependsOn": [],
+        "nextRef": null,
+        "rejectRef": null,
+        "errorRef": null,
+        "timeoutRef": null,
+        "condition": {
+          "source": null,
+          "operator": null,
+          "branches": [],
+          "defaultNext": null
+        }
+      }
+    ],
+    "diagnostics": {
+      "schema": "workflow-plan-diagnostics/v3.6",
+      "source": "connected-model-structured-plan",
+      "stepCount": 5,
+      "evidenceCount": 5,
+      "conditionCount": 1,
+      "branchCount": 2,
+      "parallelCount": 0,
+      "parallelBranchCount": 0,
+      "waitCount": 0,
+      "recoveryRouteCount": 0,
+      "toolBindings": [],
+      "unresolvedTools": [
+        {
+          "stepId": "fetch",
+          "title": "读取投诉记录",
+          "requested": "未指明具体能力"
+        },
+        {
+          "stepId": "reply",
+          "title": "发送回复",
+          "requested": "未指明具体能力"
+        }
+      ],
+      "coverage": {
+        "stepsWithEvidence": 5,
+        "totalSteps": 5,
+        "percent": 100
+      },
+      "warnings": [
+        "“读取投诉记录”尚未绑定真实工具",
+        "“发送回复”尚未绑定真实工具"
+      ]
+    }
+  }
+}

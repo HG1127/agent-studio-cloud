@@ -6,6 +6,19 @@ export async function GET(
 ) {
   const { runId } = await params;
   const run = getRun(runId);
-  const result = await run.returnValue;
-  return Response.json({ runId, status: "completed", result });
+  if (!(await run.exists)) {
+    return Response.json({ error: "未找到该运行" }, { status: 404 });
+  }
+  const status = await run.status;
+  if (status === "completed") {
+    return Response.json({
+      runId,
+      status: "completed",
+      result: await run.returnValue,
+    });
+  }
+  if (status === "running" || status === "pending") {
+    return Response.json({ runId, status: "running" });
+  }
+  return Response.json({ runId, status: "failed" });
 }
