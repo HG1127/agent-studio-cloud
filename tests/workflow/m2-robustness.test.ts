@@ -4,7 +4,8 @@ import { resumeHook, start } from "workflow/api";
 import { waitForHook } from "@workflow/vitest";
 import { AgentManifest } from "@/contracts/manifest";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
-import { failRun } from "@/server/steps/run-state";
+import { failRun, markRunRunning } from "@/server/steps/run-state";
+import { failRunProbeWorkflow } from "./failrun-probe.workflow";
 import { runs, traceEvents } from "@/db/schema";
 import { db } from "@/lib/db";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
@@ -87,5 +88,42 @@ describe("运行状态与审批健壮性", () => {
       .find((t) => t.kind === "run.rejected_stop");
     expect(rejectedStop?.title).toContain("负责人确认处理方案");
     expect(rejectedStop?.title).toContain("未获确认");
+  }, 240_000);
+
+  it("failRun 对等待确认的 run 可写失败终态", async () => {
+    const runId = await insertRun();
+    await db.update(runs).set({ status: "waiting_approval", updatedAt: new Date() }).where(eq(runs.id, runId));
+    const handle = await start(failRunProbeWorkflow, [runId, "确认恢复失败，已停止"]);
+    expect(await handle.returnValue).toBeUndefined();
+
+    const [after] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(after?.status).toBe("failed");
+    expect(after?.error).toContain("确认恢复失败");
+    const failedTraces = await db
+      .select()
+      .from(traceEvents)
+      .where(and(eq(traceEvents.runId, runId), eq(traceEvents.kind, "run.failed")));
+    expect(failedTraces).toHaveLength(1);
+  }, 240_000);
+
+  it("markRunRunning 对已终态 run 是 no-op", async () => {
+    const runId = await insertRun();
+    const handle = await start(agentRunWorkflow, [runId, manifest, {}]);
+    await waitForHook(handle, { token: `approval:${runId}:confirm`, timeout: 90_000 });
+    await resumeHook(`approval:${runId}:confirm`, { decision: "approved" });
+    expect(await handle.returnValue).toEqual({ status: "completed" });
+
+    const resumedBefore = await db
+      .select({ seq: traceEvents.seq })
+      .from(traceEvents)
+      .where(and(eq(traceEvents.runId, runId), eq(traceEvents.kind, "run.resumed")));
+    await markRunRunning(runId); // 守卫早退在 appendTrace 之前，直调安全（同 failRun 终态用例的直调先例）
+    const [after] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(after?.status).toBe("completed");
+    const resumedAfter = await db
+      .select({ seq: traceEvents.seq })
+      .from(traceEvents)
+      .where(and(eq(traceEvents.runId, runId), eq(traceEvents.kind, "run.resumed")));
+    expect(resumedAfter).toHaveLength(resumedBefore.length);
   }, 240_000);
 });

@@ -124,7 +124,8 @@ export async function failRun(runId: string, error: string): Promise<void> {
   const updated = await db
     .update(runs)
     .set({ status: "failed", error, finishedAt: now, updatedAt: now })
-    .where(and(eq(runs.id, runId), inArray(runs.status, ["queued", "running"])))
+    // waiting_approval 也在守卫内：审批恢复链路抛错时兜底 catch 调 failRun，必须能落失败终态而不是永久卡等
+    .where(and(eq(runs.id, runId), inArray(runs.status, ["queued", "running", "waiting_approval"])))
     .returning({ id: runs.id });
   if (updated.length === 0) return; // 已是终态（含终审修复的兜底重入），幂等
   await appendTrace({ runId, kind: "run.failed", level: "error", title: "流程执行失败", detail: error });
@@ -134,6 +135,12 @@ export async function failRun(runId: string, error: string): Promise<void> {
 export async function markRunRunning(runId: string): Promise<void> {
   "use step";
   const now = new Date();
-  await db.update(runs).set({ status: "running", updatedAt: now }).where(eq(runs.id, runId));
+  const updated = await db
+    .update(runs)
+    .set({ status: "running", updatedAt: now })
+    .where(and(eq(runs.id, runId), eq(runs.status, "waiting_approval")))
+    .returning({ id: runs.id });
+  // 早退在轨迹前：挂起期间 run 已被置终态（手工 DB 路径可达）时不得翻回 running，终态行也不留 run.resumed
+  if (updated.length === 0) return;
   await appendTrace({ runId, kind: "run.resumed", title: "流程继续执行" });
 }
