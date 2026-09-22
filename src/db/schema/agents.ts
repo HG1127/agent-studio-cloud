@@ -1,4 +1,4 @@
-import { integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowDraft } from "@/contracts/workflow";
 
@@ -16,17 +16,21 @@ export const agents = pgTable("agents", {
 });
 export type Agent = typeof agents.$inferSelect;
 
-export const agentVersions = pgTable("agent_versions", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  agentId: uuid("agent_id").notNull(),
-  workspaceId: uuid("workspace_id").notNull(),
-  createdBy: uuid("created_by").notNull(),
-  version: integer("version").notNull(),
-  status: text("status").notNull().default("production"),
-  manifest: jsonb("manifest").$type<AgentManifest>().notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const agentVersions = pgTable(
+  "agent_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    agentId: uuid("agent_id").notNull(),
+    workspaceId: uuid("workspace_id").notNull(),
+    createdBy: uuid("created_by").notNull(),
+    version: integer("version").notNull(),
+    status: text("status").notNull().default("production"),
+    manifest: jsonb("manifest").$type<AgentManifest>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("agent_versions_agent_id_version_unique").on(t.agentId, t.version)],
+);
 export type AgentVersion = typeof agentVersions.$inferSelect;
 
 export const workflowDefinitions = pgTable("workflow_definitions", {

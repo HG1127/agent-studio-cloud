@@ -11,6 +11,7 @@ import { resolvePublishModel } from "@/lib/model";
 import { db } from "@/lib/db";
 import { auditWorkflow } from "@/server/domain/audit";
 import { buildManifest, filterPublishBlockers } from "@/server/domain/pipeline";
+import { isUniqueViolation } from "@/server/unique-violation";
 
 export async function publishVersionAction(agentId: string): Promise<PublishVersionResult> {
   if (!z.string().uuid().safeParse(agentId).success) {
@@ -55,26 +56,37 @@ export async function publishVersionAction(agentId: string): Promise<PublishVers
       return { ok: false, error: resolved.error, issues: [] };
     }
     const manifest = buildManifest(parsed.data, { modelId: resolved.modelId, mock: resolved.mock });
-    await db.transaction(async (tx) => {
-      await tx
-        .update(agentVersions)
-        .set({ status: "retired", updatedAt: new Date() })
-        .where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.status, "production")));
-      const [row] = await tx
-        .select({ maxVersion: sql<number>`coalesce(max(${agentVersions.version}), 0)`.mapWith(Number) })
-        .from(agentVersions)
-        .where(eq(agentVersions.agentId, agentId));
-      await tx.insert(agentVersions).values({
-        agentId,
-        workspaceId: agent.workspaceId,
-        createdBy: DEMO_USER_ID,
-        version: (row?.maxVersion ?? 0) + 1,
-        status: "production",
-        manifest,
-      });
-    });
-    revalidatePath(`/agents/${agentId}`);
-    return { ok: true, exempted: exempted.map((issue) => ({ title: issue.title })) };
+    // 并发发布会撞 (agent_id, version) 唯一索引：整个事务重读 maxVersion 后重试一次
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await db.transaction(async (tx) => {
+          await tx
+            .update(agentVersions)
+            .set({ status: "retired", updatedAt: new Date() })
+            .where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.status, "production")));
+          const [row] = await tx
+            .select({ maxVersion: sql<number>`coalesce(max(${agentVersions.version}), 0)`.mapWith(Number) })
+            .from(agentVersions)
+            .where(eq(agentVersions.agentId, agentId));
+          await tx.insert(agentVersions).values({
+            agentId,
+            workspaceId: agent.workspaceId,
+            createdBy: DEMO_USER_ID,
+            version: (row?.maxVersion ?? 0) + 1,
+            status: "production",
+            manifest,
+          });
+        });
+        revalidatePath(`/agents/${agentId}`);
+        return { ok: true, exempted: exempted.map((issue) => ({ title: issue.title })) };
+      } catch (error) {
+        if (!isUniqueViolation(error)) throw error;
+        if (attempt > 0) {
+          return { ok: false, error: "发布冲突，请重试", issues: [] };
+        }
+      }
+    }
+    return { ok: false, error: "发布冲突，请重试", issues: [] };
   } catch {
     return { ok: false, error: "发布失败，请稍后重试", issues: [] };
   }
