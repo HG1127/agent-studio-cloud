@@ -14,6 +14,10 @@
 /coverage
 .vitest/
 
+# playwright
+test-results/
+playwright-report/
+
 # workflow 本地运行时产物（本地队列数据与 vitest 隔离目录）
 .workflow-data/
 .workflow-vitest/
