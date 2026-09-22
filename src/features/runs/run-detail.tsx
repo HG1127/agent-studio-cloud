@@ -142,7 +142,8 @@ export async function RunDetail({ runId }: { runId: string }) {
 
       {decidedApprovals.length > 0 ? (
         <section className="flex flex-col gap-2">
-          <h2 className="text-sm font-semibold">确认记录</h2>
+          {/* 普通区块标签：面板自身已带「已确认/未获确认」标题，避免标题嵌套重复 */}
+          <p className="text-sm font-semibold">确认记录</p>
           {decidedApprovals.map((approval) => (
             <ApprovalPanel key={approval.id} runId={runId} approval={approval} />
           ))}

@@ -1,4 +1,4 @@
-// TraceTimeline 组件测试：静态三行渲染 + SSE 增量上屏（去重）+ done 后断开并刷新 + 非实时不建连。
+// TraceTimeline 组件测试：静态三行渲染 + SSE 增量上屏（去重）+ 等待确认即刷新 + done 后断开并刷新 + 非实时不建连。
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TraceTimeline } from "@/features/runs/trace-timeline";
@@ -106,6 +106,28 @@ describe("TraceTimeline", () => {
     expect(screen.getByText("开始「生成回复方案」")).toBeInTheDocument();
     expect(screen.getAllByText("流程开始执行")).toHaveLength(1);
     expect(screen.getAllByText(/开始「分析投诉原因」|步骤「分析投诉原因」完成|流程开始执行|开始「生成回复方案」/)).toHaveLength(4);
+    // 普通轨迹不触发页面刷新，刷新只由等待确认/完成信号驱动
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it("收到等待确认轨迹事件后刷新页面（状态卡与审批面板由服务端渲染）", () => {
+    (globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
+    render(<TraceTimeline runId={RUN_ID} initialEvents={EVENTS} live />);
+    const source = FakeEventSource.instances[0];
+    act(() => {
+      source.emit("trace", {
+        id: "b2c3d4e5-0000-4000-8000-0000000000b4",
+        seq: 4,
+        nodeId: "step_2",
+        kind: "approval.requested",
+        level: "info",
+        title: "等待「负责人确认发送内容」确认",
+        detail: null,
+        at: "2026-09-21T08:30:08.000Z",
+      });
+    });
+    expect(screen.getByText("等待「负责人确认发送内容」确认")).toBeInTheDocument();
+    expect(refreshMock).toHaveBeenCalledTimes(1);
   });
 
   it("收到完成事件后断开连接并刷新页面", async () => {

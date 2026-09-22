@@ -1,5 +1,5 @@
 // 实时轨迹流 hook：EventSource 消费 /api/runs/[runId]/events，按 seq 去重合并，
-// 收到 done（运行终态）后断开并刷新服务端数据（状态卡/步骤/结果随刷新更新）。
+// 收到 approval.requested（审批面板/状态卡由服务端渲染）或 done（运行终态）后刷新服务端数据。
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { TraceEventView } from "@/contracts/run";
@@ -23,7 +23,11 @@ export function useRunStream(runId: string, initialEvents: TraceEventView[], liv
     const onTrace = (event: MessageEvent<string>) => {
       try {
         const parsed = TraceEventView.safeParse(JSON.parse(event.data));
-        if (parsed.success) setStreamed((prev) => mergeEvents([prev, [parsed.data]]));
+        if (parsed.success) {
+          setStreamed((prev) => mergeEvents([prev, [parsed.data]]));
+          // 状态卡与审批面板不在客户端组件里，等待确认出现时须刷新服务端渲染层
+          if (parsed.data.kind === "approval.requested") router.refresh();
+        }
       } catch {
         // 单条坏消息不中断整个流
       }
