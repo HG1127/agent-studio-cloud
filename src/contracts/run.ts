@@ -85,3 +85,5 @@ export const ApprovalDecisionResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(false), error: z.string() }),
 ]);
 export type ApprovalDecisionResult = z.infer<typeof ApprovalDecisionResult>;
+
+export type SaveWorkflowResult = { ok: true } | { ok: false; error: string };

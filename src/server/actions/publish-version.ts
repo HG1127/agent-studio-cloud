@@ -87,7 +87,8 @@ export async function publishVersionAction(agentId: string): Promise<PublishVers
       }
     }
     return { ok: false, error: "发布冲突，请重试", issues: [] };
-  } catch {
+  } catch (error) {
+    console.error("发布失败：", error);
     return { ok: false, error: "发布失败，请稍后重试", issues: [] };
   }
 }

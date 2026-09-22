@@ -3,12 +3,11 @@
 import { and, desc, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import type { SaveWorkflowResult } from "@/contracts/run";
 import { WorkflowDraft } from "@/contracts/workflow";
 import { workflowDefinitions } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
-
-export type SaveWorkflowResult = { ok: true } | { ok: false; error: string };
 
 export async function saveWorkflowAction(agentId: string, draft: WorkflowDraft): Promise<SaveWorkflowResult> {
   if (!z.string().uuid().safeParse(agentId).success) {

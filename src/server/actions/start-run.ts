@@ -97,7 +97,8 @@ export async function startRunAction(input: RunStartInput): Promise<StartRunResu
     revalidatePath(`/agents/${agentId}`);
     revalidatePath("/agents");
     return { ok: true, runId };
-  } catch {
+  } catch (error) {
+    console.error("运行启动失败：", error);
     return { ok: false, error: "运行启动失败，请稍后重试" };
   }
 }
