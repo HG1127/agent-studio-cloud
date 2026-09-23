@@ -188,7 +188,9 @@ describe("M1 schema 形状", () => {
     expect(at.hasDefault).toBe(true);
     const nonUnique = getTableConfig(traceEvents).indexes.filter((idx) => !idx.config.unique);
     const pair = nonUnique.find((idx) => indexColumnNames(idx).join(",") === "run_id,seq");
-    expect(pair, "trace_events 缺少 (run_id, seq) 索引").toBeDefined();
+    expect(pair, "trace_events 不应再有与唯一索引同列的普通索引").toBeUndefined();
+    const unique = getTableConfig(traceEvents).indexes.find((idx) => idx.config.unique);
+    expect(unique?.config.name).toBe("trace_events_run_id_seq_unique");
   });
 
   it("approvals：role/reason 必填，run_id 普通索引，decided_at 可空", () => {
