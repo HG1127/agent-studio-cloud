@@ -2,6 +2,7 @@ import Link from "next/link";
 
 const NAV_ITEMS = [
   { href: "/agents", label: "助手" },
+  { href: "/knowledge", label: "知识库" },
   { href: "/runs", label: "运行记录" },
 ];
 
