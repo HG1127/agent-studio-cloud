@@ -16,10 +16,13 @@
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.53",
+    "@vercel/blob": "^2.8.0",
     "@xyflow/react": "^12.11.6",
     "ai": "^7.0.107",
     "drizzle-orm": "^0.45.2",
+    "mammoth": "^1.12.3",
     "next": "16.3.5",
+    "pdf-parse": "^2.4.5",
     "postgres": "^3.4.9",
     "react": "19.2.8",
     "react-dom": "19.2.8",
