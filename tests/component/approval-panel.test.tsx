@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApprovalPanel } from "@/features/runs/approval-panel";
+import { ApprovalPanel } from "@/features/runs/ApprovalPanel";
 import type { ApprovalView } from "@/contracts/run";
 
 const { actionMock, refreshMock } = vi.hoisted(() => ({

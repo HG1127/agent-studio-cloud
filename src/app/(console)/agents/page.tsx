@@ -1,5 +1,5 @@
-import { CreateAgentForm } from "@/features/agents/create-agent-form";
-import { AgentList } from "@/features/agents/agent-list";
+import { CreateAgentForm } from "@/features/agents/CreateAgentForm";
+import { AgentList } from "@/features/agents/AgentList";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { listAgents } from "@/server/queries/agents";
 

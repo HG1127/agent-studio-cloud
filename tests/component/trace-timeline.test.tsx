@@ -1,7 +1,7 @@
 // TraceTimeline 组件测试：静态三行渲染 + SSE 增量上屏（去重）+ 等待确认即刷新 + done 后断开并刷新 + 非实时不建连。
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TraceTimeline } from "@/features/runs/trace-timeline";
+import { TraceTimeline } from "@/features/runs/TraceTimeline";
 import type { TraceEventView } from "@/contracts/run";
 
 const { refreshMock } = vi.hoisted(() => ({ refreshMock: vi.fn() }));

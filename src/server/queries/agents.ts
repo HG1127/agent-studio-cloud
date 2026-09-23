@@ -39,12 +39,12 @@ export interface AgentDetail {
   versions: Array<typeof agentVersions.$inferSelect>;
 }
 
-export async function getAgentDetail(agentId: string): Promise<AgentDetail | null> {
+export async function getAgentDetail(agentId: string, workspaceId: string): Promise<AgentDetail | null> {
   if (!z.string().uuid().safeParse(agentId).success) return null;
   const [agent] = await db
     .select()
     .from(agents)
-    .where(and(eq(agents.id, agentId), isNull(agents.archivedAt)))
+    .where(and(eq(agents.id, agentId), isNull(agents.archivedAt), eq(agents.workspaceId, workspaceId)))
     .limit(1);
   if (!agent) return null;
   const [definition] = await db

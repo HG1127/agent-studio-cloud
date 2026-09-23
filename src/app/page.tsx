@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { HealthCard } from "@/features/dashboard/health-card";
+import { HealthCard } from "@/features/dashboard/HealthCard";
 
 export default function Home() {
   return (

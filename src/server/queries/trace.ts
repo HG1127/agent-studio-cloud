@@ -20,23 +20,27 @@ function parseTraceEvent(row: TraceEvent): TraceEventView | null {
   return parsed.success ? parsed.data : null;
 }
 
-export async function listTrace(runId: string): Promise<TraceEventView[]> {
+export async function listTrace(runId: string, workspaceId: string): Promise<TraceEventView[]> {
   if (!RUN_ID.safeParse(runId).success) return [];
   const rows = await db
     .select()
     .from(traceEvents)
-    .where(eq(traceEvents.runId, runId))
+    .where(and(eq(traceEvents.runId, runId), eq(traceEvents.workspaceId, workspaceId)))
     .orderBy(asc(traceEvents.seq));
   return rows.map(parseTraceEvent).filter((event): event is TraceEventView => event !== null);
 }
 
 // SSE 增量读：只取 seq 大于游标的事件（T11 裁定——SSE 走 DB 增量轮询，不消费 workflow 流）
-export async function listTraceSince(runId: string, cursor: number): Promise<TraceEventView[]> {
+export async function listTraceSince(
+  runId: string,
+  workspaceId: string,
+  cursor: number,
+): Promise<TraceEventView[]> {
   if (!RUN_ID.safeParse(runId).success) return [];
   const rows = await db
     .select()
     .from(traceEvents)
-    .where(and(eq(traceEvents.runId, runId), gt(traceEvents.seq, cursor)))
+    .where(and(eq(traceEvents.runId, runId), eq(traceEvents.workspaceId, workspaceId), gt(traceEvents.seq, cursor)))
     .orderBy(asc(traceEvents.seq));
   return rows.map(parseTraceEvent).filter((event): event is TraceEventView => event !== null);
 }

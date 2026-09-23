@@ -1,7 +1,7 @@
 "use client";
 
 import type { WorkflowNode } from "@/contracts/workflow";
-import { NODE_TYPE_LABELS } from "./custom-nodes";
+import { NODE_TYPE_LABELS } from "./CustomNodes";
 
 interface NodeInspectorProps {
   node: WorkflowNode;

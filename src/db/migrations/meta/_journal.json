@@ -29,6 +29,13 @@
       "when": 1789994922482,
       "tag": "0003_strong_wither",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790054650508,
+      "tag": "0004_overconfident_hercules",
+      "breakpoints": true
     }
   ]
 }

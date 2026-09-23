@@ -26,3 +26,57 @@ jobs:
         env:
           # 构建期仅要求变量存在（db 模块导入即校验），占位值不发起真实连接
           DATABASE_URL_POOLED: postgresql://build:build@localhost:5432/build
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: ci
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: 跳过提示（未配置 NEON_API_KEY 或 NEON_PROJECT_ID 时）
+        if: env.NEON_API_KEY == '' || vars.NEON_PROJECT_ID == ''
+        run: echo "NEON_API_KEY 或 NEON_PROJECT_ID 未配置，跳过集成测试"
+      - name: 创建 Neon 临时分支
+        if: env.NEON_API_KEY != '' && vars.NEON_PROJECT_ID != ''
+        # neonctl v5 的 --output json 输出单个合并对象，connection_uris[0] 是含
+        # connection_uri 字段的对象；INFO/WARNING 日志走 stderr，stdout 为纯 JSON。
+        # --suspend-timeout 3600：playwright install 期间数分钟无 DB 活动，
+        # 默认 300s 即挂起计算，冷启动首查会 ECONNRESET（本地实测复现两次）
+        # 锁 @5 major：v5 会静默吞未知 flag，不锁则未来升级可能静默破坏调用参数
+        run: |
+          npx --yes neonctl@5 branches create --name ci-${{ github.run_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --api-key "$NEON_API_KEY" --output json --suspend-timeout 3600 > branch.json
+          BRANCH_URL=$(jq -r '.connection_uris[0].connection_uri' branch.json)
+          echo "BRANCH_URL=$BRANCH_URL" >> "$GITHUB_ENV"
+          # 连接串含密码：注册日志掩码后，URL 即使在后续步骤报错回显也不泄密码
+          echo "::add-mask::$BRANCH_URL"
+          rm -f branch.json
+      - name: 迁移 + 集成测试 + E2E
+        if: env.NEON_API_KEY != '' && env.BRANCH_URL != ''
+        env:
+          DATABASE_URL: ${{ env.BRANCH_URL }}
+          DATABASE_URL_POOLED: ${{ env.BRANCH_URL }}
+          MODEL_MOCK: "1"
+        run: |
+          pnpm db:migrate
+          pnpm exec next typegen
+          pnpm test:workflow
+          pnpm exec playwright install --with-deps chromium
+          pnpm test:e2e
+      - name: 删除临时分支
+        if: always() && env.NEON_API_KEY != ''
+        # neonctl v5 删除分支无交互确认（源码直连 API），没有 --force 选项
+        # 守卫不看 BRANCH_URL：分支名由 run_id 确定，create 成功但取 URL 失败时同样要能清理
+        run: |
+          rm -f branch.json
+          # 容忍分支不存在（create 被跳过或取 URL 前已失败），清理失败不应挂红 job
+          npx --yes neonctl@5 branches delete ci-${{ github.run_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --api-key "$NEON_API_KEY" || true

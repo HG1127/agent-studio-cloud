@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { VersionPanel } from "@/features/agents/version-panel";
+import { VersionPanel } from "@/features/agents/VersionPanel";
 
 const { actionMock, refreshMock } = vi.hoisted(() => ({
   actionMock: vi.fn(),

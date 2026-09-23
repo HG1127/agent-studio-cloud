@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX "agent_versions_agent_id_version_unique" ON "agent_versions" USING btree ("agent_id","version");--> statement-breakpoint
+CREATE UNIQUE INDEX "trace_events_run_id_seq_unique" ON "trace_events" USING btree ("run_id","seq");

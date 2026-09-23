@@ -5,6 +5,7 @@ import { eq, sql } from "drizzle-orm";
 import { FatalError, getWritable } from "workflow";
 import { db } from "@/lib/db";
 import { runs, traceEvents } from "@/db/schema";
+import { isUniqueViolation } from "@/server/unique-violation";
 
 export type TraceLevel = "info" | "warn" | "error";
 
@@ -30,30 +31,39 @@ export async function appendTrace(event: AppendTraceInput): Promise<void> {
     .select({ max: sql<number>`coalesce(max(${traceEvents.seq}), 0)`.mapWith(Number) })
     .from(traceEvents)
     .where(eq(traceEvents.runId, event.runId));
-  const seq = (row?.max ?? 0) + 1;
   const at = new Date();
-  const payload = {
-    seq,
+  const base = {
     nodeId: event.nodeId ?? null,
     kind: event.kind,
     level: event.level ?? "info",
     title: event.title,
     detail: event.detail ?? null,
     data: event.data ?? null,
-    at: at.toISOString(),
   };
-  await db.insert(traceEvents).values({
-    runId: event.runId,
-    workspaceId: run.workspaceId,
-    seq,
-    nodeId: payload.nodeId,
-    kind: payload.kind,
-    level: payload.level,
-    title: payload.title,
-    detail: payload.detail,
-    data: payload.data,
-    at,
-  });
+  const insertWithSeq = (seq: number) =>
+    db
+      .insert(traceEvents)
+      .values({ runId: event.runId, workspaceId: run.workspaceId, seq, ...base, at })
+      .returning({ seq: traceEvents.seq });
+  let seq = (row?.max ?? 0) + 1;
+  let inserted: { seq: number }[] | null = null;
+  // 竞态是淘汰赛：每次失败至少有一个其他写者已提交，N 个并发写者最坏要输 N-1 次，
+  // 3 次必耗尽；上限 10 保证 8 并发内全员成功（当前最大并发即 8 个并行轨迹步骤）
+  for (let attempt = 0; attempt < 10 && !inserted; attempt += 1) {
+    try {
+      inserted = await insertWithSeq(seq);
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      const [fresh] = await db
+        .select({ max: sql<number>`coalesce(max(${traceEvents.seq}), 0)`.mapWith(Number) })
+        .from(traceEvents)
+        .where(eq(traceEvents.runId, event.runId));
+      seq = (fresh?.max ?? 0) + 1;
+    }
+  }
+  if (!inserted) throw new FatalError("轨迹写入冲突，请重试");
+  // 流写入的 seq 必须用插入成功后的实际值：重试后 seq 会变，用插入前的旧号会错号
+  const payload = { seq: inserted[0].seq, ...base, at: at.toISOString() };
   const writer = getWritable({ namespace: "trace" }).getWriter();
   await writer.write(JSON.stringify(payload));
   await writer.close();

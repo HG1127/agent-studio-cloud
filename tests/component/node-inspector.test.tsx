@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { WorkflowNode } from "@/contracts/workflow";
-import { NodeInspector } from "@/features/workflow-canvas/node-inspector";
+import { NodeInspector } from "@/features/workflow-canvas/NodeInspector";
 
 const AI_NODE = WorkflowNode.parse({ id: "step_1", title: "生成回复方案", type: "ai" });
 const HUMAN_NODE = WorkflowNode.parse({

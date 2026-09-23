@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { RunLauncher } from "@/features/agents/run-launcher";
-import { VersionPanel } from "@/features/agents/version-panel";
-import { FlowCanvas } from "@/features/workflow-canvas/flow-canvas";
+import { RunLauncher } from "@/features/agents/RunLauncher";
+import { VersionPanel } from "@/features/agents/VersionPanel";
+import { FlowCanvas } from "@/features/workflow-canvas/FlowCanvas";
+import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { auditWorkflow, type DesignAuditResult } from "@/server/domain/audit";
 import { getAgentDetail } from "@/server/queries/agents";
 import { listVersions } from "@/server/queries/versions";
@@ -25,7 +26,7 @@ export default async function AgentDetailPage({
   params: Promise<{ agentId: string }>;
 }) {
   const { agentId } = await params;
-  const detail = await getAgentDetail(agentId);
+  const detail = await getAgentDetail(agentId, DEMO_WORKSPACE_ID);
   if (!detail) notFound();
   const audit = detail.draft ? auditWorkflow(detail.draft) : null;
   const versions = await listVersions(agentId);
