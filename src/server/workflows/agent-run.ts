@@ -45,7 +45,7 @@ export async function agentRunWorkflow(runId: string, manifest: AgentManifest, i
         continue;
       }
       if (node.type === "knowledge") {
-        const r = await runKnowledgeStep({ runId, node });
+        const r = await runKnowledgeStep({ runId, node, manifest, input });
         outputs[node.id] = r.receipt;
         currentId = node.next;
         continue;
