@@ -10,7 +10,7 @@ import { auditWorkflow, type AuditIssue } from "@/server/domain/audit";
 import { buildManifest, deriveDesignAuditStatus, filterPublishBlockers, stableStringify } from "@/server/domain/pipeline";
 
 const draft: WorkflowDraftType = WorkflowDraft.parse(golden1.output.workflow);
-const options = { modelId: "test-model", mock: true };
+const options = { modelId: "test-model", mock: true, knowledgeSnapshot: [] };
 
 // 递归反转对象键序，内容不变（含默认值补全后仍然等价）
 function permuteKeys(value: unknown): unknown {

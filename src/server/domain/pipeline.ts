@@ -154,7 +154,7 @@ function inputContractFor(draft: WorkflowDraft): AgentManifest["inputContract"] 
   return { fields };
 }
 
-export function buildManifest(draft: WorkflowDraft, options: { modelId: string; mock: boolean }): AgentManifest {
+export function buildManifest(draft: WorkflowDraft, options: { modelId: string; mock: boolean; knowledgeSnapshot: string[] }): AgentManifest {
   const audit = auditWorkflow(draft);
   return AgentManifest.parse({
     schemaVersion: "4.0",
@@ -165,6 +165,7 @@ export function buildManifest(draft: WorkflowDraft, options: { modelId: string; 
     requirementCoverage: asRecord(audit.requirementCoverage),
     complexityProfile: asRecord(audit.complexityProfile),
     resourceSelection: { model: { modelId: options.modelId, mock: options.mock } },
+    knowledgeSnapshot: options.knowledgeSnapshot,
     designAudit: {
       status: deriveDesignAuditStatus(audit.counts),
       issueCount: audit.issues.length,

@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { PublishVersionResult } from "@/contracts/version";
 import { WorkflowDraft } from "@/contracts/workflow";
-import { agentVersions, agents, workflowDefinitions } from "@/db/schema";
+import { agentVersions, agents, knowledgeSources, workflowDefinitions } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { resolvePublishModel } from "@/lib/model";
 import { db } from "@/lib/db";
@@ -55,7 +55,15 @@ export async function publishVersionAction(agentId: string): Promise<PublishVers
     if (!resolved.ok) {
       return { ok: false, error: resolved.error, issues: [] };
     }
-    const manifest = buildManifest(parsed.data, { modelId: resolved.modelId, mock: resolved.mock });
+    const snapshotRows = await db
+      .select({ id: knowledgeSources.id })
+      .from(knowledgeSources)
+      .where(and(eq(knowledgeSources.workspaceId, agent.workspaceId), eq(knowledgeSources.status, "indexed"), isNull(knowledgeSources.archivedAt)));
+    const manifest = buildManifest(parsed.data, {
+      modelId: resolved.modelId,
+      mock: resolved.mock,
+      knowledgeSnapshot: snapshotRows.map((row) => row.id),
+    });
     // 并发发布会撞 (agent_id, version) 唯一索引：整个事务重读 maxVersion 后重试一次
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
