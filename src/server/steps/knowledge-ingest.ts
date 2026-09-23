@@ -1,6 +1,6 @@
 "use step";
 import mammoth from "mammoth";
-import { PDFParse } from "pdf-parse";
+import { extractText, getDocumentProxy } from "unpdf";
 import { FatalError } from "workflow";
 import { eq } from "drizzle-orm";
 import { knowledgeChunks, knowledgeSources } from "@/db/schema";
@@ -20,13 +20,10 @@ export async function parseKnowledgeFile(args: ParseArgs): Promise<{ text: strin
   const ext = args.filename.split(".").pop()?.toLowerCase() ?? "";
   let text: string;
   if (ext === "pdf") {
-    const parser = new PDFParse({ data: new Uint8Array(buffer) });
-    try {
-      const result = await parser.getText();
-      text = result.text;
-    } finally {
-      await parser.destroy();
-    }
+    // unpdf 内置 serverless 版 pdfjs：无 DOMMatrix 依赖，Vercel 函数可直接加载（pdf-parse 会因 browser 条件解析炸掉）
+    const pdf = await getDocumentProxy(new Uint8Array(buffer));
+    const result = await extractText(pdf, { mergePages: true });
+    text = result.text;
   } else if (ext === "docx") {
     const result = await mammoth.extractRawText({ buffer });
     text = result.value;
