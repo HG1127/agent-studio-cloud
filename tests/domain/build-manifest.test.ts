@@ -10,7 +10,7 @@ import { auditWorkflow, type AuditIssue } from "@/server/domain/audit";
 import { buildManifest, deriveDesignAuditStatus, filterPublishBlockers, stableStringify } from "@/server/domain/pipeline";
 
 const draft: WorkflowDraftType = WorkflowDraft.parse(golden1.output.workflow);
-const options = { modelId: "test-model", mock: true, knowledgeSnapshot: [] };
+const options = { modelId: "test-model", mock: true, connectionId: null, knowledgeSnapshot: [] };
 
 // 递归反转对象键序，内容不变（含默认值补全后仍然等价）
 function permuteKeys(value: unknown): unknown {
@@ -79,6 +79,21 @@ describe("buildManifest", () => {
     );
     expect(manifest.resourceSelection.model).toEqual({ modelId: "test-model", mock: true, connectionId: null });
     expect(manifest.outputContract).toEqual({ fields: [] });
+  });
+
+  it("发布选定的模型连接冻结进 manifest；不传 connectionId 时为 null", () => {
+    const withConnection = buildManifest(draft, {
+      modelId: "gpt-a",
+      mock: false,
+      connectionId: "00000000-0000-4000-8000-0000000000c1",
+      knowledgeSnapshot: [],
+    });
+    expect(withConnection.resourceSelection.model).toEqual({
+      modelId: "gpt-a",
+      mock: false,
+      connectionId: "00000000-0000-4000-8000-0000000000c1",
+    });
+    expect(buildManifest(draft, options).resourceSelection.model.connectionId).toBeNull();
   });
 
   it("designAudit 由审计结果推导：golden 草稿有阻塞问题 → blocked，计数与审计一致", () => {
