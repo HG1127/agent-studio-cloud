@@ -43,6 +43,7 @@ export const RunSummary = z.object({
   agentId: z.string().uuid(),
   agentName: z.string(),
   status: RunStatus,
+  sourceType: z.enum(["manual", "schedule"]).default("manual"),
   startedAt: z.string().nullable(),
   finishedAt: z.string().nullable(),
 });

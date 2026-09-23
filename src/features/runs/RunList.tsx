@@ -52,7 +52,12 @@ export function RunList({ runs }: { runs: RunSummary[] }) {
           >
             <div className="flex flex-wrap items-center justify-between gap-3">
               <span className="font-medium">{run.agentName}</span>
-              <RunStatusBadge status={run.status} />
+              <span className="flex items-center gap-2">
+                {run.sourceType === "schedule" && (
+                  <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-xs text-indigo-700">定时</span>
+                )}
+                <RunStatusBadge status={run.status} />
+              </span>
             </div>
             <p className="mt-2 text-sm text-gray-400">
               {run.startedAt ? `开始于 ${formatTime(run.startedAt)}` : "尚未开始"}

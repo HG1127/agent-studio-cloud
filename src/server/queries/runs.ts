@@ -13,6 +13,7 @@ export async function listRuns(workspaceId: string): Promise<RunSummary[]> {
       agentId: runs.agentId,
       agentName: agents.name,
       status: runs.status,
+      sourceType: runs.sourceType,
       startedAt: runs.startedAt,
       finishedAt: runs.finishedAt,
     })
@@ -26,6 +27,7 @@ export async function listRuns(workspaceId: string): Promise<RunSummary[]> {
       agentId: row.agentId,
       agentName: row.agentName,
       status: row.status,
+      sourceType: row.sourceType,
       startedAt: row.startedAt?.toISOString() ?? null,
       finishedAt: row.finishedAt?.toISOString() ?? null,
     }),
