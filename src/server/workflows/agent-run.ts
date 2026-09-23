@@ -33,7 +33,7 @@ export async function agentRunWorkflow(runId: string, manifest: AgentManifest, i
         return { status: "completed" };
       }
       if (node.type === "ai") {
-        const r = await runModelStep({ runId, node, outputs, input });
+        const r = await runModelStep({ runId, node, manifest, outputs, input });
         outputs[node.id] = r.output;
         currentId = node.next;
         continue;

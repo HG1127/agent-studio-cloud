@@ -77,7 +77,7 @@ describe("buildManifest", () => {
     expect(manifest.inputContract.fields).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "severity", required: true })]),
     );
-    expect(manifest.resourceSelection.model).toEqual({ modelId: "test-model", mock: true });
+    expect(manifest.resourceSelection.model).toEqual({ modelId: "test-model", mock: true, connectionId: null });
     expect(manifest.outputContract).toEqual({ fields: [] });
   });
 
