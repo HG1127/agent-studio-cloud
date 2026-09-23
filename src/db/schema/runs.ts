@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 export const runs = pgTable("runs", {
@@ -13,11 +14,13 @@ export const runs = pgTable("runs", {
   result: jsonb("result").$type<Record<string, unknown>>(),
   stepStates: jsonb("step_states").$type<Record<string, unknown>>().notNull().default({}),
   error: text("error"),
+  sourceType: text("source_type").notNull().default("manual"),
+  sourceKey: text("source_key"),
   startedAt: timestamp("started_at", { withTimezone: true }),
   finishedAt: timestamp("finished_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [uniqueIndex("runs_source_key_unique").on(t.sourceKey).where(sql`source_key is not null`)]);
 export type Run = typeof runs.$inferSelect;
 
 export const runSteps = pgTable(
