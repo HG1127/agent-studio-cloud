@@ -5,3 +5,4 @@ export * from "./trace";
 export * from "./approvals";
 export * from "./knowledge";
 export * from "./schedules";
+export * from "./connections";
