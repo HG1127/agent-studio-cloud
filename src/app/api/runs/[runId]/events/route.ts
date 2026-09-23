@@ -46,18 +46,27 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
         let lastHeartbeat = Date.now();
         for (;;) {
           // 先追平轨迹，再判定终态：终态当轮没有新事件才发 done，保证不漏最后一批
-          const rows = await listTraceSince(runId, DEMO_WORKSPACE_ID, cursor);
+          let rows: Awaited<ReturnType<typeof listTraceSince>>;
+          let current: Awaited<ReturnType<typeof getRunRow>>;
+          try {
+            rows = await listTraceSince(runId, DEMO_WORKSPACE_ID, cursor);
+            current = await getRunRow(runId, DEMO_WORKSPACE_ID);
+          } catch (error) {
+            // 静默关流会让客户端收不到 done 而无限重连重放，必须先显式告知
+            console.error(`[events] 轮询数据库异常，通知客户端后关流 run=${runId}`, error);
+            pushEvent("done", { status: "error" });
+            break;
+          }
           for (const row of rows) {
             cursor = row.seq;
             pushEvent("trace", row);
           }
           if (closed) break;
-          const current = await getRunRow(runId, DEMO_WORKSPACE_ID);
           if (!current) {
             pushEvent("done", { status: "gone" });
             break;
           }
-          if (current && TERMINAL_STATUSES.has(current.status) && rows.length === 0) {
+          if (TERMINAL_STATUSES.has(current.status) && rows.length === 0) {
             pushEvent("done", { status: current.status });
             break;
           }
