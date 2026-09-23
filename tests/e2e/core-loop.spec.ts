@@ -9,9 +9,11 @@ test("创建助手到审批完成的完整闭环", async ({ page }) => {
   // ① 创建：名称 + 意图 → 跳转详情，画布出现人工确认节点
   await page.goto("/agents");
   await page.getByLabel("助手名称").fill(agentName);
+  // 意图里故意不写「读取资料」类字眼：M3 起知识步骤真检索，零命中会让运行失败，
+  // 而 M2 闭环用例只验证创建→发布→运行→审批链路，不依赖知识来源。
   await page
     .getByLabel("想让助手完成什么（至少 10 个字）")
-    .fill("收到客户咨询后读取客户资料并生成回复方案，发送前由负责人确认，最后输出回复邮件");
+    .fill("收到客户咨询后生成回复方案，发送前由负责人确认，最后输出回复邮件");
   await page.getByRole("button", { name: "创建助手" }).click();
   await page.waitForURL(/\/agents\/[0-9a-f-]+$/, { timeout: 60_000 });
   await expect(page.getByRole("heading", { level: 1, name: agentName })).toBeVisible();
