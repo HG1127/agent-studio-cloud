@@ -26,4 +26,20 @@ describe("验收样例更新契约", () => {
       caseId: "00000000-0000-4000-8000-000000000002",
     }).success).toBe(false);
   });
+
+  it("验收输入与预期值必须是安全有界的 JSON", () => {
+    const base = {
+      agentId: "00000000-0000-4000-8000-000000000001",
+      caseId: "00000000-0000-4000-8000-000000000002",
+      name: "合同验收",
+      input: { contract: "示例" },
+      expectations: [],
+    };
+    expect(EvaluationCaseUpdateInput.safeParse({ ...base, input: { amount: BigInt(1) } }).success).toBe(false);
+    expect(EvaluationCaseUpdateInput.safeParse({
+      ...base,
+      expectations: [{ path: "result", operator: "equals", value: BigInt(1) }],
+    }).success).toBe(false);
+    expect(EvaluationCaseUpdateInput.safeParse({ ...base, input: { text: "中".repeat(100 * 1024) } }).success).toBe(false);
+  });
 });

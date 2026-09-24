@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import type { EvaluationCaseView, EvaluationExpectation, EvaluationRunView } from "@/contracts/evaluation";
+import { EvaluationExpectation as EvaluationExpectationSchema, MAX_EVALUATION_CASES, type EvaluationCaseView, type EvaluationExpectation, type EvaluationRunView } from "@/contracts/evaluation";
 import {
   createEvaluationCaseAction,
   startEvaluationAction,
@@ -40,7 +40,7 @@ function expectationFromDraft(draft: AdvancedExpectationDraft): EvaluationExpect
   if (draft.operator === "contains") return { path: draft.path.trim(), operator: "contains", value: draft.valueText };
   let value: unknown = draft.valueText;
   try { value = JSON.parse(draft.valueText) as unknown; } catch { /* 普通文字按字符串比较 */ }
-  return { path: draft.path.trim(), operator: "equals", value };
+  return EvaluationExpectationSchema.parse({ path: draft.path.trim(), operator: "equals", value });
 }
 
 function expectationLabel(expectation: EvaluationExpectation): string {
@@ -182,9 +182,10 @@ export function EvaluationPanel({ agentId, cases, archivedCases = [], runs }: {
           className="rounded-md border border-gray-300 px-3 py-2 font-mono text-sm" />
         <input aria-label="结果应包含" disabled={evaluationRunning} value={expectedText} onChange={(event) => setExpectedText(event.target.value)} placeholder="可不填"
           className="rounded-md border border-gray-300 px-3 py-2 text-sm" />
-        <button type="button" disabled={pending || evaluationRunning || !name.trim()} onClick={saveCase}
+        <button type="button" disabled={pending || evaluationRunning || !name.trim() || (!editingId && cases.length >= MAX_EVALUATION_CASES)} onClick={saveCase}
           className="rounded-md border border-gray-300 px-3 py-2 text-sm disabled:text-gray-400">{editingId ? "保存修改" : "添加样例"}</button>
       </div>
+      {cases.length >= MAX_EVALUATION_CASES ? <p className="text-xs text-amber-700">启用中的验收样例已达到 {MAX_EVALUATION_CASES} 条上限；归档不再使用的样例后可继续添加。</p> : null}
       <details className="rounded-md border border-gray-100 p-3">
         <summary className="cursor-pointer text-xs font-medium text-gray-600">字段检查（{advancedExpectations.length}）</summary>
         <p className="mt-2 text-xs text-gray-500">可检查结构化结果中的指定字段是否存在、等于或包含某个值。</p>

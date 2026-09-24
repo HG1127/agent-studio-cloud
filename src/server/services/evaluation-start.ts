@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { agentVersions, agents, evaluationCaseResults, evaluationCases, evaluationRuns } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
+import { MAX_EVALUATION_CASES } from "@/contracts/evaluation";
 
 export async function prepareEvaluationRun(agentId: string) {
   return db.transaction(async (tx) => {
@@ -35,8 +36,10 @@ export async function prepareEvaluationRun(agentId: string) {
           eq(evaluationCaseResults.evaluationRunId, runningEvaluation.id),
           eq(evaluationCaseResults.status, "running"),
           eq(evaluationCaseResults.workspaceId, DEMO_WORKSPACE_ID),
-        ));
+        ))
+        .limit(MAX_EVALUATION_CASES + 1);
       if (!evaluation) return { ok: false as const, error: "自动验收记录不完整，请稍后重试" };
+      if (cases.length > MAX_EVALUATION_CASES) return { ok: false as const, error: `自动验收最多支持 ${MAX_EVALUATION_CASES} 条样例` };
       return {
         ok: true as const,
         evaluationId: runningEvaluation.id,
@@ -65,8 +68,10 @@ export async function prepareEvaluationRun(agentId: string) {
         eq(evaluationCases.agentId, agentId),
         eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID),
         isNull(evaluationCases.archivedAt),
-      ));
+      ))
+      .limit(MAX_EVALUATION_CASES + 1);
     if (cases.length === 0) return { ok: false as const, error: "请先添加至少一条验收样例" };
+    if (cases.length > MAX_EVALUATION_CASES) return { ok: false as const, error: `自动验收最多支持 ${MAX_EVALUATION_CASES} 条样例` };
     const [evaluation] = await tx.insert(evaluationRuns).values({
       workspaceId: DEMO_WORKSPACE_ID,
       createdBy: DEMO_USER_ID,

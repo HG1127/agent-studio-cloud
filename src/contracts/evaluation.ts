@@ -1,9 +1,23 @@
 import { z } from "zod";
+import { RunInputPayload } from "@/contracts/run";
+
+export const MAX_EVALUATION_CASES = 100;
+const MAX_EVALUATION_CASE_BYTES = 128 * 1024;
+
+function evaluationCaseSizeIssue(value: unknown): string | null {
+  try {
+    return new TextEncoder().encode(JSON.stringify(value)).byteLength > MAX_EVALUATION_CASE_BYTES
+      ? "单条验收样例不能超过 128KB"
+      : null;
+  } catch {
+    return "验收样例必须是可序列化的 JSON";
+  }
+}
 
 export const EvaluationExpectation = z.object({
-  path: z.string().default(""),
+  path: z.string().max(200).default(""),
   operator: z.enum(["equals", "contains", "exists"]),
-  value: z.unknown().optional(),
+  value: z.json().optional(),
 }).superRefine((expectation, context) => {
   if (expectation.operator === "contains" && (typeof expectation.value !== "string" || !expectation.value.trim())) {
     context.addIssue({ code: "custom", path: ["value"], message: "包含检查必须填写预期文字" });
@@ -14,15 +28,22 @@ export const EvaluationExpectation = z.object({
 });
 export type EvaluationExpectation = z.infer<typeof EvaluationExpectation>;
 
-export const EvaluationCaseCreateInput = z.object({
+const EvaluationCaseFields = z.object({
   agentId: z.string().uuid(),
   name: z.string().trim().min(1).max(80),
-  input: z.record(z.string(), z.unknown()),
+  input: RunInputPayload,
   expectations: z.array(EvaluationExpectation).max(20).default([]),
+});
+export const EvaluationCaseCreateInput = EvaluationCaseFields.superRefine((value, ctx) => {
+  const issue = evaluationCaseSizeIssue(value);
+  if (issue) ctx.addIssue({ code: "custom", message: issue });
 });
 export type EvaluationCaseCreateInput = z.infer<typeof EvaluationCaseCreateInput>;
 
-export const EvaluationCaseUpdateInput = EvaluationCaseCreateInput.extend({ caseId: z.string().uuid() });
+export const EvaluationCaseUpdateInput = EvaluationCaseFields.extend({ caseId: z.string().uuid() }).superRefine((value, ctx) => {
+  const issue = evaluationCaseSizeIssue(value);
+  if (issue) ctx.addIssue({ code: "custom", message: issue });
+});
 export type EvaluationCaseUpdateInput = z.infer<typeof EvaluationCaseUpdateInput>;
 
 export const EvaluationCaseView = z.object({

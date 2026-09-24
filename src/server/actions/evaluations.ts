@@ -1,12 +1,13 @@
 "use server";
 
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, count, eq, isNotNull, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import {
   EvaluationCaseArchiveInput,
   EvaluationCaseCreateInput,
   EvaluationCaseUpdateInput,
+  MAX_EVALUATION_CASES,
   type EvaluationActionResult,
 } from "@/contracts/evaluation";
 import { agents, evaluationCaseResults, evaluationCases, evaluationRuns } from "@/db/schema";
@@ -31,6 +32,14 @@ export async function createEvaluationCaseAction(input: unknown): Promise<Evalua
         eq(evaluationRuns.status, "running"),
       )).limit(1);
       if (running) return { ok: false as const, error: "自动验收运行期间不能修改验收样例" };
+      const [active] = await tx.select({ count: count() }).from(evaluationCases).where(and(
+        eq(evaluationCases.agentId, parsed.data.agentId),
+        eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID),
+        isNull(evaluationCases.archivedAt),
+      ));
+      if ((active?.count ?? 0) >= MAX_EVALUATION_CASES) {
+        return { ok: false as const, error: `每个助手最多保留 ${MAX_EVALUATION_CASES} 条启用中的验收样例` };
+      }
       await tx.insert(evaluationCases).values({
         workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, agentId: parsed.data.agentId,
         name: parsed.data.name, input: parsed.data.input, expectations: parsed.data.expectations,
