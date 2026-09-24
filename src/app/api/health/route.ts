@@ -1,8 +1,7 @@
-import { sql } from "drizzle-orm";
 import { getRun } from "workflow/api";
 import { WorkflowRunNotFoundError } from "workflow/errors";
 import { HealthResponse } from "@/contracts/health";
-import { db } from "@/lib/db";
+import { isDatabaseReady } from "@/server/queries/system-health";
 
 // 探针 run 永远不会被创建：运行时能回答「未找到」即代表连接与配置正常。
 // 格式必须符合平台 wrun_+ULID 约定，否则平台 API 直接 400（本地引擎不校验格式，故仅在 Vercel 暴露）
@@ -11,8 +10,7 @@ const HEALTH_PROBE_RUN_ID = "wrun_00000000000000000000000000";
 export async function GET() {
   let dbOk = false;
   try {
-    await db.execute(sql`select 1`);
-    dbOk = true;
+    dbOk = await isDatabaseReady();
   } catch {
     dbOk = false;
   }
