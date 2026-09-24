@@ -40,8 +40,7 @@ test("上传知识文档到已就绪并跑通知识检索全链路", async ({ pa
   await page.waitForURL(/\/runs\/[0-9a-f-]+$/, { timeout: 60_000 });
   await expect(page.locator("header").getByText("等待确认", { exact: true })).toBeVisible({ timeout: 90_000 });
   const approval = page.locator("section").filter({ has: page.getByRole("heading", { name: "该步骤正在等待确认" }) });
-  await expect(approval.getByText("待确认草稿")).toBeVisible();
-  await expect(approval.getByText(/\[模拟输出\]/)).toBeVisible();
+  await expect(approval.getByText("这一步没有生成可展示的正文，请核对运行输入和上游步骤结果。")).toBeVisible();
   await page.getByRole("button", { name: "批准", exact: true }).click();
   await expect(page.locator("header").getByText("已完成", { exact: true })).toBeVisible({ timeout: 90_000 });
   await expect(page.getByText(/已从知识库找到/)).toBeVisible();
