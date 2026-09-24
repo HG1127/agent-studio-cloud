@@ -5,9 +5,10 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { SaveWorkflowResult } from "@/contracts/run";
 import { WorkflowDraft } from "@/contracts/workflow";
-import { agents, workflowDefinitions } from "@/db/schema";
-import { DEMO_WORKSPACE_ID } from "@/lib/constants";
+import { agents, auditEvents, workflowDefinitions } from "@/db/schema";
+import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
+import { auditEventValues } from "@/server/audit/event-values";
 import { validateOutputContract } from "@/server/domain/runtime/output-contract";
 import { validateWaitContracts } from "@/server/domain/runtime/wait-contract";
 import { validateWorkflowRoutes } from "@/server/domain/runtime/workflow-routes";
@@ -51,6 +52,15 @@ export async function saveWorkflowAction(agentId: string, draft: WorkflowDraft):
           updatedAt: new Date(),
         })
         .where(and(eq(workflowDefinitions.id, definition.id), eq(workflowDefinitions.workspaceId, DEMO_WORKSPACE_ID)));
+      await tx.insert(auditEvents).values(auditEventValues({
+        workspaceId: DEMO_WORKSPACE_ID,
+        createdBy: DEMO_USER_ID,
+        action: "workflow.saved",
+        targetType: "workflow",
+        targetId: definition.id,
+        summary: `保存助手「${agent.name}」的流程`,
+        data: { nodeCount: Object.keys(parsed.data.nodes).length },
+      }));
       return "saved" as const;
     });
     if (result === "agent-missing") {

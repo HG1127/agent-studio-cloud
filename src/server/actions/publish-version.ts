@@ -6,7 +6,7 @@ import { z } from "zod";
 import { VersionSummary, type PublishVersionResult } from "@/contracts/version";
 import { PublishModelSelection } from "@/contracts/connections";
 import { WorkflowDraft } from "@/contracts/workflow";
-import { agentVersions, agents, evaluationCases, knowledgeSources, modelConnections, workflowDefinitions } from "@/db/schema";
+import { agentVersions, agents, auditEvents, evaluationCases, knowledgeSources, modelConnections, workflowDefinitions } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { realModelsEnabled, resolvePublishModel } from "@/lib/model";
 import { db } from "@/lib/db";
@@ -17,6 +17,7 @@ import { isUniqueViolation } from "@/server/unique-violation";
 import { validateOutputContract } from "@/server/domain/runtime/output-contract";
 import { validateWaitContracts } from "@/server/domain/runtime/wait-contract";
 import { validateWorkflowRoutes } from "@/server/domain/runtime/workflow-routes";
+import { auditEventValues } from "@/server/audit/event-values";
 
 export async function publishVersionAction(agentId: string, modelSelection?: PublishModelSelection): Promise<PublishVersionResult> {
   if (!z.string().uuid().safeParse(agentId).success) {
@@ -151,6 +152,15 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
             status: agentVersions.status,
             createdAt: agentVersions.createdAt,
           });
+          await tx.insert(auditEvents).values(auditEventValues({
+            workspaceId: agent.workspaceId,
+            createdBy: DEMO_USER_ID,
+            action: "version.published",
+            targetType: "version",
+            targetId: created.id,
+            summary: `发布助手「${agent.name}」的版本 ${created.version}`,
+            data: { version: created.version, release },
+          }));
           return VersionSummary.parse({ ...created, createdAt: created.createdAt.toISOString() });
         });
         revalidatePath(`/agents/${agentId}`);

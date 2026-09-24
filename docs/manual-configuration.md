@@ -4,7 +4,7 @@
 
 ## 当前待处理
 
-- **应用数据库迁移**：在能稳定连接 Neon 直连地址的环境执行 `pnpm db:migrate`。当前待确认应用的迁移包括 `0007_faithful_thunderball.sql`（长期经验）、`0008_flippant_inertia.sql`（自动验收）、`0009_charming_killraven.sql`（核心查询索引）和 `0010_modern_multiple_man.sql`（资料分页索引）；本地于 2026-09-24 多次尝试均在连接阶段超时，未确认迁移成功。
+- **应用数据库迁移**：在能稳定连接 Neon 直连地址的环境执行 `pnpm db:migrate`。当前待确认应用的迁移包括 `0007_faithful_thunderball.sql`（长期经验）、`0008_flippant_inertia.sql`（自动验收）、`0009_charming_killraven.sql`（核心查询索引）、`0010_modern_multiple_man.sql`（资料分页索引）和 `0011_breezy_patriot.sql`（操作记录）；本地于 2026-09-24 多次尝试均在连接阶段超时，未确认迁移成功。
 - **完整工作流套件的稳定数据库连接**：2026-09-25 的定向真实数据库用例可以通过，但完整套件在清理协作测试数据时出现 Neon `CONNECT_TIMEOUT`。合并前应在 CI 临时 Neon 分支重新执行 `pnpm test:workflow`，以 CI 的隔离数据库结果为准。
 - **GitHub 集成测试与生产迁移**：在仓库 Actions 中添加密钥 `NEON_API_KEY` 和变量 `NEON_PROJECT_ID`。CI 会据此创建并清理临时数据库分支；生产迁移工作流只允许从 `main` 手动触发，并要求输入 `MIGRATE_PRODUCTION`，执行前会保留一个 Neon 数据分支。
 - **生产上线顺序**：Vercel 构建不会自动修改数据库。包含新迁移的版本上线前，先在 GitHub Actions 手动运行“生产数据库迁移”并确认成功，再放行对应的生产部署；预览环境也必须绑定独立数据库并先应用迁移，禁止让 PR 预览连接生产数据库。

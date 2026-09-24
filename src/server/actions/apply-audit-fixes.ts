@@ -5,17 +5,18 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { AuditFixActionResult } from "@/contracts/audit";
 import { WorkflowDraft } from "@/contracts/workflow";
-import { agents, workflowDefinitions } from "@/db/schema";
-import { DEMO_WORKSPACE_ID } from "@/lib/constants";
+import { agents, auditEvents, workflowDefinitions } from "@/db/schema";
+import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { applySafeAuditFixes } from "@/server/domain/audit/safe-audit-fixes";
+import { auditEventValues } from "@/server/audit/event-values";
 
 export async function applyAuditFixesAction(agentId: string): Promise<AuditFixActionResult> {
   if (!z.string().uuid().safeParse(agentId).success) return { ok: false, error: "助手信息不正确，请刷新页面后重试" };
   try {
     const outcome = await db.transaction(async (tx) => {
       // 自动修复也必须与手工保存共用助手行锁，避免跨标签页覆盖刚保存的草稿。
-      const [agent] = await tx.select({ id: agents.id }).from(agents).where(and(
+      const [agent] = await tx.select({ id: agents.id, name: agents.name }).from(agents).where(and(
         eq(agents.id, agentId), eq(agents.workspaceId, DEMO_WORKSPACE_ID), isNull(agents.archivedAt),
       )).for("update").limit(1);
       if (!agent) return { kind: "agent-missing" as const };
@@ -34,6 +35,19 @@ export async function applyAuditFixesAction(agentId: string): Promise<AuditFixAc
         .update(workflowDefinitions)
         .set({ draft: result.draft, updatedAt: new Date() })
         .where(and(eq(workflowDefinitions.id, definition.id), eq(workflowDefinitions.workspaceId, DEMO_WORKSPACE_ID)));
+      await tx.insert(auditEvents).values(auditEventValues({
+        workspaceId: DEMO_WORKSPACE_ID,
+        createdBy: DEMO_USER_ID,
+        action: "workflow.auto_fixed",
+        targetType: "workflow",
+        targetId: definition.id,
+        summary: `自动修复助手「${agent.name}」的流程`,
+        data: {
+          appliedCount: result.applied.length,
+          remainingCritical: result.remainingCritical,
+          remainingWarnings: result.remainingWarnings,
+        },
+      }));
       return { kind: "fixed" as const, agentId: agent.id, result };
     });
     if (outcome.kind === "agent-missing") return { ok: false, error: "找不到这个助手，请刷新页面后重试" };

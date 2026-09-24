@@ -4,9 +4,10 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { AgentUpdateInput, type AgentUpdateResult } from "@/contracts/agent";
 import { WorkflowDraft } from "@/contracts/workflow";
-import { agents, workflowDefinitions } from "@/db/schema";
-import { DEMO_WORKSPACE_ID } from "@/lib/constants";
+import { agents, auditEvents, workflowDefinitions } from "@/db/schema";
+import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
+import { auditEventValues } from "@/server/audit/event-values";
 
 export async function updateAgentAction(input: unknown): Promise<AgentUpdateResult> {
   const parsed = AgentUpdateInput.safeParse(input);
@@ -39,6 +40,15 @@ export async function updateAgentAction(input: unknown): Promise<AgentUpdateResu
         .update(workflowDefinitions)
         .set({ draft: { ...draft.data, rootAgent: { ...draft.data.rootAgent, name: parsed.data.name } }, updatedAt: now })
         .where(and(eq(workflowDefinitions.id, definition.id), eq(workflowDefinitions.workspaceId, DEMO_WORKSPACE_ID)));
+      await tx.insert(auditEvents).values(auditEventValues({
+        workspaceId: DEMO_WORKSPACE_ID,
+        createdBy: DEMO_USER_ID,
+        action: "agent.updated",
+        targetType: "agent",
+        targetId: agent.id,
+        summary: `修改助手「${parsed.data.name}」的基本信息`,
+        data: {},
+      }));
       return { kind: "updated" as const, agentId: agent.id };
     });
     if (result.kind === "agent-missing") return { ok: false, error: "找不到这个助手，请刷新页面后重试" };

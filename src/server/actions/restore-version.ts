@@ -5,10 +5,11 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { AgentManifest } from "@/contracts/manifest";
 import { VersionSummary, type RestoreVersionResult } from "@/contracts/version";
-import { agentVersions, agents } from "@/db/schema";
+import { agentVersions, agents, auditEvents } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { isUniqueViolation } from "@/server/unique-violation";
+import { auditEventValues } from "@/server/audit/event-values";
 
 export async function restoreVersionAction(agentId: string, versionId: string): Promise<RestoreVersionResult> {
   if (!z.string().uuid().safeParse(agentId).success || !z.string().uuid().safeParse(versionId).success) {
@@ -16,13 +17,13 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
   }
   try {
     const [agent] = await db
-      .select({ id: agents.id, workspaceId: agents.workspaceId })
+      .select({ id: agents.id, name: agents.name, workspaceId: agents.workspaceId })
       .from(agents)
       .where(and(eq(agents.id, agentId), eq(agents.workspaceId, DEMO_WORKSPACE_ID), isNull(agents.archivedAt)))
       .limit(1);
     if (!agent) return { ok: false, error: "找不到这个助手，请刷新页面后重试" };
     const [source] = await db
-      .select({ status: agentVersions.status, manifest: agentVersions.manifest })
+      .select({ version: agentVersions.version, status: agentVersions.status, manifest: agentVersions.manifest })
       .from(agentVersions)
       .where(and(
         eq(agentVersions.id, versionId),
@@ -60,6 +61,15 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
             status: agentVersions.status,
             createdAt: agentVersions.createdAt,
           });
+          await tx.insert(auditEvents).values(auditEventValues({
+            workspaceId: agent.workspaceId,
+            createdBy: DEMO_USER_ID,
+            action: "version.restored",
+            targetType: "version",
+            targetId: created.id,
+            summary: `从版本 ${source.version} 恢复助手「${agent.name}」，生成版本 ${created.version}`,
+            data: { version: created.version, sourceVersion: source.version, sourceVersionId: versionId },
+          }));
           return VersionSummary.parse({ ...created, createdAt: created.createdAt.toISOString() });
         });
         revalidatePath(`/agents/${agentId}`);

@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { href: "/settings", label: "模型连接" },
   { href: "/schedules", label: "定时任务" },
   { href: "/runs", label: "运行记录" },
+  { href: "/activity", label: "操作记录" },
 ];
 
 export default function ConsoleLayout({ children }: { children: React.ReactNode }) {

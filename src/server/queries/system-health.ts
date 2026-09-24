@@ -20,6 +20,7 @@ export async function isDatabaseReady() {
       ('public.evaluation_cases'),
       ('public.evaluation_runs'),
       ('public.evaluation_case_results'),
+      ('public.audit_events'),
       ('public.runs_workspace_status_created_idx'),
       ('public.knowledge_sources_workspace_archived_created_idx')
     ) as required(object_name)

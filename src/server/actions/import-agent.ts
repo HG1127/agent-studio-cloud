@@ -4,10 +4,11 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { ImportAgentResult } from "@/contracts/agent";
-import { agents, agentVersions, workflowDefinitions } from "@/db/schema";
+import { agents, agentVersions, auditEvents, workflowDefinitions } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { agentImportSizeIssue, importedCollaborationKeys, normalizeAgentImport, rebindImportedWorkflow } from "@/server/domain/import-agent";
+import { auditEventValues } from "@/server/audit/event-values";
 
 export async function importAgentAction(input: unknown): Promise<ImportAgentResult> {
   const sizeIssue = agentImportSizeIssue(input);
@@ -53,6 +54,15 @@ export async function importAgentAction(input: unknown): Promise<ImportAgentResu
         createdBy: DEMO_USER_ID,
         draft: workflow,
       });
+      await tx.insert(auditEvents).values(auditEventValues({
+        workspaceId: DEMO_WORKSPACE_ID,
+        createdBy: DEMO_USER_ID,
+        action: "agent.imported",
+        targetType: "agent",
+        targetId: created.id,
+        summary: `导入助手「${imported.name}」`,
+        data: { nodeCount: Object.keys(workflow.nodes).length },
+      }));
       return created.id;
     });
     revalidatePath("/agents");

@@ -3,9 +3,10 @@
 import { and, eq, isNotNull, isNull, ne } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { AgentArchiveInput, type AgentArchiveResult } from "@/contracts/agent";
-import { agents, schedules } from "@/db/schema";
-import { DEMO_WORKSPACE_ID } from "@/lib/constants";
+import { agents, auditEvents, schedules } from "@/db/schema";
+import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
+import { auditEventValues } from "@/server/audit/event-values";
 
 export async function setAgentArchivedAction(input: unknown): Promise<AgentArchiveResult> {
   const parsed = AgentArchiveInput.safeParse(input);
@@ -22,7 +23,7 @@ export async function setAgentArchivedAction(input: unknown): Promise<AgentArchi
           eq(agents.workspaceId, DEMO_WORKSPACE_ID),
           parsed.data.archived ? isNull(agents.archivedAt) : isNotNull(agents.archivedAt),
         ))
-        .returning({ id: agents.id });
+        .returning({ id: agents.id, name: agents.name });
       if (rows.length === 0) return false;
 
       if (parsed.data.archived) {
@@ -36,6 +37,15 @@ export async function setAgentArchivedAction(input: unknown): Promise<AgentArchi
             ne(schedules.status, "paused"),
           ));
       }
+      await tx.insert(auditEvents).values(auditEventValues({
+        workspaceId: DEMO_WORKSPACE_ID,
+        createdBy: DEMO_USER_ID,
+        action: parsed.data.archived ? "agent.archived" : "agent.restored",
+        targetType: "agent",
+        targetId: rows[0].id,
+        summary: `${parsed.data.archived ? "停用" : "恢复"}助手「${rows[0].name}」`,
+        data: {},
+      }));
       return true;
     });
     if (!updated) return { ok: false, error: "助手状态已经变化，请刷新页面后重试" };

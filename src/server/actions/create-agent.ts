@@ -6,7 +6,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { AgentCreateInput, type CreateAgentResult } from "@/contracts/agent";
 import { WorkflowDraft } from "@/contracts/workflow";
-import { agents, modelConnections, workflowDefinitions } from "@/db/schema";
+import { agents, auditEvents, modelConnections, workflowDefinitions } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { realModelsEnabled } from "@/lib/model";
 import { buildAgentDraft, finalizeAgentDraft } from "@/server/domain/pipeline";
@@ -14,6 +14,7 @@ import { decryptApiKey, resolveEncryptionKey } from "@/server/domain/crypto";
 import { CompileStepListSchema, buildCompilePrompt, extractJsonObject, shouldUseLlmCompile, stepListToWorkflowDraft } from "@/server/domain/intent/llm-compile";
 import { db } from "@/lib/db";
 import { listToolCompilerCapabilities } from "@/server/tools/tool-registry";
+import { auditEventValues } from "@/server/audit/event-values";
 
 async function resolveCompileModel(): Promise<{ baseUrl: string; apiKey: string; modelId: string } | null> {
   const [connection] = await db.select({
@@ -92,6 +93,15 @@ export async function createAgentAction(input: AgentCreateInput): Promise<Create
         createdBy: DEMO_USER_ID,
         draft,
       });
+      await tx.insert(auditEvents).values(auditEventValues({
+        workspaceId: DEMO_WORKSPACE_ID,
+        createdBy: DEMO_USER_ID,
+        action: "agent.created",
+        targetType: "agent",
+        targetId: created.id,
+        summary: `创建助手「${name}」`,
+        data: { nodeCount: Object.keys(draft.nodes).length },
+      }));
       return created.id;
     });
     revalidatePath("/agents");

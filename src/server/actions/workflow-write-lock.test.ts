@@ -4,6 +4,7 @@ import { WorkflowDraft } from "@/contracts/workflow";
 const mocks = vi.hoisted(() => ({
   selectRows: [] as unknown[][],
   updates: [] as Array<{ value: Record<string, unknown> }>,
+  inserts: [] as Array<Record<string, unknown>>,
   lock: vi.fn(),
   revalidatePath: vi.fn(),
   applySafeAuditFixes: vi.fn(),
@@ -29,6 +30,12 @@ const tx = {
       },
     }),
   }),
+  insert: () => ({
+    values: async (value: Record<string, unknown>) => {
+      mocks.inserts.push(value);
+      return [];
+    },
+  }),
 };
 
 vi.mock("@/lib/db", () => ({ db: { transaction: async (run: (client: typeof tx) => unknown) => run(tx) } }));
@@ -40,6 +47,7 @@ import { saveWorkflowAction } from "@/server/actions/save-workflow";
 import { updateAgentAction } from "@/server/actions/update-agent";
 
 const AGENT_ID = "00000000-0000-4000-8000-000000000071";
+const DEFINITION_ID = "00000000-0000-4000-8000-000000000072";
 const draft = WorkflowDraft.parse({
   id: "draft-1",
   versionId: null,
@@ -57,6 +65,7 @@ const draft = WorkflowDraft.parse({
 beforeEach(() => {
   mocks.selectRows = [];
   mocks.updates = [];
+  mocks.inserts = [];
   mocks.lock.mockReset();
   mocks.revalidatePath.mockReset();
   mocks.applySafeAuditFixes.mockReset();
@@ -64,7 +73,7 @@ beforeEach(() => {
 
 describe("助手与流程并发写入", () => {
   it("保存流程时锁定助手并使用数据库中的当前名称", async () => {
-    mocks.selectRows = [[{ name: "当前名称" }], [{ id: "definition-1" }]];
+    mocks.selectRows = [[{ name: "当前名称" }], [{ id: DEFINITION_ID }]];
 
     const result = await saveWorkflowAction(AGENT_ID, draft);
 
@@ -72,6 +81,7 @@ describe("助手与流程并发写入", () => {
     expect(mocks.lock).toHaveBeenCalledOnce();
     expect(mocks.updates).toHaveLength(1);
     expect(mocks.updates[0].value.draft).toMatchObject({ rootAgent: { name: "当前名称" } });
+    expect(mocks.inserts).toHaveLength(1);
   });
 
   it("已归档或不存在的助手不能被旧页面写回流程", async () => {
@@ -102,7 +112,7 @@ describe("助手与流程并发写入", () => {
   });
 
   it("修改名称时使用同一助手行锁并同步流程名称", async () => {
-    mocks.selectRows = [[{ id: AGENT_ID }], [{ id: "definition-1", draft }]];
+    mocks.selectRows = [[{ id: AGENT_ID, name: "旧名称" }], [{ id: DEFINITION_ID, draft }]];
 
     const result = await updateAgentAction({ agentId: AGENT_ID, name: "新名称", description: "新说明" });
 
@@ -110,10 +120,11 @@ describe("助手与流程并发写入", () => {
     expect(mocks.lock).toHaveBeenCalledOnce();
     expect(mocks.updates).toHaveLength(2);
     expect(mocks.updates[1].value.draft).toMatchObject({ rootAgent: { name: "新名称" } });
+    expect(mocks.inserts).toHaveLength(1);
   });
 
   it("自动修复也锁定助手后再写入最新草稿", async () => {
-    mocks.selectRows = [[{ id: AGENT_ID }], [{ id: "definition-1", draft }]];
+    mocks.selectRows = [[{ id: AGENT_ID, name: "需要修复的助手" }], [{ id: DEFINITION_ID, draft }]];
     mocks.applySafeAuditFixes.mockReturnValue({
       draft: { ...draft, rootAgent: { ...draft.rootAgent, role: "已修复" } },
       applied: ["补充安全边界"],
@@ -128,5 +139,6 @@ describe("助手与流程并发写入", () => {
     expect(mocks.lock).toHaveBeenCalledOnce();
     expect(mocks.updates).toHaveLength(1);
     expect(mocks.updates[0].value.draft).toMatchObject({ rootAgent: { role: "已修复" } });
+    expect(mocks.inserts).toHaveLength(1);
   });
 });
