@@ -74,7 +74,7 @@ export async function RunDetail({ runId }: { runId: string }) {
         >
           下载运行报告
         </a>
-        {live ? <CancelRunButton runId={runId} /> : null}
+        {live ? <CancelRunButton runId={runId} cancelsChain={["agent_call", "handoff"].includes(run.sourceType)} /> : null}
         {!live ? <RetryRunButton runId={runId} /> : null}
       </header>
 

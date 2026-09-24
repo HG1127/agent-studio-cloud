@@ -1,5 +1,5 @@
 import { and, eq, inArray } from "drizzle-orm";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 const { appendTraceMock, cancelMock, getRunMock, revalidatePathMock } = vi.hoisted(() => ({
   appendTraceMock: vi.fn(),
@@ -21,14 +21,20 @@ const RUN_ID = "00000000-0000-4000-8000-0000000000c1";
 const CHILD_RUN_ID = "00000000-0000-4000-8000-0000000000c4";
 const GRANDCHILD_RUN_ID = "00000000-0000-4000-8000-0000000000c5";
 
+async function cleanup() {
+  await db.delete(approvals).where(inArray(approvals.runId, [RUN_ID, CHILD_RUN_ID, GRANDCHILD_RUN_ID]));
+  await db.delete(runs).where(inArray(runs.id, [CHILD_RUN_ID, GRANDCHILD_RUN_ID, RUN_ID]));
+}
+
+beforeAll(cleanup, 60_000);
+
 afterEach(async () => {
   cancelMock.mockReset();
   appendTraceMock.mockReset();
   getRunMock.mockReset();
   revalidatePathMock.mockReset();
-  await db.delete(approvals).where(inArray(approvals.runId, [RUN_ID, CHILD_RUN_ID, GRANDCHILD_RUN_ID]));
-  await db.delete(runs).where(inArray(runs.id, [CHILD_RUN_ID, GRANDCHILD_RUN_ID, RUN_ID]));
-});
+  await cleanup();
+}, 60_000);
 
 async function insertWaitingRun() {
   await db.insert(runs).values({
@@ -113,7 +119,8 @@ describe("取消运行", () => {
     cancelMock.mockResolvedValue(undefined);
     getRunMock.mockReturnValue({ cancel: cancelMock });
 
-    expect(await cancelRunAction(RUN_ID)).toEqual({ ok: true });
+    expect(await cancelRunAction(CHILD_RUN_ID)).toEqual({ ok: true });
+    expect(getRunMock).toHaveBeenCalledWith("workflow-cancel-test");
 
     const children = await db.select().from(runs).where(inArray(runs.id, [CHILD_RUN_ID, GRANDCHILD_RUN_ID]));
     expect(children).toHaveLength(2);

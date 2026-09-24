@@ -16,25 +16,41 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
   if (!z.string().uuid().safeParse(runId).success) return { ok: false, error: "运行信息不正确，请刷新页面后重试" };
   try {
     const [run] = await db
-      .select({ status: runs.status, workflowRunId: runs.workflowRunId })
+      .select({ status: runs.status, workflowRunId: runs.workflowRunId, sourceType: runs.sourceType, sourceKey: runs.sourceKey })
       .from(runs)
       .where(and(eq(runs.id, runId), eq(runs.workspaceId, DEMO_WORKSPACE_ID)))
       .limit(1);
     if (!run) return { ok: false, error: "找不到这次运行" };
     if (!LIVE_STATUSES.includes(run.status)) return { ok: false, error: "这次运行已经结束，无法取消" };
-    if (!run.workflowRunId) return { ok: false, error: "运行尚未完成启动，请稍后再试" };
+    let rootRunId = runId;
+    let root = run;
+    for (let depth = 0; depth < 3 && !root.workflowRunId; depth += 1) {
+      if (!root.sourceKey || !["agent_call", "handoff"].includes(root.sourceType)) break;
+      const parentId = /^(?:agent-call|handoff):([0-9a-f-]{36}):/i.exec(root.sourceKey)?.[1];
+      if (!parentId) break;
+      const [parent] = await db
+        .select({ status: runs.status, workflowRunId: runs.workflowRunId, sourceType: runs.sourceType, sourceKey: runs.sourceKey })
+        .from(runs)
+        .where(and(eq(runs.id, parentId), eq(runs.workspaceId, DEMO_WORKSPACE_ID)))
+        .limit(1);
+      if (!parent) return { ok: false, error: "找不到这次协作运行的上级任务，请刷新页面后重试" };
+      if (!LIVE_STATUSES.includes(parent.status)) break;
+      rootRunId = parentId;
+      root = parent;
+    }
+    if (!root.workflowRunId) return { ok: false, error: "运行尚未完成启动，请稍后再试" };
 
-    await getRun(run.workflowRunId).cancel();
+    await getRun(root.workflowRunId).cancel();
     const now = new Date();
     const updated = await db.transaction(async (tx) => {
       const rows = await tx
         .update(runs)
         .set({ status: "cancelled", error: "已由员工取消", finishedAt: now, updatedAt: now })
-        .where(and(eq(runs.id, runId), inArray(runs.status, LIVE_STATUSES)))
+        .where(and(eq(runs.id, rootRunId), inArray(runs.status, LIVE_STATUSES)))
         .returning({ id: runs.id });
       if (rows.length > 0) {
         const descendantIds: string[] = [];
-        let parents = [runId];
+        let parents = [rootRunId];
         for (let depth = 0; depth < 3 && parents.length > 0; depth += 1) {
           const children = await tx
             .select({ id: runs.id })
@@ -60,7 +76,7 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
           .set({ status: "rejected", note: "运行已取消，确认未继续", decidedAt: now, updatedAt: now })
           .where(
             and(
-              inArray(approvals.runId, [runId, ...descendantIds]),
+              inArray(approvals.runId, [rootRunId, ...descendantIds]),
               eq(approvals.workspaceId, DEMO_WORKSPACE_ID),
               eq(approvals.status, "pending"),
             ),
@@ -69,8 +85,9 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
       return rows;
     });
     if (updated.length === 0) return { ok: false, error: "运行已在取消前结束，请刷新页面查看结果" };
-    await completeEvaluationForRun(runId, null, "运行已取消");
+    await completeEvaluationForRun(rootRunId, null, "运行已取消");
     revalidatePath(`/runs/${runId}`);
+    if (rootRunId !== runId) revalidatePath(`/runs/${rootRunId}`);
     revalidatePath("/runs");
     return { ok: true };
   } catch (error) {

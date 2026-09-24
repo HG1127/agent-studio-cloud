@@ -105,6 +105,7 @@ export async function getRunView(runId: string, workspaceId: string): Promise<Ru
     agentId: row.run.agentId,
     agentName: row.agentName,
     status: row.run.status,
+    sourceType: row.run.sourceType,
     input: row.run.input,
     result: row.run.result ?? null,
     error: row.run.error ?? null,

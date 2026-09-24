@@ -4,13 +4,16 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { cancelRunAction } from "@/server/actions/cancel-run";
 
-export function CancelRunButton({ runId }: { runId: string }) {
+export function CancelRunButton({ runId, cancelsChain = false }: { runId: string; cancelsChain?: boolean }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function cancel() {
-    if (!window.confirm("确定取消这次运行吗？已经完成的外部操作不会自动撤销。")) return;
+    const message = cancelsChain
+      ? "这是协作或交接子任务。取消后会同时停止上级任务和同一执行链中的其他子任务；已经完成的外部操作不会自动撤销。确定继续吗？"
+      : "确定取消这次运行吗？已经完成的外部操作不会自动撤销。";
+    if (!window.confirm(message)) return;
     setPending(true);
     setError(null);
     try {

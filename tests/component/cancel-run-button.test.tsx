@@ -32,4 +32,15 @@ describe("CancelRunButton", () => {
     await user.click(screen.getByRole("button", { name: "取消运行" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("运行已经结束");
   });
+
+  it("从协作子任务取消时明确提示会停止整条执行链", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const user = userEvent.setup();
+    render(<CancelRunButton runId="00000000-0000-4000-8000-000000000051" cancelsChain />);
+
+    await user.click(screen.getByRole("button", { name: "取消运行" }));
+
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("同时停止上级任务和同一执行链中的其他子任务"));
+    expect(cancelMock).not.toHaveBeenCalled();
+  });
 });

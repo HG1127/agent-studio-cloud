@@ -62,6 +62,7 @@ export const RunView = z.object({
   agentId: z.string().uuid(),
   agentName: z.string(),
   status: RunStatus,
+  sourceType: RunSourceType.default("manual"),
   input: z.record(z.string(), z.unknown()),
   result: z.unknown().nullable(),
   error: z.string().nullable(),
