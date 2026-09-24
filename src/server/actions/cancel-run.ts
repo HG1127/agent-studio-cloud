@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, like, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getRun } from "workflow/api";
 import { z } from "zod";
@@ -33,12 +33,34 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
         .where(and(eq(runs.id, runId), inArray(runs.status, LIVE_STATUSES)))
         .returning({ id: runs.id });
       if (rows.length > 0) {
+        const descendantIds: string[] = [];
+        let parents = [runId];
+        for (let depth = 0; depth < 3 && parents.length > 0; depth += 1) {
+          const children = await tx
+            .select({ id: runs.id })
+            .from(runs)
+            .where(and(
+              eq(runs.workspaceId, DEMO_WORKSPACE_ID),
+              or(...parents.flatMap((parentId) => [
+                like(runs.sourceKey, `agent-call:${parentId}:%`),
+                like(runs.sourceKey, `handoff:${parentId}:%`),
+              ])),
+            ));
+          parents = children.map((child) => child.id).filter((id) => !descendantIds.includes(id));
+          descendantIds.push(...parents);
+        }
+        if (descendantIds.length > 0) {
+          await tx
+            .update(runs)
+            .set({ status: "cancelled", error: "上级运行已取消", finishedAt: now, updatedAt: now })
+            .where(and(inArray(runs.id, descendantIds), inArray(runs.status, LIVE_STATUSES)));
+        }
         await tx
           .update(approvals)
           .set({ status: "rejected", note: "运行已取消，确认未继续", decidedAt: now, updatedAt: now })
           .where(
             and(
-              eq(approvals.runId, runId),
+              inArray(approvals.runId, [runId, ...descendantIds]),
               eq(approvals.workspaceId, DEMO_WORKSPACE_ID),
               eq(approvals.status, "pending"),
             ),
