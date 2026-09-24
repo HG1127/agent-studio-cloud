@@ -206,6 +206,28 @@ describe("取消运行", () => {
     expect(appendTraceMock).not.toHaveBeenCalled();
   });
 
+  it("拒绝超大步骤输出并把步骤明确记为失败", async () => {
+    await insertWaitingRun();
+
+    await expect(persistStep({
+      runId: RUN_ID, nodeId: "large_step", nodeTitle: "超大结果", nodeType: "ai",
+      status: "succeeded", output: { answer: "x".repeat(1024 * 1024) },
+    })).rejects.toThrow("步骤「超大结果」的输出不能超过 1MB");
+
+    const [step] = await db.select().from(runSteps).where(and(
+      eq(runSteps.runId, RUN_ID), eq(runSteps.nodeId, "large_step"),
+    ));
+    expect(step).toMatchObject({
+      status: "failed",
+      output: null,
+      error: "步骤「超大结果」的输出不能超过 1MB",
+    });
+    expect(appendTraceMock).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "step.failed",
+      detail: "步骤「超大结果」的输出不能超过 1MB",
+    }));
+  });
+
   it("运行取消后迟到的确认结果不能覆盖已关闭状态", async () => {
     await insertWaitingRun();
     const [approval] = await db.select().from(approvals).where(and(

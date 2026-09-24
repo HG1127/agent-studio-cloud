@@ -8,6 +8,12 @@ import { db } from "@/lib/db";
 import { approvals, runSteps, runs } from "@/db/schema";
 import { appendTrace } from "@/server/steps/trace-step";
 import { completeEvaluationForRun } from "@/server/services/evaluation-state";
+import {
+  jsonStorageIssue,
+  MAX_RUN_CONTEXT_BYTES,
+  MAX_RUN_RESULT_BYTES,
+  MAX_STEP_OUTPUT_BYTES,
+} from "@/server/domain/runtime/json-storage";
 
 async function requireRun(runId: string) {
   const [run] = await db
@@ -56,6 +62,13 @@ export interface PersistStepInput {
 // upsert run_steps（run_id+node_id 唯一）+ runs.stepStates + trace step.*；running 计一次尝试
 export async function persistStep(step: PersistStepInput): Promise<void> {
   "use step";
+  if (step.output !== undefined && step.output !== null) {
+    const issue = jsonStorageIssue(step.output, MAX_STEP_OUTPUT_BYTES, `步骤「${step.nodeTitle ?? step.nodeId}」的输出`);
+    if (issue) {
+      await persistStep({ ...step, status: "failed", output: null, error: issue });
+      throw new FatalError(issue);
+    }
+  }
   const now = new Date();
   const starting = step.status === "running";
   const title = step.nodeTitle ?? step.nodeId;
@@ -132,6 +145,10 @@ export async function finalizeRun(
   contextOutputs: Record<string, unknown> = result,
 ): Promise<void> {
   "use step";
+  const resultIssue = jsonStorageIssue(result, MAX_RUN_RESULT_BYTES, "运行结果");
+  if (resultIssue) throw new FatalError(resultIssue);
+  const contextIssue = jsonStorageIssue(contextOutputs, MAX_RUN_CONTEXT_BYTES, "运行完整上下文");
+  if (contextIssue) throw new FatalError(contextIssue);
   const now = new Date();
   const updated = await db
     .update(runs)
