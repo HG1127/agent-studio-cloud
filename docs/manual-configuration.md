@@ -5,6 +5,8 @@
 ## 当前待处理
 
 - **应用数据库迁移**：在能稳定连接 Neon 直连地址的环境执行 `pnpm db:migrate`。当前待确认应用的迁移包括 `0007_faithful_thunderball.sql`（长期经验）和 `0008_flippant_inertia.sql`（自动验收）；本地于 2026-09-24 多次尝试均在连接阶段超时，未确认迁移成功。
+- **GitHub 集成测试与生产迁移**：在仓库 Actions 中添加密钥 `NEON_API_KEY` 和变量 `NEON_PROJECT_ID`。CI 会据此创建并清理临时数据库分支；生产迁移工作流只允许从 `main` 手动触发，并要求输入 `MIGRATE_PRODUCTION`，执行前会保留一个 Neon 数据分支。
+- **Vercel 运行环境**：至少配置池化连接 `DATABASE_URL_POOLED`、迁移直连 `DATABASE_URL` 与 `MODEL_MOCK=1`；其余变量按 `.env.example` 和下列能力逐项启用，预览与生产环境需分别核对。
 - **站点访问保护与登录**：确定身份提供方和正式域名后配置 Auth.js；在此之前保持固定演示工作区，不开放公网生产写入。
 - **真实模型**：配置模型连接加密主钥并完成站点访问保护后，才启用 `REAL_MODELS_ENABLED=1`。
 - **真实业务工具**：逐个提供外部系统账号、权限范围和回执校验规则；未配置的工具继续在启动前明确阻止，不静默模拟。
