@@ -17,7 +17,7 @@ import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { cancelRunAction } from "@/server/actions/cancel-run";
 import { recordDecision, requestApproval } from "@/server/steps/approval-step";
-import { failRun, finalizeRun, initializeRun, persistStep } from "@/server/steps/run-state";
+import { failRun, finalizeRun, initializeRun, markRunRunning, persistStep } from "@/server/steps/run-state";
 
 const RUN_ID = "00000000-0000-4000-8000-0000000000c1";
 const CHILD_RUN_ID = "00000000-0000-4000-8000-0000000000c4";
@@ -239,5 +239,16 @@ describe("取消运行", () => {
     ));
     expect(rows).toHaveLength(1);
     expect(appendTraceMock).toHaveBeenCalledOnce();
+  });
+
+  it("运行取消后恢复动作明确失败且不写继续轨迹", async () => {
+    await insertWaitingRun();
+    await db.update(runs).set({ status: "cancelled", error: "已由员工取消" }).where(eq(runs.id, RUN_ID));
+
+    await expect(markRunRunning(RUN_ID)).resolves.toBe(false);
+
+    const [run] = await db.select().from(runs).where(eq(runs.id, RUN_ID));
+    expect(run.status).toBe("cancelled");
+    expect(appendTraceMock).not.toHaveBeenCalled();
   });
 });

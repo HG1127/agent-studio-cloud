@@ -58,7 +58,8 @@ export async function completeWait(args: {
     status: "succeeded",
     output: args.output,
   });
-  await markRunRunning(args.runId);
+  const resumed = await markRunRunning(args.runId);
+  if (!resumed) throw new FatalError("运行已经结束，不能继续等待后的步骤");
   await appendTrace({
     runId: args.runId,
     nodeId: args.node.id,

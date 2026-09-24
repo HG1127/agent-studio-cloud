@@ -173,7 +173,7 @@ export async function failRun(runId: string, error: string): Promise<void> {
 }
 
 // 等待结束后把 run 拉回 running 并留下持久轨迹（瞬态状态不可断言，轨迹可）
-export async function markRunRunning(runId: string): Promise<void> {
+export async function markRunRunning(runId: string): Promise<boolean> {
   "use step";
   const now = new Date();
   const updated = await db
@@ -182,6 +182,7 @@ export async function markRunRunning(runId: string): Promise<void> {
     .where(and(eq(runs.id, runId), inArray(runs.status, ["waiting_approval", "waiting_event"])))
     .returning({ id: runs.id });
   // 早退在轨迹前：挂起期间 run 已被置终态（手工 DB 路径可达）时不得翻回 running，终态行也不留 run.resumed
-  if (updated.length === 0) return;
+  if (updated.length === 0) return false;
   await appendTrace({ runId, kind: "run.resumed", title: "流程继续执行" });
+  return true;
 }

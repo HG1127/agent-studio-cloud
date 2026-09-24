@@ -298,7 +298,8 @@ export async function agentRunWorkflow(
         const hook = createHook<{ decision: "approved" | "rejected"; note?: string }>({ token });
         const decision = await hook;
         await recordDecision({ runId, node, approvalId, decision });
-        await markRunRunning(runId);
+        const resumed = await markRunRunning(runId);
+        if (!resumed) throw new FatalError("运行已经结束，不能继续确认后的步骤");
         if (decision.decision === "rejected") {
           await appendTrace({
             runId, nodeId: node.id, kind: "run.rejected_stop", level: "warn",
