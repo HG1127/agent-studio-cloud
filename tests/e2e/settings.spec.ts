@@ -35,13 +35,13 @@ test("连接增改测删与发布选模可贯通，运行保留模型名和用�
   const name = `连接验收-${Date.now()}`;
   const renamed = `${name}-编辑`;
   const fakeKey = "sk-e2e-not-real-1234";
-  const requests: Array<{ model: string; authorization: string | undefined }> = [];
+  const requests: Array<{ model: string; authorization: string | undefined; isProbe: boolean }> = [];
   let rejectRequests = false;
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     const body = JSON.parse(Buffer.concat(chunks).toString());
-    requests.push({ model: body.model, authorization: request.headers.authorization });
+    requests.push({ model: body.model, authorization: request.headers.authorization, isProbe: JSON.stringify(body.messages ?? []).includes("连通性测试助手") });
     response.setHeader("content-type", "application/json");
     if (rejectRequests) {
       response.writeHead(401).end(JSON.stringify({ error: { message: `invalid ${fakeKey}` } }));
@@ -76,7 +76,7 @@ test("连接增改测删与发布选模可贯通，运行保留模型名和用�
     await expect(row).toBeVisible({ timeout: 30_000 });
     await row.getByRole("button", { name: "测试连接", exact: true }).click();
     await expect(page.getByRole("status")).toContainText("连接正常", { timeout: 30_000 });
-    expect(requests[0]).toEqual({ model: "first-model", authorization: `Bearer ${fakeKey}` });
+    expect(requests[0]).toMatchObject({ model: "first-model", authorization: `Bearer ${fakeKey}`, isProbe: true });
 
     rejectRequests = true;
     await row.getByRole("button", { name: "测试连接", exact: true }).click();
@@ -98,8 +98,9 @@ test("连接增改测删与发布选模可贯通，运行保留模型名和用�
     await page.waitForURL(/\/runs\/[0-9a-f-]+$/, { timeout: 60_000 });
     await expect(page.locator("header").getByText("已完成", { exact: true })).toBeVisible({ timeout: 90_000 });
     await expect(page.getByText(/本地协议验收输出/).first()).toBeVisible();
-    expect(requests.length).toBeGreaterThan(0);
-    expect(requests.every((request) => request.model === "selected-model:latest")).toBe(true);
+    const runRequests = requests.filter((request) => !request.isProbe);
+    expect(runRequests.length).toBeGreaterThan(0);
+    expect(runRequests.map((request) => request.model)).toEqual(Array(runRequests.length).fill("selected-model:latest"));
     const runId = page.url().split("/").pop()!;
     const outputs = await sql`select output from run_steps where run_id = ${runId} and node_type = 'ai'`;
     expect(outputs.length).toBeGreaterThan(0);
