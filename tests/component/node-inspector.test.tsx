@@ -35,6 +35,17 @@ const HANDOFF_NODE = WorkflowNode.parse({
   type: "handoff",
   toAgent: { id: "", versionId: "" },
 });
+const WAIT_NODE = WorkflowNode.parse({
+  id: "step_7", title: "等待回执", type: "wait",
+  wait: { mode: "delay", durationMs: 60_000, eventKey: "", timeoutMs: 0 },
+});
+const MEMORY_NODE = WorkflowNode.parse({
+  id: "step_8", title: "参考经验", type: "memory", memory: { mode: "read", limit: 5 },
+});
+const LOOP_NODE = WorkflowNode.parse({
+  id: "step_9", title: "逐项检查", type: "loop",
+  loop: { collectionPath: "input.items", itemKey: "item", maxIterations: 20, bodyNext: null, exitNext: null },
+});
 
 describe("NodeInspector", () => {
   it("修改节点名称时回调携带新值", () => {
@@ -66,6 +77,28 @@ describe("NodeInspector", () => {
     render(<NodeInspector node={CONDITION_NODE} onNodeChange={vi.fn()} onNodeDelete={vi.fn()} />);
     expect(screen.getByLabelText("判断说明")).toBeInTheDocument();
     expect(screen.queryByLabelText("说明")).not.toBeInTheDocument();
+  });
+
+  it("条件节点可以配置数据、比较方式和分支", async () => {
+    const onNodeChange = vi.fn();
+    const user = userEvent.setup();
+    render(<NodeInspector node={CONDITION_NODE} onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("判断数据"), { target: { value: "input.total" } });
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({ condition: expect.objectContaining({ source: "input.total" }) }));
+    await user.click(screen.getByRole("button", { name: "添加情况" }));
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({ condition: expect.objectContaining({ branches: [expect.objectContaining({ label: "情况 1" })] }) }));
+  });
+
+  it("等待、经验和逐项处理节点暴露运行所需设置", () => {
+    const onWait = vi.fn();
+    const { rerender } = render(<NodeInspector node={WAIT_NODE} onNodeChange={onWait} onNodeDelete={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("等待秒数"), { target: { value: "5" } });
+    expect(onWait).toHaveBeenLastCalledWith(expect.objectContaining({ wait: expect.objectContaining({ durationMs: 5000 }) }));
+
+    rerender(<NodeInspector node={MEMORY_NODE} onNodeChange={vi.fn()} onNodeDelete={vi.fn()} />);
+    expect(screen.getByLabelText("最多参考条数")).toHaveValue(5);
+    rerender(<NodeInspector node={LOOP_NODE} onNodeChange={vi.fn()} onNodeDelete={vi.fn()} />);
+    expect(screen.getByLabelText("列表数据")).toHaveValue("input.items");
   });
 
   it("知识节点可以单独修改检索内容", () => {

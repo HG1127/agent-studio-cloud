@@ -15,10 +15,11 @@ import "@xyflow/react/dist/style.css";
 import type { AgentTargetOption } from "@/contracts/agent";
 import type { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
 import { saveWorkflowAction } from "@/server/actions/save-workflow";
-import { workflowNodeTypes, type WorkflowFlowNode } from "./CustomNodes";
+import { NODE_TYPE_LABELS, workflowNodeTypes, type WorkflowFlowNode } from "./CustomNodes";
 import { autoLayout } from "./layout";
 import { NodeInspector } from "./NodeInspector";
 import { updateWorkflowNode } from "./update-workflow-node";
+import { ADDABLE_NODE_TYPES, createWorkflowNode } from "./create-workflow-node";
 
 interface FlowCanvasProps {
   agentId: string;
@@ -188,6 +189,7 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets }: FlowC
   const [showControlNodes, setShowControlNodes] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [newNodeType, setNewNodeType] = useState<(typeof ADDABLE_NODE_TYPES)[number] | "">("");
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
 
   const visibleNodes = useMemo(
@@ -278,6 +280,16 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets }: FlowC
     setSelectedId((current) => (current === nodeId ? null : current));
   }, []);
 
+  const handleNodeAdd = useCallback(() => {
+    if (!newNodeType) return;
+    setDraft((current) => {
+      const created = createWorkflowNode(current, newNodeType);
+      setSelectedId(created.nodeId);
+      return created.draft;
+    });
+    setNewNodeType("");
+  }, [newNodeType]);
+
   async function handleSave() {
     setPending(true);
     setFeedback(null);
@@ -304,7 +316,27 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets }: FlowC
           />
           显示控制节点
         </label>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 text-sm text-gray-600">
+            新增步骤
+            <select
+              aria-label="新增步骤类型"
+              value={newNodeType}
+              onChange={(event) => setNewNodeType(event.target.value as (typeof ADDABLE_NODE_TYPES)[number] | "")}
+              className="rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+            >
+              <option value="">选择类型</option>
+              {ADDABLE_NODE_TYPES.map((type) => <option key={type} value={type}>{NODE_TYPE_LABELS[type]}</option>)}
+            </select>
+          </label>
+          <button
+            type="button"
+            disabled={!newNodeType}
+            onClick={handleNodeAdd}
+            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:border-gray-500 disabled:text-gray-400"
+          >
+            添加
+          </button>
           {feedback ? (
             <span role={feedback.ok ? "status" : "alert"} className={feedback.ok ? "text-sm text-emerald-600" : "text-sm text-red-600"}>
               {feedback.text}
