@@ -33,7 +33,7 @@ export async function agentRunWorkflow(runId: string, manifest: AgentManifest, i
         return { status: "completed" };
       }
       if (node.type === "ai") {
-        const r = await runModelStep({ runId, node, outputs, input });
+        const r = await runModelStep({ runId, node, manifest, outputs, input });
         outputs[node.id] = r.output;
         currentId = node.next;
         continue;
@@ -63,7 +63,7 @@ export async function agentRunWorkflow(runId: string, manifest: AgentManifest, i
         continue;
       }
       if (node.type === "human") {
-        const { approvalId, token } = await requestApproval({ runId, node });
+        const { approvalId, token } = await requestApproval({ runId, node, outputs, nodes: draft.nodes });
         const hook = createHook<{ decision: "approved" | "rejected"; note?: string }>({ token });
         const decision = await hook;
         await recordDecision({ runId, node, approvalId, decision });

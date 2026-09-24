@@ -17,6 +17,7 @@ import { saveWorkflowAction } from "@/server/actions/save-workflow";
 import { workflowNodeTypes, type WorkflowFlowNode } from "./CustomNodes";
 import { autoLayout } from "./layout";
 import { NodeInspector } from "./NodeInspector";
+import { updateWorkflowNode } from "./update-workflow-node";
 
 interface FlowCanvasProps {
   agentId: string;
@@ -64,7 +65,7 @@ function outgoingSpecs(node: WorkflowNode): EdgeSpec[] {
 }
 
 function patchNode(draft: WorkflowDraft, nodeId: string, node: WorkflowNode): WorkflowDraft {
-  return { ...draft, nodes: { ...draft.nodes, [nodeId]: node } };
+  return updateWorkflowNode(draft, nodeId, node);
 }
 
 function isStructuralNode(node: WorkflowNode | undefined): boolean {

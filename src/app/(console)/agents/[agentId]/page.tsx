@@ -7,6 +7,7 @@ import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { auditWorkflow, type DesignAuditResult } from "@/server/domain/audit";
 import { getAgentDetail } from "@/server/queries/agents";
 import { listVersions } from "@/server/queries/versions";
+import { listModelConnections } from "@/server/queries/model-connections";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +30,8 @@ export default async function AgentDetailPage({
   const detail = await getAgentDetail(agentId, DEMO_WORKSPACE_ID);
   if (!detail) notFound();
   const audit = detail.draft ? auditWorkflow(detail.draft) : null;
-  const versions = await listVersions(agentId);
+  const [versions, connections] = await Promise.all([listVersions(agentId), listModelConnections()]);
+  const defaultModelLabel = process.env.MODEL_MOCK === "1" ? "演示模式" : process.env.MODEL_ID?.trim() ? "服务端默认模型" : "尚未配置默认模型";
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-6 p-8">
       <Link href="/agents" className="w-fit text-sm text-gray-500 hover:text-gray-700">
@@ -49,7 +51,7 @@ export default async function AgentDetailPage({
           这个助手还没有流程草稿
         </section>
       )}
-      <VersionPanel agentId={agentId} versions={versions} />
+      <VersionPanel agentId={agentId} versions={versions} connections={connections} defaultModelLabel={defaultModelLabel} />
       <RunLauncher agentId={agentId} />
     </main>
   );

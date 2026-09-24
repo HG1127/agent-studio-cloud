@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import type { ApprovalView } from "@/contracts/run";
+import type { ApprovalReview, ApprovalView } from "@/contracts/run";
 import { decideApprovalAction } from "@/server/actions/decide-approval";
 
 // 审批面板：runs 详情页（Task 13）挂载。界面只显示业务信息，不出现内部标识。
@@ -18,6 +18,7 @@ export function ApprovalPanel({ runId, approval }: { runId: string; approval: Ap
         <p className="text-sm text-gray-700">
           「{approval.nodeTitle}」的处理结果：{approval.status === "approved" ? "已确认" : "未获确认"}
         </p>
+        <ReviewContent review={approval.review} title="本次确认的草稿" />
         {approval.note ? (
           <p className="text-sm text-gray-500">
             备注：<span>{approval.note}</span>
@@ -43,6 +44,7 @@ export function ApprovalPanel({ runId, approval }: { runId: string; approval: Ap
     <ApprovalForm
       role={approval.role}
       reason={approval.reason}
+      review={approval.review}
       submitting={submitting}
       error={error}
       onDecide={handleDecide}
@@ -50,15 +52,30 @@ export function ApprovalPanel({ runId, approval }: { runId: string; approval: Ap
   );
 }
 
+function ReviewContent({ review, title = "待确认草稿" }: { review: ApprovalReview | null; title?: string }) {
+  if (!review) {
+    return <p className="text-sm text-amber-800">这一步没有生成可展示的正文，请核对运行输入和上游步骤结果。</p>;
+  }
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-gray-200 bg-white p-3">
+      <h3 className="text-sm font-semibold">{title}</h3>
+      <p className="text-xs text-gray-500">来自「{review.sourceTitle}」</p>
+      <p className="max-h-80 overflow-auto whitespace-pre-wrap break-words text-sm text-gray-800">{review.content}</p>
+    </div>
+  );
+}
+
 function ApprovalForm({
   role,
   reason,
+  review,
   submitting,
   error,
   onDecide,
 }: {
   role: string;
   reason: string;
+  review: ApprovalReview | null;
   submitting: "approved" | "rejected" | null;
   error: string | null;
   onDecide: (decision: "approved" | "rejected", note: string) => Promise<void>;
@@ -72,6 +89,7 @@ function ApprovalForm({
         负责人：<span>{role}</span>
       </p>
       <p className="text-sm text-gray-700">{reason}</p>
+      <ReviewContent review={review} />
       <label className="flex flex-col gap-1 text-sm text-gray-700">
         备注
         <textarea

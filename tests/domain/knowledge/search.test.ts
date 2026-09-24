@@ -19,6 +19,28 @@ describe("scoreChunks", () => {
     expect(hits.length).toBe(2);
   });
 
+  it("中文任务句能命中已上传资料中的主题短语", () => {
+    const hits = scoreChunks("检索海蓝灯塔二四资料", [
+      { sourceId: "pilot", sourceName: "客户咨询处理验收资料", chunkIndex: 0, content: "客户退货回复须负责人确认。验收标记：海蓝灯塔二四。" },
+      { sourceId: "other", sourceName: "其他资料", chunkIndex: 0, content: "这是一份没有对应验收标记的资料。" },
+    ]);
+    expect(hits.map((hit) => hit.sourceId)).toEqual(["pilot"]);
+  });
+
+  it("完整查询命中排在通用片段命中之前，不被结果上限挤掉", () => {
+    const query = "读取资料生成回复方案f1a2b3c4-1234-5678-9abc-123456789abc";
+    const common = Array.from({ length: 12 }, (_, index) => ({
+      sourceId: `common-${index}`,
+      sourceName: "通用资料",
+      chunkIndex: index,
+      content: "读取资料生成回复方案。".repeat(20),
+    }));
+    const exact = { sourceId: "exact", sourceName: "本次上传的资料", chunkIndex: 0, content: `${query}\n客户咨询处理规则。` };
+    const hits = scoreChunks(query, [...common, exact], { limit: 8 });
+    expect(hits).toHaveLength(8);
+    expect(hits[0].sourceId).toBe("exact");
+  });
+
   it("多词英文查询按空白拆分逐词命中", () => {
     const hits = scoreChunks("refund policy", [{ sourceId: "s4", sourceName: "en", chunkIndex: 0, content: "Our refund policy is simple." }]);
     expect(hits).toHaveLength(1);

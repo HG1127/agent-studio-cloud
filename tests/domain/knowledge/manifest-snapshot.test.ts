@@ -15,7 +15,7 @@ const draft = {
 
 describe("manifest 知识快照", () => {
   it("buildManifest 把传入的来源 ID 冻结进 manifest", () => {
-    const manifest = buildManifest(draft as never, { modelId: "mock", mock: true, knowledgeSnapshot: ["00000000-0000-4000-8000-00000000000a", "00000000-0000-4000-8000-00000000000b"] });
+    const manifest = buildManifest(draft as never, { modelId: "mock", mock: true, connectionId: null, knowledgeSnapshot: ["00000000-0000-4000-8000-00000000000a", "00000000-0000-4000-8000-00000000000b"] });
     expect(manifest.knowledgeSnapshot).toEqual(["00000000-0000-4000-8000-00000000000a", "00000000-0000-4000-8000-00000000000b"]);
   });
 

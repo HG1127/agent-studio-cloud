@@ -6,6 +6,10 @@ export function isModelMock(): boolean {
   return process.env.MODEL_MOCK === "1";
 }
 
+export function realModelsEnabled(): boolean {
+  return process.env.NODE_ENV !== "production" || process.env.REAL_MODELS_ENABLED === "1";
+}
+
 export function getModel() {
   const provider = createOpenAICompatible({
     name: "custom-model",

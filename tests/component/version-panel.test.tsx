@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { VersionPanel } from "@/features/agents/VersionPanel";
+import type { ModelConnectionView } from "@/contracts/connections";
 
 const { actionMock, refreshMock } = vi.hoisted(() => ({
   actionMock: vi.fn(),
@@ -27,8 +28,8 @@ const VERSIONS = [
   },
 ];
 
-function renderPanel(versions = VERSIONS) {
-  return render(<VersionPanel agentId={AGENT_ID} versions={versions} />);
+function renderPanel(versions = VERSIONS, connections: ModelConnectionView[] = []) {
+  return render(<VersionPanel agentId={AGENT_ID} versions={versions} connections={connections} defaultModelLabel="演示模式" />);
 }
 
 describe("VersionPanel", () => {
@@ -59,12 +60,31 @@ describe("VersionPanel", () => {
     renderPanel();
     await user.click(screen.getByRole("button", { name: "发布新版本" }));
     await waitFor(() => {
-      expect(actionMock).toHaveBeenCalledWith(AGENT_ID);
+      expect(actionMock).toHaveBeenCalledWith(AGENT_ID, undefined);
     });
     await waitFor(() => {
       expect(refreshMock).toHaveBeenCalledTimes(1);
     });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("选定连接和模型后发布，模型名中的冒号也完整保留", async () => {
+    actionMock.mockResolvedValue({ ok: true, exempted: [] });
+    const user = userEvent.setup();
+    const connection: ModelConnectionView = {
+      id: "00000000-0000-4000-8000-0000000000c1", name: "主力模型", baseUrl: "https://api.example.com/v1",
+      apiKeyHint: "****1234", modelIds: ["test-model:latest"], isDefaultCompile: false, createdAt: "2026-09-23T00:00:00.000Z",
+    };
+    renderPanel(VERSIONS, [connection]);
+    await user.selectOptions(screen.getByRole("combobox", { name: "运行模型" }), screen.getByRole("option", { name: "主力模型 / test-model:latest" }));
+    await user.click(screen.getByRole("button", { name: "发布新版本" }));
+    await waitFor(() => expect(actionMock).toHaveBeenCalledWith(AGENT_ID, { connectionId: connection.id, modelId: "test-model:latest" }));
+  });
+
+  it("服务端默认是真实模型时，不标成演示模式", () => {
+    render(<VersionPanel agentId={AGENT_ID} versions={[]} connections={[]} defaultModelLabel="服务端默认模型" />);
+    expect(screen.getByRole("option", { name: "服务端默认模型" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "演示模式" })).not.toBeInTheDocument();
   });
 
   it("发布被门禁拒绝时展示失败原因与阻塞问题列表，不刷新", async () => {
@@ -81,6 +101,27 @@ describe("VersionPanel", () => {
     expect(screen.getByText(/没有定义最终交付物/)).toBeInTheDocument();
     expect(screen.getByText(/流程出现死路/)).toBeInTheDocument();
     expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it("发布请求中断后显示可读错误，保留模型选择并允许重试", async () => {
+    actionMock.mockRejectedValueOnce(new Error("network failure"));
+    actionMock.mockResolvedValueOnce({ ok: true, exempted: [] });
+    const user = userEvent.setup();
+    const connection: ModelConnectionView = {
+      id: "00000000-0000-4000-8000-0000000000c1", name: "主力模型", baseUrl: "https://api.example.com/v1",
+      apiKeyHint: "****1234", modelIds: ["test-model:latest"], isDefaultCompile: false, createdAt: "2026-09-23T00:00:00.000Z",
+    };
+    renderPanel(VERSIONS, [connection]);
+    const selected = JSON.stringify([connection.id, "test-model:latest"]);
+    await user.selectOptions(screen.getByRole("combobox", { name: "运行模型" }), selected);
+    await user.click(screen.getByRole("button", { name: "发布新版本" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("发布失败，请稍后重试");
+    expect(screen.getByRole("button", { name: "发布新版本" })).toBeEnabled();
+    expect(screen.getByRole("combobox", { name: "运行模型" })).toHaveValue(selected);
+    expect(refreshMock).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "发布新版本" }));
+    await waitFor(() => expect(refreshMock).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("发布中按钮不可重复点击", async () => {

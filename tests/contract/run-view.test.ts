@@ -116,11 +116,16 @@ describe("ApprovalView", () => {
     status: "pending",
     role: "业务负责人",
     reason: "确认处理方案后流程才会继续",
+    review: null,
     note: null,
     decidedAt: null,
   };
   it("直接 parse 审批行", () => {
     expect(ApprovalView.parse(approvalFixture).status).toBe("pending");
+  });
+  it("保留与确认记录绑定的正文", () => {
+    const review = { sourceNodeId: "draft", sourceTitle: "生成回复草稿", content: "您好，建议先核对订单凭证。" };
+    expect(ApprovalView.parse({ ...approvalFixture, review }).review).toEqual(review);
   });
   it("拒绝未知审批状态", () => {
     expect(ApprovalView.safeParse({ ...approvalFixture, status: "skipped" }).success).toBe(false);

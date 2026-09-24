@@ -11,6 +11,7 @@ import {
   runSteps,
   traceEvents,
   approvals,
+  modelConnections,
 } from "@/db/schema";
 
 function cols(table: PgTable): Record<string, Column> {
@@ -46,6 +47,7 @@ const businessTables = [
   runSteps,
   traceEvents,
   approvals,
+  modelConnections,
 ] as const;
 
 const createdByTables = [
@@ -53,6 +55,7 @@ const createdByTables = [
   agentVersions,
   workflowDefinitions,
   runs,
+  modelConnections,
 ] as const;
 
 const tableSqlNames: Array<[PgTable, string]> = [
@@ -65,10 +68,11 @@ const tableSqlNames: Array<[PgTable, string]> = [
   [runSteps, "run_steps"],
   [traceEvents, "trace_events"],
   [approvals, "approvals"],
+  [modelConnections, "model_connections"],
 ];
 
 describe("M1 schema 形状", () => {
-  it("九张表的数据库表名按 snake_case 落库", () => {
+  it("十张表的数据库表名按 snake_case 落库", () => {
     for (const [table, name] of tableSqlNames) {
       expect(tableName(table)).toBe(name);
     }
@@ -81,7 +85,7 @@ describe("M1 schema 形状", () => {
     }
   });
 
-  it("八张业务表都带租户样板列 workspace_id/created_at/updated_at，四张核心表另带 created_by", () => {
+  it("九张业务表都带租户样板列 workspace_id/created_at/updated_at，五张核心表另带 created_by", () => {
     for (const table of businessTables) {
       expect(expectColumn(table, "workspaceId", "workspace_id", "PgUUID").notNull).toBe(true);
       for (const prop of ["createdAt", "updatedAt"] as const) {
@@ -208,5 +212,20 @@ describe("M1 schema 形状", () => {
     expect(decidedAt.notNull).toBe(false);
     const nonUnique = getTableConfig(approvals).indexes.filter((idx) => !idx.config.unique);
     expect(nonUnique.some((idx) => indexColumnNames(idx).join(",") === "run_id")).toBe(true);
+  });
+
+  it("model_connections：密钥列是密文与掩码，model_ids 为 jsonb，默认编译标记默认 false", () => {
+    expect(expectColumn(modelConnections, "workspaceId", "workspace_id", "PgUUID").notNull).toBe(true);
+    expect(expectColumn(modelConnections, "createdBy", "created_by", "PgUUID").notNull).toBe(true);
+    expect(expectColumn(modelConnections, "name", "name", "PgText").notNull).toBe(true);
+    expect(expectColumn(modelConnections, "baseUrl", "base_url", "PgText").notNull).toBe(true);
+    expect(expectColumn(modelConnections, "apiKeyCiphertext", "api_key_ciphertext", "PgText").notNull).toBe(true);
+    expect(expectColumn(modelConnections, "apiKeyHint", "api_key_hint", "PgText").notNull).toBe(true);
+    expect(expectColumn(modelConnections, "modelIds", "model_ids", "PgJsonb").notNull).toBe(true);
+    const isDefault = expectColumn(modelConnections, "isDefaultCompile", "is_default_compile", "PgBoolean");
+    expect(isDefault.notNull).toBe(true);
+    expect(isDefault.default).toBe(false);
+    expect(expectColumn(modelConnections, "archivedAt", "archived_at", "PgTimestamp").notNull).toBe(false);
+    expect(getTableConfig(modelConnections).indexes.some((idx) => indexColumnNames(idx).join(",") === "workspace_id")).toBe(true);
   });
 });

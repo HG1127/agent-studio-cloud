@@ -21,6 +21,19 @@ function toView(row: typeof knowledgeSources.$inferSelect) {
   };
 }
 
+async function storeOriginal(bytes: Buffer, filename: string, sha256: string, token: string): Promise<string> {
+  const safeName = filename.replace(/[^\w.\-\u4e00-\u9fff]/g, "_");
+  const blob = await put(`knowledge/${DEMO_WORKSPACE_ID}/${sha256}-${safeName}`, bytes, {
+    access: "private", addRandomSuffix: true, token,
+  });
+  return blob.pathname;
+}
+
+function storageUnavailable() {
+  console.error("[knowledge-upload] 私有文件存储写入失败");
+  return Response.json({ ok: false, error: "私有文件存储暂不可用，请检查配置后重试" }, { status: 503 });
+}
+
 export async function POST(req: Request) {
   let form: FormData;
   try {
@@ -41,21 +54,32 @@ export async function POST(req: Request) {
   }
   const bytes = Buffer.from(await file.arrayBuffer());
   const sha256 = createHash("sha256").update(bytes).digest("hex");
+  const blobToken = process.env.BLOB_READ_WRITE_TOKEN ?? "";
   const [duplicate] = await db
     .select()
     .from(knowledgeSources)
     .where(and(eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID), eq(knowledgeSources.sha256, sha256), isNull(knowledgeSources.archivedAt)))
     .limit(1);
   if (duplicate) {
+    if (!duplicate.blobPathname && blobToken) {
+      try {
+        const blobPathname = await storeOriginal(bytes, file.name, sha256, blobToken);
+        await db.update(knowledgeSources).set({ blobPathname, updatedAt: new Date() }).where(eq(knowledgeSources.id, duplicate.id));
+        return Response.json({ ok: true, deduped: true, blobStored: true, source: toView(duplicate) });
+      } catch {
+        return storageUnavailable();
+      }
+    }
     return Response.json({ ok: true, deduped: true, blobStored: Boolean(duplicate.blobPathname), source: toView(duplicate) });
   }
-  const blobToken = process.env.BLOB_READ_WRITE_TOKEN ?? "";
   let blobPathname: string | null = null;
   if (blobToken) {
     // Blob 只做原文留存（可重解析）；本地/CI 未配 token 时降级跳过，不阻塞入库
-    const safeName = file.name.replace(/[^\w.\-\u4e00-\u9fff]/g, "_");
-    const blob = await put(`knowledge/${DEMO_WORKSPACE_ID}/${sha256}-${safeName}`, bytes, { access: "public", token: blobToken });
-    blobPathname = blob.pathname;
+    try {
+      blobPathname = await storeOriginal(bytes, file.name, sha256, blobToken);
+    } catch {
+      return storageUnavailable();
+    }
   }
   const [row] = await db
     .insert(knowledgeSources)

@@ -5,13 +5,17 @@
 import { eq, sql } from "drizzle-orm";
 import { FatalError } from "workflow";
 import type { WorkflowNode } from "@/contracts/workflow";
+import { ApprovalPayload } from "@/contracts/run";
 import { approvals, runs } from "@/db/schema";
 import { db } from "@/lib/db";
+import { selectApprovalReview } from "@/server/domain/approval/select-review";
 import { appendTrace } from "@/server/steps/trace-step";
 
 export interface RequestApprovalInput {
   runId: string;
   node: WorkflowNode;
+  outputs: Record<string, unknown>;
+  nodes: Record<string, WorkflowNode>;
 }
 
 export interface ApprovalHandle {
@@ -37,6 +41,7 @@ export async function requestApproval(args: RequestApprovalInput): Promise<Appro
   const node = args.node;
   const role = node.approval?.role ?? "业务负责人";
   const reason = node.approval?.reason ?? `确认「${node.title}」后流程才会继续`;
+  const payload = ApprovalPayload.parse({ review: selectApprovalReview(args.outputs, args.nodes) });
   const now = new Date();
   const [row] = await db
     .insert(approvals)
@@ -48,6 +53,7 @@ export async function requestApproval(args: RequestApprovalInput): Promise<Appro
       status: "pending",
       role,
       reason,
+      payload,
     })
     .returning({ id: approvals.id });
   await db.update(runs).set({ status: "waiting_approval", updatedAt: now }).where(eq(runs.id, args.runId));

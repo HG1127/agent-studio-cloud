@@ -17,6 +17,12 @@ const CONDITION_NODE = WorkflowNode.parse({
   type: "condition",
   condition: { source: "input.amount", operator: "eq", branches: [], defaultNext: null },
 });
+const KNOWLEDGE_NODE = WorkflowNode.parse({
+  id: "step_4",
+  title: "查阅退货资料",
+  type: "knowledge",
+  knowledge: { space: "业务资料库", query: "退货规则" },
+});
 
 describe("NodeInspector", () => {
   it("修改节点名称时回调携带新值", () => {
@@ -48,6 +54,15 @@ describe("NodeInspector", () => {
     render(<NodeInspector node={CONDITION_NODE} onNodeChange={vi.fn()} onNodeDelete={vi.fn()} />);
     expect(screen.getByLabelText("判断说明")).toBeInTheDocument();
     expect(screen.queryByLabelText("说明")).not.toBeInTheDocument();
+  });
+
+  it("知识节点可以单独修改检索内容", () => {
+    const onNodeChange = vi.fn();
+    render(<NodeInspector node={KNOWLEDGE_NODE} onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("检索内容"), { target: { value: "海蓝灯塔二四" } });
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      knowledge: { space: "业务资料库", query: "海蓝灯塔二四" },
+    }));
   });
 
   it("起点节点不提供删除，其余节点点击删除时回调携带节点标识", async () => {

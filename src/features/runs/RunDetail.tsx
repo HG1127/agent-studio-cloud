@@ -127,6 +127,14 @@ export async function RunDetail({ runId }: { runId: string }) {
                 <span className={`rounded-full px-2 py-0.5 text-xs ${STEP_STATUS_STYLES[step.status] ?? "bg-gray-100 text-gray-600"}`}>
                   {STEP_STATUS_LABEL[step.status] ?? "待执行"}
                 </span>
+                {step.output ? (
+                  <details className="w-full min-w-0">
+                    <summary className="cursor-pointer text-sm text-gray-500">查看步骤数据（开发者数据）</summary>
+                    <pre className="mt-2 max-h-80 overflow-auto rounded-md bg-gray-50 p-3 text-xs">
+                      {JSON.stringify(step.output, null, 2)}
+                    </pre>
+                  </details>
+                ) : null}
               </li>
             ))}
           </ul>

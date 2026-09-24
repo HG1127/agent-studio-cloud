@@ -1,7 +1,7 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
-import type { KnowledgeSourceView } from "@/contracts/knowledge";
+import { KnowledgeUploadResult, type KnowledgeSourceView } from "@/contracts/knowledge";
 import { archiveKnowledgeSourceAction } from "@/server/actions/archive-knowledge-source";
 
 const STATUS_LABELS: Record<KnowledgeSourceView["status"], string> = {
@@ -14,6 +14,7 @@ const STATUS_LABELS: Record<KnowledgeSourceView["status"], string> = {
 export function UploadSourceForm() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   return (
     <section className="rounded-lg border bg-white p-4">
@@ -21,23 +22,37 @@ export function UploadSourceForm() {
         onSubmit={async (event) => {
           event.preventDefault();
           const form = event.currentTarget;
-          const data = new FormData(form);
-          const file = data.get("file");
-          if (!(file instanceof File) || file.size === 0) {
+          const file = form.querySelector<HTMLInputElement>('input[name="file"]')?.files?.[0];
+          if (!file || file.size === 0) {
             setError("请选择要上传的文件");
             return;
           }
+          const data = new FormData(form);
           setUploading(true);
           setError(null);
-          const response = await fetch("/api/knowledge/sources", { method: "POST", body: data });
-          const result = await response.json();
-          setUploading(false);
-          if (!result.ok) {
-            setError(result.error);
-            return;
+          setNotice(null);
+          try {
+            const response = await fetch("/api/knowledge/sources", { method: "POST", body: data });
+            const parsed = KnowledgeUploadResult.safeParse(await response.json());
+            if (!parsed.success) {
+              setError("上传结果无法读取，请刷新后查看资料状态");
+              return;
+            }
+            const result = parsed.data;
+            if (!result.ok) {
+              setError(result.error);
+              return;
+            }
+            if (!result.blobStored) {
+              setNotice("资料已接收，但原文件尚未保存。需要长期留存原文件时，请先配置私有文件存储。");
+            }
+            form.reset();
+            router.refresh();
+          } catch {
+            setError("上传失败，请检查网络后重试");
+          } finally {
+            setUploading(false);
           }
-          form.reset();
-          router.refresh();
         }}
         className="flex flex-wrap items-center gap-3"
       >
@@ -48,6 +63,7 @@ export function UploadSourceForm() {
         <span className="text-xs text-gray-500">支持 PDF / DOCX / TXT / MD / HTML / JSON / CSV / XML，不超过 8MB</span>
       </form>
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+      {notice && <p role="status" className="mt-2 text-sm text-amber-800">{notice}</p>}
     </section>
   );
 }

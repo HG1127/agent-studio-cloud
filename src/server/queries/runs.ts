@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { ApprovalView, RunSummary, RunView } from "@/contracts/run";
+import { ApprovalPayload, ApprovalView, RunSummary, RunView } from "@/contracts/run";
 import { agents, approvals, runSteps, runs, type Run, type RunStep } from "@/db/schema";
 import { db } from "@/lib/db";
 
@@ -104,6 +104,7 @@ export async function listApprovals(runId: string, workspaceId: string): Promise
       status: row.status,
       role: row.role,
       reason: row.reason,
+      review: ApprovalPayload.safeParse(row.payload).data?.review ?? null,
       note: row.note,
       decidedAt: row.decidedAt?.toISOString() ?? null,
     }),

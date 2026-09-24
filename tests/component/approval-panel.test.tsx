@@ -22,6 +22,7 @@ const PENDING: ApprovalView = {
   status: "pending",
   role: "业务负责人",
   reason: "确认“负责人确认处理方案”后流程才会继续",
+  review: null,
   note: null,
   decidedAt: null,
 };
@@ -46,6 +47,16 @@ describe("ApprovalPanel", () => {
     expect(screen.getByText("确认“负责人确认处理方案”后流程才会继续")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "批准" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "拒绝" })).toBeInTheDocument();
+  });
+
+  it("待确认和已确认时都展示同一份回复草稿", () => {
+    const review = { sourceNodeId: "draft", sourceTitle: "生成回复草稿", content: "您好，签收后七天内可申请退货。" };
+    const { rerender } = render(<ApprovalPanel runId={RUN_ID} approval={{ ...PENDING, review }} />);
+    expect(screen.getByText("待确认草稿")).toBeInTheDocument();
+    expect(screen.getByText(review.content)).toBeInTheDocument();
+    rerender(<ApprovalPanel runId={RUN_ID} approval={{ ...DECIDED, review }} />);
+    expect(screen.getByText("本次确认的草稿")).toBeInTheDocument();
+    expect(screen.getByText(review.content)).toBeInTheDocument();
   });
 
   it("点批准调用审批动作并携带备注，成功后刷新页面", async () => {

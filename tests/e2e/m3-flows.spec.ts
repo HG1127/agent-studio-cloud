@@ -1,24 +1,37 @@
+import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { config } from "dotenv";
 import { expect, test } from "@playwright/test";
 
 config({ path: ".env.local" });
 
-// M3 关键路径：知识上传→检索全链路 + 定时任务→tick 开跑。
-// 知识检索是关键词匹配：检索词取流程步骤文本（如「读取资料生成回复方案」），
-// 所以 fixture 里必须原样包含这句话，否则零命中防护会让运行失败（这是设计行为）。
 test("上传知识文档到已就绪并跑通知识检索全链路", async ({ page }) => {
-  const agentName = `M3 知识链路助手-${Date.now()}`;
+  const sampleId = randomUUID();
+  const agentName = `M3 知识链路助手-${sampleId}`;
+  const filename = `m3-knowledge-sample-${sampleId}.txt`;
+  const query = `读取资料生成回复方案${sampleId}`;
+  const fixture = await readFile("tests/fixtures/m3-knowledge-sample.txt");
+  // 唯一检索词同时避免内容去重与历史资料命中。
+  const buffer = Buffer.concat([Buffer.from(`${query}\n`), fixture]);
   await page.goto("/knowledge");
-  await page.setInputFiles('input[type="file"]', "tests/fixtures/m3-knowledge-sample.txt");
+  await page.setInputFiles('input[type="file"]', { name: filename, mimeType: "text/plain", buffer });
+  const uploaded = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === "/api/knowledge/sources" && response.request().method() === "POST",
+  );
   await page.getByRole("button", { name: "上传文档" }).click();
-  await expect(page.getByText(/m3-knowledge-sample/).first()).toBeVisible();
-  await expect(page.getByText("已就绪").first()).toBeVisible({ timeout: 30_000 });
+  const response = await uploaded;
+  expect(response.ok()).toBe(true);
+  expect(await response.json()).toMatchObject({ ok: true, deduped: false, blobStored: false, source: { name: filename } });
+  await expect(page.getByRole("status")).toContainText("原文件尚未保存");
+  const source = page.getByRole("listitem").filter({ has: page.getByText(filename, { exact: true }) });
+  await expect(source).toContainText("已就绪", { timeout: 60_000 });
+  await expect(source).toHaveCount(1);
 
   await page.goto("/agents");
   await page.getByLabel("助手名称").fill(agentName);
   await page
     .getByLabel("想让助手完成什么（至少 10 个字）")
-    .fill("收到客户咨询后读取资料生成回复方案，发送前由负责人确认，最后输出回复邮件");
+    .fill(`收到客户咨询后${query}，发送前由负责人确认，最后输出回复邮件`);
   await page.getByRole("button", { name: "创建助手" }).click();
   await page.waitForURL(/\/agents\/[0-9a-f-]+$/, { timeout: 60_000 });
   await page.getByRole("button", { name: "发布新版本" }).click();
@@ -27,14 +40,28 @@ test("上传知识文档到已就绪并跑通知识检索全链路", async ({ pa
   await page.getByRole("button", { name: "运行此助手" }).click();
   await page.waitForURL(/\/runs\/[0-9a-f-]+$/, { timeout: 60_000 });
   await expect(page.locator("header").getByText("等待确认", { exact: true })).toBeVisible({ timeout: 90_000 });
+  const approval = page.locator("section").filter({ has: page.getByRole("heading", { name: "该步骤正在等待确认" }) });
+  await expect(approval.getByText("这一步没有生成可展示的正文，请核对运行输入和上游步骤结果。")).toBeVisible();
   await page.getByRole("button", { name: "批准", exact: true }).click();
   await expect(page.locator("header").getByText("已完成", { exact: true })).toBeVisible({ timeout: 90_000 });
   await expect(page.getByText(/已从知识库找到/)).toBeVisible();
+  const steps = page.locator("section").filter({ has: page.getByRole("heading", { name: "执行步骤", exact: true }) });
+  const receipt = steps.locator("details").filter({ hasText: filename });
+  await expect(receipt).toHaveCount(1);
+  await receipt.getByText("查看步骤数据（开发者数据）", { exact: true }).click();
+  await expect(receipt.locator("pre")).toBeVisible();
+  expect(JSON.parse(await receipt.locator("pre").innerText())).toMatchObject({
+    ok: true,
+    query,
+    hits: expect.arrayContaining([expect.objectContaining({ source: filename, excerpt: expect.stringContaining(query) })]),
+  });
 });
 
 test("创建定时任务并经 tick 接口开出定时运行", async ({ page, request }) => {
   test.setTimeout(300_000);
-  const agentName = `M3 定时链路助手-${Date.now()}`;
+  const sampleId = randomUUID();
+  const agentName = `M3 定时链路助手-${sampleId}`;
+  const input = { input: `定时演示运行-${sampleId}` };
   await page.goto("/agents");
   await page.getByLabel("助手名称").fill(agentName);
   await page
@@ -53,11 +80,14 @@ test("创建定时任务并经 tick 接口开出定时运行", async ({ page, re
   const pad = (value: number) => String(value).padStart(2, "0");
   const local = `${due.getFullYear()}-${pad(due.getMonth() + 1)}-${pad(due.getDate())}T${pad(due.getHours())}:${pad(due.getMinutes())}`;
   await page.getByLabel("执行时间").fill(local);
-  await page.getByLabel("运行输入（JSON）").fill('{"input": "定时演示运行"}');
+  await page.getByLabel("运行输入（JSON）").fill(JSON.stringify(input));
   await page.getByRole("button", { name: "创建定时任务" }).click();
-  // 不能用 getByText(agentName).first()：表单下拉的 <option> 同名且在 DOM 前面，会被判 hidden
-  await expect(page.locator("li").filter({ hasText: agentName })).toBeVisible({ timeout: 15_000 });
+  const schedule = page.getByRole("listitem").filter({ has: page.getByText(agentName, { exact: true }) });
+  await expect(schedule).toBeVisible({ timeout: 15_000 });
 
+  await page.goto("/runs");
+  const scheduledRun = page.getByRole("listitem").filter({ has: page.getByText(agentName, { exact: true }) });
+  await expect(scheduledRun).toHaveCount(0);
   while (Date.now() < due.getTime() + 2_000) {
     await page.waitForTimeout(1_000);
   }
@@ -68,5 +98,12 @@ test("创建定时任务并经 tick 接口开出定时运行", async ({ page, re
   });
   expect(tick.ok()).toBeTruthy();
   await page.goto("/runs");
-  await expect(page.getByText("定时", { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(scheduledRun).toHaveCount(1, { timeout: 30_000 });
+  await expect(scheduledRun.getByText("定时", { exact: true })).toBeVisible();
+  await scheduledRun.getByRole("link").click();
+  await page.waitForURL(/\/runs\/[0-9a-f-]+$/);
+  await expect(page.getByRole("heading", { name: agentName, exact: true })).toBeVisible();
+  const runInput = page.locator("section").filter({ has: page.getByRole("heading", { name: "运行输入", exact: true }) });
+  expect(JSON.parse(await runInput.locator("pre").innerText())).toEqual(input);
+  await expect(page.locator("header").getByText("已完成", { exact: true })).toBeVisible({ timeout: 90_000 });
 });

@@ -4,16 +4,17 @@ import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { PublishVersionResult } from "@/contracts/version";
+import { PublishModelSelection } from "@/contracts/connections";
 import { WorkflowDraft } from "@/contracts/workflow";
-import { agentVersions, agents, knowledgeSources, workflowDefinitions } from "@/db/schema";
+import { agentVersions, agents, knowledgeSources, modelConnections, workflowDefinitions } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
-import { resolvePublishModel } from "@/lib/model";
+import { realModelsEnabled, resolvePublishModel } from "@/lib/model";
 import { db } from "@/lib/db";
 import { auditWorkflow } from "@/server/domain/audit";
 import { buildManifest, filterPublishBlockers } from "@/server/domain/pipeline";
 import { isUniqueViolation } from "@/server/unique-violation";
 
-export async function publishVersionAction(agentId: string): Promise<PublishVersionResult> {
+export async function publishVersionAction(agentId: string, modelSelection?: PublishModelSelection): Promise<PublishVersionResult> {
   if (!z.string().uuid().safeParse(agentId).success) {
     return { ok: false, error: "助手标识不正确，请刷新页面后重试", issues: [] };
   }
@@ -50,18 +51,51 @@ export async function publishVersionAction(agentId: string): Promise<PublishVers
         issues: blocking.map((issue) => `${issue.title}：${issue.detail}`),
       };
     }
-    // T10 携带裁定：模型配置守卫——无 MODEL_ID 且未显式 MODEL_MOCK=1 时不写入永久版本记录
-    const resolved = resolvePublishModel({ modelId: process.env.MODEL_ID, modelMock: process.env.MODEL_MOCK });
-    if (!resolved.ok) {
-      return { ok: false, error: resolved.error, issues: [] };
+    // 发布时冻结运行模型：显式选择了连接就校验后用连接；未选择时维持环境变量守卫
+    let manifestModel: { modelId: string; mock: boolean; connectionId: string | null };
+    if (modelSelection) {
+      if (!realModelsEnabled()) return { ok: false, error: "真实模型功能尚未开放", issues: [] };
+      const selection = PublishModelSelection.safeParse(modelSelection);
+      if (!selection.success) {
+        return { ok: false, error: "所选运行模型无效，请重新选择后再发布", issues: [] };
+      }
+      const [connection] = await db
+        .select({ id: modelConnections.id, modelIds: modelConnections.modelIds })
+        .from(modelConnections)
+        .where(
+          and(
+            eq(modelConnections.id, selection.data.connectionId),
+            eq(modelConnections.workspaceId, agent.workspaceId),
+            isNull(modelConnections.archivedAt),
+          ),
+        )
+        .limit(1);
+      if (!connection) {
+        return { ok: false, error: "所选模型连接不存在或已删除，请重新选择后再发布", issues: [] };
+      }
+      if (!connection.modelIds.includes(selection.data.modelId)) {
+        return { ok: false, error: "所选模型已不在该连接的模型列表里，请重新选择后再发布", issues: [] };
+      }
+      manifestModel = { modelId: selection.data.modelId, mock: false, connectionId: connection.id };
+    } else {
+      // T10 携带裁定：模型配置守卫——无 MODEL_ID 且未显式 MODEL_MOCK=1 时不写入永久版本记录
+      const resolved = resolvePublishModel({ modelId: process.env.MODEL_ID, modelMock: process.env.MODEL_MOCK });
+      if (!resolved.ok) {
+        return { ok: false, error: resolved.error, issues: [] };
+      }
+      manifestModel = { modelId: resolved.modelId, mock: resolved.mock, connectionId: null };
+    }
+    if (!manifestModel.mock && !realModelsEnabled()) {
+      return { ok: false, error: "真实模型功能尚未开放", issues: [] };
     }
     const snapshotRows = await db
       .select({ id: knowledgeSources.id })
       .from(knowledgeSources)
       .where(and(eq(knowledgeSources.workspaceId, agent.workspaceId), eq(knowledgeSources.status, "indexed"), isNull(knowledgeSources.archivedAt)));
     const manifest = buildManifest(parsed.data, {
-      modelId: resolved.modelId,
-      mock: resolved.mock,
+      modelId: manifestModel.modelId,
+      mock: manifestModel.mock,
+      connectionId: manifestModel.connectionId,
       knowledgeSnapshot: snapshotRows.map((row) => row.id),
     });
     // 并发发布会撞 (agent_id, version) 唯一索引：整个事务重读 maxVersion 后重试一次
