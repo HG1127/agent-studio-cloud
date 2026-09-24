@@ -6,6 +6,7 @@ import { z } from "zod";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { getRunRow } from "@/server/queries/runs";
 import { listTraceSince } from "@/server/queries/trace";
+import { resolveSseCursor } from "@/server/domain/sse-cursor";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
   }
 
   const encoder = new TextEncoder();
-  let cursor = 0;
+  let cursor = resolveSseCursor(req.url, req.headers.get("last-event-id"));
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       let closed = false;
@@ -36,8 +37,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
           closed = true;
         }
       };
-      const pushEvent = (event: string, data: unknown) =>
-        send(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      const pushEvent = (event: string, data: unknown, id?: number) =>
+        send(`${id === undefined ? "" : `id: ${id}\n`}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
       const onAbort = () => {
         closed = true;
       };
@@ -59,7 +60,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
           }
           for (const row of rows) {
             cursor = row.seq;
-            pushEvent("trace", row);
+            pushEvent("trace", row, row.seq);
           }
           if (closed) break;
           if (!current) {

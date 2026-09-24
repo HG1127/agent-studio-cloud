@@ -86,10 +86,10 @@ describe("TraceTimeline", () => {
     (globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
     render(<TraceTimeline runId={RUN_ID} initialEvents={EVENTS} live />);
     expect(FakeEventSource.instances).toHaveLength(1);
-    expect(FakeEventSource.instances[0].url).toBe(`/api/runs/${RUN_ID}/events`);
+    expect(FakeEventSource.instances[0].url).toBe(`/api/runs/${RUN_ID}/events?after=3`);
 
     const source = FakeEventSource.instances[0];
-    // 服务端游标从 0 起会重放既有三条，客户端需按序号去重
+    // 即使服务端或代理意外重放既有事件，客户端仍按序号去重
     act(() => {
       for (const event of EVENTS) source.emit("trace", event);
       source.emit("trace", {

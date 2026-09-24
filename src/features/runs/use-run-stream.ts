@@ -18,7 +18,8 @@ export function useRunStream(runId: string, initialEvents: TraceEventView[], liv
 
   useEffect(() => {
     if (!live || typeof window === "undefined" || typeof window.EventSource === "undefined") return;
-    const source = new EventSource(`/api/runs/${runId}/events`);
+    const after = initialEvents.reduce((max, event) => Math.max(max, event.seq), 0);
+    const source = new EventSource(`/api/runs/${runId}/events?after=${after}`);
     let closedByDone = false;
     const onTrace = (event: MessageEvent<string>) => {
       try {
@@ -43,7 +44,7 @@ export function useRunStream(runId: string, initialEvents: TraceEventView[], liv
       // EventSource 出错时会自动重连，这里只在卸载或终态后主动断开
       if (!closedByDone) source.close();
     };
-  }, [live, router, runId]);
+  }, [initialEvents, live, router, runId]);
 
   return useMemo(() => mergeEvents([initialEvents, streamed]), [initialEvents, streamed]);
 }
