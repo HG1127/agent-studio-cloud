@@ -147,4 +147,16 @@ describe("知识库列表", () => {
     expect(screen.getByText("资料 21.txt")).toBeInTheDocument();
     expect(screen.getByText("第 2 / 2 页")).toBeInTheDocument();
   });
+
+  it("服务端分页模式不再对当前页做二次筛选和分页", () => {
+    const sources = Array.from({ length: 20 }, (_, index) => ({
+      id: `server-source-${index}`, name: `资料 ${index + 1}.txt`, mime: "text/plain", sizeBytes: 100,
+      status: "indexed" as const, chunkCount: 1, charCount: 80, error: null,
+      createdAt: "2026-09-23T00:00:00.000Z",
+    }));
+    render(<KnowledgeList initial={sources} serverManaged />);
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("资料列表分页")).not.toBeInTheDocument();
+    expect(screen.getByText("资料 20.txt")).toBeInTheDocument();
+  });
 });

@@ -71,6 +71,13 @@
       "when": 1790277002808,
       "tag": "0009_charming_killraven",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790278626440,
+      "tag": "0010_modern_multiple_man",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,4 @@
-import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { AgentSummary, AgentTargetOption, type AgentTargetOption as AgentTargetOptionType } from "@/contracts/agent";
 import { AgentManifest } from "@/contracts/manifest";
@@ -6,7 +6,14 @@ import { WorkflowDraft } from "@/contracts/workflow";
 import { db } from "@/lib/db";
 import { agentVersions, agents, workflowDefinitions } from "@/db/schema";
 
-async function listAgentsByArchivedState(workspaceId: string, archived: boolean): Promise<AgentSummary[]> {
+async function listAgentsByArchivedState(
+  workspaceId: string,
+  archived: boolean,
+  options: { query?: string; limit?: number; offset?: number } = {},
+): Promise<AgentSummary[]> {
+  const query = options.query?.trim().slice(0, 200);
+  const limit = Math.min(101, Math.max(1, options.limit ?? 100));
+  const offset = Math.max(0, options.offset ?? 0);
   const rows = await db
     .select({
       id: agents.id,
@@ -21,8 +28,14 @@ async function listAgentsByArchivedState(workspaceId: string, archived: boolean)
         ),
     })
     .from(agents)
-    .where(and(eq(agents.workspaceId, workspaceId), archived ? isNotNull(agents.archivedAt) : isNull(agents.archivedAt)))
-    .orderBy(desc(agents.updatedAt));
+    .where(and(
+      eq(agents.workspaceId, workspaceId),
+      archived ? isNotNull(agents.archivedAt) : isNull(agents.archivedAt),
+      query ? or(ilike(agents.name, `%${query}%`), ilike(agents.description, `%${query}%`)) : undefined,
+    ))
+    .orderBy(desc(agents.updatedAt))
+    .limit(limit)
+    .offset(offset);
   return rows.map((row) =>
     AgentSummary.parse({
       id: row.id,
@@ -36,12 +49,12 @@ async function listAgentsByArchivedState(workspaceId: string, archived: boolean)
   );
 }
 
-export async function listAgents(workspaceId: string): Promise<AgentSummary[]> {
-  return listAgentsByArchivedState(workspaceId, false);
+export async function listAgents(workspaceId: string, options?: { query?: string; limit?: number; offset?: number }): Promise<AgentSummary[]> {
+  return listAgentsByArchivedState(workspaceId, false, options);
 }
 
-export async function listArchivedAgents(workspaceId: string): Promise<AgentSummary[]> {
-  return listAgentsByArchivedState(workspaceId, true);
+export async function listArchivedAgents(workspaceId: string, options?: { query?: string; limit?: number; offset?: number }): Promise<AgentSummary[]> {
+  return listAgentsByArchivedState(workspaceId, true, options);
 }
 
 export interface AgentDetail {

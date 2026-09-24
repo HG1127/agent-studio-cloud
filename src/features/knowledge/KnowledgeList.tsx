@@ -80,7 +80,7 @@ export function UploadSourceForm() {
   );
 }
 
-export function KnowledgeList({ initial, archived = false }: { initial: KnowledgeSourceView[]; archived?: boolean }) {
+export function KnowledgeList({ initial, archived = false, serverManaged = false }: { initial: KnowledgeSourceView[]; archived?: boolean; serverManaged?: boolean }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -94,7 +94,7 @@ export function KnowledgeList({ initial, archived = false }: { initial: Knowledg
   }, [initial, query]);
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
-  const visible = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const visible = serverManaged ? initial : filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   useEffect(() => {
     if (!hasParsing) return;
     const timer = setInterval(() => startTransition(() => router.refresh()), 2000);
@@ -106,7 +106,7 @@ export function KnowledgeList({ initial, archived = false }: { initial: Knowledg
   }
   return (
     <>
-      <div className="mb-3 flex flex-wrap items-center gap-3">
+      {!serverManaged ? <div className="mb-3 flex flex-wrap items-center gap-3">
         <label className="flex min-w-64 flex-1 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
           <span className="shrink-0 text-gray-500">查找资料</span>
           <input
@@ -121,7 +121,7 @@ export function KnowledgeList({ initial, archived = false }: { initial: Knowledg
           />
         </label>
         <span className="text-sm text-gray-500">共 {filtered.length} 份</span>
-      </div>
+      </div> : null}
       {visible.length === 0 ? <p className="py-4 text-sm text-gray-600">没有找到匹配的资料</p> : null}
       <ul className="space-y-2">
         {visible.map((source) => (
@@ -159,7 +159,7 @@ export function KnowledgeList({ initial, archived = false }: { initial: Knowledg
           </li>
         ))}
       </ul>
-      {pageCount > 1 ? <nav aria-label="资料列表分页" className="mt-4 flex items-center justify-end gap-3 text-sm">
+      {!serverManaged && pageCount > 1 ? <nav aria-label="资料列表分页" className="mt-4 flex items-center justify-end gap-3 text-sm">
         <button type="button" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)} className="rounded border px-3 py-1.5 disabled:opacity-40">上一页</button>
         <span>第 {currentPage} / {pageCount} 页</span>
         <button type="button" disabled={currentPage === pageCount} onClick={() => setPage(currentPage + 1)} className="rounded border px-3 py-1.5 disabled:opacity-40">下一页</button>

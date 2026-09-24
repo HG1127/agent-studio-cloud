@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, isNotNull, isNull } from "drizzle-orm";
 import { knowledgeChunks, knowledgeSources } from "@/db/schema";
 import { KnowledgeSearchResult, type KnowledgeSourceView } from "@/contracts/knowledge";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
@@ -7,15 +7,24 @@ import { scoreChunks } from "@/server/domain/knowledge/search";
 
 const SEARCH_SCAN_LIMIT = 2_000;
 
-export async function listKnowledgeSources(archived = false): Promise<KnowledgeSourceView[]> {
+export async function listKnowledgeSources(
+  archived = false,
+  options: { query?: string; limit?: number; offset?: number } = {},
+): Promise<KnowledgeSourceView[]> {
+  const query = options.query?.trim().slice(0, 200);
+  const limit = Math.min(101, Math.max(1, options.limit ?? 100));
+  const offset = Math.max(0, options.offset ?? 0);
   const rows = await db
     .select()
     .from(knowledgeSources)
     .where(and(
       eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID),
       archived ? isNotNull(knowledgeSources.archivedAt) : isNull(knowledgeSources.archivedAt),
+      query ? ilike(knowledgeSources.name, `%${query}%`) : undefined,
     ))
-    .orderBy(desc(knowledgeSources.createdAt));
+    .orderBy(desc(knowledgeSources.createdAt))
+    .limit(limit)
+    .offset(offset);
   return rows.map((row) => ({
     id: row.id, name: row.name, mime: row.mime, sizeBytes: row.sizeBytes,
     status: (archived ? "archived" : row.status) as KnowledgeSourceView["status"],

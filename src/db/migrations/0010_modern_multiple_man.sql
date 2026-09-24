@@ -1,0 +1,1 @@
+CREATE INDEX "knowledge_sources_workspace_archived_created_idx" ON "knowledge_sources" USING btree ("workspace_id","archived_at","created_at");

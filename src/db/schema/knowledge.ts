@@ -23,6 +23,7 @@ export const knowledgeSources = pgTable(
   (t) => [
     uniqueIndex("knowledge_sources_workspace_sha_unique").on(t.workspaceId, t.sha256),
     index("knowledge_sources_workspace_status_idx").on(t.workspaceId, t.status),
+    index("knowledge_sources_workspace_archived_created_idx").on(t.workspaceId, t.archivedAt, t.createdAt),
   ],
 );
 export type KnowledgeSource = typeof knowledgeSources.$inferSelect;

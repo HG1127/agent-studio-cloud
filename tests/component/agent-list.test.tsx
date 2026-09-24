@@ -58,4 +58,12 @@ describe("助手列表", () => {
     expect(screen.getByText("助手 21")).toBeInTheDocument();
     expect(screen.getByText("第 2 / 2 页")).toBeInTheDocument();
   });
+
+  it("服务端分页模式不再对当前页做二次筛选和分页", () => {
+    const agents = Array.from({ length: 20 }, (_, index) => ({ ...agent, id: `server-agent-${index}`, name: `助手 ${index + 1}` }));
+    render(<AgentList agents={agents} serverManaged />);
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("助手列表分页")).not.toBeInTheDocument();
+    expect(screen.getByText("助手 20")).toBeInTheDocument();
+  });
 });

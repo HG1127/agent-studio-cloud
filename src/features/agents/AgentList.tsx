@@ -13,7 +13,7 @@ const dateFormatter = new Intl.DateTimeFormat("zh-CN", {
 });
 const PAGE_SIZE = 20;
 
-export function AgentList({ agents, archived = false }: { agents: AgentSummary[]; archived?: boolean }) {
+export function AgentList({ agents, archived = false, serverManaged = false }: { agents: AgentSummary[]; archived?: boolean; serverManaged?: boolean }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -28,13 +28,13 @@ export function AgentList({ agents, archived = false }: { agents: AgentSummary[]
   }, [agents, query]);
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
-  const visible = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const visible = serverManaged ? agents : filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   if (agents.length === 0) {
     return <p className="text-gray-500">{archived ? "没有已停用的助手" : "还没有助手，创建第一个吧"}</p>;
   }
   return (
     <>
-      <div className="mb-3 flex flex-wrap items-center gap-3">
+      {!serverManaged ? <div className="mb-3 flex flex-wrap items-center gap-3">
         <label className="flex min-w-64 flex-1 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
           <span className="shrink-0 text-gray-500">查找助手</span>
           <input
@@ -49,7 +49,7 @@ export function AgentList({ agents, archived = false }: { agents: AgentSummary[]
           />
         </label>
         <span className="text-sm text-gray-500">共 {filtered.length} 个</span>
-      </div>
+      </div> : null}
       {visible.length === 0 ? <p className="py-4 text-sm text-gray-500">没有找到匹配的助手</p> : null}
       <ul className="flex flex-col gap-3">
         {visible.map((agent) => (
@@ -81,7 +81,7 @@ export function AgentList({ agents, archived = false }: { agents: AgentSummary[]
           </li>
         ))}
       </ul>
-      {pageCount > 1 ? <nav aria-label="助手列表分页" className="mt-4 flex items-center justify-end gap-3 text-sm">
+      {!serverManaged && pageCount > 1 ? <nav aria-label="助手列表分页" className="mt-4 flex items-center justify-end gap-3 text-sm">
         <button type="button" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)} className="rounded border px-3 py-1.5 disabled:opacity-40">上一页</button>
         <span>第 {currentPage} / {pageCount} 页</span>
         <button type="button" disabled={currentPage === pageCount} onClick={() => setPage(currentPage + 1)} className="rounded border px-3 py-1.5 disabled:opacity-40">下一页</button>
