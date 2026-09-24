@@ -6,6 +6,7 @@ import { TraceTimeline } from "@/features/runs/TraceTimeline";
 import { WaitEventPanel } from "@/features/runs/WaitEventPanel";
 import { CancelRunButton } from "@/features/runs/CancelRunButton";
 import { RetryRunButton } from "@/features/runs/RetryRunButton";
+import { CopyResultButton } from "@/features/runs/CopyResultButton";
 import type { RunStatus } from "@/contracts/run";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { getPendingWait, getRunView, listApprovals, listRunSteps } from "@/server/queries/runs";
@@ -100,7 +101,10 @@ export async function RunDetail({ runId }: { runId: string }) {
 
       {run.result ? (
         <section className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-4">
-          <h2 className="text-sm font-semibold">最终结果</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold">最终结果</h2>
+            <CopyResultButton result={run.result} />
+          </div>
           {outputs.length > 0 ? (
             <ul className="flex flex-col gap-3">
               {outputs.map(([nodeId, output]) => (
