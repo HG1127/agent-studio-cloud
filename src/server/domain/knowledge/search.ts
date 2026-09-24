@@ -55,13 +55,15 @@ export function scoreChunks(query: string, docs: SearchDoc[], opts?: { limit?: n
   const tokens = tokenize(query);
   if (tokens.length === 0) return [];
   const limit = Math.min(opts?.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
-  const hits: SearchHit[] = [];
+  const hits: Array<{ hit: SearchHit; exactMatch: boolean }> = [];
   for (const doc of docs) {
     const lower = doc.content.toLowerCase();
     let score = 0;
+    let exactMatch = false;
     for (const token of tokens) {
       const first = lower.indexOf(token);
       if (first !== -1) {
+        exactMatch = true;
         score += FREQUENCY_WEIGHT * countOccurrences(lower, token);
         if (first < EARLY_POSITION_CHARS) score += EARLY_BONUS;
         continue;
@@ -77,8 +79,11 @@ export function scoreChunks(query: string, docs: SearchDoc[], opts?: { limit?: n
       if (earlyGramHit) score += EARLY_BONUS;
     }
     if (score > 0) {
-      hits.push({ ...doc, excerpt: doc.content.slice(0, EXCERPT_CHARS), score });
+      hits.push({ hit: { ...doc, excerpt: doc.content.slice(0, EXCERPT_CHARS), score }, exactMatch });
     }
   }
-  return hits.sort((a, b) => b.score - a.score).slice(0, limit);
+  return hits
+    .sort((a, b) => Number(b.exactMatch) - Number(a.exactMatch) || b.hit.score - a.hit.score)
+    .slice(0, limit)
+    .map(({ hit }) => hit);
 }

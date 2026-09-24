@@ -27,6 +27,20 @@ describe("scoreChunks", () => {
     expect(hits.map((hit) => hit.sourceId)).toEqual(["pilot"]);
   });
 
+  it("完整查询命中排在通用片段命中之前，不被结果上限挤掉", () => {
+    const query = "读取资料生成回复方案f1a2b3c4-1234-5678-9abc-123456789abc";
+    const common = Array.from({ length: 12 }, (_, index) => ({
+      sourceId: `common-${index}`,
+      sourceName: "通用资料",
+      chunkIndex: index,
+      content: "读取资料生成回复方案。".repeat(20),
+    }));
+    const exact = { sourceId: "exact", sourceName: "本次上传的资料", chunkIndex: 0, content: `${query}\n客户咨询处理规则。` };
+    const hits = scoreChunks(query, [...common, exact], { limit: 8 });
+    expect(hits).toHaveLength(8);
+    expect(hits[0].sourceId).toBe("exact");
+  });
+
   it("多词英文查询按空白拆分逐词命中", () => {
     const hits = scoreChunks("refund policy", [{ sourceId: "s4", sourceName: "en", chunkIndex: 0, content: "Our refund policy is simple." }]);
     expect(hits).toHaveLength(1);
