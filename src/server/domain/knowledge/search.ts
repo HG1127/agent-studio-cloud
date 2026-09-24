@@ -5,6 +5,7 @@ const FREQUENCY_WEIGHT = 0.5;
 const DEFAULT_LIMIT = 8;
 const MAX_LIMIT = 20;
 const EXCERPT_CHARS = 700;
+export const MAX_KNOWLEDGE_SCAN_CHUNKS = 2_000;
 
 export interface SearchDoc {
   sourceId: string;

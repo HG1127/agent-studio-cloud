@@ -3,9 +3,7 @@ import { knowledgeChunks, knowledgeSources } from "@/db/schema";
 import { KnowledgeSearchResult, type KnowledgeSourceView } from "@/contracts/knowledge";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
-import { scoreChunks } from "@/server/domain/knowledge/search";
-
-const SEARCH_SCAN_LIMIT = 2_000;
+import { MAX_KNOWLEDGE_SCAN_CHUNKS, scoreChunks } from "@/server/domain/knowledge/search";
 
 export async function listKnowledgeSources(
   archived = false,
@@ -53,10 +51,10 @@ export async function searchKnowledgeChunks(query: string) {
       isNull(knowledgeSources.archivedAt),
     ))
     .orderBy(desc(knowledgeSources.createdAt), asc(knowledgeChunks.chunkIndex))
-    .limit(SEARCH_SCAN_LIMIT + 1);
+    .limit(MAX_KNOWLEDGE_SCAN_CHUNKS + 1);
   return KnowledgeSearchResult.parse({
     query: normalized,
-    hits: scoreChunks(normalized, rows.slice(0, SEARCH_SCAN_LIMIT), { limit: 8 }),
-    truncated: rows.length > SEARCH_SCAN_LIMIT,
+    hits: scoreChunks(normalized, rows.slice(0, MAX_KNOWLEDGE_SCAN_CHUNKS), { limit: 8 }),
+    truncated: rows.length > MAX_KNOWLEDGE_SCAN_CHUNKS,
   });
 }

@@ -59,6 +59,7 @@ describe("知识步骤真实现", () => {
       const handle = await start(knowledgeProbeWorkflow, [runId, node, manifest, {}]);
       const result = await handle.returnValue;
       expect(result.receipt.hitCount).toBe(1);
+      expect(result.receipt).toMatchObject({ scannedCount: 1, truncated: false });
       expect(result.receipt.hits[0].excerpt).toContain("退货政策");
       const receiptTraces = await db
         .select()
