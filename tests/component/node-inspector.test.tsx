@@ -115,6 +115,21 @@ describe("NodeInspector", () => {
     expect(screen.getByLabelText("列表数据")).toHaveValue("input.items");
   });
 
+  it("保存经验时从业务步骤选择内容来源", async () => {
+    const writeNode = WorkflowNode.parse({ id: "memory_write", title: "保存经验", type: "memory", memory: { mode: "write", contentFrom: "run_summary" } });
+    const onNodeChange = vi.fn();
+    const user = userEvent.setup();
+    render(<NodeInspector
+      node={writeNode}
+      workflowNodes={{ [AI_NODE.id]: AI_NODE, [writeNode.id]: writeNode }}
+      onNodeChange={onNodeChange}
+      onNodeDelete={vi.fn()}
+    />);
+    expect(screen.getByRole("option", { name: "生成回复方案" })).toHaveValue(AI_NODE.id);
+    await user.selectOptions(screen.getByLabelText("保存内容来源"), AI_NODE.id);
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({ memory: { mode: "write", contentFrom: AI_NODE.id } }));
+  });
+
   it("并行节点可以修改策略、工作名称并添加步骤", async () => {
     const onNodeChange = vi.fn();
     const user = userEvent.setup();

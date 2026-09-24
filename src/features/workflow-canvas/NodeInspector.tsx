@@ -6,6 +6,7 @@ import { NODE_TYPE_LABELS } from "./CustomNodes";
 
 interface NodeInspectorProps {
   node: WorkflowNode;
+  workflowNodes?: Record<string, WorkflowNode>;
   agentTargets?: AgentTargetOption[];
   onNodeChange: (node: WorkflowNode) => void;
   onNodeDelete: (nodeId: string) => void;
@@ -46,11 +47,17 @@ function changeInlineStep(
 }
 
 // M1 编辑范围：title/description，加 human 的负责人与确认事项；condition 的说明以「判断说明」呈现
-export function NodeInspector({ node, agentTargets = [], onNodeChange, onNodeDelete }: NodeInspectorProps) {
+export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agentTargets = [], onNodeChange, onNodeDelete }: NodeInspectorProps) {
   const isHuman = node.type === "human";
   const isCondition = node.type === "condition";
   const knowledge = node.knowledge;
   const deletable = node.type !== "trigger" && node.type !== "end";
+  const memorySources = Object.values(workflowNodes).filter((candidate) =>
+    candidate.id !== node.id
+    && candidate.type !== "trigger"
+    && candidate.type !== "end"
+    && candidate.ui?.visibility !== "control",
+  );
   return (
     <aside aria-label="节点详情" className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4">
       <div className="flex items-center gap-2">
@@ -283,7 +290,7 @@ export function NodeInspector({ node, agentTargets = [], onNodeChange, onNodeDel
         <div className="flex flex-col gap-2 border-t border-gray-100 pt-3">
           <label htmlFor="memory-mode" className="text-sm font-medium">经验操作</label>
           <select id="memory-mode" value={node.memory.mode}
-            onChange={(event) => onNodeChange({ ...node, memory: event.target.value === "read" ? { mode: "read", query: "", limit: 5 } : { mode: "write", contentFrom: "" } })}
+            onChange={(event) => onNodeChange({ ...node, memory: event.target.value === "read" ? { mode: "read", query: "", limit: 5 } : { mode: "write", contentFrom: "run_summary" } })}
             className="rounded-md border border-gray-300 px-3 py-2 text-sm">
             <option value="read">读取相关经验</option><option value="write">保存本次经验</option>
           </select>
@@ -299,9 +306,14 @@ export function NodeInspector({ node, agentTargets = [], onNodeChange, onNodeDel
                 className="rounded-md border border-gray-300 px-3 py-2 text-sm font-normal" />
             </label>
           </> : <label className="flex flex-col gap-1 text-sm font-medium">保存内容来源
-            <input aria-label="保存内容来源" value={node.memory.contentFrom ?? ""} placeholder="留空则保存本次结果"
+            <select aria-label="保存内容来源" value={node.memory.contentFrom || "run_summary"}
               onChange={(event) => onNodeChange({ ...node, memory: { ...node.memory!, contentFrom: event.target.value } })}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm font-normal" />
+              className="rounded-md border border-gray-300 px-3 py-2 text-sm font-normal">
+              <option value="run_summary">本次输入和全部结果</option>
+              {node.memory.contentFrom && node.memory.contentFrom !== "run_summary" && !memorySources.some((source) => source.id === node.memory!.contentFrom)
+                ? <option value={node.memory.contentFrom}>来源已不可用</option> : null}
+              {memorySources.map((source) => <option key={source.id} value={source.id}>{source.title}</option>)}
+            </select>
           </label>}
         </div>
       ) : null}
