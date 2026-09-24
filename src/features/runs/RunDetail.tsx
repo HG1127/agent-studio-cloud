@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ApprovalPanel } from "@/features/runs/ApprovalPanel";
 import { RunStatusBadge } from "@/features/runs/RunList";
 import { TraceTimeline } from "@/features/runs/TraceTimeline";
+import { CancelRunButton } from "@/features/runs/CancelRunButton";
 import type { RunStatus } from "@/contracts/run";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { getRunContext, getRunView, listApprovals, listRunSteps } from "@/server/queries/runs";
@@ -48,7 +49,7 @@ export async function RunDetail({ runId }: { runId: string }) {
   ]);
   const live = LIVE_STATUSES.has(run.status);
   // 待确认的置顶，已决定的按时间在后
-  const pendingApprovals = approvals.filter((approval) => approval.status === "pending");
+  const pendingApprovals = live ? approvals.filter((approval) => approval.status === "pending") : [];
   const decidedApprovals = approvals.filter((approval) => approval.status !== "pending");
   const outputs = extractOutputs(context);
   const stepTitleByNode = new Map(steps.map((step) => [step.nodeId, step.nodeTitle]));
@@ -70,6 +71,7 @@ export async function RunDetail({ runId }: { runId: string }) {
         <Link href={`/agents/${run.agentId}`} className="w-fit text-sm text-gray-500 hover:text-gray-700">
           查看这个助手
         </Link>
+        {live ? <CancelRunButton runId={runId} /> : null}
       </header>
 
       {run.status === "failed" && run.error ? (

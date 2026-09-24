@@ -18,6 +18,7 @@ vi.mock("@/server/queries/runs", () => ({
 vi.mock("@/server/queries/trace", () => ({ listTrace: async () => [] }));
 vi.mock("@/features/runs/TraceTimeline", () => ({ TraceTimeline: () => null }));
 vi.mock("@/features/runs/ApprovalPanel", () => ({ ApprovalPanel: () => null }));
+vi.mock("@/features/runs/CancelRunButton", () => ({ CancelRunButton: () => null }));
 
 import { RunDetail } from "@/features/runs/RunDetail";
 

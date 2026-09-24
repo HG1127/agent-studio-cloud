@@ -28,6 +28,12 @@ export const StartRunResult = z.discriminatedUnion("ok", [
 ]);
 export type StartRunResult = z.infer<typeof StartRunResult>;
 
+export const CancelRunResult = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true) }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+export type CancelRunResult = z.infer<typeof CancelRunResult>;
+
 export const RunView = z.object({
   id: z.string().uuid(),
   agentId: z.string().uuid(),
