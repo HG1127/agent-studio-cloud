@@ -13,6 +13,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { AgentTargetOption } from "@/contracts/agent";
+import type { ToolRegistryOption } from "@/contracts/tool-registry";
 import type { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
 import { saveWorkflowAction } from "@/server/actions/save-workflow";
 import { NODE_TYPE_LABELS, workflowNodeTypes, type WorkflowFlowNode } from "./CustomNodes";
@@ -30,6 +31,7 @@ interface FlowCanvasProps {
   agentId: string;
   draft: WorkflowDraft;
   agentTargets: AgentTargetOption[];
+  toolOptions: ToolRegistryOption[];
 }
 
 const EDGE_STYLES: Record<EdgeKind, { color: string; dashed: boolean }> = {
@@ -41,7 +43,7 @@ const EDGE_STYLES: Record<EdgeKind, { color: string; dashed: boolean }> = {
   timeout: { color: "#0891b2", dashed: true },
 };
 
-export function FlowCanvas({ agentId, draft: initialDraft, agentTargets }: FlowCanvasProps) {
+export function FlowCanvas({ agentId, draft: initialDraft, agentTargets, toolOptions }: FlowCanvasProps) {
   const router = useRouter();
   const [draft, setDraft] = useState(initialDraft);
   const [showControlNodes, setShowControlNodes] = useState(false);
@@ -283,7 +285,7 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets }: FlowC
         </div>
         {selectedNode ? (
           <div className="w-72 shrink-0">
-            <NodeInspector key={selectedNode.id} node={selectedNode} workflowNodes={draft.nodes} agentTargets={agentTargets} onNodeChange={handleNodeChange} onNodeDelete={handleNodeDelete} />
+            <NodeInspector key={selectedNode.id} node={selectedNode} workflowNodes={draft.nodes} agentTargets={agentTargets} toolOptions={toolOptions} onNodeChange={handleNodeChange} onNodeDelete={handleNodeDelete} />
           </div>
         ) : null}
       </div>

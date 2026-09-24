@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { AgentTargetOption } from "@/contracts/agent";
+import type { ToolRegistryOption } from "@/contracts/tool-registry";
 import {
   MAX_CONDITION_BRANCHES,
   MAX_PARALLEL_BRANCHES,
@@ -15,6 +16,7 @@ interface NodeInspectorProps {
   node: WorkflowNode;
   workflowNodes?: Record<string, WorkflowNode>;
   agentTargets?: AgentTargetOption[];
+  toolOptions?: ToolRegistryOption[];
   onNodeChange: (node: WorkflowNode) => void;
   onNodeDelete: (nodeId: string) => void;
 }
@@ -97,7 +99,7 @@ function WaitPayloadSchemaEditor({ node, onNodeChange }: {
 }
 
 // M1 编辑范围：title/description，加 human 的负责人与确认事项；condition 的说明以「判断说明」呈现
-export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agentTargets = [], onNodeChange, onNodeDelete }: NodeInspectorProps) {
+export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agentTargets = [], toolOptions = [], onNodeChange, onNodeDelete }: NodeInspectorProps) {
   const isHuman = node.type === "human";
   const isCondition = node.type === "condition";
   const knowledge = node.knowledge;
@@ -139,6 +141,46 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
           className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
         />
       </div>
+      {node.type === "tool" ? (
+        <div className="flex flex-col gap-1">
+          <label htmlFor="node-tool-target" className="text-sm font-medium">业务工具</label>
+          <select
+            id="node-tool-target"
+            value={node.tool?.registryToolId ?? ""}
+            onChange={(event) => {
+              const selected = toolOptions.find((item) => item.id === event.target.value);
+              onNodeChange({
+                ...node,
+                tool: selected ? {
+                  connector: selected.name,
+                  action: selected.action,
+                  scope: selected.scope,
+                  risk: selected.risk,
+                  maxRetries: node.tool?.maxRetries ?? 3,
+                  registryToolId: selected.id,
+                  protocol: "http-json",
+                  operationKind: selected.risk === "low" ? "read" : "action",
+                  unresolved: false,
+                  inputSchema: selected.inputSchema,
+                  outputSchema: selected.outputSchema,
+                } : {
+                  connector: "demo", action: node.tool?.action || "demo", scope: "demo", risk: "low",
+                  maxRetries: 1, registryToolId: "demo", protocol: "demo", unresolved: false,
+                  inputSchema: { type: "object" }, outputSchema: { type: "object" },
+                },
+              });
+            }}
+            className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
+          >
+            <option value="demo">演示工具（不连接业务系统）</option>
+            {toolOptions.map((tool) => <option key={tool.id} value={tool.id}>{tool.name}</option>)}
+          </select>
+          {toolOptions.length === 0 ? <p className="text-xs text-gray-500">服务端还没有配置可用的业务工具</p> : null}
+          {toolOptions.find((tool) => tool.id === node.tool?.registryToolId)?.description ? (
+            <p className="text-xs text-gray-500">{toolOptions.find((tool) => tool.id === node.tool?.registryToolId)?.description}</p>
+          ) : null}
+        </div>
+      ) : null}
       {node.type === "knowledge" && knowledge ? (
         <div className="flex flex-col gap-1">
           <label htmlFor="node-query" className="text-sm font-medium">检索内容</label>

@@ -14,6 +14,7 @@ import { validateWaitContracts } from "@/server/domain/runtime/wait-contract";
 import { validateWorkflowRoutes } from "@/server/domain/runtime/workflow-routes";
 import { completeEvaluationForRun } from "@/server/services/evaluation-state";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
+import { getToolRegistration } from "@/server/tools/tool-registry";
 
 // M1 运行引擎支持的节点类型：其余编排类节点后续任务扩展
 const SUPPORTED_NODE_TYPES: ReadonlySet<string> = new Set([
@@ -135,7 +136,8 @@ export async function startRunCore(args: {
       }
       if (node.type === "tool") {
         const demoBound = node.tool && (node.tool.registryToolId === "demo" || node.tool.protocol === "demo");
-        if (!node.tool || node.tool.unresolved === true || !demoBound) unsupported.push(node.title);
+        const realBound = node.tool && getToolRegistration(node.tool.registryToolId) !== null;
+        if (!node.tool || node.tool.unresolved === true || (!demoBound && !realBound)) unsupported.push(node.title);
       }
       if (node.type === "knowledge") {
         if (!node.knowledge?.space) unsupported.push(node.title);
@@ -150,7 +152,8 @@ export async function startRunCore(args: {
           for (const step of branch.steps) {
             if (step.type === "tool") {
               const demoBound = step.tool && (step.tool.registryToolId === "demo" || step.tool.protocol === "demo");
-              if (!step.tool || step.tool.unresolved === true || !demoBound) unsupported.push(`${node.title} / ${branch.label} / ${step.title}`);
+              const realBound = step.tool && getToolRegistration(step.tool.registryToolId) !== null;
+              if (!step.tool || step.tool.unresolved === true || (!demoBound && !realBound)) unsupported.push(`${node.title} / ${branch.label} / ${step.title}`);
             }
             if (step.type === "knowledge" && !step.knowledge?.space) unsupported.push(`${node.title} / ${branch.label} / ${step.title}`);
             if (step.type === "memory" && !step.memory) unsupported.push(`${node.title} / ${branch.label} / ${step.title}（经验设置不完整）`);
@@ -168,7 +171,8 @@ export async function startRunCore(args: {
         for (const step of prepared.steps) {
           if (step.type === "tool") {
             const demoBound = step.tool && (step.tool.registryToolId === "demo" || step.tool.protocol === "demo");
-            if (!step.tool || step.tool.unresolved === true || !demoBound) unsupported.push(`${node.title} / ${step.title}`);
+            const realBound = step.tool && getToolRegistration(step.tool.registryToolId) !== null;
+            if (!step.tool || step.tool.unresolved === true || (!demoBound && !realBound)) unsupported.push(`${node.title} / ${step.title}`);
           }
           if (step.type === "knowledge" && !step.knowledge?.space) unsupported.push(`${node.title} / ${step.title}`);
           if (step.type === "memory" && !step.memory) unsupported.push(`${node.title} / ${step.title}（经验设置不完整）`);

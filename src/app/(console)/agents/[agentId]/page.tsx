@@ -14,6 +14,7 @@ import { listVersions } from "@/server/queries/versions";
 import { listModelConnections } from "@/server/queries/model-connections";
 import { listEvaluationCases, listEvaluationRuns } from "@/server/queries/evaluations";
 import { AgentManifest } from "@/contracts/manifest";
+import { listToolRegistryOptions } from "@/server/tools/tool-registry";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +47,7 @@ export default async function AgentDetailPage({
   ]);
   const defaultModelLabel = process.env.MODEL_MOCK === "1" ? "演示模式" : process.env.MODEL_ID?.trim() ? "服务端默认模型" : "尚未配置默认模型";
   const currentVersion = detail.versions.find((version) => version.status === "production");
+  const toolOptions = listToolRegistryOptions();
   const currentManifest = currentVersion ? AgentManifest.safeParse(currentVersion.manifest) : null;
   const inputFields = currentManifest?.success ? currentManifest.data.inputContract.fields : undefined;
   return (
@@ -65,7 +67,7 @@ export default async function AgentDetailPage({
         <p className="text-sm text-gray-500">{auditStatusLine(audit)}</p>
       </header>
       {detail.draft ? (
-        <FlowCanvas agentId={agentId} draft={detail.draft} agentTargets={agentTargets} />
+        <FlowCanvas agentId={agentId} draft={detail.draft} agentTargets={agentTargets} toolOptions={toolOptions} />
       ) : (
         <section className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">
           这个助手还没有流程草稿

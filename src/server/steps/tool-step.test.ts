@@ -1,0 +1,59 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { WorkflowNode } from "@/contracts/workflow";
+
+const mocks = vi.hoisted(() => ({
+  persistStep: vi.fn(), appendTrace: vi.fn(), invokeHttpTool: vi.fn(), getToolRegistration: vi.fn(),
+}));
+vi.mock("@/server/steps/run-state", () => ({ persistStep: mocks.persistStep }));
+vi.mock("@/server/steps/trace-step", () => ({ appendTrace: mocks.appendTrace }));
+vi.mock("@/server/tools/invoke-http-tool", () => ({ invokeHttpTool: mocks.invokeHttpTool }));
+vi.mock("@/server/tools/tool-registry", () => ({ getToolRegistration: mocks.getToolRegistration }));
+
+import { runToolStep } from "@/server/steps/tool-step";
+
+const node = WorkflowNode.parse({
+  id: "update_customer", title: "更新客户资料", type: "tool",
+  tool: {
+    connector: "客户系统", action: "update_customer", scope: "customer.write", risk: "medium",
+    registryToolId: "crm.update", protocol: "http-json", inputSchema: { type: "object" },
+    outputSchema: { type: "object", required: ["receiptId"], properties: { receiptId: { type: "string" } } },
+  },
+});
+const registration = {
+  id: "crm.update", name: "客户系统", description: "", endpoint: "https://tools.example.com/update",
+  method: "POST", headers: {}, action: "update_customer", scope: "customer.write", risk: "medium",
+  inputSchema: { type: "object" }, outputSchema: node.tool!.outputSchema,
+};
+
+describe("真实工具步骤", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getToolRegistration.mockReturnValue(registration);
+  });
+
+  it("执行注册工具并持久化经过契约校验的业务回执", async () => {
+    mocks.invokeHttpTool.mockResolvedValue({ ok: true, output: { receiptId: "receipt-1" } });
+    await expect(runToolStep({ runId: "run-1", node, input: { customerId: "c1" }, outputs: {} }))
+      .resolves.toEqual({ receipt: { receiptId: "receipt-1" } });
+    expect(mocks.invokeHttpTool).toHaveBeenCalledWith(expect.objectContaining({
+      idempotencyKey: "run-1:update_customer", action: "update_customer", input: { customerId: "c1" },
+    }));
+    expect(mocks.persistStep).toHaveBeenLastCalledWith(expect.objectContaining({
+      status: "succeeded", output: { receiptId: "receipt-1" },
+    }));
+  });
+
+  it("拒绝不符合冻结契约的业务回执", async () => {
+    mocks.invokeHttpTool.mockResolvedValue({ ok: true, output: { ok: true } });
+    await expect(runToolStep({ runId: "run-1", node, input: {}, outputs: {} }))
+      .rejects.toThrow("业务系统回执不符合字段契约");
+    expect(mocks.persistStep).toHaveBeenLastCalledWith(expect.objectContaining({ status: "failed" }));
+  });
+
+  it("保留外部系统瞬时失败的可重试语义", async () => {
+    mocks.invokeHttpTool.mockResolvedValue({ ok: false, error: "业务系统暂时不可用，稍后自动重试", retryable: true });
+    await expect(runToolStep({ runId: "run-1", node, input: {}, outputs: {} }))
+      .rejects.toThrow("业务系统暂时不可用");
+    expect(mocks.persistStep).toHaveBeenLastCalledWith(expect.objectContaining({ status: "failed" }));
+  });
+});

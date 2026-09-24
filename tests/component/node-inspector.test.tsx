@@ -23,6 +23,10 @@ const KNOWLEDGE_NODE = WorkflowNode.parse({
   type: "knowledge",
   knowledge: { space: "业务资料库", query: "退货规则" },
 });
+const TOOL_NODE = WorkflowNode.parse({
+  id: "tool_1", title: "更新客户资料", type: "tool",
+  tool: { connector: "demo", action: "update_customer", scope: "demo", risk: "low", maxRetries: 1, registryToolId: "demo", protocol: "demo" },
+});
 const AGENT_CALL_NODE = WorkflowNode.parse({
   id: "step_5",
   title: "请研究助手分析",
@@ -202,6 +206,28 @@ describe("NodeInspector", () => {
     fireEvent.change(screen.getByLabelText("检索内容"), { target: { value: "海蓝灯塔二四" } });
     expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
       knowledge: { space: "业务资料库", query: "海蓝灯塔二四" },
+    }));
+  });
+
+  it("工具节点可以选择服务端业务工具并冻结回执契约", async () => {
+    const onNodeChange = vi.fn();
+    const user = userEvent.setup();
+    render(<NodeInspector
+      node={TOOL_NODE}
+      toolOptions={[{
+        id: "crm.update", name: "客户系统", description: "更新客户跟进状态", action: "update_customer",
+        scope: "customer.write", risk: "medium", inputSchema: { type: "object" },
+        outputSchema: { type: "object", required: ["receiptId"], properties: { receiptId: { type: "string" } } },
+      }]}
+      onNodeChange={onNodeChange}
+      onNodeDelete={vi.fn()}
+    />);
+    await user.selectOptions(screen.getByLabelText("业务工具"), "crm.update");
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      tool: expect.objectContaining({
+        registryToolId: "crm.update", protocol: "http-json", connector: "客户系统",
+        outputSchema: expect.objectContaining({ required: ["receiptId"] }),
+      }),
     }));
   });
 
