@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Background,
@@ -23,6 +23,7 @@ import { ADDABLE_NODE_TYPES, createWorkflowNode } from "./create-workflow-node";
 import { WorkflowInputEditor } from "./WorkflowInputEditor";
 import { WorkflowOutputEditor } from "./WorkflowOutputEditor";
 import { validateOutputFieldPaths } from "@/server/domain/runtime/output-contract";
+import { notifyDraftState } from "@/lib/draft-state";
 
 interface FlowCanvasProps {
   agentId: string;
@@ -192,8 +193,25 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets }: FlowC
   const [showControlNodes, setShowControlNodes] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const [newNodeType, setNewNodeType] = useState<(typeof ADDABLE_NODE_TYPES)[number] | "">("");
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
+  const markDirty = useCallback(() => {
+    setDirty(true);
+    setFeedback(null);
+  }, []);
+
+  useEffect(() => notifyDraftState({ agentId, dirty }), [agentId, dirty]);
+  useEffect(() => () => notifyDraftState({ agentId, dirty: false }), [agentId]);
+  useEffect(() => {
+    if (!dirty) return;
+    const warnBeforeLeave = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeLeave);
+    return () => window.removeEventListener("beforeunload", warnBeforeLeave);
+  }, [dirty]);
 
   const visibleNodes = useMemo(
     () => Object.values(draft.nodes).filter((node) => showControlNodes || node.ui?.visibility !== "control"),
@@ -240,6 +258,7 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets }: FlowC
   }, [visibleNodes]);
 
   const onNodesChange = useCallback((changes: NodeChange<WorkflowFlowNode>[]) => {
+    if (changes.some((change) => change.type === "position" && change.position)) markDirty();
     setDraft((current) => {
       let next = current;
       for (const change of changes) {
@@ -258,9 +277,10 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets }: FlowC
       }
       return next;
     });
-  }, []);
+  }, [markDirty]);
 
   const onEdgesChange = useCallback((changes: EdgeChange[]) => {
+    if (changes.some((change) => change.type === "remove")) markDirty();
     setDraft((current) => {
       let next = current;
       for (const change of changes) {
@@ -268,30 +288,34 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets }: FlowC
       }
       return next;
     });
-  }, []);
+  }, [markDirty]);
 
   const onConnect = useCallback((connection: Connection) => {
+    markDirty();
     setDraft((current) => applyConnection(current, connection));
-  }, []);
+  }, [markDirty]);
 
   const handleNodeChange = useCallback((node: WorkflowNode) => {
+    markDirty();
     setDraft((current) => patchNode(current, node.id, node));
-  }, []);
+  }, [markDirty]);
 
   const handleNodeDelete = useCallback((nodeId: string) => {
+    markDirty();
     setDraft((current) => removeNode(current, nodeId));
     setSelectedId((current) => (current === nodeId ? null : current));
-  }, []);
+  }, [markDirty]);
 
   const handleNodeAdd = useCallback(() => {
     if (!newNodeType) return;
+    markDirty();
     setDraft((current) => {
       const created = createWorkflowNode(current, newNodeType);
       setSelectedId(created.nodeId);
       return created.draft;
     });
     setNewNodeType("");
-  }, [newNodeType]);
+  }, [markDirty, newNodeType]);
 
   async function handleSave() {
     const names = draft.variables.map((variable) => variable.name);
@@ -315,6 +339,7 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets }: FlowC
       const result = await saveWorkflowAction(agentId, draft);
       if (result.ok) {
         setFeedback({ ok: true, text: "草稿已保存" });
+        setDirty(false);
         router.refresh();
       } else {
         setFeedback({ ok: false, text: result.error });
@@ -330,9 +355,15 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets }: FlowC
 
   return (
     <section className="flex flex-col gap-3">
-      <WorkflowInputEditor variables={draft.variables} onChange={(variables) => setDraft((current) => ({ ...current, variables }))} />
+      <WorkflowInputEditor variables={draft.variables} onChange={(variables) => {
+        markDirty();
+        setDraft((current) => ({ ...current, variables }));
+      }} />
       <WorkflowOutputEditor nodes={draft.nodes} fields={draft.outputContract?.fields ?? []}
-        onChange={(fields) => setDraft((current) => ({ ...current, outputContract: { fields } }))} />
+        onChange={(fields) => {
+          markDirty();
+          setDraft((current) => ({ ...current, outputContract: { fields } }));
+        }} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <label className="flex items-center gap-2 text-sm text-gray-600">
           <input
@@ -368,6 +399,7 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets }: FlowC
               {feedback.text}
             </span>
           ) : null}
+          {dirty && !feedback ? <span role="status" className="text-sm text-amber-700">有未保存修改</span> : null}
           <button
             type="button"
             onClick={handleSave}

@@ -1,11 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { VersionSummary } from "@/contracts/version";
 import type { ModelConnectionView } from "@/contracts/connections";
 import { publishVersionAction } from "@/server/actions/publish-version";
 import { restoreVersionAction } from "@/server/actions/restore-version";
+import { DRAFT_STATE_EVENT, type DraftStateDetail } from "@/lib/draft-state";
 
 function formatTime(iso: string): string {
   const date = new Date(iso);
@@ -28,10 +29,20 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
     selection: { connectionId: connection.id, modelId },
   })));
   const [pending, setPending] = useState(false);
+  const [hasUnsavedDraft, setHasUnsavedDraft] = useState(false);
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [failure, setFailure] = useState<{ error: string; issues: string[] } | null>(null);
   const [demoNotice, setDemoNotice] = useState<string[] | null>(null);
   const [releaseNotice, setReleaseNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    const receiveDraftState = (event: Event) => {
+      const detail = (event as CustomEvent<DraftStateDetail>).detail;
+      if (detail?.agentId === agentId) setHasUnsavedDraft(detail.dirty);
+    };
+    window.addEventListener(DRAFT_STATE_EVENT, receiveDraftState);
+    return () => window.removeEventListener(DRAFT_STATE_EVENT, receiveDraftState);
+  }, [agentId]);
 
   const displayedVersions = optimisticVersions.reduce<VersionSummary[]>((current, published) => [
     published,
@@ -49,6 +60,10 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
   const currentVersion = displayedVersions.find((version) => version.status === "production");
 
   async function handlePublish() {
+    if (hasUnsavedDraft) {
+      setFailure({ error: "请先保存流程草稿，再发布新版本", issues: [] });
+      return;
+    }
     setPending(true);
     setFailure(null);
     setDemoNotice(null);
@@ -115,13 +130,14 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
           <button
             type="button"
             onClick={handlePublish}
-            disabled={pending}
+            disabled={pending || hasUnsavedDraft}
             className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:bg-gray-400"
           >
-            {pending ? "正在发布…" : "发布新版本"}
+            {pending ? "正在发布…" : hasUnsavedDraft ? "请先保存草稿" : "发布新版本"}
           </button>
         </div>
       </div>
+      {hasUnsavedDraft ? <p role="status" className="text-sm text-amber-700">流程有未保存修改，保存后才能发布。</p> : null}
       {failure ? (
         <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           <p>{failure.error}</p>

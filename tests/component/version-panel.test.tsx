@@ -1,8 +1,9 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { VersionPanel } from "@/features/agents/VersionPanel";
 import type { ModelConnectionView } from "@/contracts/connections";
+import { DRAFT_STATE_EVENT } from "@/lib/draft-state";
 
 const { actionMock, restoreMock, refreshMock } = vi.hoisted(() => ({
   actionMock: vi.fn(),
@@ -63,6 +64,14 @@ describe("VersionPanel", () => {
     renderPanel([]);
     expect(screen.getByText(/还没有发布过版本/)).toBeInTheDocument();
     expect(screen.queryByText("当前版本")).not.toBeInTheDocument();
+  });
+
+  it("流程有未保存修改时阻止发布旧草稿", async () => {
+    renderPanel();
+    act(() => window.dispatchEvent(new CustomEvent(DRAFT_STATE_EVENT, { detail: { agentId: AGENT_ID, dirty: true } })));
+    expect(screen.getByRole("button", { name: "请先保存草稿" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("保存后才能发布");
+    expect(actionMock).not.toHaveBeenCalled();
   });
 
   it("历史版本可恢复为新的当前版本", async () => {
