@@ -17,3 +17,9 @@ export const PublishVersionResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(false), error: z.string(), issues: z.array(z.string()) }),
 ]);
 export type PublishVersionResult = z.infer<typeof PublishVersionResult>;
+
+export const RestoreVersionResult = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), version: z.number().int().positive() }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+export type RestoreVersionResult = z.infer<typeof RestoreVersionResult>;

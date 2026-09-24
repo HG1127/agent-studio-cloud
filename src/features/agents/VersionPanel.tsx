@@ -5,6 +5,7 @@ import { useState } from "react";
 import type { VersionSummary } from "@/contracts/version";
 import type { ModelConnectionView } from "@/contracts/connections";
 import { publishVersionAction } from "@/server/actions/publish-version";
+import { restoreVersionAction } from "@/server/actions/restore-version";
 
 function formatTime(iso: string): string {
   const date = new Date(iso);
@@ -26,6 +27,7 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
     selection: { connectionId: connection.id, modelId },
   })));
   const [pending, setPending] = useState(false);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
   const [failure, setFailure] = useState<{ error: string; issues: string[] } | null>(null);
   const [demoNotice, setDemoNotice] = useState<string[] | null>(null);
 
@@ -52,6 +54,21 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
       setFailure({ error: "发布失败，请稍后重试", issues: [] });
     } finally {
       setPending(false);
+    }
+  }
+
+  async function handleRestore(versionId: string) {
+    setRestoringId(versionId);
+    setFailure(null);
+    setDemoNotice(null);
+    try {
+      const result = await restoreVersionAction(agentId, versionId);
+      if (result.ok) router.refresh();
+      else setFailure({ error: result.error, issues: [] });
+    } catch {
+      setFailure({ error: "恢复失败，请稍后重试", issues: [] });
+    } finally {
+      setRestoringId(null);
     }
   }
 
@@ -115,6 +132,16 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
                 {version.status === "production" ? "当前版本" : "历史版本"}
               </span>
               <span className="text-gray-500">{formatTime(version.createdAt)}</span>
+              {version.status !== "production" ? (
+                <button
+                  type="button"
+                  disabled={pending || restoringId !== null}
+                  onClick={() => handleRestore(version.id)}
+                  className="ml-auto rounded-md border border-gray-300 px-2.5 py-1 text-xs text-gray-700 hover:border-gray-500 disabled:text-gray-400"
+                >
+                  {restoringId === version.id ? "正在恢复…" : "恢复为当前版本"}
+                </button>
+              ) : null}
             </li>
           ))}
         </ul>

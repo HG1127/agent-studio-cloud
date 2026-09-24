@@ -4,12 +4,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { VersionPanel } from "@/features/agents/VersionPanel";
 import type { ModelConnectionView } from "@/contracts/connections";
 
-const { actionMock, refreshMock } = vi.hoisted(() => ({
+const { actionMock, restoreMock, refreshMock } = vi.hoisted(() => ({
   actionMock: vi.fn(),
+  restoreMock: vi.fn(),
   refreshMock: vi.fn(),
 }));
 
 vi.mock("@/server/actions/publish-version", () => ({ publishVersionAction: actionMock }));
+vi.mock("@/server/actions/restore-version", () => ({ restoreVersionAction: restoreMock }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: refreshMock }) }));
 
 const AGENT_ID = "00000000-0000-4000-8000-000000000009";
@@ -35,6 +37,7 @@ function renderPanel(versions = VERSIONS, connections: ModelConnectionView[] = [
 describe("VersionPanel", () => {
   afterEach(() => {
     actionMock.mockReset();
+    restoreMock.mockReset();
     refreshMock.mockReset();
   });
 
@@ -52,6 +55,24 @@ describe("VersionPanel", () => {
     renderPanel([]);
     expect(screen.getByText(/还没有发布过版本/)).toBeInTheDocument();
     expect(screen.queryByText("当前版本")).not.toBeInTheDocument();
+  });
+
+  it("历史版本可恢复为新的当前版本", async () => {
+    restoreMock.mockResolvedValue({ ok: true, version: 3 });
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(screen.getByRole("button", { name: "恢复为当前版本" }));
+    await waitFor(() => expect(restoreMock).toHaveBeenCalledWith(AGENT_ID, VERSIONS[1].id));
+    expect(refreshMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("历史版本恢复失败时保留错误提示", async () => {
+    restoreMock.mockResolvedValue({ ok: false, error: "历史版本格式过旧，无法直接恢复" });
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(screen.getByRole("button", { name: "恢复为当前版本" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("历史版本格式过旧");
+    expect(refreshMock).not.toHaveBeenCalled();
   });
 
   it("点「发布新版本」调用发布动作，成功后刷新页面", async () => {
