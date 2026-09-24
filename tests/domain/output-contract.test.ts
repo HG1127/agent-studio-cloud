@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { projectWorkflowResult, validateOutputFieldPaths } from "@/server/domain/runtime/output-contract";
+import { WorkflowDraft } from "@/contracts/workflow";
+import { projectWorkflowResult, validateOutputContract, validateOutputFieldPaths } from "@/server/domain/runtime/output-contract";
 
 describe("最终交付结果", () => {
   it("没有交付契约时保留全部步骤结果", () => {
@@ -34,5 +35,23 @@ describe("最终交付结果", () => {
       { path: "交付", required: true, sourceNodeId: "draft" },
       { path: "交付.方案", required: true, sourceNodeId: "plan" },
     ])).toContain("与其下级字段冲突");
+  });
+
+  it("拒绝不存在、起止或控制步骤作为最终交付来源", () => {
+    const nodes = WorkflowDraft.parse({
+      id: "output-contract-test",
+      rootAgent: { id: "agent", name: "测试助手", role: "测试" },
+      memoryPolicy: { taskContext: true, longTerm: false },
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "draft" },
+        draft: { id: "draft", title: "生成方案", type: "ai", next: "done" },
+        check: { id: "check", title: "质量检查", type: "rule", next: "done", ui: { visibility: "control" } },
+        done: { id: "done", title: "结束", type: "end", next: null },
+      },
+    }).nodes;
+    expect(validateOutputContract([{ path: "plan", label: "方案", required: true, sourceNodeId: "draft" }], nodes)).toBeNull();
+    expect(validateOutputContract([{ path: "plan", label: "方案", required: true, sourceNodeId: "missing" }], nodes)).toContain("必须选择有效的业务步骤来源");
+    expect(validateOutputContract([{ path: "plan", label: "方案", required: true, sourceNodeId: "start" }], nodes)).toContain("必须选择有效的业务步骤来源");
+    expect(validateOutputContract([{ path: "plan", label: "方案", required: true, sourceNodeId: "check" }], nodes)).toContain("必须选择有效的业务步骤来源");
   });
 });

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { WorkflowDraft } from "@/contracts/workflow";
+import { WorkflowDraft, type WorkflowDraft as WorkflowDraftType } from "@/contracts/workflow";
 
 const mocks = vi.hoisted(() => ({
   selectRows: [] as unknown[][],
@@ -40,7 +40,7 @@ import { saveWorkflowAction } from "@/server/actions/save-workflow";
 import { updateAgentAction } from "@/server/actions/update-agent";
 
 const AGENT_ID = "00000000-0000-4000-8000-000000000071";
-const draft: WorkflowDraft = {
+const draft: WorkflowDraftType = {
   id: "draft-1",
   versionId: null,
   startNodeId: "start",
@@ -77,6 +77,24 @@ describe("助手与流程并发写入", () => {
     const result = await saveWorkflowAction(AGENT_ID, draft);
 
     expect(result).toEqual({ ok: false, error: "找不到这个助手，或助手已归档，请刷新页面后重试" });
+    expect(mocks.updates).toHaveLength(0);
+  });
+
+  it("服务端拒绝保存引用已删除步骤的最终交付", async () => {
+    const invalid = WorkflowDraft.parse({
+      ...draft,
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "done" },
+        done: { id: "done", title: "结束", type: "end", next: null },
+      },
+      outputContract: { fields: [{ path: "plan", label: "方案", required: true, sourceNodeId: "deleted" }] },
+    });
+
+    expect(await saveWorkflowAction(AGENT_ID, invalid)).toEqual({
+      ok: false,
+      error: "最终交付“方案”必须选择有效的业务步骤来源",
+    });
+    expect(mocks.lock).not.toHaveBeenCalled();
     expect(mocks.updates).toHaveLength(0);
   });
 

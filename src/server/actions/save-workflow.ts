@@ -8,6 +8,7 @@ import { WorkflowDraft } from "@/contracts/workflow";
 import { agents, workflowDefinitions } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
+import { validateOutputContract } from "@/server/domain/runtime/output-contract";
 
 export async function saveWorkflowAction(agentId: string, draft: WorkflowDraft): Promise<SaveWorkflowResult> {
   if (!z.string().uuid().safeParse(agentId).success) {
@@ -17,6 +18,8 @@ export async function saveWorkflowAction(agentId: string, draft: WorkflowDraft):
   if (!parsed.success) {
     return { ok: false, error: "流程草稿没有通过保存校验，请检查各步骤内容后重试" };
   }
+  const outputError = validateOutputContract(parsed.data.outputContract?.fields ?? [], parsed.data.nodes);
+  if (outputError) return { ok: false, error: outputError };
   try {
     const result = await db.transaction(async (tx) => {
       // 与基本信息更新按同一助手行串行化，并拒绝旧页面给已归档助手写回草稿。

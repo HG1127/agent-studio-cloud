@@ -14,7 +14,7 @@ import { auditWorkflow } from "@/server/domain/audit";
 import { buildManifest, filterPublishBlockers } from "@/server/domain/pipeline";
 import { releaseStatusForCaseCount } from "@/server/domain/release-gate";
 import { isUniqueViolation } from "@/server/unique-violation";
-import { validateOutputFieldPaths } from "@/server/domain/runtime/output-contract";
+import { validateOutputContract } from "@/server/domain/runtime/output-contract";
 
 export async function publishVersionAction(agentId: string, modelSelection?: PublishModelSelection): Promise<PublishVersionResult> {
   if (!z.string().uuid().safeParse(agentId).success) {
@@ -43,7 +43,7 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
     if (!parsed.success) {
       return { ok: false, error: "流程草稿没有通过校验，请在画布上重新保存后再发布", issues: [] };
     }
-    const outputPathError = validateOutputFieldPaths(parsed.data.outputContract?.fields ?? []);
+    const outputPathError = validateOutputContract(parsed.data.outputContract?.fields ?? [], parsed.data.nodes);
     if (outputPathError) {
       return { ok: false, error: outputPathError, issues: [] };
     }

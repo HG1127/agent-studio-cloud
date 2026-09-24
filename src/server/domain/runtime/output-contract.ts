@@ -1,4 +1,4 @@
-import type { WorkflowDraft } from "@/contracts/workflow";
+import type { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
 
 type OutputField = NonNullable<WorkflowDraft["outputContract"]>["fields"][number];
 
@@ -12,6 +12,19 @@ export function validateOutputFieldPaths(fields: OutputField[]): string | null {
   for (let index = 0; index < ordered.length; index += 1) {
     if (ordered.some((path, position) => position !== index && path.startsWith(`${ordered[index]}.`))) {
       return `最终交付字段位置“${ordered[index]}”与其下级字段冲突`;
+    }
+  }
+  return null;
+}
+
+export function validateOutputContract(fields: OutputField[], nodes: Record<string, WorkflowNode>): string | null {
+  const pathError = validateOutputFieldPaths(fields);
+  if (pathError) return pathError;
+  for (const field of fields) {
+    const sourceId = field.sourceNodeId ?? field.path.split(".")[0];
+    const source = nodes[sourceId];
+    if (!source || source.type === "trigger" || source.type === "end" || source.ui?.visibility === "control") {
+      return `最终交付“${field.label || field.path}”必须选择有效的业务步骤来源`;
     }
   }
   return null;
