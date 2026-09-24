@@ -56,44 +56,48 @@ export interface PersistStepInput {
 // upsert run_steps（run_id+node_id 唯一）+ runs.stepStates + trace step.*；running 计一次尝试
 export async function persistStep(step: PersistStepInput): Promise<void> {
   "use step";
-  const run = await requireRun(step.runId);
-  if (!["queued", "running", "waiting_approval", "waiting_event"].includes(run.status)) {
-    throw new FatalError("运行已经结束，忽略迟到的步骤结果");
-  }
   const now = new Date();
   const starting = step.status === "running";
   const title = step.nodeTitle ?? step.nodeId;
-  await db
-    .insert(runSteps)
-    .values({
-      runId: step.runId,
-      workspaceId: run.workspaceId,
-      nodeId: step.nodeId,
-      nodeTitle: step.nodeTitle ?? null,
-      nodeType: step.nodeType,
-      status: step.status,
-      output: step.output ?? null,
-      error: step.error ?? null,
-      startedAt: starting ? now : null,
-      finishedAt: starting ? null : now,
-      attempt: 1,
-    })
-    .onConflictDoUpdate({
-      target: [runSteps.runId, runSteps.nodeId],
-      set: starting
-        ? { status: "running", startedAt: now, attempt: sql`coalesce(${runSteps.attempt}, 0) + 1`, updatedAt: now }
-        : { status: step.status, output: step.output ?? null, error: step.error ?? null, finishedAt: now, updatedAt: now },
-    });
-  const [current] = await db
-    .select({ stepStates: runs.stepStates })
-    .from(runs)
-    .where(eq(runs.id, step.runId))
-    .limit(1);
-  const states = {
-    ...(current?.stepStates ?? {}),
-    [step.nodeId]: { status: step.status, updatedAt: now.toISOString() },
-  };
-  await db.update(runs).set({ stepStates: states, updatedAt: now }).where(eq(runs.id, step.runId));
+  await db.transaction(async (tx) => {
+    // 锁住运行状态直到步骤与摘要一起落库，取消操作要么在前、要么在后，不能插进检查与写入之间。
+    const [run] = await tx
+      .select({ workspaceId: runs.workspaceId, status: runs.status, stepStates: runs.stepStates })
+      .from(runs)
+      .where(eq(runs.id, step.runId))
+      .for("update")
+      .limit(1);
+    if (!run) throw new FatalError("运行记录不存在，无法继续执行");
+    if (!["queued", "running", "waiting_approval", "waiting_event"].includes(run.status)) {
+      throw new FatalError("运行已经结束，忽略迟到的步骤结果");
+    }
+    await tx
+      .insert(runSteps)
+      .values({
+        runId: step.runId,
+        workspaceId: run.workspaceId,
+        nodeId: step.nodeId,
+        nodeTitle: step.nodeTitle ?? null,
+        nodeType: step.nodeType,
+        status: step.status,
+        output: step.output ?? null,
+        error: step.error ?? null,
+        startedAt: starting ? now : null,
+        finishedAt: starting ? null : now,
+        attempt: 1,
+      })
+      .onConflictDoUpdate({
+        target: [runSteps.runId, runSteps.nodeId],
+        set: starting
+          ? { status: "running", startedAt: now, attempt: sql`coalesce(${runSteps.attempt}, 0) + 1`, updatedAt: now }
+          : { status: step.status, output: step.output ?? null, error: step.error ?? null, finishedAt: now, updatedAt: now },
+      });
+    const states = {
+      ...(run.stepStates ?? {}),
+      [step.nodeId]: { status: step.status, updatedAt: now.toISOString() },
+    };
+    await tx.update(runs).set({ stepStates: states, updatedAt: now }).where(eq(runs.id, step.runId));
+  });
   await appendTrace({
     runId: step.runId,
     nodeId: step.nodeId,
@@ -112,8 +116,14 @@ export async function persistStep(step: PersistStepInput): Promise<void> {
 
 export async function persistContext(runId: string, outputs: Record<string, unknown>): Promise<void> {
   "use step";
-  await requireRun(runId);
-  await db.update(runs).set({ context: { outputs }, updatedAt: new Date() }).where(eq(runs.id, runId));
+  const updated = await db
+    .update(runs)
+    .set({ context: { outputs }, updatedAt: new Date() })
+    .where(and(eq(runs.id, runId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])))
+    .returning({ id: runs.id });
+  if (updated.length > 0) return;
+  const [run] = await db.select({ id: runs.id }).from(runs).where(eq(runs.id, runId)).limit(1);
+  if (!run) throw new FatalError("运行记录不存在，无法继续执行");
 }
 
 export async function finalizeRun(
@@ -122,11 +132,10 @@ export async function finalizeRun(
   contextOutputs: Record<string, unknown> = result,
 ): Promise<void> {
   "use step";
-  await persistContext(runId, contextOutputs);
   const now = new Date();
   const updated = await db
     .update(runs)
-    .set({ status: "completed", result, finishedAt: now, updatedAt: now })
+    .set({ status: "completed", result, context: { outputs: contextOutputs }, finishedAt: now, updatedAt: now })
     .where(and(eq(runs.id, runId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])))
     .returning({ id: runs.id });
   if (updated.length === 0) return;

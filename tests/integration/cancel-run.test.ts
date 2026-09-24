@@ -168,12 +168,21 @@ describe("取消运行", () => {
 
   it("迟到的完成回调不能把已取消运行改成已完成", async () => {
     await insertWaitingRun();
-    await db.update(runs).set({ status: "cancelled", error: "已由员工取消" }).where(eq(runs.id, RUN_ID));
+    await db.update(runs).set({
+      status: "cancelled",
+      error: "已由员工取消",
+      context: { outputs: { retained: "取消前内容" } },
+    }).where(eq(runs.id, RUN_ID));
 
     await finalizeRun(RUN_ID, { answer: "迟到结果" });
 
     const [run] = await db.select().from(runs).where(eq(runs.id, RUN_ID));
-    expect(run).toMatchObject({ status: "cancelled", result: null, error: "已由员工取消" });
+    expect(run).toMatchObject({
+      status: "cancelled",
+      result: null,
+      context: { outputs: { retained: "取消前内容" } },
+      error: "已由员工取消",
+    });
     expect(appendTraceMock).not.toHaveBeenCalled();
   });
 
