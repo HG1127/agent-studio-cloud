@@ -40,6 +40,17 @@ function countOccurrences(haystack: string, needle: string): number {
   return count;
 }
 
+function hanTrigrams(token: string): string[] {
+  const grams = new Set<string>();
+  for (const match of token.matchAll(/\p{Script=Han}{3,}/gu)) {
+    const chars = Array.from(match[0]);
+    for (let index = 0; index <= chars.length - 3; index += 1) {
+      grams.add(chars.slice(index, index + 3).join(""));
+    }
+  }
+  return [...grams];
+}
+
 export function scoreChunks(query: string, docs: SearchDoc[], opts?: { limit?: number }): SearchHit[] {
   const tokens = tokenize(query);
   if (tokens.length === 0) return [];
@@ -50,9 +61,20 @@ export function scoreChunks(query: string, docs: SearchDoc[], opts?: { limit?: n
     let score = 0;
     for (const token of tokens) {
       const first = lower.indexOf(token);
-      if (first === -1) continue;
-      score += FREQUENCY_WEIGHT * countOccurrences(lower, token);
-      if (first < EARLY_POSITION_CHARS) score += EARLY_BONUS;
+      if (first !== -1) {
+        score += FREQUENCY_WEIGHT * countOccurrences(lower, token);
+        if (first < EARLY_POSITION_CHARS) score += EARLY_BONUS;
+        continue;
+      }
+      // 中文任务句通常含“检索…资料”等指令词，正文只包含中间的主题短语。
+      let earlyGramHit = false;
+      for (const gram of hanTrigrams(token)) {
+        const gramFirst = lower.indexOf(gram);
+        if (gramFirst === -1) continue;
+        score += FREQUENCY_WEIGHT * countOccurrences(lower, gram);
+        if (gramFirst < EARLY_POSITION_CHARS) earlyGramHit = true;
+      }
+      if (earlyGramHit) score += EARLY_BONUS;
     }
     if (score > 0) {
       hits.push({ ...doc, excerpt: doc.content.slice(0, EXCERPT_CHARS), score });
