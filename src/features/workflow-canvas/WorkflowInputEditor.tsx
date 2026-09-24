@@ -29,7 +29,10 @@ export function WorkflowInputEditor({ variables, onChange }: {
           <div key={index} className="grid gap-2 rounded-md border border-gray-100 p-3 md:grid-cols-[1fr_1fr_120px_auto_auto]">
             <label className="flex flex-col gap-1 text-xs text-gray-600">字段名
               <input aria-label={`字段 ${index + 1} 名称`} value={variable.name}
-                onChange={(event) => update(index, { name: event.target.value.replace(/[^A-Za-z0-9_]/g, "") })}
+                onChange={(event) => {
+                  const cleaned = event.target.value.replace(/[^A-Za-z0-9_]/g, "");
+                  update(index, { name: /^\d/.test(cleaned) ? `_${cleaned}` : cleaned });
+                }}
                 className="rounded-md border border-gray-300 px-2 py-1.5 text-sm" />
             </label>
             <label className="flex flex-col gap-1 text-xs text-gray-600">显示名称

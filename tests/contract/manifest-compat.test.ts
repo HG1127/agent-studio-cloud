@@ -33,4 +33,11 @@ describe("manifest 模型冻结向后兼容", () => {
     expect(parsed.resourceSelection.model.connectionId).toBe("00000000-0000-4000-8000-0000000000c1");
     expect(parsed.resourceSelection.model.mock).toBe(false);
   });
+
+  it("拒绝未知、非法或重复的运行输入字段", () => {
+    const model = { resourceSelection: { model: { modelId: "mock", mock: true } } };
+    expect(AgentManifest.safeParse({ ...base, ...model, inputContract: { fields: [{ name: "brief", type: "unknown" }] } }).success).toBe(false);
+    expect(AgentManifest.safeParse({ ...base, ...model, inputContract: { fields: [{ name: "1brief" }] } }).success).toBe(false);
+    expect(AgentManifest.safeParse({ ...base, ...model, inputContract: { fields: [{ name: "brief" }, { name: "brief" }] } }).success).toBe(false);
+  });
 });

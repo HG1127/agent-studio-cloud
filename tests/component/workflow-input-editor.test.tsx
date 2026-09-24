@@ -21,6 +21,8 @@ describe("运行输入字段编辑", () => {
     await user.click(screen.getByText(/运行输入字段/));
     fireEvent.change(screen.getByLabelText("字段 1 名称"), { target: { value: "order-id" } });
     expect(onChange).toHaveBeenLastCalledWith([{ ...variable, name: "orderid" }]);
+    fireEvent.change(screen.getByLabelText("字段 1 名称"), { target: { value: "1order" } });
+    expect(onChange).toHaveBeenLastCalledWith([{ ...variable, name: "_1order" }]);
 
     rerender(<WorkflowInputEditor variables={[variable]} onChange={onChange} />);
     await user.selectOptions(screen.getByLabelText("字段 1 类型"), "number");

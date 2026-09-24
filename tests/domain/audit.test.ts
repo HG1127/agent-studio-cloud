@@ -119,4 +119,20 @@ describe("直测：结构性检查", () => {
       code: "condition_default",
     });
   });
+
+  it("非法名称与不受支持类型会阻止运行输入字段发布", () => {
+    const out = auditWorkflow({
+      ...deadEndDraft,
+      variables: [
+        { name: "1brief", type: "string", scope: "run" },
+        { name: "payload", type: "anything", scope: "run" },
+        { name: "open", type: "any", scope: "run" },
+      ],
+    }, {});
+    expect(out.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "variable_name_invalid_1brief", severity: "critical" }),
+      expect.objectContaining({ code: "variable_type_payload", severity: "critical" }),
+      expect.objectContaining({ code: "variable_input_type_open", severity: "critical" }),
+    ]));
+  });
 });

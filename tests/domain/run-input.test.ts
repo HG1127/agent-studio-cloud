@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
+import type { AgentInputField } from "@/contracts/manifest";
 import { validateRunInput } from "@/server/domain/runtime/run-input";
 
-const fields = [
+const fields: AgentInputField[] = [
   { name: "brief", label: "任务说明", required: true, type: "string" },
   { name: "count", label: "数量", required: false, type: "number" },
 ];

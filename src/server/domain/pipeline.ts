@@ -149,10 +149,21 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 function inputContractFor(draft: WorkflowDraft): AgentManifest["inputContract"] {
   const fields: AgentManifest["inputContract"]["fields"] = [];
   const seen = new Set<string>();
+  const inputTypes = new Set<AgentManifest["inputContract"]["fields"][number]["type"]>(["string", "number", "boolean", "object", "array"]);
   for (const variable of draft.variables ?? []) {
-    if (variable.scope !== "run" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(variable.name) || seen.has(variable.name)) continue;
+    if (
+      variable.scope !== "run"
+      || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(variable.name)
+      || seen.has(variable.name)
+      || !inputTypes.has(variable.type as AgentManifest["inputContract"]["fields"][number]["type"])
+    ) continue;
     seen.add(variable.name);
-    fields.push({ name: variable.name, label: variable.label, required: variable.required, type: variable.type });
+    fields.push({
+      name: variable.name,
+      label: variable.label,
+      required: variable.required,
+      type: variable.type as AgentManifest["inputContract"]["fields"][number]["type"],
+    });
   }
   if (fields.length === 0) {
     fields.push({ name: "input", label: "业务输入", required: true, type: "string" });

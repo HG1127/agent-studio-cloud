@@ -608,12 +608,18 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
       issues.push(issue("critical", "data", "业务变量缺少名称", "变量中心存在未命名变量，运行时无法稳定引用。", { fixable: true, code: "variable_name" }));
       continue;
     }
+    if (v.scope === "run" && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+      issues.push(issue("critical", "data", "运行输入字段名不正确", `「${name}」必须以字母或下划线开头，并且只能包含字母、数字和下划线。`, { fixable: true, code: `variable_name_invalid_${name}` }));
+    }
     if (varNames.has(name)) {
       issues.push(issue("critical", "data", "业务变量名称重复", `「${name}」被定义了多次。`, { fixable: true, code: `variable_duplicate_${name}` }));
     }
     varNames.add(name);
     if (!["string", "number", "boolean", "object", "array", "any"].includes(v.type || "any")) {
-      issues.push(issue("warning", "data", "业务变量类型不明确", `「${name}」使用了不支持的类型 ${v.type}。`, { fixable: true, code: `variable_type_${name}` }));
+      issues.push(issue("critical", "data", "业务变量类型不明确", `「${name}」使用了不支持的类型 ${v.type}。`, { fixable: true, code: `variable_type_${name}` }));
+    }
+    if (v.scope === "run" && (v.type || "string") === "any") {
+      issues.push(issue("critical", "data", "运行输入类型不明确", `「${name}」需要选择文字、数字、是或否、对象或列表中的一种。`, { fixable: true, code: `variable_input_type_${name}` }));
     }
     if (v.scope === "shared" && /secret|token|password|api.?key/i.test(name)) {
       issues.push(issue("critical", "memory", "敏感变量不能设为共享", `「${name}」看起来属于凭证/密钥，不能进入 Agent Team 共享状态。`, { fixable: true, code: `variable_sensitive_${name}` }));
