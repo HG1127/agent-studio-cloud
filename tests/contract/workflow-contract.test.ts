@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_CONDITION_BRANCHES,
   MAX_PARALLEL_BRANCHES,
+  MAX_WORKFLOW_BYTES,
   MAX_WORKFLOW_NODES,
   WorkflowDraft,
   WorkflowNode,
@@ -59,6 +60,12 @@ describe("WorkflowDraft", () => {
         strategy: "all", failurePolicy: "fail_fast",
         branches: Array.from({ length: MAX_PARALLEL_BRANCHES + 1 }, (_, index) => ({ id: `branch_${index}`, label: `工作 ${index}`, steps: [{ id: "step", title: "处理", type: "ai" }] })),
       },
+    }).success).toBe(false);
+  });
+  it("限制流程草稿整体大小", () => {
+    expect(WorkflowDraft.safeParse({
+      ...baseDraft,
+      businessGrounding: { source: "字".repeat(MAX_WORKFLOW_BYTES) },
     }).success).toBe(false);
   });
 });

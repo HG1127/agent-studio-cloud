@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const MAX_WORKFLOW_NODES = 200;
+export const MAX_WORKFLOW_BYTES = 1024 * 1024;
 export const MAX_CONDITION_BRANCHES = 20;
 export const MAX_PARALLEL_BRANCHES = 8;
 export const MAX_PARALLEL_STEPS = 20;
@@ -120,6 +121,13 @@ export const WorkflowDraft = z.object({
   runtimePolicy: z.record(z.string(), z.unknown()).optional(),
   outputContract: z.object({ fields: z.array(z.object({ path: z.string(), label: z.string().optional(), required: z.boolean().default(true), sourceNodeId: z.string().optional() })).default([]) }).optional(),
   ui: z.object({ positions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })).default({}) }).default({ positions: {} }),
+}).superRefine((draft, ctx) => {
+  try {
+    const bytes = new TextEncoder().encode(JSON.stringify(draft)).byteLength;
+    if (bytes > MAX_WORKFLOW_BYTES) ctx.addIssue({ code: "custom", message: "流程草稿不能超过 1MB" });
+  } catch {
+    ctx.addIssue({ code: "custom", message: "流程草稿必须是可序列化的 JSON" });
+  }
 });
 export type WorkflowNodeType = z.infer<typeof WorkflowNodeType>;
 export type WorkflowNode = z.infer<typeof WorkflowNode>;
