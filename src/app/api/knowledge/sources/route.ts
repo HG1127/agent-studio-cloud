@@ -54,8 +54,13 @@ export async function POST(req: Request) {
   if (blobToken) {
     // Blob 只做原文留存（可重解析）；本地/CI 未配 token 时降级跳过，不阻塞入库
     const safeName = file.name.replace(/[^\w.\-\u4e00-\u9fff]/g, "_");
-    const blob = await put(`knowledge/${DEMO_WORKSPACE_ID}/${sha256}-${safeName}`, bytes, { access: "private", token: blobToken });
-    blobPathname = blob.pathname;
+    try {
+      const blob = await put(`knowledge/${DEMO_WORKSPACE_ID}/${sha256}-${safeName}`, bytes, { access: "private", token: blobToken });
+      blobPathname = blob.pathname;
+    } catch {
+      console.error("[knowledge-upload] 私有文件存储写入失败");
+      return Response.json({ ok: false, error: "私有文件存储暂不可用，请检查配置后重试" }, { status: 503 });
+    }
   }
   const [row] = await db
     .insert(knowledgeSources)

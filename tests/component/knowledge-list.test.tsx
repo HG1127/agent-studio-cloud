@@ -41,4 +41,13 @@ describe("知识库列表", () => {
     await userEvent.click(screen.getByRole("button", { name: "上传文档" }));
     expect(await screen.findByRole("status")).toHaveTextContent("原文件尚未保存");
   });
+
+  it("上传请求失败后允许重试", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    const { container } = render(<UploadSourceForm />);
+    await userEvent.upload(container.querySelector('input[type="file"]')!, new window.File(["退货说明"], "售后手册.txt", { type: "text/plain" }));
+    await userEvent.click(screen.getByRole("button", { name: "上传文档" }));
+    expect(await screen.findByText("上传失败，请检查网络后重试")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "上传文档" })).toBeEnabled();
+  });
 });

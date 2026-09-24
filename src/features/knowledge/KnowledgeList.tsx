@@ -31,23 +31,28 @@ export function UploadSourceForm() {
           setUploading(true);
           setError(null);
           setNotice(null);
-          const response = await fetch("/api/knowledge/sources", { method: "POST", body: data });
-          const parsed = KnowledgeUploadResult.safeParse(await response.json());
-          setUploading(false);
-          if (!parsed.success) {
-            setError("上传结果无法读取，请刷新后查看资料状态");
-            return;
+          try {
+            const response = await fetch("/api/knowledge/sources", { method: "POST", body: data });
+            const parsed = KnowledgeUploadResult.safeParse(await response.json());
+            if (!parsed.success) {
+              setError("上传结果无法读取，请刷新后查看资料状态");
+              return;
+            }
+            const result = parsed.data;
+            if (!result.ok) {
+              setError(result.error);
+              return;
+            }
+            if (!result.blobStored) {
+              setNotice("资料已接收，但原文件尚未保存。需要长期留存原文件时，请先配置私有文件存储。");
+            }
+            form.reset();
+            router.refresh();
+          } catch {
+            setError("上传失败，请检查网络后重试");
+          } finally {
+            setUploading(false);
           }
-          const result = parsed.data;
-          if (!result.ok) {
-            setError(result.error);
-            return;
-          }
-          if (!result.blobStored) {
-            setNotice("资料已接收，但原文件尚未保存。需要长期留存原文件时，请先配置私有文件存储。");
-          }
-          form.reset();
-          router.refresh();
         }}
         className="flex flex-wrap items-center gap-3"
       >
