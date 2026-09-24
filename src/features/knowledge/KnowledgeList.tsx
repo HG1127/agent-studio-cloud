@@ -11,6 +11,8 @@ const STATUS_LABELS: Record<KnowledgeSourceView["status"], string> = {
   archived: "已归档",
 };
 const PAGE_SIZE = 20;
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+const ALLOWED_UPLOAD_EXTENSIONS = new Set(["pdf", "docx", "txt", "md", "html", "json", "csv", "xml"]);
 
 export function UploadSourceForm() {
   const router = useRouter();
@@ -26,6 +28,15 @@ export function UploadSourceForm() {
           const file = form.querySelector<HTMLInputElement>('input[name="file"]')?.files?.[0];
           if (!file || file.size === 0) {
             setError("请选择要上传的文件");
+            return;
+          }
+          const extension = file.name.split(".").pop()?.toLocaleLowerCase("zh-CN") ?? "";
+          if (!ALLOWED_UPLOAD_EXTENSIONS.has(extension)) {
+            setError("暂不支持这种文件类型，可上传：PDF、DOCX、TXT、MD、HTML、JSON、CSV、XML");
+            return;
+          }
+          if (file.size > MAX_UPLOAD_BYTES) {
+            setError("文件超过 8MB 限制，请拆分后再上传");
             return;
           }
           const data = new FormData(form);
@@ -63,7 +74,7 @@ export function UploadSourceForm() {
         </button>
         <span className="text-xs text-gray-500">支持 PDF / DOCX / TXT / MD / HTML / JSON / CSV / XML，不超过 8MB</span>
       </form>
-      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+      {error && <p role="alert" className="mt-2 text-sm text-red-600">{error}</p>}
       {notice && <p role="status" className="mt-2 text-sm text-amber-800">{notice}</p>}
     </section>
   );
