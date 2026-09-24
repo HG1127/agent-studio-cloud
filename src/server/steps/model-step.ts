@@ -70,6 +70,7 @@ export async function runModelStep(args: RunModelStepInput): Promise<{ output: s
             .from(modelConnections)
             .where(and(eq(modelConnections.id, manifestModel.connectionId), isNull(modelConnections.archivedAt)))
             .limit(1)
+            .catch(() => { throw new Error("读取模型连接失败，请稍后重试"); })
         )[0] ?? null
       : null;
     target = resolveModelTarget({
@@ -119,7 +120,10 @@ export async function runModelStep(args: RunModelStepInput): Promise<{ output: s
     });
     return { output };
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
+    const retryable = isTransientModelError(error);
+    const reason = retryable
+      ? "模型服务暂时不可用，稍后自动重试"
+      : "模型调用失败，请检查连接地址、密钥和模型名称";
     await persistStep({
       runId: args.runId,
       nodeId: node.id,
@@ -128,9 +132,9 @@ export async function runModelStep(args: RunModelStepInput): Promise<{ output: s
       status: "failed",
       error: reason,
     });
-    if (isTransientModelError(error)) {
-      throw new RetryableError("模型调用失败，稍后自动重试", { retryAfter: "5s" });
+    if (retryable) {
+      throw new RetryableError(reason, { retryAfter: "5s" });
     }
-    throw new FatalError(`模型调用失败：${reason}`);
+    throw new FatalError(reason);
   }
 }
