@@ -1,6 +1,20 @@
 import { AgentImportFile } from "@/contracts/agent";
 import type { WorkflowDraft } from "@/contracts/workflow";
 
+export const MAX_AGENT_IMPORT_BYTES = 5 * 1024 * 1024;
+
+export function agentImportSizeIssue(input: unknown): string | null {
+  try {
+    const serialized = JSON.stringify(input);
+    if (serialized === undefined) return "导入内容不是有效的 JSON";
+    return new TextEncoder().encode(serialized).byteLength > MAX_AGENT_IMPORT_BYTES
+      ? "导入文件不能超过 5MB"
+      : null;
+  } catch {
+    return "导入内容不是有效的 JSON";
+  }
+}
+
 export interface NormalizedAgentImport {
   name: string;
   description: string | null;
@@ -50,6 +64,7 @@ export function rebindImportedWorkflow(args: {
 }
 
 export function normalizeAgentImport(input: unknown): NormalizedAgentImport | null {
+  if (agentImportSizeIssue(input)) return null;
   const parsed = AgentImportFile.safeParse(input);
   if (!parsed.success) return null;
   if (parsed.data.format === "agent-studio-cloud") {

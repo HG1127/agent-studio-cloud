@@ -7,9 +7,11 @@ import type { ImportAgentResult } from "@/contracts/agent";
 import { agents, agentVersions, workflowDefinitions } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
-import { importedCollaborationKeys, normalizeAgentImport, rebindImportedWorkflow } from "@/server/domain/import-agent";
+import { agentImportSizeIssue, importedCollaborationKeys, normalizeAgentImport, rebindImportedWorkflow } from "@/server/domain/import-agent";
 
 export async function importAgentAction(input: unknown): Promise<ImportAgentResult> {
+  const sizeIssue = agentImportSizeIssue(input);
+  if (sizeIssue) return { ok: false, error: sizeIssue };
   const imported = normalizeAgentImport(input);
   if (!imported) return { ok: false, error: "文件不是有效的助手定义或冻结版本，或文件版本暂不兼容" };
   try {

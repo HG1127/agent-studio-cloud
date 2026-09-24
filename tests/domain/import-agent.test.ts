@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { AgentManifest } from "@/contracts/manifest";
 import { WorkflowDraft } from "@/contracts/workflow";
-import { importedCollaborationKeys, normalizeAgentImport, rebindImportedWorkflow } from "@/server/domain/import-agent";
+import {
+  agentImportSizeIssue,
+  importedCollaborationKeys,
+  MAX_AGENT_IMPORT_BYTES,
+  normalizeAgentImport,
+  rebindImportedWorkflow,
+} from "@/server/domain/import-agent";
 
 const workflow = WorkflowDraft.parse({
   id: "workflow-import",
@@ -15,6 +21,14 @@ const workflow = WorkflowDraft.parse({
 });
 
 describe("助手导入格式归一化", () => {
+  it("服务端拒绝超大或无法序列化的导入内容", () => {
+    expect(agentImportSizeIssue({ text: "x".repeat(MAX_AGENT_IMPORT_BYTES) })).toBe("导入文件不能超过 5MB");
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    expect(agentImportSizeIssue(circular)).toBe("导入内容不是有效的 JSON");
+    expect(normalizeAgentImport(circular)).toBeNull();
+  });
+
   it("保留助手定义中的名称、说明、意图和草稿", () => {
     const result = normalizeAgentImport({
       format: "agent-studio-cloud",
