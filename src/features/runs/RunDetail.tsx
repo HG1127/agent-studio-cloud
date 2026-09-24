@@ -8,7 +8,7 @@ import { CancelRunButton } from "@/features/runs/CancelRunButton";
 import { RetryRunButton } from "@/features/runs/RetryRunButton";
 import type { RunStatus } from "@/contracts/run";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
-import { getPendingWait, getRunContext, getRunView, listApprovals, listRunSteps } from "@/server/queries/runs";
+import { getPendingWait, getRunView, listApprovals, listRunSteps } from "@/server/queries/runs";
 import { listTrace } from "@/server/queries/trace";
 
 const LIVE_STATUSES: ReadonlySet<RunStatus> = new Set(["queued", "running", "waiting_approval", "waiting_event"]);
@@ -33,28 +33,20 @@ function formatDateTime(iso: string): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
-function extractOutputs(context: Record<string, unknown> | null): Array<[string, unknown]> {
-  if (!context || typeof context !== "object") return [];
-  const outputs = context.outputs;
-  if (!outputs || typeof outputs !== "object" || Array.isArray(outputs)) return [];
-  return Object.entries(outputs as Record<string, unknown>);
-}
-
 export async function RunDetail({ runId }: { runId: string }) {
   const run = await getRunView(runId, DEMO_WORKSPACE_ID);
   if (!run) notFound();
-  const [steps, approvals, trace, context, pendingWait] = await Promise.all([
+  const [steps, approvals, trace, pendingWait] = await Promise.all([
     listRunSteps(runId, DEMO_WORKSPACE_ID),
     listApprovals(runId, DEMO_WORKSPACE_ID),
     listTrace(runId, DEMO_WORKSPACE_ID),
-    getRunContext(runId, DEMO_WORKSPACE_ID),
     getPendingWait(runId, DEMO_WORKSPACE_ID),
   ]);
   const live = LIVE_STATUSES.has(run.status);
   // 待确认的置顶，已决定的按时间在后
   const pendingApprovals = live ? approvals.filter((approval) => approval.status === "pending") : [];
   const decidedApprovals = approvals.filter((approval) => approval.status !== "pending");
-  const outputs = extractOutputs(context);
+  const outputs = Object.entries(run.result ?? {});
   const stepTitleByNode = new Map(steps.map((step) => [step.nodeId, step.nodeTitle]));
 
   return (

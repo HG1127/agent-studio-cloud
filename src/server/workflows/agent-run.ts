@@ -6,6 +6,7 @@ import { requestApproval, recordDecision } from "@/server/steps/approval-step";
 import { resolveLoopCollection, workflowExecutionLimit } from "@/server/domain/runtime/loop-runtime";
 import { prepareParallelBranches, resolveParallelOutcome, type PreparedParallelBranch } from "@/server/domain/runtime/parallel-runtime";
 import { prepareSubflow, type PreparedSubflow } from "@/server/domain/runtime/subflow-runtime";
+import { projectWorkflowResult } from "@/server/domain/runtime/output-contract";
 import { evaluateCondition } from "@/server/steps/condition-step";
 import { beginAgentCall, finishAgentCall } from "@/server/steps/agent-call-step";
 import { beginHandoff, finishHandoff } from "@/server/steps/handoff-step";
@@ -171,7 +172,9 @@ export async function agentRunWorkflow(
         continue;
       }
       if (node.type === "end") {
-        await finalizeRun(runId, outputs);
+        const projected = projectWorkflowResult(outputs, manifest.outputContract?.fields ?? []);
+        if (!projected.ok) throw new FatalError(`缺少必需交付内容：${projected.missing.join("、")}`);
+        await finalizeRun(runId, projected.result, outputs);
         return { status: "completed" };
       }
       if (node.type === "ai") {

@@ -105,9 +105,13 @@ export async function persistContext(runId: string, outputs: Record<string, unkn
   await db.update(runs).set({ context: { outputs }, updatedAt: new Date() }).where(eq(runs.id, runId));
 }
 
-export async function finalizeRun(runId: string, result: Record<string, unknown>): Promise<void> {
+export async function finalizeRun(
+  runId: string,
+  result: Record<string, unknown>,
+  contextOutputs: Record<string, unknown> = result,
+): Promise<void> {
   "use step";
-  await persistContext(runId, result);
+  await persistContext(runId, contextOutputs);
   const now = new Date();
   await db.update(runs).set({ status: "completed", result, finishedAt: now, updatedAt: now }).where(eq(runs.id, runId));
   await appendTrace({

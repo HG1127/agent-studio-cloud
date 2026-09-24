@@ -47,7 +47,8 @@ describe("运行详情步骤数据", () => {
     await user.click(screen.getByText("查看步骤数据（开发者数据）"));
     expect(screen.getByText(/"inputTokens": 12/)).toBeVisible();
     expect(screen.getByText(/"outputTokens": 6/)).toBeVisible();
-    expect(screen.getAllByText("分析客户反馈")).toHaveLength(2);
+    expect(screen.getAllByText("分析客户反馈")).toHaveLength(1);
+    expect(screen.queryByText("分析完成")).not.toBeInTheDocument();
   });
 
   it("没有步骤输出时不显示数据入口，也不虚构用量", async () => {
