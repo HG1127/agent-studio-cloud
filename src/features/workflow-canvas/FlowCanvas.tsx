@@ -21,6 +21,7 @@ import { NodeInspector } from "./NodeInspector";
 import { updateWorkflowNode } from "./update-workflow-node";
 import { ADDABLE_NODE_TYPES, createWorkflowNode } from "./create-workflow-node";
 import { WorkflowInputEditor } from "./WorkflowInputEditor";
+import { WorkflowOutputEditor } from "./WorkflowOutputEditor";
 
 interface FlowCanvasProps {
   agentId: string;
@@ -297,6 +298,12 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets }: FlowC
       setFeedback({ ok: false, text: "运行输入字段名必须以字母或下划线开头，且不能重复" });
       return;
     }
+    const outputFields = draft.outputContract?.fields ?? [];
+    if (outputFields.some((field) => !field.path || !field.sourceNodeId || !draft.nodes[field.sourceNodeId])
+      || new Set(outputFields.map((field) => field.path)).size !== outputFields.length) {
+      setFeedback({ ok: false, text: "最终交付字段必须选择有效来源，且不能重复" });
+      return;
+    }
     setPending(true);
     setFeedback(null);
     try {
@@ -319,6 +326,8 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets }: FlowC
   return (
     <section className="flex flex-col gap-3">
       <WorkflowInputEditor variables={draft.variables} onChange={(variables) => setDraft((current) => ({ ...current, variables }))} />
+      <WorkflowOutputEditor nodes={draft.nodes} fields={draft.outputContract?.fields ?? []}
+        onChange={(fields) => setDraft((current) => ({ ...current, outputContract: { fields } }))} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <label className="flex items-center gap-2 text-sm text-gray-600">
           <input
