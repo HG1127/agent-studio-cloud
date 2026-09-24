@@ -76,7 +76,7 @@ export async function runMemoryStep(args: {
     })
     .onConflictDoUpdate({
       target: [agentMemories.sourceRunId, agentMemories.sourceNodeId],
-      set: { content, metadata: { nodeTitle: args.node.title }, archivedAt: null, updatedAt: new Date() },
+      set: { content, metadata: { nodeTitle: args.node.title }, updatedAt: new Date() },
     });
   const output = { mode: "write", saved: true, contentLength: content.length };
   await persistStep({ runId: args.runId, nodeId: args.node.id, nodeTitle: args.node.title, nodeType: args.node.type, status: "succeeded", output });
