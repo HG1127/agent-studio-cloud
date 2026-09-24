@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { put } from "@vercel/blob";
 import { and, eq } from "drizzle-orm";
 import { start } from "workflow/api";
@@ -56,15 +56,16 @@ async function reconcileDuplicateSource(sourceId: string, suppliedBlobPathname: 
         ? (current.chunkCount > 0 ? "indexed" : "parsing")
         : current.status;
     const error = retrying ? null : current.error;
+    const ingestToken = retrying ? `pending:${randomUUID()}` : null;
     const blobPathname = current.blobPathname ?? suppliedBlobPathname;
     const shouldUpdate = Boolean(current.archivedAt) || retrying || blobPathname !== current.blobPathname;
     if (shouldUpdate) {
       await tx
         .update(knowledgeSources)
-        .set({ archivedAt: null, status, error, blobPathname, updatedAt: new Date() })
+        .set({ archivedAt: null, status, error, blobPathname, parseEngine: ingestToken ?? current.parseEngine, updatedAt: new Date() })
         .where(and(eq(knowledgeSources.id, current.id), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)));
     }
-    return { row: { ...current, archivedAt: null, status, error, blobPathname }, retrying };
+    return { row: { ...current, archivedAt: null, status, error, blobPathname, parseEngine: ingestToken ?? current.parseEngine }, retrying, ingestToken };
   });
 }
 
@@ -117,10 +118,13 @@ export async function POST(req: Request) {
           filename: file.name,
           mime: file.type || duplicate.mime,
           content: new Blob([bytes]).stream(),
+          ingestToken: reconciled.ingestToken!,
         }]);
       } catch (startError) {
         console.error("知识重新入库工作流启动失败：", startError);
-        await db.update(knowledgeSources).set({ status: "failed", error: "解析任务启动失败，请重新上传", updatedAt: new Date() }).where(eq(knowledgeSources.id, duplicate.id));
+        await db.update(knowledgeSources).set({ status: "failed", error: "解析任务启动失败，请重新上传", parseEngine: null, updatedAt: new Date() }).where(and(
+          eq(knowledgeSources.id, duplicate.id), eq(knowledgeSources.parseEngine, reconciled.ingestToken!),
+        ));
         return Response.json({ ok: false, error: "解析任务启动失败，请重新上传" }, { status: 500 });
       }
     }
@@ -140,6 +144,7 @@ export async function POST(req: Request) {
       return storageUnavailable();
     }
   }
+  const ingestToken = `pending:${randomUUID()}`;
   const [row] = await db
     .insert(knowledgeSources)
     .values({
@@ -149,6 +154,7 @@ export async function POST(req: Request) {
       sizeBytes: bytes.length,
       sha256,
       status: "parsing",
+      parseEngine: ingestToken,
       blobPathname,
       createdBy: DEMO_USER_ID,
     })
@@ -178,10 +184,12 @@ export async function POST(req: Request) {
     });
   }
   try {
-    await start(knowledgeIngestWorkflow, [{ sourceId: row.id, filename: file.name, mime: row.mime, content: new Blob([bytes]).stream() }]);
+    await start(knowledgeIngestWorkflow, [{ sourceId: row.id, filename: file.name, mime: row.mime, content: new Blob([bytes]).stream(), ingestToken }]);
   } catch (error) {
     console.error("知识入库工作流启动失败：", error);
-    await db.update(knowledgeSources).set({ status: "failed", error: "解析任务启动失败，请重试上传", updatedAt: new Date() }).where(eq(knowledgeSources.id, row.id));
+    await db.update(knowledgeSources).set({ status: "failed", error: "解析任务启动失败，请重试上传", parseEngine: null, updatedAt: new Date() }).where(and(
+      eq(knowledgeSources.id, row.id), eq(knowledgeSources.parseEngine, ingestToken),
+    ));
     return Response.json({ ok: false, error: "解析任务启动失败，请重试上传" }, { status: 500 });
   }
   return Response.json({ ok: true, deduped: false, blobStored: blobPathname !== null, source: toView(row) });

@@ -139,6 +139,7 @@ describe("知识原文件上传", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ ok: true, deduped: true, source: { status: "parsing" } });
     expect(startMock).toHaveBeenCalledOnce();
+    expect(startMock.mock.calls[0]?.[1]?.[0]).toMatchObject({ ingestToken: expect.stringMatching(/^pending:/) });
     expect(dbState.update).toHaveBeenCalledOnce();
   });
 
@@ -156,6 +157,7 @@ describe("知识原文件上传", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ ok: true, deduped: true, source: { status: "parsing", error: null } });
     expect(startMock).toHaveBeenCalledOnce();
+    expect(startMock.mock.calls[0]?.[1]?.[0]).toMatchObject({ ingestToken: expect.stringMatching(/^pending:/) });
     expect(dbState.update).toHaveBeenCalledOnce();
   });
 

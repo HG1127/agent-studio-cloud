@@ -5,19 +5,20 @@ export interface KnowledgeIngestArgs {
   filename: string;
   mime: string;
   content: ReadableStream<Uint8Array>;
+  ingestToken: string;
 }
 
 export async function knowledgeIngestWorkflow(args: KnowledgeIngestArgs): Promise<{ chunkCount: number }> {
   "use workflow";
   try {
     const parsed = await parseKnowledgeFile(args);
-    const indexed = await indexKnowledgeChunks({ sourceId: args.sourceId, text: parsed.text });
+    const indexed = await indexKnowledgeChunks({ sourceId: args.sourceId, text: parsed.text, ingestToken: args.ingestToken });
     return { chunkCount: indexed.chunkCount };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const reason = /[\u4e00-\u9fff]/.test(message) ? message : "文件解析失败，已停止";
     try {
-      await markKnowledgeFailed({ sourceId: args.sourceId, error: reason });
+      await markKnowledgeFailed({ sourceId: args.sourceId, error: reason, ingestToken: args.ingestToken });
     } catch (failErr) {
       console.error(`知识来源 ${args.sourceId} 写失败状态时出错：`, failErr);
     }

@@ -36,18 +36,19 @@ export async function parseKnowledgeFile(args: ParseArgs): Promise<{ text: strin
   return { text };
 }
 
-export async function indexKnowledgeChunks(args: { sourceId: string; text: string }): Promise<{ chunkCount: number }> {
+export async function indexKnowledgeChunks(args: { sourceId: string; text: string; ingestToken: string }): Promise<{ chunkCount: number }> {
   "use step";
   const chunks = chunkText(args.text);
   const charCount = chunks.reduce((sum, chunk) => sum + chunk.content.length, 0);
   await db.transaction(async (tx) => {
     const [source] = await tx
-      .select({ workspaceId: knowledgeSources.workspaceId, archivedAt: knowledgeSources.archivedAt })
+      .select({ workspaceId: knowledgeSources.workspaceId, archivedAt: knowledgeSources.archivedAt, parseEngine: knowledgeSources.parseEngine })
       .from(knowledgeSources)
       .where(eq(knowledgeSources.id, args.sourceId))
       .for("update")
       .limit(1);
     if (!source) throw new FatalError("找不到要入库的知识来源");
+    if (source.parseEngine !== args.ingestToken) throw new FatalError("资料已有新的解析任务，忽略旧任务结果");
     // 失败后重新上传会复用同一来源；事务保证旧分片不会被半套新数据覆盖。
     await tx.delete(knowledgeChunks).where(eq(knowledgeChunks.sourceId, args.sourceId));
     for (let i = 0; i < chunks.length; i += 200) {
@@ -71,19 +72,20 @@ export async function indexKnowledgeChunks(args: { sourceId: string; text: strin
   return { chunkCount: chunks.length };
 }
 
-export async function markKnowledgeFailed(args: { sourceId: string; error: string }): Promise<void> {
+export async function markKnowledgeFailed(args: { sourceId: string; error: string; ingestToken: string }): Promise<void> {
   "use step";
   await db.transaction(async (tx) => {
     const [source] = await tx
-      .select({ archivedAt: knowledgeSources.archivedAt })
+      .select({ archivedAt: knowledgeSources.archivedAt, parseEngine: knowledgeSources.parseEngine })
       .from(knowledgeSources)
       .where(eq(knowledgeSources.id, args.sourceId))
       .for("update")
       .limit(1);
     if (!source) return;
+    if (source.parseEngine !== args.ingestToken) return;
     await tx
       .update(knowledgeSources)
-      .set({ status: processedKnowledgeStatus(source.archivedAt, "failed"), error: args.error, updatedAt: new Date() })
+      .set({ status: processedKnowledgeStatus(source.archivedAt, "failed"), parseEngine: "builtin", error: args.error, updatedAt: new Date() })
       .where(eq(knowledgeSources.id, args.sourceId));
   });
 }
