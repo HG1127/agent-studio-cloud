@@ -1,0 +1,62 @@
+name: 生产数据库迁移
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 输入 MIGRATE_PRODUCTION 确认执行
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-database-migration
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    if: github.ref == 'refs/heads/main' && inputs.confirm == 'MIGRATE_PRODUCTION'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+      NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: 检查生产迁移配置
+        run: |
+          if [[ -z "$NEON_API_KEY" || -z "$NEON_PROJECT_ID" ]]; then
+            echo "::error::NEON_API_KEY 或 NEON_PROJECT_ID 未配置"
+            exit 1
+          fi
+      - name: 保留迁移前 Neon 数据分支
+        run: |
+          BACKUP_BRANCH="pre-migration-${{ github.run_id }}-${{ github.run_attempt }}"
+          npx --yes neonctl@5 branches create \
+            --name "$BACKUP_BRANCH" \
+            --project-id "$NEON_PROJECT_ID" \
+            --api-key "$NEON_API_KEY" \
+            --no-secrets --no-compute --output json > /dev/null
+          echo "迁移前数据分支：$BACKUP_BRANCH"
+      - name: 迁移 Neon 默认分支
+        run: |
+          DATABASE_URL=$(npx --yes neonctl@5 connection-string \
+            --project-id "$NEON_PROJECT_ID" \
+            --database-name neondb \
+            --role-name neondb_owner \
+            --api-key "$NEON_API_KEY")
+          if [[ "$DATABASE_URL" != postgres://* && "$DATABASE_URL" != postgresql://* ]]; then
+            echo "::error::Neon 默认分支未返回有效连接串"
+            exit 1
+          fi
+          echo "::add-mask::$DATABASE_URL"
+          export DATABASE_URL
+          pnpm db:migrate
