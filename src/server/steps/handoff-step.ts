@@ -6,6 +6,7 @@ import type { WorkflowNode } from "@/contracts/workflow";
 import { agents, agentVersions, runs } from "@/db/schema";
 import { db } from "@/lib/db";
 import { buildHandoffInput } from "@/server/domain/runtime/handoff-runtime";
+import { validateCollaborationInput } from "@/server/domain/runtime/collaboration-input";
 import { validateCollaborationTarget } from "@/server/domain/runtime/collaboration-chain";
 import { loadCollaborationChain } from "@/server/services/collaboration-chain";
 import { persistStep } from "@/server/steps/run-state";
@@ -50,6 +51,8 @@ export async function beginHandoff(args: {
   const parsedManifest = target ? AgentManifest.safeParse(target.manifest) : null;
   if (!target || !parsedManifest?.success) throw new FatalError(`步骤「${args.node.title}」绑定的接收助手版本不可用`);
   const prepared = buildHandoffInput({ node: args.node, targetManifest: parsedManifest.data, input: args.parentInput, outputs: args.outputs });
+  const validatedInput = validateCollaborationInput(prepared.input, parsedManifest.data.inputContract.fields);
+  if (!validatedInput.ok) throw new FatalError(`步骤「${args.node.title}」生成的交接输入无效：${validatedInput.error}`);
   await persistStep({ runId: args.runId, nodeId: args.node.id, nodeTitle: args.node.title, nodeType: args.node.type, status: "running" });
   const sourceKey = `handoff:${args.runId}:${args.node.id}`;
   const childRunId = await db.transaction(async (tx) => {
@@ -68,7 +71,7 @@ export async function beginHandoff(args: {
         agentId: targetRef.id,
         versionId: targetVersionId,
         status: "queued",
-        input: prepared.input,
+        input: validatedInput.data,
         sourceType: "handoff",
         sourceKey,
       })
@@ -87,7 +90,7 @@ export async function beginHandoff(args: {
     detail: prepared.redactedPaths.length > 0 ? `已移除 ${prepared.redactedPaths.length} 项禁止传递的信息` : null,
     data: { deliverables: args.node.contract?.deliverables ?? [] },
   });
-  return { childRunId, targetName: target.name, manifest: parsedManifest.data, input: prepared.input };
+  return { childRunId, targetName: target.name, manifest: parsedManifest.data, input: validatedInput.data };
 }
 
 export async function finishHandoff(args: {

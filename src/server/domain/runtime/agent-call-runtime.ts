@@ -1,5 +1,6 @@
 import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
+import { buildBoundedCollaborationContext } from "@/server/domain/runtime/collaboration-input";
 
 export function buildAgentCallInput(args: {
   node: WorkflowNode;
@@ -7,12 +8,16 @@ export function buildAgentCallInput(args: {
   input: Record<string, unknown>;
   outputs: Record<string, unknown>;
 }): Record<string, unknown> {
-  const context = JSON.stringify({
+  const fields = args.targetManifest.inputContract.fields;
+  const fallbackCopies = fields.filter((field) => {
+    const value = args.input[field.name] ?? args.outputs[field.name];
+    return (value === undefined || value === null) && field.type === "string";
+  }).length;
+  const context = buildBoundedCollaborationContext({
     task: args.input,
     previousResults: Object.values(args.outputs),
     request: args.node.description || args.node.title,
-  });
-  const fields = args.targetManifest.inputContract.fields;
+  }, fallbackCopies || 1);
   if (fields.length === 0) return { context };
   return Object.fromEntries(fields.flatMap((field) => {
     const value = args.input[field.name] ?? args.outputs[field.name];

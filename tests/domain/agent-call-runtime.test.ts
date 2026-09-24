@@ -55,6 +55,19 @@ describe("助手调用运行逻辑", () => {
     expect(buildAgentCallInput({ node, targetManifest: typedManifest, input: { count: 3, confirmed: false }, outputs: {} })).toMatchObject({ count: 3, confirmed: false });
   });
 
+  it("大量上游结果不会让多个上下文字段重复撑大协作输入", () => {
+    const node = WorkflowNode.parse({ id: "call", title: "调用助手", type: "agent_call", agentCall: { targetAgentId: "target", versionId: "version" } });
+    const input = buildAgentCallInput({
+      node,
+      targetManifest,
+      input: {},
+      outputs: { report: "x".repeat(200_000) },
+    });
+    expect(String(input.customer)).toContain("已截断");
+    expect(String(input.brief)).toContain("已截断");
+    expect(JSON.stringify(input).length).toBeLessThan(30_000);
+  });
+
   it("模型流程编译器保留助手调用节点供画布绑定", () => {
     const result = compileModelWorkflowPlan({
       intent: {

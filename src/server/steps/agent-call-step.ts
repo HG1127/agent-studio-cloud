@@ -6,6 +6,7 @@ import type { WorkflowNode } from "@/contracts/workflow";
 import { agents, agentVersions, runs } from "@/db/schema";
 import { db } from "@/lib/db";
 import { buildAgentCallInput } from "@/server/domain/runtime/agent-call-runtime";
+import { validateCollaborationInput } from "@/server/domain/runtime/collaboration-input";
 import { validateCollaborationTarget } from "@/server/domain/runtime/collaboration-chain";
 import { loadCollaborationChain } from "@/server/services/collaboration-chain";
 import { persistStep } from "@/server/steps/run-state";
@@ -48,7 +49,10 @@ export async function beginAgentCall(args: {
     .limit(1);
   const parsedManifest = target ? AgentManifest.safeParse(target.manifest) : null;
   if (!target || !parsedManifest?.success) throw new FatalError(`步骤「${args.node.title}」绑定的协作助手版本不可用`);
-  const input = buildAgentCallInput({ node: args.node, targetManifest: parsedManifest.data, input: args.parentInput, outputs: args.outputs });
+  const derivedInput = buildAgentCallInput({ node: args.node, targetManifest: parsedManifest.data, input: args.parentInput, outputs: args.outputs });
+  const validatedInput = validateCollaborationInput(derivedInput, parsedManifest.data.inputContract.fields);
+  if (!validatedInput.ok) throw new FatalError(`步骤「${args.node.title}」生成的协作输入无效：${validatedInput.error}`);
+  const input = validatedInput.data;
   await persistStep({ runId: args.runId, nodeId: args.node.id, nodeTitle: args.node.title, nodeType: args.node.type, status: "running" });
   const sourceKey = `agent-call:${args.runId}:${args.node.id}`;
   const childRunId = await db.transaction(async (tx) => {

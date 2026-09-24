@@ -1,5 +1,6 @@
 import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
+import { buildBoundedCollaborationContext } from "@/server/domain/runtime/collaboration-input";
 
 const SECRET_KEY = /password|passcode|secret|token|api[_-]?key|credential|cookie|authorization|private[_-]?key|密码|密钥|令牌|凭证|授权|私钥/i;
 
@@ -52,7 +53,12 @@ export function buildHandoffInput(args: {
   const sanitizedOutputs = sanitizeHandoffValue(args.outputs, terms);
   const sourceInput = sanitizedInput.value as Record<string, unknown>;
   const sourceOutputs = sanitizedOutputs.value as Record<string, unknown>;
-  const context = JSON.stringify({
+  const fields = args.targetManifest.inputContract.fields;
+  const fallbackCopies = fields.filter((field) => {
+    const value = sourceInput[field.name] ?? sourceOutputs[field.name];
+    return (value === undefined || value === null) && field.type === "string";
+  }).length;
+  const context = buildBoundedCollaborationContext({
     task: sourceInput,
     previousResults: Object.values(sourceOutputs),
     handoff: {
@@ -60,8 +66,7 @@ export function buildHandoffInput(args: {
       deliverables: args.node.contract?.deliverables ?? [],
       mustNotInclude: args.node.contract?.mustNotInclude ?? [],
     },
-  });
-  const fields = args.targetManifest.inputContract.fields;
+  }, fallbackCopies || 1);
   const input = fields.length === 0 ? { brief: context } : Object.fromEntries(fields.flatMap((field) => {
     const value = sourceInput[field.name] ?? sourceOutputs[field.name];
     if (value !== undefined && value !== null) return [[field.name, value]];
