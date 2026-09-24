@@ -61,15 +61,14 @@ async function insertFixture() {
 }
 
 describe("自动验收并发启动", () => {
-  it("同一助手同时发起两次时只创建一轮验收", async () => {
+  it("同一助手同时发起两次时复用同一轮验收", async () => {
     await insertFixture();
     const results = await Promise.all([prepareEvaluationRun(AGENT_ID), prepareEvaluationRun(AGENT_ID)]);
 
-    expect(results.filter((result) => result.ok)).toHaveLength(1);
-    expect(results.find((result) => !result.ok)).toEqual({
-      ok: false,
-      error: "这个助手已有一轮自动验收正在运行，请等待完成后再试",
-    });
+    expect(results.every((result) => result.ok)).toBe(true);
+    const successful = results.filter((result) => result.ok);
+    expect(new Set(successful.map((result) => result.evaluationId)).size).toBe(1);
+    expect(successful.some((result) => result.resumed)).toBe(true);
     const active = await db.select().from(evaluationRuns).where(eq(evaluationRuns.agentId, AGENT_ID));
     expect(active).toHaveLength(1);
   });

@@ -168,12 +168,12 @@ export function EvaluationPanel({ agentId, cases, archivedCases = [], runs }: {
           <h2 className="text-sm font-semibold">自动验收</h2>
           <p className="mt-1 text-xs text-gray-500">优先验证待验收版本；全部通过后自动上线。没有待验收版本时验证当前版本。</p>
         </div>
-        <button type="button" disabled={pending || cases.length === 0 || evaluationRunning} onClick={startEvaluation}
+        <button type="button" disabled={pending || cases.length === 0} onClick={startEvaluation}
           className="rounded-md bg-violet-700 px-3 py-2 text-sm text-white hover:bg-violet-600 disabled:bg-gray-300">
-          {pending ? "正在处理…" : evaluationRunning ? "验收运行中" : "运行全部样例"}
+          {pending ? "正在处理…" : evaluationRunning ? "检查并继续" : "运行全部样例"}
         </button>
       </div>
-      {evaluationRunning ? <p role="status" className="rounded-md bg-blue-50 p-2 text-sm text-blue-700">验收运行期间样例已锁定，完成后可继续新增、编辑或归档。</p> : null}
+      {evaluationRunning ? <p role="status" className="rounded-md bg-blue-50 p-2 text-sm text-blue-700">验收运行期间样例已锁定；若状态长时间不变化，可点“检查并继续”自动补启未完成样例。</p> : null}
       {error ? <p role="alert" className="rounded-md bg-red-50 p-2 text-sm text-red-700">{error}</p> : null}
       <div className="grid gap-2 md:grid-cols-[1fr_2fr_1fr_auto]">
         <input aria-label="样例名称" disabled={evaluationRunning} value={name} onChange={(event) => setName(event.target.value)} placeholder="样例名称"

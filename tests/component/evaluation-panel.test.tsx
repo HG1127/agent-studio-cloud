@@ -94,7 +94,9 @@ describe("EvaluationPanel", () => {
     await waitFor(() => expect(startMock).toHaveBeenCalledWith(AGENT_ID));
   });
 
-  it("已有一轮验收运行时禁止重复启动", () => {
+  it("已有一轮验收运行时锁定样例但允许检查并继续", async () => {
+    startMock.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
     render(<EvaluationPanel agentId={AGENT_ID} cases={CASES} runs={[{
       id: "00000000-0000-4000-8000-000000000035",
       version: 4,
@@ -106,7 +108,10 @@ describe("EvaluationPanel", () => {
       finishedAt: null,
       results: [],
     }]} />);
-    expect(screen.getByRole("button", { name: "验收运行中" })).toBeDisabled();
+    const resume = screen.getByRole("button", { name: "检查并继续" });
+    expect(resume).toBeEnabled();
+    await user.click(resume);
+    await waitFor(() => expect(startMock).toHaveBeenCalledWith(AGENT_ID));
     expect(screen.getByRole("status")).toHaveTextContent("验收运行期间样例已锁定");
     expect(screen.getByLabelText("样例名称")).toBeDisabled();
     expect(screen.getByLabelText("运行输入")).toBeDisabled();

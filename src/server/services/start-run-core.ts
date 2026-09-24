@@ -10,6 +10,7 @@ import { prepareSubflow } from "@/server/domain/runtime/subflow-runtime";
 import { validateAgentCallNode } from "@/server/domain/runtime/agent-call-runtime";
 import { validateHandoffNode } from "@/server/domain/runtime/handoff-runtime";
 import { validateRunInput } from "@/server/domain/runtime/run-input";
+import { completeEvaluationForRun } from "@/server/services/evaluation-state";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
 
 // M1 运行引擎支持的节点类型：其余编排类节点后续任务扩展
@@ -33,10 +34,14 @@ const SUPPORTED_NODE_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 async function markRunStartFailed(runId: string): Promise<void> {
-  await db
+  const updated = await db
     .update(runs)
     .set({ status: "failed", error: "运行启动失败，请稍后重试", finishedAt: new Date(), updatedAt: new Date() })
-    .where(and(eq(runs.id, runId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])));
+    .where(and(eq(runs.id, runId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])))
+    .returning({ id: runs.id });
+  if (updated.length > 0) {
+    await completeEvaluationForRun(runId, null, "运行启动失败，请稍后重试");
+  }
 }
 
 async function collaboratorIssue(node: AgentManifest["workflowSnapshot"]["nodes"][string], currentAgentId: string, workspaceId: string): Promise<string | null> {
@@ -186,7 +191,21 @@ export async function startRunCore(args: {
         sourceType: args.sourceType ?? "manual",
         sourceKey: args.sourceKey ?? null,
       })
+      .onConflictDoNothing()
       .returning({ id: runs.id });
+    if (!run && args.sourceKey) {
+      const [existing] = await db
+        .select({ id: runs.id, status: runs.status, workflowRunId: runs.workflowRunId, error: runs.error })
+        .from(runs)
+        .where(and(eq(runs.workspaceId, agent.workspaceId), eq(runs.sourceKey, args.sourceKey)))
+        .limit(1);
+      if (!existing) return { ok: false, error: "运行启动冲突，请稍后重试" };
+      if (existing.status === "failed" && !existing.workflowRunId) {
+        return { ok: false, error: existing.error ?? "运行启动失败，请稍后重试" };
+      }
+      return { ok: true, runId: existing.id };
+    }
+    if (!run) return { ok: false, error: "运行启动冲突，请稍后重试" };
     const runId = run.id;
     let workflowRun: Awaited<ReturnType<typeof start>>;
     try {

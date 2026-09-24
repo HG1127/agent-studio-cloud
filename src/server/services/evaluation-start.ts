@@ -22,7 +22,28 @@ export async function prepareEvaluationRun(agentId: string) {
       ))
       .limit(1);
     if (runningEvaluation) {
-      return { ok: false as const, error: "这个助手已有一轮自动验收正在运行，请等待完成后再试" };
+      const [evaluation] = await tx
+        .select({ versionId: evaluationRuns.versionId })
+        .from(evaluationRuns)
+        .where(eq(evaluationRuns.id, runningEvaluation.id))
+        .limit(1);
+      const cases = await tx
+        .select({ id: evaluationCases.id, input: evaluationCases.input })
+        .from(evaluationCaseResults)
+        .innerJoin(evaluationCases, eq(evaluationCases.id, evaluationCaseResults.evaluationCaseId))
+        .where(and(
+          eq(evaluationCaseResults.evaluationRunId, runningEvaluation.id),
+          eq(evaluationCaseResults.status, "running"),
+          eq(evaluationCaseResults.workspaceId, DEMO_WORKSPACE_ID),
+        ));
+      if (!evaluation) return { ok: false as const, error: "自动验收记录不完整，请稍后重试" };
+      return {
+        ok: true as const,
+        evaluationId: runningEvaluation.id,
+        versionId: evaluation.versionId,
+        cases,
+        resumed: true as const,
+      };
     }
     const [version] = await tx
       .select({ id: agentVersions.id })
@@ -61,6 +82,6 @@ export async function prepareEvaluationRun(agentId: string) {
       evaluationCaseId: testCase.id,
       status: "running",
     })));
-    return { ok: true as const, evaluationId: evaluation.id, versionId: version.id, cases };
+    return { ok: true as const, evaluationId: evaluation.id, versionId: version.id, cases, resumed: false as const };
   });
 }
