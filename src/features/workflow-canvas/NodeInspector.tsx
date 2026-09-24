@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { AgentTargetOption } from "@/contracts/agent";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { NODE_TYPE_LABELS } from "./CustomNodes";
@@ -54,10 +54,6 @@ function WaitPayloadSchemaEditor({ node, onNodeChange }: {
   const serialized = JSON.stringify(node.wait?.payloadSchema ?? { type: "object" }, null, 2);
   const [value, setValue] = useState(serialized);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    setValue(serialized);
-    setError(null);
-  }, [node.id, serialized]);
 
   function apply() {
     try {

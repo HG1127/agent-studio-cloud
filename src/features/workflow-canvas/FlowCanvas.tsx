@@ -429,7 +429,7 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets }: FlowC
         </div>
         {selectedNode ? (
           <div className="w-72 shrink-0">
-            <NodeInspector node={selectedNode} workflowNodes={draft.nodes} agentTargets={agentTargets} onNodeChange={handleNodeChange} onNodeDelete={handleNodeDelete} />
+            <NodeInspector key={selectedNode.id} node={selectedNode} workflowNodes={draft.nodes} agentTargets={agentTargets} onNodeChange={handleNodeChange} onNodeDelete={handleNodeDelete} />
           </div>
         ) : null}
       </div>
