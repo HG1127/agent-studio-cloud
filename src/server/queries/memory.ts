@@ -5,9 +5,17 @@ import { agentMemories, agents } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 
-export async function listMemories(filters: { agentId?: string; query?: string; archived?: boolean } = {}) {
+export async function listMemories(filters: {
+  agentId?: string;
+  query?: string;
+  archived?: boolean;
+  limit?: number;
+  offset?: number;
+} = {}) {
   const agentId = z.string().uuid().safeParse(filters.agentId).data;
   const query = filters.query?.trim().slice(0, 200);
+  const limit = Math.min(101, Math.max(1, filters.limit ?? 100));
+  const offset = Math.max(0, filters.offset ?? 0);
   const rows = await db
     .select({ memory: agentMemories, agentName: agents.name })
     .from(agentMemories)
@@ -19,7 +27,8 @@ export async function listMemories(filters: { agentId?: string; query?: string; 
       query ? ilike(agentMemories.content, `%${query}%`) : undefined,
     ))
     .orderBy(desc(agentMemories.createdAt))
-    .limit(100);
+    .limit(limit)
+    .offset(offset);
   return rows.map(({ memory, agentName }) => MemoryView.parse({
     id: memory.id,
     agentId: memory.agentId,

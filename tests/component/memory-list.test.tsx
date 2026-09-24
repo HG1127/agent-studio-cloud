@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MemoryList } from "@/features/memory/MemoryList";
+import { MemoryList, MemoryPagination } from "@/features/memory/MemoryList";
 import { setMemoryArchivedAction } from "@/server/actions/archive-memory";
 
 const refresh = vi.fn();
@@ -38,5 +38,19 @@ describe("经验库列表", () => {
     await userEvent.click(screen.getByRole("button", { name: "停用" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("停用经验失败，请检查网络后重试");
     expect(screen.getByRole("button", { name: "停用" })).toBeEnabled();
+  });
+
+  it("有更多经验时显示服务端翻页入口", () => {
+    render(<MemoryPagination
+      page={2}
+      hasNext
+      previousHref="/memory?page=1"
+      nextHref="/memory?page=3"
+      label="在用经验翻页"
+    />);
+    expect(screen.getByRole("navigation", { name: "在用经验翻页" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "上一页" })).toHaveAttribute("href", "/memory?page=1");
+    expect(screen.getByRole("link", { name: "下一页" })).toHaveAttribute("href", "/memory?page=3");
+    expect(screen.getByText("第 2 页")).toBeInTheDocument();
   });
 });

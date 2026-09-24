@@ -51,3 +51,22 @@ export function MemoryList({ memories, archived = false }: { memories: MemoryVie
     {error ? <p role="alert" className="mt-3 text-sm text-red-600">{error}</p> : null}
   </>;
 }
+
+export function MemoryPagination({ page, hasNext, previousHref, nextHref, label }: {
+  page: number;
+  hasNext: boolean;
+  previousHref: string;
+  nextHref: string;
+  label: string;
+}) {
+  if (page === 1 && !hasNext) return null;
+  return <nav aria-label={label} className="flex items-center justify-between gap-3 text-sm">
+    {page > 1
+      ? <Link href={previousHref} className="rounded-md border border-gray-300 px-3 py-1.5 hover:border-gray-500">上一页</Link>
+      : <span />}
+    <span className="text-gray-500">第 {page} 页</span>
+    {hasNext
+      ? <Link href={nextHref} className="rounded-md border border-gray-300 px-3 py-1.5 hover:border-gray-500">下一页</Link>
+      : <span />}
+  </nav>;
+}
