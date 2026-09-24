@@ -518,7 +518,7 @@ export async function agentRunWorkflow(
         }
         throw new FatalError(`步骤「${node.title}」未能完成`);
       }
-      // 其余节点类型 M1 不支持自动执行
+      // 契约新增节点类型但运行器尚未实现时，必须明确失败，不能静默跳过。
       throw new FatalError(`步骤「${node.title}」暂不支持自动执行`);
     }
     await failRun(runId, guard >= executionLimit ? "步骤数超过安全上限，已停止" : "流程没有后续步骤，已停止");

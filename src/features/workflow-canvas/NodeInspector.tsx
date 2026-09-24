@@ -164,7 +164,7 @@ function WaitPayloadSchemaEditor({ node, onNodeChange }: {
   </div>;
 }
 
-// M1 编辑范围：title/description，加 human 的负责人与确认事项；condition 的说明以「判断说明」呈现
+// 通用标题/说明与各节点专属配置集中在同一检查面板；condition 的说明以「判断说明」呈现。
 export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agentTargets = [], toolOptions = [], onNodeChange, onNodeDelete }: NodeInspectorProps) {
   const isHuman = node.type === "human";
   const isCondition = node.type === "condition";

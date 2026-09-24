@@ -52,7 +52,7 @@ function isToolUnbound(node: WorkflowNode): boolean {
   return node.type === "tool" && (Boolean(node.tool?.unresolved) || !node.tool?.registryToolId);
 }
 
-// M1 演示发布策略的画布标识：演示绑定（registryToolId/protocol 为 demo）的工具节点标注「演示」；
+// 演示绑定（registryToolId/protocol 为 demo）的工具节点明确标注「演示」；
 // 未绑定判定保留在前，真正未绑定的节点仍显示「未绑定工具」
 function isDemoTool(node: WorkflowNode): boolean {
   return node.type === "tool" && (node.tool?.registryToolId === "demo" || node.tool?.protocol === "demo");

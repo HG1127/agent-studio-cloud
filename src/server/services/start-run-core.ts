@@ -16,7 +16,7 @@ import { completeEvaluationForRun } from "@/server/services/evaluation-state";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
 import { getToolRegistration } from "@/server/tools/tool-registry";
 
-// M1 运行引擎支持的节点类型：其余编排类节点后续任务扩展
+// 发布快照允许进入运行引擎的完整节点类型；未知类型必须在创建 run 前拒绝。
 const SUPPORTED_NODE_TYPES: ReadonlySet<string> = new Set([
   "trigger",
   "end",

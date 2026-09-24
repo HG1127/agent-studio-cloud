@@ -74,11 +74,9 @@ export function finalizeAgentDraft(params: {
   }
 }
 
-// M1 工具裁定（M2 真实连接后移除）：编译器对未注册工具打未绑定标记（registryToolId=null、
-// protocol/connector='unbound'、scope 以 unbound. 开头、unresolved=true），通用知识库步骤同样无真实来源；
-// grounding 的 executableTool/knowledgeBound 会据此全部判死 → business_source_unresolved 恒为 critical，
-// 发布成功路径在 M1 永远不可达。此处在 compile 之后、grounding 之前把未绑定能力统一改绑演示来源，
-// 并清空编译器填的 runtimeRequirements.unresolvedTools（列表已失效，留着会让运行前置校验直接拒绝）。
+// 创建期能力裁定：编译器对未注册工具标记为 unbound；已配置的真实工具保持原绑定，
+// 其余节点明确改绑到界面可见的演示工具，保证演示流程可运行且不伪装成真实外部调用。
+// 通用知识步骤同样绑定演示资料库；运行前仍会校验真实注册项是否存在。
 export function bindDemoCapabilities(workflow: WorkflowDraft): void {
   for (const node of Object.values(workflow.nodes)) {
     if (
