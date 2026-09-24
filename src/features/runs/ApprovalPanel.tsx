@@ -31,13 +31,15 @@ export function ApprovalPanel({ runId, approval }: { runId: string; approval: Ap
   async function handleDecide(decision: "approved" | "rejected", note: string) {
     setSubmitting(decision);
     setError(null);
-    const result = await decideApprovalAction(runId, approval.id, { decision, note });
-    if (result.ok) {
-      router.refresh();
-    } else {
-      setError(result.error);
+    try {
+      const result = await decideApprovalAction(runId, approval.id, { decision, note });
+      if (result.ok) router.refresh();
+      else setError(result.error);
+    } catch {
+      setError("提交失败，请检查网络后重试");
+    } finally {
+      setSubmitting(null);
     }
-    setSubmitting(null);
   }
 
   return (

@@ -36,9 +36,13 @@ export function AgentList({ agents, archived = false }: { agents: AgentSummary[]
               onClick={() => {
                 setError(null);
                 startTransition(async () => {
-                  const result = await setAgentArchivedAction({ agentId: agent.id, archived: !archived });
-                  if (!result.ok) setError(result.error);
-                  else router.refresh();
+                  try {
+                    const result = await setAgentArchivedAction({ agentId: agent.id, archived: !archived });
+                    if (!result.ok) setError(result.error);
+                    else router.refresh();
+                  } catch {
+                    setError(archived ? "恢复失败，请检查网络后重试" : "停用失败，请检查网络后重试");
+                  }
                 });
               }}
             >

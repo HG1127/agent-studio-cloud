@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentList } from "@/features/agents/AgentList";
 import { setAgentArchivedAction } from "@/server/actions/set-agent-archived";
 
@@ -18,6 +18,8 @@ const agent = {
   updatedAt: "2026-09-24T00:00:00.000Z",
 };
 
+afterEach(() => vi.clearAllMocks());
+
 describe("助手列表", () => {
   it("可停用在用助手", async () => {
     render(<AgentList agents={[agent]} />);
@@ -29,5 +31,13 @@ describe("助手列表", () => {
     render(<AgentList agents={[{ ...agent, archivedAt: "2026-09-24T01:00:00.000Z" }]} archived />);
     expect(screen.getByRole("button", { name: "恢复" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /合同审核助手/ })).not.toBeInTheDocument();
+  });
+
+  it("停用请求中断时显示错误并允许重试", async () => {
+    vi.mocked(setAgentArchivedAction).mockRejectedValueOnce(new Error("offline"));
+    render(<AgentList agents={[agent]} />);
+    await userEvent.click(screen.getByRole("button", { name: "停用" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("停用失败，请检查网络后重试");
+    expect(screen.getByRole("button", { name: "停用" })).toBeEnabled();
   });
 });

@@ -75,6 +75,15 @@ describe("RunLauncher", () => {
     expect(pushMock).not.toHaveBeenCalled();
   });
 
+  it("启动请求中断时显示网络错误并允许重试", async () => {
+    startRunMock.mockRejectedValue(new Error("offline"));
+    const user = userEvent.setup();
+    render(<RunLauncher agentId={AGENT_ID} />);
+    await user.click(screen.getByRole("button", { name: "运行此助手" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("启动失败，请检查网络后重试");
+    expect(screen.getByRole("button", { name: "运行此助手" })).toBeEnabled();
+  });
+
   it("按版本输入契约生成字段并在提交前校验必填项", async () => {
     startRunMock.mockResolvedValue({ ok: true, runId: RUN_ID });
     const user = userEvent.setup();

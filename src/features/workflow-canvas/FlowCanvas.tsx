@@ -293,14 +293,19 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets }: FlowC
   async function handleSave() {
     setPending(true);
     setFeedback(null);
-    const result = await saveWorkflowAction(agentId, draft);
-    if (result.ok) {
-      setFeedback({ ok: true, text: "草稿已保存" });
-      router.refresh();
-    } else {
-      setFeedback({ ok: false, text: result.error });
+    try {
+      const result = await saveWorkflowAction(agentId, draft);
+      if (result.ok) {
+        setFeedback({ ok: true, text: "草稿已保存" });
+        router.refresh();
+      } else {
+        setFeedback({ ok: false, text: result.error });
+      }
+    } catch {
+      setFeedback({ ok: false, text: "保存失败，请检查网络后重试" });
+    } finally {
+      setPending(false);
     }
-    setPending(false);
   }
 
   const selectedNode = selectedId ? (visibleNodes.find((node) => node.id === selectedId) ?? null) : null;

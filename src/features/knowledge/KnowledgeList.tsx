@@ -104,9 +104,13 @@ export function KnowledgeList({ initial, archived = false }: { initial: Knowledg
                 onClick={() => {
                   setError(null);
                   startTransition(async () => {
-                    const result = await setKnowledgeSourceArchivedAction({ sourceId: source.id, archived: !archived });
-                    if (!result.ok) setError(result.error);
-                    else router.refresh();
+                    try {
+                      const result = await setKnowledgeSourceArchivedAction({ sourceId: source.id, archived: !archived });
+                      if (!result.ok) setError(result.error);
+                      else router.refresh();
+                    } catch {
+                      setError(archived ? "恢复资料失败，请检查网络后重试" : "归档资料失败，请检查网络后重试");
+                    }
                   });
                 }}
               >

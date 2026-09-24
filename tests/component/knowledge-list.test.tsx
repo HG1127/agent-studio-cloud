@@ -7,7 +7,10 @@ import { setKnowledgeSourceArchivedAction } from "@/server/actions/archive-knowl
 const refresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
 vi.mock("@/server/actions/archive-knowledge-source", () => ({ setKnowledgeSourceArchivedAction: vi.fn(async () => ({ ok: true as const })) }));
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.clearAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("知识库列表", () => {
   it("空列表显示引导文案，非空列表渲染状态与归档入口", () => {
@@ -40,6 +43,18 @@ describe("知识库列表", () => {
     rerender(<KnowledgeList initial={[{ ...source, status: "archived" }]} archived />);
     await userEvent.click(screen.getByRole("button", { name: "恢复" }));
     expect(setKnowledgeSourceArchivedAction).toHaveBeenLastCalledWith({ sourceId: source.id, archived: false });
+  });
+
+  it("归档请求中断时显示错误并允许重试", async () => {
+    vi.mocked(setKnowledgeSourceArchivedAction).mockRejectedValueOnce(new Error("offline"));
+    render(<KnowledgeList initial={[{
+      id: "00000000-0000-4000-8000-0000000000f3", name: "售后手册.txt", mime: "text/plain",
+      sizeBytes: 2048, status: "indexed", chunkCount: 3, charCount: 1200, error: null,
+      createdAt: "2026-09-23T00:00:00.000Z",
+    }]} />);
+    await userEvent.click(screen.getByRole("button", { name: "归档" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("归档资料失败，请检查网络后重试");
+    expect(screen.getByRole("button", { name: "归档" })).toBeEnabled();
   });
 
   it("解析失败时说明可以重新上传重试", () => {

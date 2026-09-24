@@ -66,11 +66,13 @@ export function RunLauncher({ agentId, inputFields }: { agentId: string; inputFi
       return;
     }
     setPending(true);
-    const result = await startRunAction({ agentId, input });
-    if (result.ok) {
-      router.push(`/runs/${result.runId}`);
-    } else {
-      setError(result.error);
+    try {
+      const result = await startRunAction({ agentId, input });
+      if (result.ok) router.push(`/runs/${result.runId}`);
+      else setError(result.error);
+    } catch {
+      setError("启动失败，请检查网络后重试");
+    } finally {
       setPending(false);
     }
   }

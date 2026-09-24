@@ -49,4 +49,11 @@ describe("CreateAgentForm", () => {
     });
     expect(pushMock).not.toHaveBeenCalled();
   });
+
+  it("创建请求中断时显示网络错误并允许重试", async () => {
+    actionMock.mockRejectedValue(new Error("offline"));
+    await fillAndSubmit();
+    expect(await screen.findByRole("alert")).toHaveTextContent("创建请求失败，请检查网络后重试");
+    expect(screen.getByRole("button", { name: "创建助手" })).toBeEnabled();
+  });
 });

@@ -18,13 +18,18 @@ export function CreateAgentForm() {
     event.preventDefault();
     setPending(true);
     setError(null);
-    const result = await createAgentAction({ name, intentText });
-    if (result.ok) {
-      router.push(`/agents/${result.agentId}`);
-      return;
+    try {
+      const result = await createAgentAction({ name, intentText });
+      if (result.ok) {
+        router.push(`/agents/${result.agentId}`);
+        return;
+      }
+      setError(result.error);
+    } catch {
+      setError("创建请求失败，请检查网络后重试");
+    } finally {
+      setPending(false);
     }
-    setError(result.error);
-    setPending(false);
   }
 
   return (

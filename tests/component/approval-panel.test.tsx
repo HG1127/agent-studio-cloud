@@ -112,6 +112,15 @@ describe("ApprovalPanel", () => {
     expect(refreshMock).not.toHaveBeenCalled();
   });
 
+  it("审批请求中断时显示网络错误并允许重试", async () => {
+    actionMock.mockRejectedValue(new Error("offline"));
+    const user = userEvent.setup();
+    render(<ApprovalPanel runId={RUN_ID} approval={PENDING} />);
+    await user.click(screen.getByRole("button", { name: "批准" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("提交失败，请检查网络后重试");
+    expect(screen.getByRole("button", { name: "批准" })).toBeEnabled();
+  });
+
   it("已决定时显示结果与备注，不再显示操作按钮", () => {
     render(<ApprovalPanel runId={RUN_ID} approval={DECIDED} />);
     expect(screen.getByText("已确认")).toBeInTheDocument();
