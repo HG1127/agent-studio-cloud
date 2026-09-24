@@ -49,7 +49,7 @@ async function reconcileDuplicateSource(sourceId: string, suppliedBlobPathname: 
     const lastUpdatedAt = current.updatedAt ?? current.createdAt;
     const staleParsing = current.status === "parsing" && lastUpdatedAt.getTime() < Date.now() - STALE_PARSING_MS;
     const retrying = current.status === "failed" || staleParsing
-      || (current.status === "archived" && current.chunkCount === 0 && Boolean(current.error));
+      || (current.status === "archived" && current.chunkCount === 0);
     const status = retrying
       ? "parsing"
       : current.status === "archived"

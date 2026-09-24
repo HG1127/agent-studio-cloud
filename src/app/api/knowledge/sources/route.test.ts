@@ -124,6 +124,24 @@ describe("知识原文件上传", () => {
     expect(dbState.update).toHaveBeenCalledOnce();
   });
 
+  it("重新上传归档但尚无分片的资料时重新启动解析", async () => {
+    dbState.rows = [{
+      id: "00000000-0000-4000-8000-0000000000f3", name: "待解析资料.txt", mime: "text/plain",
+      sizeBytes: 12, status: "archived", chunkCount: 0, charCount: 0, error: null,
+      createdAt: new Date("2026-09-24T00:00:00Z"), updatedAt: new Date("2026-09-24T01:00:00Z"),
+      blobPathname: null, archivedAt: new Date("2026-09-24T01:00:00Z"),
+    }];
+    const form = new FormData();
+    form.set("file", new File(["退货说明"], "待解析资料.txt", { type: "text/plain" }));
+
+    const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, deduped: true, source: { status: "parsing" } });
+    expect(startMock).toHaveBeenCalledOnce();
+    expect(dbState.update).toHaveBeenCalledOnce();
+  });
+
   it("重新上传解析失败的同一文件会复用记录并重新入库", async () => {
     dbState.rows = [{
       id: "00000000-0000-4000-8000-0000000000f3", name: "售后手册.txt", mime: "text/plain",
