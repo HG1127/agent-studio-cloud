@@ -149,7 +149,7 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 function inputContractFor(draft: WorkflowDraft): AgentManifest["inputContract"] {
   const fields: AgentManifest["inputContract"]["fields"] = [];
   const seen = new Set<string>();
-  for (const variable of draft.variables) {
+  for (const variable of draft.variables ?? []) {
     if (variable.scope !== "run" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(variable.name) || seen.has(variable.name)) continue;
     seen.add(variable.name);
     fields.push({ name: variable.name, label: variable.label, required: variable.required, type: variable.type });
