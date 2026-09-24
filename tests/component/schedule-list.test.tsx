@@ -27,7 +27,7 @@ describe("定时任务列表", () => {
     );
     expect(screen.getByText(/每 5 分钟/)).toBeInTheDocument();
     expect(screen.getByText(/每天 09:30/)).toBeInTheDocument();
-    expect(screen.getByText("运行中")).toBeInTheDocument();
+    expect(screen.getByText("已启用")).toBeInTheDocument();
     expect(screen.getByText("出错")).toBeInTheDocument();
     expect(screen.getByText("最近一次失败：运行启动失败，请稍后重试")).toBeInTheDocument();
   });
