@@ -3,8 +3,10 @@ import { createHook, FatalError, sleep } from "workflow";
 import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { requestApproval, recordDecision } from "@/server/steps/approval-step";
+import { resolveLoopCollection, workflowExecutionLimit } from "@/server/domain/runtime/loop-runtime";
 import { evaluateCondition } from "@/server/steps/condition-step";
 import { runKnowledgeStep } from "@/server/steps/knowledge-step";
+import { beginLoopIteration, completeLoop } from "@/server/steps/loop-step";
 import { runModelStep } from "@/server/steps/model-step";
 import { failRun, finalizeRun, initializeRun, markRunRunning } from "@/server/steps/run-state";
 import { runQualityGate } from "@/server/steps/quality-step";
@@ -18,9 +20,18 @@ export async function agentRunWorkflow(runId: string, manifest: AgentManifest, i
   await initializeRun(runId, draft);
   let currentId: string | null = draft.startNodeId;
   const outputs: Record<string, unknown> = {};
+  const loopStates: Record<string, {
+    items: unknown[];
+    sourceCount: number;
+    limited: boolean;
+    index: number;
+    iterations: Array<{ iteration: number; item: unknown; bodyOutput: unknown }>;
+  }> = {};
+  const activeLoops: Array<{ loopId: string; iteration: number; total: number; item: unknown }> = [];
+  const executionLimit = workflowExecutionLimit(draft.nodes);
   let guard = 0;
   try {
-    while (currentId && guard < 200) {
+    while (currentId && guard < executionLimit) {
       guard += 1;
       // 显式标注打断 currentId 收窄与节点类型之间的推导环（TS7022）
       const node: WorkflowNode | undefined = draft.nodes[currentId];
@@ -52,7 +63,7 @@ export async function agentRunWorkflow(runId: string, manifest: AgentManifest, i
         continue;
       }
       if (node.type === "condition") {
-        currentId = await evaluateCondition({ runId, node, outputs, input });
+        currentId = await evaluateCondition({ runId, node, outputs, input, currentItem: activeLoops.at(-1)?.item });
         continue;
       }
       if (node.type === "rule") {
@@ -123,10 +134,58 @@ export async function agentRunWorkflow(runId: string, manifest: AgentManifest, i
         currentId = node.next;
         continue;
       }
+      if (node.type === "loop") {
+        const loop = node.loop;
+        if (!loop?.bodyNext || !loop.exitNext) throw new FatalError(`步骤「${node.title}」的逐项处理路径不完整`);
+        const state = loopStates[node.id] ?? (() => {
+          const collection = resolveLoopCollection({
+            collectionPath: loop.collectionPath,
+            maxIterations: loop.maxIterations,
+            input,
+            outputs,
+          });
+          return (loopStates[node.id] = { ...collection, index: 0, iterations: [] });
+        })();
+        const active = activeLoops.at(-1);
+        if (active?.loopId === node.id && active.iteration > state.iterations.length) {
+          state.iterations.push({
+            iteration: active.iteration,
+            item: active.item,
+            bodyOutput: outputs[loop.bodyNext],
+          });
+        }
+        if (state.index < state.items.length) {
+          const item = state.items[state.index];
+          state.index += 1;
+          const frame = { loopId: node.id, iteration: state.index, total: state.items.length, item };
+          if (active?.loopId === node.id) activeLoops[activeLoops.length - 1] = frame;
+          else activeLoops.push(frame);
+          outputs[node.id] = {
+            itemKey: loop.itemKey,
+            currentItem: item,
+            iteration: state.index,
+            total: state.items.length,
+          };
+          await beginLoopIteration({ runId, node, iteration: state.index, total: state.items.length, item });
+          currentId = loop.bodyNext;
+          continue;
+        }
+        if (activeLoops.at(-1)?.loopId === node.id) activeLoops.pop();
+        const output = {
+          processedCount: state.index,
+          sourceCount: state.sourceCount,
+          limited: state.limited,
+          iterations: state.iterations,
+        };
+        outputs[node.id] = output;
+        await completeLoop({ runId, node, output });
+        currentId = loop.exitNext;
+        continue;
+      }
       // 其余节点类型 M1 不支持自动执行
       throw new FatalError(`步骤「${node.title}」暂不支持自动执行`);
     }
-    await failRun(runId, guard >= 200 ? "步骤数超过安全上限，已停止" : "流程没有后续步骤，已停止");
+    await failRun(runId, guard >= executionLimit ? "步骤数超过安全上限，已停止" : "流程没有后续步骤，已停止");
     return { status: "failed" };
   } catch (err) {
     const message = err instanceof Error ? err.message : "";

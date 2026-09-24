@@ -2,12 +2,12 @@
 export interface RunEvalContext {
   input: Record<string, unknown>;
   variables: Record<string, unknown>;
-  context: { outputs: Record<string, unknown> };
+  context: { outputs: Record<string, unknown>; currentItem?: unknown };
 }
 
 const ROOTS: ReadonlySet<string> = new Set(["input", "variables", "context"]);
 
-// 支持 input.x / variables.x / context.outputs.<nodeId> 及嵌套段；未知路径返回 undefined
+// 支持 input.x / variables.x / context.outputs.<nodeId> / context.currentItem.x 及嵌套段；未知路径返回 undefined
 export function resolvePath(path: string, ctx: RunEvalContext): unknown {
   const segments = path.split(".").filter(Boolean);
   if (segments.length === 0 || !ROOTS.has(segments[0])) return undefined;
