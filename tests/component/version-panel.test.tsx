@@ -48,6 +48,10 @@ describe("VersionPanel", () => {
     expect(screen.getByText("版本 1")).toBeInTheDocument();
     expect(screen.getByText("当前版本")).toBeInTheDocument();
     expect(screen.getByText("历史版本")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "下载此版本" })[0]).toHaveAttribute(
+      "href",
+      `/api/agents/${AGENT_ID}/versions/${VERSIONS[0].id}/export`,
+    );
     expect(screen.getAllByText(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)).toHaveLength(2);
   });
 

@@ -167,6 +167,8 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
                       : "历史版本"}
               </span>
               <span className="text-gray-500">{formatTime(version.createdAt)}</span>
+              <a href={`/api/agents/${agentId}/versions/${version.id}/export`} download
+                className="text-xs text-blue-700 hover:underline">下载此版本</a>
               {version.status === "retired" ? (
                 <button
                   type="button"

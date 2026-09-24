@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AgentManifest } from "./manifest";
 
 // status 原样保留数据库值（发布动作写入 candidate/production/retired/superseded），
 // 读路径保持宽容，「当前版本/历史版本」的文案映射由 UI 负责
@@ -28,3 +29,13 @@ export const RestoreVersionResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(false), error: z.string() }),
 ]);
 export type RestoreVersionResult = z.infer<typeof RestoreVersionResult>;
+
+export const VersionExportFile = z.object({
+  format: z.literal("agent-studio-cloud-version"),
+  formatVersion: z.literal(1),
+  exportedAt: z.iso.datetime(),
+  agent: z.object({ name: z.string() }),
+  version: z.object({ number: z.number().int().positive(), status: z.string(), createdAt: z.iso.datetime() }),
+  manifest: AgentManifest,
+});
+export type VersionExportFile = z.infer<typeof VersionExportFile>;
