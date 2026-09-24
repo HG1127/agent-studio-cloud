@@ -7,13 +7,28 @@ export type PreparedParallel =
   | { ok: true; branches: PreparedParallelBranch[] }
   | { ok: false; error: string };
 
+export function resolveParallelOutcome(args: {
+  strategy: "all" | "any" | "all_settled";
+  failurePolicy: "fail_fast" | "continue";
+  statuses: Array<"completed" | "failed">;
+}): { status: "completed" | "completed_with_issues" | "failed"; shouldFail: boolean; selectedIndex: number | null } {
+  const completed = args.statuses.filter((status) => status === "completed").length;
+  const failed = args.statuses.length - completed;
+  if (args.strategy === "any") {
+    const selectedIndex = args.statuses.findIndex((status) => status === "completed");
+    return selectedIndex >= 0
+      ? { status: "completed", shouldFail: false, selectedIndex }
+      : { status: "failed", shouldFail: true, selectedIndex: null };
+  }
+  if (failed === 0) return { status: "completed", shouldFail: false, selectedIndex: null };
+  if (args.failurePolicy === "fail_fast") return { status: "failed", shouldFail: true, selectedIndex: null };
+  return { status: "completed_with_issues", shouldFail: false, selectedIndex: null };
+}
+
 export function prepareParallelBranches(node: WorkflowNode): PreparedParallel {
   const parallel = node.parallel;
   if (!parallel || parallel.branches.length < 2) {
     return { ok: false, error: `步骤「${node.title}」至少需要两项并行工作` };
-  }
-  if (parallel.strategy === "any") {
-    return { ok: false, error: `步骤「${node.title}」的“任一完成即继续”暂不支持安全取消其余工作` };
   }
   const ids = new Set<string>();
   const branches: PreparedParallelBranch[] = [];

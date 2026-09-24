@@ -63,6 +63,15 @@ function manifestFor(failurePolicy: "fail_fast" | "continue") {
   });
 }
 
+function manifestForAny() {
+  const manifest = manifestFor("continue");
+  const parallel = manifest.workflowSnapshot.nodes.parallel;
+  if (!parallel.parallel) throw new Error("并行测试配置不完整");
+  parallel.parallel.strategy = "any";
+  parallel.parallel.failurePolicy = "fail_fast";
+  return manifest;
+}
+
 async function runWith(manifest: AgentManifest) {
   const [row] = await db.insert(runs).values({
     workspaceId: DEMO_WORKSPACE_ID,
@@ -136,6 +145,30 @@ describe("并行分支运行", () => {
       expect(parallelStep?.status).toBe("succeeded");
       const traces = await db.select().from(traceEvents).where(eq(traceEvents.runId, runId));
       expect(traces.map((trace) => trace.kind)).toContain("parallel.completed_with_issues");
+    } finally {
+      await cleanup(runId);
+    }
+  }, 240_000);
+
+  it("任一分支成功时完成并记录采用的分支", async () => {
+    const runId = await runWith(manifestForAny());
+    try {
+      const [run] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+      expect(run?.status).toBe("completed");
+      expect(run?.result).toMatchObject({
+        parallel: {
+          strategy: "any",
+          status: "completed",
+          selectedBranchId: "content",
+          completedCount: 1,
+          failedCount: 1,
+        },
+      });
+      const [parallelStep] = await db.select().from(runSteps).where(and(
+        eq(runSteps.runId, runId),
+        eq(runSteps.nodeId, "parallel"),
+      )).limit(1);
+      expect(parallelStep?.status).toBe("succeeded");
     } finally {
       await cleanup(runId);
     }

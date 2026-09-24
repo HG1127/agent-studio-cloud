@@ -4,7 +4,7 @@ import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { requestApproval, recordDecision } from "@/server/steps/approval-step";
 import { resolveLoopCollection, workflowExecutionLimit } from "@/server/domain/runtime/loop-runtime";
-import { prepareParallelBranches, type PreparedParallelBranch } from "@/server/domain/runtime/parallel-runtime";
+import { prepareParallelBranches, resolveParallelOutcome, type PreparedParallelBranch } from "@/server/domain/runtime/parallel-runtime";
 import { prepareSubflow, type PreparedSubflow } from "@/server/domain/runtime/subflow-runtime";
 import { evaluateCondition } from "@/server/steps/condition-step";
 import { beginAgentCall, finishAgentCall } from "@/server/steps/agent-call-step";
@@ -232,6 +232,8 @@ export async function agentRunWorkflow(
         continue;
       }
       if (node.type === "system") {
+        const result = await runInlineSystemStep({ runId, node });
+        outputs[node.id] = result.output;
         currentId = node.next;
         continue;
       }
@@ -366,24 +368,32 @@ export async function agentRunWorkflow(
           };
         });
         const failed = branchResults.filter((branch) => branch.status === "failed");
+        const outcome = resolveParallelOutcome({
+          strategy: node.parallel!.strategy,
+          failurePolicy: node.parallel!.failurePolicy,
+          statuses: branchResults.map((branch) => branch.status),
+        });
         const output = {
           strategy: node.parallel?.strategy,
-          status: failed.length === 0 ? "completed" : "completed_with_issues",
+          status: outcome.status,
           completedCount: branchResults.length - failed.length,
           failedCount: failed.length,
+          ...(outcome.selectedIndex === null ? {} : { selectedBranchId: branchResults[outcome.selectedIndex].id }),
           branches: Object.fromEntries(branchResults.map((branch) => [branch.id, branch])),
         };
         outputs[node.id] = output;
-        if (failed.length > 0 && node.parallel?.failurePolicy === "fail_fast") {
+        if (outcome.shouldFail) {
           const handled = Boolean(node.onErrorNext);
           await finishParallel({ runId, node, output, failed: true, handled });
           if (node.onErrorNext) {
             currentId = node.onErrorNext;
             continue;
           }
-          throw new FatalError(`步骤「${node.title}」有 ${failed.length} 项并行工作未完成`);
+          throw new FatalError(node.parallel?.strategy === "any"
+            ? `步骤「${node.title}」没有任何一项并行工作完成`
+            : `步骤「${node.title}」有 ${failed.length} 项并行工作未完成`);
         }
-        await finishParallel({ runId, node, output, failed: failed.length > 0, handled: true });
+        await finishParallel({ runId, node, output, failed: outcome.status === "completed_with_issues", handled: true });
         currentId = node.next;
         continue;
       }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { WorkflowNode } from "@/contracts/workflow";
-import { prepareParallelBranches } from "@/server/domain/runtime/parallel-runtime";
+import { prepareParallelBranches, resolveParallelOutcome } from "@/server/domain/runtime/parallel-runtime";
 
 function parallelNode(overrides: Record<string, unknown> = {}) {
   return WorkflowNode.parse({
@@ -30,7 +30,7 @@ describe("并行分支运行准备", () => {
     ]);
   });
 
-  it("拒绝重复分支标识与暂时无法安全取消的任一完成策略", () => {
+  it("拒绝重复分支标识并接受任一成功策略", () => {
     const duplicate = parallelNode({
       parallel: {
         strategy: "all",
@@ -50,7 +50,20 @@ describe("并行分支运行准备", () => {
         branches: parallelNode().parallel?.branches,
       },
     });
-    expect(prepareParallelBranches(any)).toMatchObject({ ok: false, error: expect.stringContaining("安全取消") });
+    expect(prepareParallelBranches(any)).toMatchObject({ ok: true });
+  });
+
+  it("任一成功时继续并选中成功分支，全部失败时进入失败路径", () => {
+    expect(resolveParallelOutcome({ strategy: "any", failurePolicy: "fail_fast", statuses: ["failed", "completed"] })).toEqual({
+      status: "completed",
+      shouldFail: false,
+      selectedIndex: 1,
+    });
+    expect(resolveParallelOutcome({ strategy: "any", failurePolicy: "continue", statuses: ["failed", "failed"] })).toEqual({
+      status: "failed",
+      shouldFail: true,
+      selectedIndex: null,
+    });
   });
 
   it("拒绝需要暂停或再次编排的分支内步骤", () => {
