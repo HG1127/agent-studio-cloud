@@ -49,6 +49,14 @@ export const HandoffContract = z.object({
     private: z.array(z.string()).default([]),
   }).optional(),
 });
+export const WorkflowVariable = z.object({
+  name: z.string(),
+  label: z.string().optional(),
+  type: z.string().default("string"),
+  scope: z.string().default("run"),
+  required: z.boolean().default(true),
+  description: z.string().optional(),
+});
 export const WorkflowNode = z.object({
   id: z.string(), title: z.string(), type: WorkflowNodeType,
   agent: z.object({ id: z.string(), name: z.string(), role: z.string() }).optional(),
@@ -92,7 +100,7 @@ export const WorkflowDraft = z.object({
   startNodeId: z.string().default("start"),
   rootAgent: z.object({ id: z.string(), name: z.string(), role: z.string() }),
   nodes: z.record(z.string(), WorkflowNode),
-  variables: z.array(z.object({ name: z.string(), label: z.string().optional(), type: z.string().default("string"), scope: z.string().default("run"), required: z.boolean().default(true), description: z.string().optional() })).default([]),
+  variables: z.array(WorkflowVariable).default([]),
   memoryPolicy: z.object({ taskContext: z.boolean(), longTerm: z.boolean(), description: z.string().optional() }),
   runtimeRequirements: z.object({ externalTools: z.array(z.unknown()).default([]), unresolvedTools: z.array(z.unknown()).default([]), toolReceiptVerification: z.boolean().default(true) }).optional(),
   intentSource: z.record(z.string(), z.unknown()).optional(),
@@ -111,3 +119,4 @@ export type WorkflowNode = z.infer<typeof WorkflowNode>;
 export type WorkflowDraft = z.infer<typeof WorkflowDraft>;
 export type ParallelBranch = z.infer<typeof ParallelBranch>;
 export type HandoffContract = z.infer<typeof HandoffContract>;
+export type WorkflowVariable = z.infer<typeof WorkflowVariable>;

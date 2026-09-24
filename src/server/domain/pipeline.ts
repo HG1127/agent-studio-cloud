@@ -146,11 +146,18 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 }
 
-// M1 简化：统一一个业务输入字段，条件节点引用 input.* 时按前缀后的路径列出具体字段
-// （取名字段的语义与旧系统 workflowTestContract.mjs sourceField 一致）
 function inputContractFor(draft: WorkflowDraft): AgentManifest["inputContract"] {
-  const fields: AgentManifest["inputContract"]["fields"] = [{ name: "input", label: "业务输入", required: true, type: "string" }];
-  const seen = new Set(["input"]);
+  const fields: AgentManifest["inputContract"]["fields"] = [];
+  const seen = new Set<string>();
+  for (const variable of draft.variables) {
+    if (variable.scope !== "run" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(variable.name) || seen.has(variable.name)) continue;
+    seen.add(variable.name);
+    fields.push({ name: variable.name, label: variable.label, required: variable.required, type: variable.type });
+  }
+  if (fields.length === 0) {
+    fields.push({ name: "input", label: "业务输入", required: true, type: "string" });
+    seen.add("input");
+  }
   for (const node of Object.values(draft.nodes)) {
     if (node.type !== "condition" || !node.condition) continue;
     const sources = [node.condition.source, ...node.condition.branches.flatMap((branch) => (branch.rules ?? []).map((rule) => rule.source))].filter(

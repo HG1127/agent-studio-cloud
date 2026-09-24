@@ -68,17 +68,30 @@ describe("buildManifest", () => {
     expect(buildManifest(changed, options).workflowFingerprint).not.toBe(buildManifest(draft, options).workflowFingerprint);
   });
 
-  it("manifest 结构：快照、输入契约（统一业务输入 + condition 的 input.* 字段）、模型选择", () => {
+  it("manifest 结构：快照、草稿输入契约、模型选择", () => {
     const manifest = buildManifest(draft, options);
     expect(manifest.schemaVersion).toBe("4.0");
     expect(manifest.workflowSnapshot).toEqual(draft);
-    expect(manifest.inputContract.fields[0]).toMatchObject({ name: "input", label: "业务输入", required: true });
-    // plan-golden-1 的条件节点引用 input.severity → 列出 severity 字段
-    expect(manifest.inputContract.fields).toEqual(
-      expect.arrayContaining([expect.objectContaining({ name: "severity", required: true })]),
-    );
+    expect(manifest.inputContract.fields).toEqual([
+      expect.objectContaining({ name: "severity", label: "判断严重程度", required: true, type: "string" }),
+    ]);
     expect(manifest.resourceSelection.model).toEqual({ modelId: "test-model", mock: true, connectionId: null });
     expect(manifest.outputContract).toEqual({ fields: [] });
+  });
+
+  it("草稿定义运行输入字段时按名称、类型和必填状态冻结，不再添加默认输入", () => {
+    const configured = WorkflowDraft.parse({
+      ...draft,
+      variables: [
+        { name: "brief", label: "任务说明", type: "string", scope: "run", required: true },
+        { name: "count", label: "数量", type: "number", scope: "run", required: false },
+      ],
+    });
+    expect(buildManifest(configured, options).inputContract.fields).toEqual(expect.arrayContaining([
+      { name: "brief", label: "任务说明", type: "string", required: true },
+      { name: "count", label: "数量", type: "number", required: false },
+    ]));
+    expect(buildManifest(configured, options).inputContract.fields.some((field) => field.name === "input")).toBe(false);
   });
 
   it("发布选定的模型连接冻结进 manifest；不传 connectionId 时为 null", () => {

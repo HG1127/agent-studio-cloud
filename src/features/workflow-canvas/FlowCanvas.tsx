@@ -20,6 +20,7 @@ import { autoLayout } from "./layout";
 import { NodeInspector } from "./NodeInspector";
 import { updateWorkflowNode } from "./update-workflow-node";
 import { ADDABLE_NODE_TYPES, createWorkflowNode } from "./create-workflow-node";
+import { WorkflowInputEditor } from "./WorkflowInputEditor";
 
 interface FlowCanvasProps {
   agentId: string;
@@ -291,6 +292,11 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets }: FlowC
   }, [newNodeType]);
 
   async function handleSave() {
+    const names = draft.variables.map((variable) => variable.name);
+    if (names.some((name) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) || new Set(names).size !== names.length) {
+      setFeedback({ ok: false, text: "运行输入字段名必须以字母或下划线开头，且不能重复" });
+      return;
+    }
     setPending(true);
     setFeedback(null);
     try {
@@ -312,6 +318,7 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets }: FlowC
 
   return (
     <section className="flex flex-col gap-3">
+      <WorkflowInputEditor variables={draft.variables} onChange={(variables) => setDraft((current) => ({ ...current, variables }))} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <label className="flex items-center gap-2 text-sm text-gray-600">
           <input
