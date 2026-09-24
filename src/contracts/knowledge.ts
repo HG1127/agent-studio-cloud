@@ -17,6 +17,22 @@ export const KnowledgeSourceView = z.object({
 });
 export type KnowledgeSourceView = z.infer<typeof KnowledgeSourceView>;
 
+export const KnowledgeSearchHit = z.object({
+  sourceId: z.string().uuid(),
+  sourceName: z.string(),
+  chunkIndex: z.number().int().nonnegative(),
+  excerpt: z.string(),
+  score: z.number(),
+});
+export type KnowledgeSearchHit = z.infer<typeof KnowledgeSearchHit>;
+
+export const KnowledgeSearchResult = z.object({
+  query: z.string(),
+  hits: z.array(KnowledgeSearchHit),
+  truncated: z.boolean(),
+});
+export type KnowledgeSearchResult = z.infer<typeof KnowledgeSearchResult>;
+
 export const KnowledgeUploadResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true), deduped: z.boolean(), blobStored: z.boolean(), source: KnowledgeSourceView }),
   z.object({ ok: z.literal(false), error: z.string() }),
