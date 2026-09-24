@@ -103,4 +103,31 @@ describe("知识库列表", () => {
     expect(await screen.findByText("上传失败，请检查网络后重试")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "上传文档" })).toBeEnabled();
   });
+
+  it("可以按文件名查找资料", async () => {
+    const source = {
+      id: "00000000-0000-4000-8000-0000000000f3", mime: "text/plain", sizeBytes: 2048,
+      status: "indexed" as const, chunkCount: 3, charCount: 1200, error: null,
+      createdAt: "2026-09-23T00:00:00.000Z",
+    };
+    render(<KnowledgeList initial={[{ ...source, name: "售后手册.txt" }, { ...source, id: "00000000-0000-4000-8000-0000000000f4", name: "商品目录.csv" }]} />);
+    await userEvent.type(screen.getByRole("searchbox"), "售后");
+    expect(screen.getByText("售后手册.txt")).toBeInTheDocument();
+    expect(screen.queryByText("商品目录.csv")).not.toBeInTheDocument();
+    expect(screen.getByText("共 1 份")).toBeInTheDocument();
+  });
+
+  it("超过一页时可以翻页", async () => {
+    const sources = Array.from({ length: 21 }, (_, index) => ({
+      id: `source-${index}`, name: `资料 ${index + 1}.txt`, mime: "text/plain", sizeBytes: 100,
+      status: "indexed" as const, chunkCount: 1, charCount: 80, error: null,
+      createdAt: "2026-09-23T00:00:00.000Z",
+    }));
+    render(<KnowledgeList initial={sources} />);
+    expect(screen.getByText("资料 1.txt")).toBeInTheDocument();
+    expect(screen.queryByText("资料 21.txt")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(screen.getByText("资料 21.txt")).toBeInTheDocument();
+    expect(screen.getByText("第 2 / 2 页")).toBeInTheDocument();
+  });
 });

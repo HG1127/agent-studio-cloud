@@ -1,6 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { KnowledgeUploadResult, type KnowledgeSourceView } from "@/contracts/knowledge";
 import { setKnowledgeSourceArchivedAction } from "@/server/actions/archive-knowledge-source";
 
@@ -10,6 +10,7 @@ const STATUS_LABELS: Record<KnowledgeSourceView["status"], string> = {
   failed: "解析失败",
   archived: "已归档",
 };
+const PAGE_SIZE = 20;
 
 export function UploadSourceForm() {
   const router = useRouter();
@@ -72,7 +73,17 @@ export function KnowledgeList({ initial, archived = false }: { initial: Knowledg
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
   const hasParsing = initial.some((source) => source.status === "parsing");
+  const filtered = useMemo(() => {
+    const normalized = query.trim().toLocaleLowerCase("zh-CN");
+    if (!normalized) return initial;
+    return initial.filter((source) => source.name.toLocaleLowerCase("zh-CN").includes(normalized));
+  }, [initial, query]);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const visible = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   useEffect(() => {
     if (!hasParsing) return;
     const timer = setInterval(() => startTransition(() => router.refresh()), 2000);
@@ -84,8 +95,25 @@ export function KnowledgeList({ initial, archived = false }: { initial: Knowledg
   }
   return (
     <>
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <label className="flex min-w-64 flex-1 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+          <span className="shrink-0 text-gray-500">查找资料</span>
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setPage(1);
+            }}
+            placeholder="输入文件名"
+            className="min-w-0 flex-1 outline-none"
+          />
+        </label>
+        <span className="text-sm text-gray-500">共 {filtered.length} 份</span>
+      </div>
+      {visible.length === 0 ? <p className="py-4 text-sm text-gray-600">没有找到匹配的资料</p> : null}
       <ul className="space-y-2">
-        {initial.map((source) => (
+        {visible.map((source) => (
           <li key={source.id} className="flex items-center justify-between rounded-lg border bg-white p-3">
             <div>
               <p className="text-sm font-medium text-gray-900">{source.name}</p>
@@ -120,6 +148,11 @@ export function KnowledgeList({ initial, archived = false }: { initial: Knowledg
           </li>
         ))}
       </ul>
+      {pageCount > 1 ? <nav aria-label="资料列表分页" className="mt-4 flex items-center justify-end gap-3 text-sm">
+        <button type="button" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)} className="rounded border px-3 py-1.5 disabled:opacity-40">上一页</button>
+        <span>第 {currentPage} / {pageCount} 页</span>
+        <button type="button" disabled={currentPage === pageCount} onClick={() => setPage(currentPage + 1)} className="rounded border px-3 py-1.5 disabled:opacity-40">下一页</button>
+      </nav> : null}
       {error ? <p role="alert" className="mt-2 text-sm text-red-600">{error}</p> : null}
     </>
   );

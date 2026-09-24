@@ -40,4 +40,22 @@ describe("助手列表", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("停用失败，请检查网络后重试");
     expect(screen.getByRole("button", { name: "停用" })).toBeEnabled();
   });
+
+  it("可以按名称或说明查找助手", async () => {
+    render(<AgentList agents={[agent, { ...agent, id: "00000000-0000-4000-8000-0000000000a2", name: "报价助手", description: "生成商品报价" }]} />);
+    await userEvent.type(screen.getByRole("searchbox"), "风险");
+    expect(screen.getByText("合同审核助手")).toBeInTheDocument();
+    expect(screen.queryByText("报价助手")).not.toBeInTheDocument();
+    expect(screen.getByText("共 1 个")).toBeInTheDocument();
+  });
+
+  it("超过一页时可以翻页", async () => {
+    const agents = Array.from({ length: 21 }, (_, index) => ({ ...agent, id: `agent-${index}`, name: `助手 ${index + 1}` }));
+    render(<AgentList agents={agents} />);
+    expect(screen.getByText("助手 1")).toBeInTheDocument();
+    expect(screen.queryByText("助手 21")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(screen.getByText("助手 21")).toBeInTheDocument();
+    expect(screen.getByText("第 2 / 2 页")).toBeInTheDocument();
+  });
 });
