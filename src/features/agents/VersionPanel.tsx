@@ -30,11 +30,13 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [failure, setFailure] = useState<{ error: string; issues: string[] } | null>(null);
   const [demoNotice, setDemoNotice] = useState<string[] | null>(null);
+  const [releaseNotice, setReleaseNotice] = useState<string | null>(null);
 
   async function handlePublish() {
     setPending(true);
     setFailure(null);
     setDemoNotice(null);
+    setReleaseNotice(null);
     const selection = modelOptions.find((option) => option.value === modelSelection)?.selection;
     if (modelSelection && !selection) {
       setFailure({ error: "所选模型已不可用，请重新选择后再发布", issues: [] });
@@ -46,6 +48,9 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
       if (result.ok) {
         const exempted = result.exempted ?? [];
         if (exempted.length > 0) setDemoNotice(exempted.map((issue) => issue.title));
+        if (result.release === "candidate") {
+          setReleaseNotice("待验收版本已创建。请在下方运行全部验收样例，通过后会自动上线。");
+        }
         router.refresh();
       } else {
         setFailure({ error: result.error, issues: result.issues });
@@ -61,6 +66,7 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
     setRestoringId(versionId);
     setFailure(null);
     setDemoNotice(null);
+    setReleaseNotice(null);
     try {
       const result = await restoreVersionAction(agentId, versionId);
       if (result.ok) router.refresh();
@@ -107,6 +113,9 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
           ) : null}
         </div>
       ) : null}
+      {releaseNotice ? (
+        <p role="status" className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700">{releaseNotice}</p>
+      ) : null}
       {demoNotice ? (
         <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
           <p>已发布。演示期提醒：还有 {demoNotice.length} 个设计检查问题待处理</p>
@@ -129,10 +138,16 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
                     : "rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500"
                 }
               >
-                {version.status === "production" ? "当前版本" : "历史版本"}
+                {version.status === "production"
+                  ? "当前版本"
+                  : version.status === "candidate"
+                    ? "待验收"
+                    : version.status === "superseded"
+                      ? "未上线"
+                      : "历史版本"}
               </span>
               <span className="text-gray-500">{formatTime(version.createdAt)}</span>
-              {version.status !== "production" ? (
+              {version.status === "retired" ? (
                 <button
                   type="button"
                   disabled={pending || restoringId !== null}

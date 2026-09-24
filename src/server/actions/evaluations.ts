@@ -1,6 +1,6 @@
 "use server";
 
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { EvaluationCaseCreateInput, type EvaluationActionResult } from "@/contracts/evaluation";
@@ -59,12 +59,12 @@ export async function startEvaluationAction(agentId: string): Promise<Evaluation
     .where(and(
       eq(agentVersions.agentId, agentId),
       eq(agentVersions.workspaceId, DEMO_WORKSPACE_ID),
-      eq(agentVersions.status, "production"),
+      inArray(agentVersions.status, ["candidate", "production"]),
       isNull(agents.archivedAt),
     ))
     .orderBy(desc(agentVersions.version))
     .limit(1);
-  if (!version) return { ok: false, error: "请先发布一个可运行版本" };
+  if (!version) return { ok: false, error: "请先发布一个待验收版本" };
   const cases = await db
     .select({ id: evaluationCases.id, input: evaluationCases.input })
     .from(evaluationCases)

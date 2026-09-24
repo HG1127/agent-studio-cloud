@@ -1,8 +1,9 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { z } from "zod";
-import { evaluationCaseResults, evaluationCases, evaluationRuns, runs } from "@/db/schema";
+import { agentVersions, evaluationCaseResults, evaluationCases, evaluationRuns, runs } from "@/db/schema";
 import { db } from "@/lib/db";
 import { evaluateExpectations } from "@/server/domain/evaluation";
+import { shouldPromoteEvaluation } from "@/server/domain/release-gate";
 
 const EvaluationSourceKey = z.string().regex(/^evaluation:[0-9a-f-]{36}:[0-9a-f-]{36}$/i);
 
@@ -14,16 +15,39 @@ async function refreshEvaluationSummary(evaluationRunId: string): Promise<void> 
   const passedCount = rows.filter((row) => row.status === "passed").length;
   const failedCount = rows.filter((row) => row.status === "failed").length;
   const complete = rows.length > 0 && passedCount + failedCount === rows.length;
-  await db
-    .update(evaluationRuns)
-    .set({
-      passedCount,
-      failedCount,
-      status: complete ? "completed" : "running",
-      finishedAt: complete ? new Date() : null,
-      updatedAt: new Date(),
-    })
-    .where(eq(evaluationRuns.id, evaluationRunId));
+  await db.transaction(async (tx) => {
+    await tx
+      .update(evaluationRuns)
+      .set({
+        passedCount,
+        failedCount,
+        status: complete ? "completed" : "running",
+        finishedAt: complete ? new Date() : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(evaluationRuns.id, evaluationRunId));
+    if (!complete || !shouldPromoteEvaluation({ totalCount: rows.length, passedCount, failedCount })) return;
+    const [evaluation] = await tx
+      .select({ agentId: evaluationRuns.agentId, versionId: evaluationRuns.versionId })
+      .from(evaluationRuns)
+      .where(eq(evaluationRuns.id, evaluationRunId))
+      .limit(1);
+    if (!evaluation) return;
+    const promoted = await tx
+      .update(agentVersions)
+      .set({ status: "production", updatedAt: new Date() })
+      .where(and(eq(agentVersions.id, evaluation.versionId), eq(agentVersions.status, "candidate")))
+      .returning({ id: agentVersions.id });
+    if (promoted.length === 0) return;
+    await tx
+      .update(agentVersions)
+      .set({ status: "retired", updatedAt: new Date() })
+      .where(and(
+        eq(agentVersions.agentId, evaluation.agentId),
+        eq(agentVersions.status, "production"),
+        ne(agentVersions.id, evaluation.versionId),
+      ));
+  });
 }
 
 export async function completeEvaluationForRun(

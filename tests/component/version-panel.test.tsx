@@ -66,6 +66,16 @@ describe("VersionPanel", () => {
     expect(refreshMock).toHaveBeenCalledTimes(1);
   });
 
+  it("待验收与未上线版本不能绕过门禁恢复", () => {
+    renderPanel([
+      { ...VERSIONS[0], status: "candidate" },
+      { ...VERSIONS[1], status: "superseded" },
+    ]);
+    expect(screen.getByText("待验收")).toBeInTheDocument();
+    expect(screen.getByText("未上线")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "恢复为当前版本" })).not.toBeInTheDocument();
+  });
+
   it("历史版本恢复失败时保留错误提示", async () => {
     restoreMock.mockResolvedValue({ ok: false, error: "历史版本格式过旧，无法直接恢复" });
     const user = userEvent.setup();
@@ -185,5 +195,13 @@ describe("VersionPanel", () => {
       expect(refreshMock).toHaveBeenCalledTimes(1);
     });
     expect(screen.queryByText(/演示期提醒/)).not.toBeInTheDocument();
+  });
+
+  it("有验收样例时提示先验收再自动上线", async () => {
+    actionMock.mockResolvedValue({ ok: true, release: "candidate", exempted: [] });
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(screen.getByRole("button", { name: "发布新版本" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("待验收版本已创建");
   });
 });

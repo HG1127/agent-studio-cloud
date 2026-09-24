@@ -88,7 +88,7 @@ export function EvaluationPanel({ agentId, cases, runs }: {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold">自动验收</h2>
-          <p className="mt-1 text-xs text-gray-500">用保存的业务样例批量验证当前发布版本。</p>
+          <p className="mt-1 text-xs text-gray-500">优先验证待验收版本；全部通过后自动上线。没有待验收版本时验证当前版本。</p>
         </div>
         <button type="button" disabled={pending || cases.length === 0} onClick={startEvaluation}
           className="rounded-md bg-violet-700 px-3 py-2 text-sm text-white hover:bg-violet-600 disabled:bg-gray-300">

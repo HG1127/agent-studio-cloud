@@ -6,12 +6,13 @@ import { z } from "zod";
 import type { PublishVersionResult } from "@/contracts/version";
 import { PublishModelSelection } from "@/contracts/connections";
 import { WorkflowDraft } from "@/contracts/workflow";
-import { agentVersions, agents, knowledgeSources, modelConnections, workflowDefinitions } from "@/db/schema";
+import { agentVersions, agents, evaluationCases, knowledgeSources, modelConnections, workflowDefinitions } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { realModelsEnabled, resolvePublishModel } from "@/lib/model";
 import { db } from "@/lib/db";
 import { auditWorkflow } from "@/server/domain/audit";
 import { buildManifest, filterPublishBlockers } from "@/server/domain/pipeline";
+import { releaseStatusForCaseCount } from "@/server/domain/release-gate";
 import { isUniqueViolation } from "@/server/unique-violation";
 
 export async function publishVersionAction(agentId: string, modelSelection?: PublishModelSelection): Promise<PublishVersionResult> {
@@ -98,14 +99,30 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
       connectionId: manifestModel.connectionId,
       knowledgeSnapshot: snapshotRows.map((row) => row.id),
     });
+    const [evaluationCaseSummary] = await db
+      .select({ count: sql<number>`count(*)`.mapWith(Number) })
+      .from(evaluationCases)
+      .where(and(
+        eq(evaluationCases.agentId, agentId),
+        eq(evaluationCases.workspaceId, agent.workspaceId),
+        isNull(evaluationCases.archivedAt),
+      ));
+    const release = releaseStatusForCaseCount(evaluationCaseSummary?.count ?? 0);
     // 并发发布会撞 (agent_id, version) 唯一索引：整个事务重读 maxVersion 后重试一次
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         await db.transaction(async (tx) => {
+          const now = new Date();
           await tx
             .update(agentVersions)
-            .set({ status: "retired", updatedAt: new Date() })
-            .where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.status, "production")));
+            .set({ status: "superseded", updatedAt: now })
+            .where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.status, "candidate")));
+          if (release === "production") {
+            await tx
+              .update(agentVersions)
+              .set({ status: "retired", updatedAt: now })
+              .where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.status, "production")));
+          }
           const [row] = await tx
             .select({ maxVersion: sql<number>`coalesce(max(${agentVersions.version}), 0)`.mapWith(Number) })
             .from(agentVersions)
@@ -115,12 +132,12 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
             workspaceId: agent.workspaceId,
             createdBy: DEMO_USER_ID,
             version: (row?.maxVersion ?? 0) + 1,
-            status: "production",
+            status: release,
             manifest,
           });
         });
         revalidatePath(`/agents/${agentId}`);
-        return { ok: true, exempted: exempted.map((issue) => ({ title: issue.title })) };
+        return { ok: true, release, exempted: exempted.map((issue) => ({ title: issue.title })) };
       } catch (error) {
         if (!isUniqueViolation(error)) throw error;
         if (attempt > 0) {
