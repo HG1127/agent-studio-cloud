@@ -11,6 +11,7 @@ import { validateAgentCallNode } from "@/server/domain/runtime/agent-call-runtim
 import { validateHandoffNode } from "@/server/domain/runtime/handoff-runtime";
 import { validateRunInput } from "@/server/domain/runtime/run-input";
 import { validateWaitContracts } from "@/server/domain/runtime/wait-contract";
+import { validateWorkflowRoutes } from "@/server/domain/runtime/workflow-routes";
 import { completeEvaluationForRun } from "@/server/services/evaluation-state";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
 
@@ -118,6 +119,8 @@ export async function startRunCore(args: {
     if (inputError) return { ok: false, error: inputError };
     const waitError = validateWaitContracts(manifest.workflowSnapshot.nodes);
     if (waitError) return { ok: false, error: waitError };
+    const routeError = validateWorkflowRoutes(manifest.workflowSnapshot);
+    if (routeError) return { ok: false, error: routeError };
     // 启动前置校验：不支持的节点类型 / 未绑定工具 / 未绑定知识来源 → 列出步骤名，不创建 run
     const unsupported: string[] = [];
     for (const node of Object.values(manifest.workflowSnapshot.nodes)) {

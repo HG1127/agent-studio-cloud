@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { WorkflowDraft, type WorkflowDraft as WorkflowDraftType } from "@/contracts/workflow";
+import { WorkflowDraft } from "@/contracts/workflow";
 
 const mocks = vi.hoisted(() => ({
   selectRows: [] as unknown[][],
@@ -40,16 +40,19 @@ import { saveWorkflowAction } from "@/server/actions/save-workflow";
 import { updateAgentAction } from "@/server/actions/update-agent";
 
 const AGENT_ID = "00000000-0000-4000-8000-000000000071";
-const draft: WorkflowDraftType = {
+const draft = WorkflowDraft.parse({
   id: "draft-1",
   versionId: null,
   startNodeId: "start",
   rootAgent: { id: AGENT_ID, name: "页面里的旧名称", role: "主助手" },
-  nodes: {},
+  nodes: {
+    start: { id: "start", title: "开始", type: "trigger", next: "done" },
+    done: { id: "done", title: "完成", type: "end", next: null },
+  },
   variables: [],
   memoryPolicy: { taskContext: true, longTerm: false },
   ui: { positions: {} },
-};
+});
 
 beforeEach(() => {
   mocks.selectRows = [];

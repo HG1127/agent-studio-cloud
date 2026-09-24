@@ -10,6 +10,7 @@ import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { validateOutputContract } from "@/server/domain/runtime/output-contract";
 import { validateWaitContracts } from "@/server/domain/runtime/wait-contract";
+import { validateWorkflowRoutes } from "@/server/domain/runtime/workflow-routes";
 
 export async function saveWorkflowAction(agentId: string, draft: WorkflowDraft): Promise<SaveWorkflowResult> {
   if (!z.string().uuid().safeParse(agentId).success) {
@@ -23,6 +24,8 @@ export async function saveWorkflowAction(agentId: string, draft: WorkflowDraft):
   if (outputError) return { ok: false, error: outputError };
   const waitError = validateWaitContracts(parsed.data.nodes);
   if (waitError) return { ok: false, error: waitError };
+  const routeError = validateWorkflowRoutes(parsed.data);
+  if (routeError) return { ok: false, error: routeError };
   try {
     const result = await db.transaction(async (tx) => {
       // 与基本信息更新按同一助手行串行化，并拒绝旧页面给已归档助手写回草稿。

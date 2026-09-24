@@ -4,7 +4,7 @@ import { start } from "workflow/api";
 import { WorkflowRunFailedError } from "workflow/errors";
 import { AgentManifest } from "@/contracts/manifest";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
-import { runs } from "@/db/schema";
+import { runs, traceEvents } from "@/db/schema";
 import { db } from "@/lib/db";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 
@@ -34,6 +34,43 @@ const badManifest = {
   },
 } as unknown as AgentManifest;
 
+const fallbackManifest = AgentManifest.parse({
+  schemaVersion: "4.0",
+  workflowFingerprint: "f".repeat(64),
+  inputContract: { fields: [] },
+  resourceSelection: { model: { modelId: "mock", mock: true } },
+  designAudit: { status: "passed", issueCount: 0, criticalCount: 0 },
+  workflowSnapshot: {
+    id: "draft-failure-fallback",
+    startNodeId: "start",
+    rootAgent: { id: "agt_failure_test", name: "失败分支测试助手", role: "通用业务助手" },
+    memoryPolicy: { taskContext: true, longTerm: false },
+    nodes: {
+      start: { id: "start", title: "收到任务", type: "trigger", next: "broken_tool" },
+      broken_tool: {
+        id: "broken_tool",
+        title: "调用不可用系统",
+        type: "tool",
+        next: "done",
+        onErrorNext: "fallback",
+        tool: {
+          connector: "external",
+          action: "send",
+          scope: "当前工作区",
+          risk: "low",
+          maxRetries: 1,
+          registryToolId: "external-send",
+          protocol: "external",
+          inputSchema: { type: "object" },
+          outputSchema: { type: "object" },
+        },
+      },
+      fallback: { id: "fallback", title: "转人工记录", type: "system", next: "done", system: { kind: "record" } },
+      done: { id: "done", title: "流程结束", type: "end", next: null },
+    },
+  },
+});
+
 async function insertRun(): Promise<string> {
   const [row] = await db
     .insert(runs)
@@ -43,6 +80,20 @@ async function insertRun(): Promise<string> {
 }
 
 describe("运行失败兜底", () => {
+  it("业务操作失败时按未完成路径继续并保留失败原因", async () => {
+    const runId = await insertRun();
+    const handle = await start(agentRunWorkflow, [runId, fallbackManifest, {}]);
+
+    await expect(handle.returnValue).resolves.toEqual({ status: "completed" });
+    const [runAfter] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(runAfter).toMatchObject({
+      status: "completed",
+      result: { broken_tool: { status: "failed", error: expect.stringContaining("暂不支持") } },
+    });
+    const handled = await db.select().from(traceEvents).where(eq(traceEvents.runId, runId));
+    expect(handled.some((event) => event.kind === "step.failed_handled" && event.nodeId === "broken_tool")).toBe(true);
+  }, 240_000);
+
   it("步骤抛错时 runs 写入失败终态与中文原因，SDK 侧 run 同步失败", async () => {
     const runId = await insertRun();
     const handle = await start(agentRunWorkflow, [runId, badManifest, {}]);

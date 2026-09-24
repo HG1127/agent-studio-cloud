@@ -16,6 +16,7 @@ import { releaseStatusForCaseCount } from "@/server/domain/release-gate";
 import { isUniqueViolation } from "@/server/unique-violation";
 import { validateOutputContract } from "@/server/domain/runtime/output-contract";
 import { validateWaitContracts } from "@/server/domain/runtime/wait-contract";
+import { validateWorkflowRoutes } from "@/server/domain/runtime/workflow-routes";
 
 export async function publishVersionAction(agentId: string, modelSelection?: PublishModelSelection): Promise<PublishVersionResult> {
   if (!z.string().uuid().safeParse(agentId).success) {
@@ -50,6 +51,8 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
     }
     const waitError = validateWaitContracts(parsed.data.nodes);
     if (waitError) return { ok: false, error: waitError, issues: [] };
+    const routeError = validateWorkflowRoutes(parsed.data);
+    if (routeError) return { ok: false, error: routeError, issues: [] };
     const audit = auditWorkflow(parsed.data);
     // M1 演示发布策略：critical 门禁交给 filterPublishBlockers 裁决，豁免项随成功返回值透出给面板提醒
     const { blocking, exempted } = filterPublishBlockers(audit.issues, parsed.data);
