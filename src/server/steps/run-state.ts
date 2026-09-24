@@ -11,7 +11,7 @@ import { completeEvaluationForRun } from "@/server/services/evaluation-state";
 
 async function requireRun(runId: string) {
   const [run] = await db
-    .select({ id: runs.id, workspaceId: runs.workspaceId })
+    .select({ id: runs.id, workspaceId: runs.workspaceId, status: runs.status })
     .from(runs)
     .where(eq(runs.id, runId))
     .limit(1);
@@ -21,9 +21,17 @@ async function requireRun(runId: string) {
 
 export async function initializeRun(runId: string, draft: WorkflowDraft): Promise<void> {
   "use step";
-  await requireRun(runId);
+  const run = await requireRun(runId);
   const now = new Date();
-  await db.update(runs).set({ status: "running", startedAt: now, updatedAt: now }).where(eq(runs.id, runId));
+  const updated = await db
+    .update(runs)
+    .set({ status: "running", startedAt: now, updatedAt: now })
+    .where(and(eq(runs.id, runId), eq(runs.status, "queued")))
+    .returning({ id: runs.id });
+  if (updated.length === 0) {
+    if (run.status === "running") return;
+    throw new FatalError("运行已经结束，不能重新启动");
+  }
   await appendTrace({
     runId,
     nodeId: draft.startNodeId,

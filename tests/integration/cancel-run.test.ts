@@ -12,14 +12,21 @@ vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 vi.mock("@/server/steps/trace-step", () => ({ appendTrace: appendTraceMock }));
 
 import { approvals, runs } from "@/db/schema";
+import { WorkflowDraft } from "@/contracts/workflow";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { cancelRunAction } from "@/server/actions/cancel-run";
-import { failRun } from "@/server/steps/run-state";
+import { failRun, initializeRun } from "@/server/steps/run-state";
 
 const RUN_ID = "00000000-0000-4000-8000-0000000000c1";
 const CHILD_RUN_ID = "00000000-0000-4000-8000-0000000000c4";
 const GRANDCHILD_RUN_ID = "00000000-0000-4000-8000-0000000000c5";
+const draft = WorkflowDraft.parse({
+  id: "initialization-guard", versionId: null, startNodeId: "start",
+  rootAgent: { id: "agent", name: "状态机测试", role: "owner" },
+  nodes: { start: { id: "start", title: "开始", type: "trigger", next: null } },
+  variables: [], memoryPolicy: { taskContext: true, longTerm: false }, ui: { positions: {} },
+});
 
 async function cleanup() {
   await db.delete(approvals).where(inArray(approvals.runId, [RUN_ID, CHILD_RUN_ID, GRANDCHILD_RUN_ID]));
@@ -145,5 +152,16 @@ describe("取消运行", () => {
       decidedAt: expect.any(Date),
     });
     expect(approvalRows.find((row) => row.nodeId === "approval_completed")?.status).toBe("approved");
+  });
+
+  it("初始化步骤不能把已经失败的运行重新变成运行中", async () => {
+    await insertWaitingRun();
+    await db.update(runs).set({ status: "failed", error: "启动句柄回写失败" }).where(eq(runs.id, RUN_ID));
+
+    await expect(initializeRun(RUN_ID, draft)).rejects.toThrow("运行已经结束，不能重新启动");
+
+    const [run] = await db.select().from(runs).where(eq(runs.id, RUN_ID));
+    expect(run).toMatchObject({ status: "failed", error: "启动句柄回写失败" });
+    expect(appendTraceMock).not.toHaveBeenCalled();
   });
 });
