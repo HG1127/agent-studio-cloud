@@ -157,6 +157,7 @@ export async function agentRunWorkflow(
     iterations: Array<{ iteration: number; item: unknown; bodyOutput: unknown }>;
   }> = {};
   const activeLoops: Array<{ loopId: string; iteration: number; total: number; item: unknown }> = [];
+  const qualityRepairAttempts: Record<string, number> = {};
   const executionLimit = workflowExecutionLimit(draft.nodes);
   let guard = 0;
   try {
@@ -262,7 +263,24 @@ export async function agentRunWorkflow(
         continue;
       }
       if (node.type === "rule") {
-        currentId = await runQualityGate({ runId, node, outputs, nodes: draft.nodes });
+        const quality = await runQualityGate({ runId, node, outputs, nodes: draft.nodes, repairAttempts: qualityRepairAttempts });
+        if (quality.repair) {
+          const repairNode = draft.nodes[quality.repair.nodeId];
+          if (!repairNode || repairNode.type !== "ai") throw new FatalError("质量返工目标不存在或不支持自动重写");
+          qualityRepairAttempts[repairNode.id] = quality.repair.nextRepairAttempt;
+          const repaired = await runModelStep({
+            runId,
+            node: repairNode,
+            manifest,
+            outputs,
+            input,
+            qualityFeedback: quality.repair.feedback,
+          });
+          outputs[repairNode.id] = repaired.output;
+          currentId = node.id;
+          continue;
+        }
+        currentId = quality.next;
         continue;
       }
       if (node.type === "system") {

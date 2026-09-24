@@ -22,6 +22,7 @@ export interface RunModelStepInput {
   manifest: AgentManifest;
   outputs: Record<string, unknown>;
   input: Record<string, unknown>;
+  qualityFeedback?: string | null;
 }
 
 export async function runModelStep(args: RunModelStepInput): Promise<{ output: string }> {
@@ -41,7 +42,7 @@ export async function runModelStep(args: RunModelStepInput): Promise<{ output: s
     nodeType: node.type,
     status: "running",
   });
-  const prompt = buildStepPrompt({ node, upstreamOutputs: args.outputs, input: args.input });
+  const prompt = buildStepPrompt({ node, upstreamOutputs: args.outputs, input: args.input, qualityFeedback: args.qualityFeedback });
   const manifestModel = args.manifest.resourceSelection.model;
   if (manifestModel.mock) {
     const goal = node.description || node.title;

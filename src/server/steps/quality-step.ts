@@ -1,7 +1,6 @@
 "use step";
 // 质量门禁步骤：verify_*（rule.kind=tool_result）核对来源工具回执；
 // quality_review 按 quality 配置核对产出完整性 / 工具回执 / 人工确认（查 approvals 表）。
-// M1 简化：任一检查不通过 → failRun + FatalError（重写返工记 M2 债务）。
 import { and, eq, inArray } from "drizzle-orm";
 import { FatalError } from "workflow";
 import type { WorkflowNode } from "@/contracts/workflow";
@@ -9,6 +8,7 @@ import { db } from "@/lib/db";
 import { approvals } from "@/db/schema";
 import { failRun, persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
+import { selectQualityRepair, type QualityRepairPlan } from "@/server/domain/runtime/quality-repair";
 
 function hasContent(value: unknown): boolean {
   if (value === undefined || value === null) return false;
@@ -28,9 +28,15 @@ export interface RunQualityGateInput {
   node: WorkflowNode;
   outputs: Record<string, unknown>;
   nodes: Record<string, WorkflowNode>;
+  repairAttempts: Record<string, number>;
 }
 
-export async function runQualityGate(args: RunQualityGateInput): Promise<string | null> {
+export interface QualityGateResult {
+  next: string | null;
+  repair: (QualityRepairPlan & { feedback: string }) | null;
+}
+
+export async function runQualityGate(args: RunQualityGateInput): Promise<QualityGateResult> {
   "use step";
   const { node } = args;
   const reject = async (reason: string): Promise<never> => {
@@ -97,14 +103,30 @@ export async function runQualityGate(args: RunQualityGateInput): Promise<string 
         kind: "quality.passed",
         title: `「${node.title}」检查通过（未获确认，保留当前结果并停止高影响动作）`,
       });
-      return node.next;
+      return { next: node.next, repair: null };
     }
     const missingOutputs = quality.requiredOutputTitles.filter((title) => {
       const sourceNode = Object.values(args.nodes).find((item) => item.title === title);
       return !sourceNode || !hasContent(args.outputs[sourceNode.id]);
     });
     if (missingOutputs.length > 0) {
-      return reject(`交付前检查未通过：以下步骤还没有形成结果：${missingOutputs.join("、")}`);
+      const reason = `交付前检查未通过：以下步骤还没有形成结果：${missingOutputs.join("、")}`;
+      const missingNodes = missingOutputs.flatMap((title) => {
+        const source = Object.values(args.nodes).find((item) => item.title === title);
+        return source ? [source] : [];
+      });
+      const repair = selectQualityRepair(missingNodes, args.repairAttempts);
+      if (!repair) return reject(reason);
+      await appendTrace({
+        runId: args.runId,
+        nodeId: node.id,
+        kind: "quality.rework_requested",
+        level: "warn",
+        title: `「${node.title}」要求自动返工`,
+        detail: `${reason}；正在进行第 ${repair.nextRepairAttempt} 次返工`,
+        data: { repairNodeId: repair.nodeId, repairAttempt: repair.nextRepairAttempt, maxAttempts: repair.maxAttempts },
+      });
+      return { next: node.id, repair: { ...repair, feedback: reason } };
     }
     if (quality.checkToolReceipts) {
       const missingReceipts = Object.values(args.nodes)
@@ -140,5 +162,5 @@ export async function runQualityGate(args: RunQualityGateInput): Promise<string 
     kind: "quality.passed",
     title: `「${node.title}」检查通过`,
   });
-  return node.next;
+  return { next: node.next, repair: null };
 }
