@@ -228,6 +228,32 @@ describe("取消运行", () => {
     }));
   });
 
+  it("限制同一次运行累计保存的步骤结果并在重试开始时清除旧结果", async () => {
+    await insertWaitingRun();
+    const output = { answer: "x".repeat(900 * 1024) };
+    for (let index = 0; index < 4; index += 1) {
+      await persistStep({
+        runId: RUN_ID, nodeId: `large_${index}`, nodeTitle: `大结果 ${index}`, nodeType: "ai",
+        status: "succeeded", output,
+      });
+    }
+
+    await expect(persistStep({
+      runId: RUN_ID, nodeId: "large_4", nodeTitle: "超出合计", nodeType: "ai",
+      status: "succeeded", output,
+    })).rejects.toThrow("步骤结果合计不能超过 4MB");
+    const [rejected] = await db.select().from(runSteps).where(and(
+      eq(runSteps.runId, RUN_ID), eq(runSteps.nodeId, "large_4"),
+    ));
+    expect(rejected).toMatchObject({ status: "failed", output: null, error: "这次运行的步骤结果合计不能超过 4MB" });
+
+    await persistStep({ runId: RUN_ID, nodeId: "large_0", nodeTitle: "大结果 0", nodeType: "ai", status: "running" });
+    const [retried] = await db.select().from(runSteps).where(and(
+      eq(runSteps.runId, RUN_ID), eq(runSteps.nodeId, "large_0"),
+    ));
+    expect(retried).toMatchObject({ status: "running", output: null, error: null, finishedAt: null, attempt: 2 });
+  });
+
   it("运行取消后迟到的确认结果不能覆盖已关闭状态", async () => {
     await insertWaitingRun();
     const [approval] = await db.select().from(approvals).where(and(

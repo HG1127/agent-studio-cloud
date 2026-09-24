@@ -1,4 +1,5 @@
 export const MAX_STEP_OUTPUT_BYTES = 1024 * 1024;
+export const MAX_RUN_STEP_OUTPUT_TOTAL_BYTES = 4 * 1024 * 1024;
 export const MAX_RUN_RESULT_BYTES = 2 * 1024 * 1024;
 export const MAX_RUN_CONTEXT_BYTES = 4 * 1024 * 1024;
 

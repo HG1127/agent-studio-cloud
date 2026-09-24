@@ -1,7 +1,7 @@
 "use step";
 // 运行状态机步骤：initializeRun / persistStep / persistContext / finalizeRun / failRun。
 // 全部落在 runs / run_steps 两张表，状态机为 queued→running→completed|failed，中间可暂停等待确认或外部消息。
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { FatalError } from "workflow";
 import type { WorkflowDraft } from "@/contracts/workflow";
 import { db } from "@/lib/db";
@@ -12,6 +12,7 @@ import {
   jsonStorageIssue,
   MAX_RUN_CONTEXT_BYTES,
   MAX_RUN_RESULT_BYTES,
+  MAX_RUN_STEP_OUTPUT_TOTAL_BYTES,
   MAX_STEP_OUTPUT_BYTES,
 } from "@/server/domain/runtime/json-storage";
 
@@ -62,15 +63,14 @@ export interface PersistStepInput {
 // upsert run_steps（run_id+node_id 唯一）+ runs.stepStates + trace step.*；running 计一次尝试
 export async function persistStep(step: PersistStepInput): Promise<void> {
   "use step";
-  if (step.output !== undefined && step.output !== null) {
-    const issue = jsonStorageIssue(step.output, MAX_STEP_OUTPUT_BYTES, `步骤「${step.nodeTitle ?? step.nodeId}」的输出`);
-    if (issue) {
-      await persistStep({ ...step, status: "failed", output: null, error: issue });
-      throw new FatalError(issue);
-    }
-  }
+  let rejectedOutput = step.output !== undefined && step.output !== null
+    ? jsonStorageIssue(step.output, MAX_STEP_OUTPUT_BYTES, `步骤「${step.nodeTitle ?? step.nodeId}」的输出`)
+    : null;
+  let storedStep: PersistStepInput = rejectedOutput
+    ? { ...step, status: "failed", output: null, error: rejectedOutput }
+    : step;
   const now = new Date();
-  const starting = step.status === "running";
+  let starting = storedStep.status === "running";
   const title = step.nodeTitle ?? step.nodeId;
   await db.transaction(async (tx) => {
     // 锁住运行状态直到步骤与摘要一起落库，取消操作要么在前、要么在后，不能插进检查与写入之间。
@@ -84,17 +84,29 @@ export async function persistStep(step: PersistStepInput): Promise<void> {
     if (!["queued", "running", "waiting_approval", "waiting_event"].includes(run.status)) {
       throw new FatalError("运行已经结束，忽略迟到的步骤结果");
     }
+    if (!rejectedOutput && storedStep.output !== undefined && storedStep.output !== null) {
+      const [aggregate] = await tx
+        .select({ bytes: sql<number>`coalesce(sum(octet_length(${runSteps.output}::text)), 0)`.mapWith(Number) })
+        .from(runSteps)
+        .where(and(eq(runSteps.runId, storedStep.runId), ne(runSteps.nodeId, storedStep.nodeId)));
+      const nextBytes = new TextEncoder().encode(JSON.stringify(storedStep.output)).byteLength;
+      if ((aggregate?.bytes ?? 0) + nextBytes > MAX_RUN_STEP_OUTPUT_TOTAL_BYTES) {
+        rejectedOutput = "这次运行的步骤结果合计不能超过 4MB";
+        storedStep = { ...storedStep, status: "failed", output: null, error: rejectedOutput };
+        starting = false;
+      }
+    }
     await tx
       .insert(runSteps)
       .values({
-        runId: step.runId,
+        runId: storedStep.runId,
         workspaceId: run.workspaceId,
-        nodeId: step.nodeId,
-        nodeTitle: step.nodeTitle ?? null,
-        nodeType: step.nodeType,
-        status: step.status,
-        output: step.output ?? null,
-        error: step.error ?? null,
+        nodeId: storedStep.nodeId,
+        nodeTitle: storedStep.nodeTitle ?? null,
+        nodeType: storedStep.nodeType,
+        status: storedStep.status,
+        output: storedStep.output ?? null,
+        error: storedStep.error ?? null,
         startedAt: starting ? now : null,
         finishedAt: starting ? null : now,
         attempt: 1,
@@ -102,29 +114,30 @@ export async function persistStep(step: PersistStepInput): Promise<void> {
       .onConflictDoUpdate({
         target: [runSteps.runId, runSteps.nodeId],
         set: starting
-          ? { status: "running", startedAt: now, attempt: sql`coalesce(${runSteps.attempt}, 0) + 1`, updatedAt: now }
-          : { status: step.status, output: step.output ?? null, error: step.error ?? null, finishedAt: now, updatedAt: now },
+          ? { status: "running", output: null, error: null, startedAt: now, finishedAt: null, attempt: sql`coalesce(${runSteps.attempt}, 0) + 1`, updatedAt: now }
+          : { status: storedStep.status, output: storedStep.output ?? null, error: storedStep.error ?? null, finishedAt: now, updatedAt: now },
       });
     const states = {
       ...(run.stepStates ?? {}),
-      [step.nodeId]: { status: step.status, updatedAt: now.toISOString() },
+      [storedStep.nodeId]: { status: storedStep.status, updatedAt: now.toISOString() },
     };
-    await tx.update(runs).set({ stepStates: states, updatedAt: now }).where(eq(runs.id, step.runId));
+    await tx.update(runs).set({ stepStates: states, updatedAt: now }).where(eq(runs.id, storedStep.runId));
   });
   await appendTrace({
-    runId: step.runId,
-    nodeId: step.nodeId,
-    kind: `step.${step.status}`,
-    level: step.status === "failed" ? "error" : "info",
+    runId: storedStep.runId,
+    nodeId: storedStep.nodeId,
+    kind: `step.${storedStep.status}`,
+    level: storedStep.status === "failed" ? "error" : "info",
     title:
-      step.status === "running"
+      storedStep.status === "running"
         ? `开始步骤「${title}」`
-        : step.status === "succeeded"
+        : storedStep.status === "succeeded"
           ? `步骤「${title}」完成`
           : `步骤「${title}」失败`,
-    detail: step.error ?? null,
-    data: step.output ?? null,
+    detail: storedStep.error ?? null,
+    data: storedStep.output ?? null,
   });
+  if (rejectedOutput) throw new FatalError(rejectedOutput);
 }
 
 export async function persistContext(runId: string, outputs: Record<string, unknown>): Promise<void> {
