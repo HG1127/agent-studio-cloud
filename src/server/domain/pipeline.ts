@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import { AgentManifest } from "@/contracts/manifest";
 import { WorkflowDraft } from "@/contracts/workflow";
-import { attachComplexIntentContract, compileIntentWorkflow } from "@/server/domain/intent";
+import { attachComplexIntentContract, compileIntentWorkflow, type IntentStep } from "@/server/domain/intent";
 import { groundBusinessWorkflow } from "@/server/domain/grounding";
 import { auditWorkflow, type AuditIssue, type DesignAuditResult } from "@/server/domain/audit";
 
@@ -30,10 +30,23 @@ export function buildAgentDraft(options: { name: string; intentText: string }): 
   const { name, intentText } = options;
   try {
     const compiled = compileIntentWorkflow({ text: intentText, name, caps: [], humanReasons: [], sourceType: "idea" });
-    // M1 工具裁定：仅演示工具，sandbox 执行；M2 真实连接后移除
-    bindDemoCapabilities(compiled.workflow);
-    const intent = { orderedSteps: compiled.orderedSteps, trigger: undefined, outputs: [] };
-    const grounded = groundBusinessWorkflow(compiled.workflow, {
+    return finalizeAgentDraft({ name, intentText, workflow: compiled.workflow, orderedSteps: compiled.orderedSteps });
+  } catch (error) {
+    return { draft: null, issues: [], diagnostics: { error: error instanceof Error ? error.message : String(error) } };
+  }
+}
+
+export function finalizeAgentDraft(params: {
+  name: string;
+  intentText: string;
+  workflow: WorkflowDraft;
+  orderedSteps: IntentStep[];
+}): AgentPipelineResult {
+  const { intentText, workflow, orderedSteps } = params;
+  try {
+    bindDemoCapabilities(workflow);
+    const intent = { orderedSteps, trigger: undefined, outputs: [] };
+    const grounded = groundBusinessWorkflow(workflow, {
       sourceText: intentText,
       intent,
       answers: {},

@@ -4,6 +4,7 @@ import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { listAgents } from "@/server/queries/agents";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 export default async function AgentsPage() {
   const agents = await listAgents(DEMO_WORKSPACE_ID);
