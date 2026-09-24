@@ -1,3 +1,5 @@
+export const MAX_KNOWLEDGE_FILE_BYTES = 4 * 1024 * 1024;
+export const MAX_KNOWLEDGE_PDF_PAGES = 500;
 export const MAX_KNOWLEDGE_TEXT_CHARS = 2_000_000;
 
 export function validateExtractedKnowledgeText(text: string): string | null {

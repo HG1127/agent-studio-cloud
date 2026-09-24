@@ -5,12 +5,12 @@ import { start } from "workflow/api";
 import { knowledgeSources } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
+import { MAX_KNOWLEDGE_FILE_BYTES } from "@/server/domain/knowledge/text-limits";
 import { knowledgeIngestWorkflow } from "@/server/workflows/knowledge-ingest";
 
 export const dynamic = "force-dynamic";
 
 const ALLOWED_EXT = new Set(["pdf", "docx", "txt", "md", "html", "json", "csv", "xml"]);
-const MAX_BYTES = 4 * 1024 * 1024;
 const MAX_MULTIPART_BYTES = 5 * 1024 * 1024;
 const STALE_PARSING_MS = 5 * 60 * 1000;
 
@@ -92,7 +92,7 @@ export async function POST(req: Request) {
   if (!ALLOWED_EXT.has(ext)) {
     return Response.json({ ok: false, error: "暂不支持这种文件类型，可上传：PDF、DOCX、TXT、MD、HTML、JSON、CSV、XML" }, { status: 400 });
   }
-  if (file.size > MAX_BYTES) {
+  if (file.size > MAX_KNOWLEDGE_FILE_BYTES) {
     return Response.json({ ok: false, error: "文件超过 4MB 限制，请拆分后再上传" }, { status: 400 });
   }
   const bytes = Buffer.from(await file.arrayBuffer());

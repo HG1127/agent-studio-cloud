@@ -6,7 +6,11 @@ import { eq } from "drizzle-orm";
 import { knowledgeChunks, knowledgeSources } from "@/db/schema";
 import { db } from "@/lib/db";
 import { chunkText } from "@/server/domain/knowledge/chunker";
-import { validateExtractedKnowledgeText } from "@/server/domain/knowledge/text-limits";
+import {
+  MAX_KNOWLEDGE_FILE_BYTES,
+  MAX_KNOWLEDGE_PDF_PAGES,
+  validateExtractedKnowledgeText,
+} from "@/server/domain/knowledge/text-limits";
 import { processedKnowledgeStatus } from "@/server/domain/knowledge/source-state";
 
 interface ParseArgs {
@@ -16,16 +20,44 @@ interface ParseArgs {
   content: ReadableStream<Uint8Array>;
 }
 
+export async function readKnowledgeFile(content: ReadableStream<Uint8Array>): Promise<Buffer> {
+  const reader = content.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_KNOWLEDGE_FILE_BYTES) {
+        await reader.cancel("文件超过大小限制").catch(() => undefined);
+        throw new FatalError("文件超过 4MB 限制，请拆分后重新上传");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks, totalBytes);
+}
+
 export async function parseKnowledgeFile(args: ParseArgs): Promise<{ text: string }> {
   "use step";
-  const buffer = Buffer.from(await new Response(args.content).arrayBuffer());
+  const buffer = await readKnowledgeFile(args.content);
   const ext = args.filename.split(".").pop()?.toLowerCase() ?? "";
   let text: string;
   if (ext === "pdf") {
     // unpdf 内置 serverless 版 pdfjs：无 DOMMatrix 依赖，Vercel 函数可直接加载（pdf-parse 会因 browser 条件解析炸掉）
     const pdf = await getDocumentProxy(new Uint8Array(buffer));
-    const result = await extractText(pdf, { mergePages: true });
-    text = result.text;
+    try {
+      if (pdf.numPages > MAX_KNOWLEDGE_PDF_PAGES) {
+        throw new FatalError(`PDF 超过 ${MAX_KNOWLEDGE_PDF_PAGES} 页限制，请拆分后重新上传`);
+      }
+      const result = await extractText(pdf, { mergePages: true });
+      text = result.text;
+    } finally {
+      await pdf.cleanup();
+    }
   } else if (ext === "docx") {
     const result = await mammoth.extractRawText({ buffer });
     text = result.value;
