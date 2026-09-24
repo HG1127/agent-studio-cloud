@@ -18,6 +18,7 @@ const SUPPORTED_NODE_TYPES: ReadonlySet<string> = new Set([
   "condition",
   "rule",
   "system",
+  "wait",
 ]);
 
 export async function startRunCore(args: {

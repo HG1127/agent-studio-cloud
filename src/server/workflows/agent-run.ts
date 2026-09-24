@@ -1,5 +1,5 @@
 // 运行编排工作流：只做控制流与状态机推进，所有 I/O 与业务逻辑都在 "use step" 里。
-import { createHook, FatalError } from "workflow";
+import { createHook, FatalError, sleep } from "workflow";
 import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { requestApproval, recordDecision } from "@/server/steps/approval-step";
@@ -10,6 +10,7 @@ import { failRun, finalizeRun, initializeRun, markRunRunning } from "@/server/st
 import { runQualityGate } from "@/server/steps/quality-step";
 import { appendTrace } from "@/server/steps/trace-step";
 import { runToolStep } from "@/server/steps/tool-step";
+import { beginWait, completeWait } from "@/server/steps/wait-step";
 
 export async function agentRunWorkflow(runId: string, manifest: AgentManifest, input: Record<string, unknown>) {
   "use workflow";
@@ -75,6 +76,51 @@ export async function agentRunWorkflow(runId: string, manifest: AgentManifest, i
           });
         }
         currentId = decision.decision === "approved" ? node.next : (node.rejectNext ?? "not_approved");
+        continue;
+      }
+      if (node.type === "wait") {
+        const wait = node.wait;
+        if (!wait) throw new FatalError(`步骤「${node.title}」的等待设置不完整`);
+        await beginWait({ runId, node });
+        if (wait.mode === "delay") {
+          if (wait.durationMs > 0) await sleep(wait.durationMs);
+          const output = { resumedBy: "delay", durationMs: wait.durationMs };
+          outputs[node.id] = output;
+          await completeWait({ runId, node, output });
+          currentId = node.next;
+          continue;
+        }
+        if (wait.mode === "until") {
+          const until = wait.until ? new Date(wait.until) : null;
+          if (!until || Number.isNaN(until.getTime())) throw new FatalError(`步骤「${node.title}」的继续时间不正确`);
+          if (until.getTime() > Date.now()) await sleep(until);
+          const output = { resumedBy: "time", until: until.toISOString() };
+          outputs[node.id] = output;
+          await completeWait({ runId, node, output });
+          currentId = node.next;
+          continue;
+        }
+        if (!wait.eventKey.trim()) throw new FatalError(`步骤「${node.title}」缺少消息匹配标识`);
+        const hook = createHook<Record<string, unknown>>({ token: `wait:${runId}:${wait.eventKey}` });
+        const resumed = wait.timeoutMs > 0
+          ? await Promise.race([
+              hook.then((payload) => ({ kind: "event" as const, payload })),
+              sleep(wait.timeoutMs).then(() => ({ kind: "timeout" as const })),
+            ])
+          : { kind: "event" as const, payload: await hook };
+        if (resumed.kind === "timeout") {
+          const output = { timedOut: true, timeoutMs: wait.timeoutMs };
+          outputs[node.id] = output;
+          await completeWait({ runId, node, output, timedOut: true });
+          const timeoutNext = wait.onTimeoutNext ?? node.onErrorNext;
+          if (!timeoutNext) throw new FatalError(`步骤「${node.title}」等待超时，且没有后续处理步骤`);
+          currentId = timeoutNext;
+          continue;
+        }
+        const output = { resumedBy: "event", eventKey: wait.eventKey, payload: resumed.payload };
+        outputs[node.id] = output;
+        await completeWait({ runId, node, output });
+        currentId = node.next;
         continue;
       }
       // 其余节点类型 M1 不支持自动执行

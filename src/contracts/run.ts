@@ -11,11 +11,15 @@ export const RunStatus = z.enum([
   "queued",
   "running",
   "waiting_approval",
+  "waiting_event",
   "completed",
   "failed",
   "cancelled",
 ]);
 export type RunStatus = z.infer<typeof RunStatus>;
+
+export const WaitEventPayload = z.record(z.string(), z.unknown());
+export type WaitEventPayload = z.infer<typeof WaitEventPayload>;
 
 // 启动动作返回的判别联合唯一来源：失败时不创建 run，只返回中文错误
 export const StartRunResult = z.discriminatedUnion("ok", [

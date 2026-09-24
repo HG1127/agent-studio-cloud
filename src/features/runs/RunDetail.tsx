@@ -8,7 +8,7 @@ import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { getRunContext, getRunView, listApprovals, listRunSteps } from "@/server/queries/runs";
 import { listTrace } from "@/server/queries/trace";
 
-const LIVE_STATUSES: ReadonlySet<RunStatus> = new Set(["queued", "running", "waiting_approval"]);
+const LIVE_STATUSES: ReadonlySet<RunStatus> = new Set(["queued", "running", "waiting_approval", "waiting_event"]);
 
 const STEP_STATUS_LABEL: Record<string, string> = {
   pending: "待执行",
