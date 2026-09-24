@@ -11,6 +11,8 @@ import {
   updateEvaluationCaseAction,
 } from "@/server/actions/evaluations";
 
+type AdvancedExpectationDraft = { path: string; operator: "equals" | "contains" | "exists"; valueText: string };
+
 function commonExpectation(expectations: EvaluationExpectation[]): string {
   const row = expectations.find((item) => item.path === "" && item.operator === "contains");
   return typeof row?.value === "string" ? row.value : "";
@@ -19,6 +21,26 @@ function commonExpectation(expectations: EvaluationExpectation[]): string {
 function mergeCommonExpectation(expectations: EvaluationExpectation[], value: string): EvaluationExpectation[] {
   const preserved = expectations.filter((item) => !(item.path === "" && item.operator === "contains"));
   return value.trim() ? [...preserved, { path: "", operator: "contains", value: value.trim() }] : preserved;
+}
+
+function advancedDraft(expectation: EvaluationExpectation): AdvancedExpectationDraft {
+  return {
+    path: expectation.path,
+    operator: expectation.operator,
+    valueText: expectation.operator === "exists"
+      ? ""
+      : typeof expectation.value === "string"
+        ? expectation.value
+        : JSON.stringify(expectation.value ?? ""),
+  };
+}
+
+function expectationFromDraft(draft: AdvancedExpectationDraft): EvaluationExpectation {
+  if (draft.operator === "exists") return { path: draft.path.trim(), operator: "exists" };
+  if (draft.operator === "contains") return { path: draft.path.trim(), operator: "contains", value: draft.valueText };
+  let value: unknown = draft.valueText;
+  try { value = JSON.parse(draft.valueText) as unknown; } catch { /* 普通文字按字符串比较 */ }
+  return { path: draft.path.trim(), operator: "equals", value };
 }
 
 function expectationLabel(expectation: EvaluationExpectation): string {
@@ -39,7 +61,7 @@ export function EvaluationPanel({ agentId, cases, archivedCases = [], runs }: {
   const [inputText, setInputText] = useState('{"input":"请处理这条验收任务"}');
   const [expectedText, setExpectedText] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editingExpectations, setEditingExpectations] = useState<EvaluationExpectation[]>([]);
+  const [advancedExpectations, setAdvancedExpectations] = useState<AdvancedExpectationDraft[]>([]);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const evaluationRunning = runs.some((run) => run.status === "running");
@@ -55,7 +77,7 @@ export function EvaluationPanel({ agentId, cases, archivedCases = [], runs }: {
     setInputText('{"input":"请处理这条验收任务"}');
     setExpectedText("");
     setEditingId(null);
-    setEditingExpectations([]);
+    setAdvancedExpectations([]);
   }
 
   function editCase(testCase: EvaluationCaseView) {
@@ -64,7 +86,9 @@ export function EvaluationPanel({ agentId, cases, archivedCases = [], runs }: {
     setName(testCase.name);
     setInputText(JSON.stringify(testCase.input));
     setExpectedText(commonExpectation(testCase.expectations));
-    setEditingExpectations(testCase.expectations);
+    setAdvancedExpectations(testCase.expectations
+      .filter((item) => !(item.path === "" && item.operator === "contains"))
+      .map(advancedDraft));
   }
 
   async function saveCase() {
@@ -78,15 +102,17 @@ export function EvaluationPanel({ agentId, cases, archivedCases = [], runs }: {
       setError("运行输入必须使用对象格式");
       return;
     }
+    if (advancedExpectations.some((expectation) => !expectation.path.trim())) {
+      setError("字段检查必须填写结果字段路径");
+      return;
+    }
     setPending(true);
     try {
       const payload = {
         agentId,
         name,
         input,
-        expectations: editingId
-          ? mergeCommonExpectation(editingExpectations, expectedText)
-          : expectedText.trim() ? [{ path: "", operator: "contains" as const, value: expectedText.trim() }] : [],
+        expectations: mergeCommonExpectation(advancedExpectations.map(expectationFromDraft), expectedText),
       };
       const result = editingId
         ? await updateEvaluationCaseAction({ ...payload, caseId: editingId })
@@ -154,6 +180,33 @@ export function EvaluationPanel({ agentId, cases, archivedCases = [], runs }: {
         <button type="button" disabled={pending || !name.trim()} onClick={saveCase}
           className="rounded-md border border-gray-300 px-3 py-2 text-sm disabled:text-gray-400">{editingId ? "保存修改" : "添加样例"}</button>
       </div>
+      <details className="rounded-md border border-gray-100 p-3">
+        <summary className="cursor-pointer text-xs font-medium text-gray-600">字段检查（{advancedExpectations.length}）</summary>
+        <p className="mt-2 text-xs text-gray-500">可检查结构化结果中的指定字段是否存在、等于或包含某个值。</p>
+        {advancedExpectations.map((expectation, index) => (
+          <div key={index} className="mt-2 grid gap-2 md:grid-cols-[1.5fr_120px_1.5fr_auto]">
+            <input aria-label={`字段检查 ${index + 1} 路径`} value={expectation.path} placeholder="例如：deliverables.plan"
+              onChange={(event) => setAdvancedExpectations((current) => current.map((item, position) => position === index ? { ...item, path: event.target.value } : item))}
+              className="rounded-md border border-gray-300 px-2 py-1.5 text-sm" />
+            <select aria-label={`字段检查 ${index + 1} 方式`} value={expectation.operator}
+              onChange={(event) => setAdvancedExpectations((current) => current.map((item, position) => position === index ? { ...item, operator: event.target.value as AdvancedExpectationDraft["operator"] } : item))}
+              className="rounded-md border border-gray-300 px-2 py-1.5 text-sm">
+              <option value="exists">需要存在</option>
+              <option value="equals">需要等于</option>
+              <option value="contains">需要包含</option>
+            </select>
+            <input aria-label={`字段检查 ${index + 1} 预期值`} value={expectation.valueText} disabled={expectation.operator === "exists"}
+              placeholder={expectation.operator === "equals" ? "文字、数字、true 或 JSON" : "需要包含的文字"}
+              onChange={(event) => setAdvancedExpectations((current) => current.map((item, position) => position === index ? { ...item, valueText: event.target.value } : item))}
+              className="rounded-md border border-gray-300 px-2 py-1.5 text-sm disabled:bg-gray-100" />
+            <button type="button" disabled={pending} onClick={() => setAdvancedExpectations((current) => current.filter((_, position) => position !== index))}
+              className="text-xs text-red-600 hover:underline">删除检查</button>
+          </div>
+        ))}
+        <button type="button" disabled={pending || advancedExpectations.length >= 19}
+          onClick={() => setAdvancedExpectations((current) => [...current, { path: "", operator: "exists", valueText: "" }])}
+          className="mt-3 rounded-md border border-gray-300 px-2.5 py-1.5 text-xs disabled:text-gray-400">添加字段检查</button>
+      </details>
       {editingId ? <button type="button" disabled={pending} onClick={resetCaseForm} className="w-fit text-xs text-gray-500 hover:text-gray-800">取消编辑</button> : null}
       {cases.length > 0 ? (
         <ul className="divide-y divide-gray-100">

@@ -139,6 +139,32 @@ describe("EvaluationPanel", () => {
     expect(refreshMock).toHaveBeenCalledOnce();
   });
 
+  it("可以创建字段存在、字段等于和字段包含检查", async () => {
+    createMock.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    render(<EvaluationPanel agentId={AGENT_ID} cases={[]} runs={[]} />);
+    await user.type(screen.getByLabelText("样例名称"), "结构化结果");
+    await user.click(screen.getByText("字段检查（0）"));
+    await user.click(screen.getByRole("button", { name: "添加字段检查" }));
+    await user.type(screen.getByLabelText("字段检查 1 路径"), "deliverables.plan");
+    await user.selectOptions(screen.getByLabelText("字段检查 1 方式"), "equals");
+    await user.type(screen.getByLabelText("字段检查 1 预期值"), "42");
+    await user.click(screen.getByRole("button", { name: "添加字段检查" }));
+    await user.type(screen.getByLabelText("字段检查 2 路径"), "receipt");
+    await user.selectOptions(screen.getByLabelText("字段检查 2 方式"), "contains");
+    await user.type(screen.getByLabelText("字段检查 2 预期值"), "已发送");
+    await user.click(screen.getByRole("button", { name: "添加样例" }));
+    await waitFor(() => expect(createMock).toHaveBeenCalledWith({
+      agentId: AGENT_ID,
+      name: "结构化结果",
+      input: { input: "请处理这条验收任务" },
+      expectations: [
+        { path: "deliverables.plan", operator: "equals", value: 42 },
+        { path: "receipt", operator: "contains", value: "已发送" },
+      ],
+    }));
+  });
+
   it("可以归档并恢复验收样例", async () => {
     archiveMock.mockResolvedValue({ ok: true });
     const user = userEvent.setup();
