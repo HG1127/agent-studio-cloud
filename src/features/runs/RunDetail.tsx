@@ -4,6 +4,7 @@ import { ApprovalPanel } from "@/features/runs/ApprovalPanel";
 import { RunStatusBadge } from "@/features/runs/RunList";
 import { TraceTimeline } from "@/features/runs/TraceTimeline";
 import { CancelRunButton } from "@/features/runs/CancelRunButton";
+import { RetryRunButton } from "@/features/runs/RetryRunButton";
 import type { RunStatus } from "@/contracts/run";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { getRunContext, getRunView, listApprovals, listRunSteps } from "@/server/queries/runs";
@@ -72,6 +73,7 @@ export async function RunDetail({ runId }: { runId: string }) {
           查看这个助手
         </Link>
         {live ? <CancelRunButton runId={runId} /> : null}
+        {!live ? <RetryRunButton runId={runId} /> : null}
       </header>
 
       {run.status === "failed" && run.error ? (
