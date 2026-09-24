@@ -1,7 +1,11 @@
 // buildStepPrompt 纯函数单测：中文提示词组装（角色 + 本步目标 + 上游产出 + 质量返工要求）。
 // 组装逻辑移植自旧系统 modelGateway.mjs 的 businessStepPrompt 并简化。
 import { describe, expect, it } from "vitest";
-import { buildStepPrompt } from "@/server/domain/runtime/step-prompt";
+import {
+  buildStepPrompt,
+  MAX_STEP_SYSTEM_PROMPT_CHARS,
+  MAX_STEP_USER_PROMPT_CHARS,
+} from "@/server/domain/runtime/step-prompt";
 import type { WorkflowNode } from "@/contracts/workflow";
 
 const node = {
@@ -60,5 +64,29 @@ describe("buildStepPrompt", () => {
     const { system, user } = buildStepPrompt({ node, upstreamOutputs: {}, input: {} });
     expect(system).toContain("分析投诉原因");
     expect(user).toContain("分析投诉原因");
+  });
+
+  it("超大上下文按预算截断但保留首尾与输出要求", () => {
+    const hugeNode = {
+      ...node,
+      title: `步骤开头${"题".repeat(20_000)}步骤结尾`,
+    } as unknown as WorkflowNode;
+    const { system, user } = buildStepPrompt({
+      node: hugeNode,
+      upstreamOutputs: { report: `上游开头${"中".repeat(200_000)}上游结尾` },
+      input: { task: `输入开头${"入".repeat(100_000)}输入结尾` },
+      qualityFeedback: `反馈开头${"改".repeat(50_000)}反馈结尾`,
+    });
+
+    expect(system.length).toBeLessThanOrEqual(MAX_STEP_SYSTEM_PROMPT_CHARS);
+    expect(user.length).toBeLessThanOrEqual(MAX_STEP_USER_PROMPT_CHARS);
+    expect(user).toContain("内容过长，已截断");
+    expect(user).toContain("上游开头");
+    expect(user).toContain("上游结尾");
+    expect(user).toContain("输入开头");
+    expect(user).toContain("输入结尾");
+    expect(user).toContain("反馈开头");
+    expect(user).toContain("反馈结尾");
+    expect(user).toMatch(/【输出要求】\n直接返回本步骤的业务结果，不要输出多余解释或前后缀。$/);
   });
 });
