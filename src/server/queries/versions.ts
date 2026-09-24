@@ -4,8 +4,9 @@ import { VersionSummary } from "@/contracts/version";
 import { agents, agentVersions } from "@/db/schema";
 import { db } from "@/lib/db";
 
-export async function listVersions(agentId: string, pagination: { limit?: number; offset?: number } = {}): Promise<VersionSummary[]> {
-  if (!z.string().uuid().safeParse(agentId).success) return [];
+export async function listVersions(agentId: string, workspaceId: string, pagination: { limit?: number; offset?: number } = {}): Promise<VersionSummary[]> {
+  const uuid = z.string().uuid();
+  if (!uuid.safeParse(agentId).success || !uuid.safeParse(workspaceId).success) return [];
   const limit = Math.min(101, Math.max(1, pagination.limit ?? 100));
   const offset = Math.max(0, pagination.offset ?? 0);
   const rows = await db
@@ -16,7 +17,7 @@ export async function listVersions(agentId: string, pagination: { limit?: number
       createdAt: agentVersions.createdAt,
     })
     .from(agentVersions)
-    .where(eq(agentVersions.agentId, agentId))
+    .where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.workspaceId, workspaceId)))
     .orderBy(desc(agentVersions.version))
     .limit(limit)
     .offset(offset);

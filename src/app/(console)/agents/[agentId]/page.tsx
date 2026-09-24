@@ -47,7 +47,7 @@ export default async function AgentDetailPage({
   if (!detail) notFound();
   const audit = detail.draft ? auditWorkflow(detail.draft) : null;
   const [versions, connections, agentTargets, evaluationCases, archivedEvaluationCases, evaluationRuns] = await Promise.all([
-    listVersions(agentId, { limit: versionPageSize + 1, offset: (versionPage - 1) * versionPageSize }),
+    listVersions(agentId, DEMO_WORKSPACE_ID, { limit: versionPageSize + 1, offset: (versionPage - 1) * versionPageSize }),
     listModelConnections(),
     listAgentTargets(DEMO_WORKSPACE_ID, agentId),
     listEvaluationCases(agentId, DEMO_WORKSPACE_ID),

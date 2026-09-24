@@ -74,7 +74,7 @@ export async function getAgentDetail(agentId: string, workspaceId: string): Prom
   const [definition] = await db
     .select({ draft: workflowDefinitions.draft })
     .from(workflowDefinitions)
-    .where(eq(workflowDefinitions.agentId, agentId))
+    .where(and(eq(workflowDefinitions.agentId, agentId), eq(workflowDefinitions.workspaceId, workspaceId)))
     .orderBy(desc(workflowDefinitions.createdAt))
     .limit(1);
   const [currentVersion] = await db
@@ -97,7 +97,12 @@ export async function listAgentTargets(workspaceId: string, excludeAgentId: stri
     .select({ agentId: agents.id, agentName: agents.name, versionId: agentVersions.id, version: agentVersions.version, manifest: agentVersions.manifest })
     .from(agentVersions)
     .innerJoin(agents, eq(agents.id, agentVersions.agentId))
-    .where(and(eq(agentVersions.workspaceId, workspaceId), eq(agentVersions.status, "production"), isNull(agents.archivedAt)))
+    .where(and(
+      eq(agentVersions.workspaceId, workspaceId),
+      eq(agents.workspaceId, workspaceId),
+      eq(agentVersions.status, "production"),
+      isNull(agents.archivedAt),
+    ))
     .orderBy(desc(agentVersions.version));
   return rows.flatMap((row) => {
     if (row.agentId === excludeAgentId) return [];
