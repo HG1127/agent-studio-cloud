@@ -135,7 +135,6 @@ export async function persistStep(step: PersistStepInput): Promise<void> {
           ? `步骤「${title}」完成`
           : `步骤「${title}」失败`,
     detail: storedStep.error ?? null,
-    data: storedStep.output ?? null,
   });
   if (rejectedOutput) throw new FatalError(rejectedOutput);
 }

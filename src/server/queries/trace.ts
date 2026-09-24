@@ -6,7 +6,20 @@ import { db } from "@/lib/db";
 
 const RUN_ID = z.string().uuid();
 
-function parseTraceEvent(row: TraceEvent): TraceEventView | null {
+const TRACE_VIEW_COLUMNS = {
+  id: traceEvents.id,
+  seq: traceEvents.seq,
+  nodeId: traceEvents.nodeId,
+  kind: traceEvents.kind,
+  level: traceEvents.level,
+  title: traceEvents.title,
+  detail: traceEvents.detail,
+  at: traceEvents.at,
+};
+
+type TraceViewRow = Pick<TraceEvent, "id" | "seq" | "nodeId" | "kind" | "level" | "title" | "detail" | "at">;
+
+function parseTraceEvent(row: TraceViewRow): TraceEventView | null {
   const parsed = TraceEventView.safeParse({
     id: row.id,
     seq: row.seq,
@@ -23,7 +36,7 @@ function parseTraceEvent(row: TraceEvent): TraceEventView | null {
 export async function listTrace(runId: string, workspaceId: string): Promise<TraceEventView[]> {
   if (!RUN_ID.safeParse(runId).success) return [];
   const rows = await db
-    .select()
+    .select(TRACE_VIEW_COLUMNS)
     .from(traceEvents)
     .where(and(eq(traceEvents.runId, runId), eq(traceEvents.workspaceId, workspaceId)))
     .orderBy(asc(traceEvents.seq));
@@ -38,7 +51,7 @@ export async function listTraceSince(
 ): Promise<TraceEventView[]> {
   if (!RUN_ID.safeParse(runId).success) return [];
   const rows = await db
-    .select()
+    .select(TRACE_VIEW_COLUMNS)
     .from(traceEvents)
     .where(and(eq(traceEvents.runId, runId), eq(traceEvents.workspaceId, workspaceId), gt(traceEvents.seq, cursor)))
     .orderBy(asc(traceEvents.seq));
