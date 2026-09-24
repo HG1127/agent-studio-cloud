@@ -1,41 +1,97 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Agent Studio Cloud
 
-## Getting Started
+面向业务团队的云端智能助手工作台。用户可以用中文描述需求，生成并编辑流程，发布冻结版本，运行持久工作流，并在页面查看审批、等待、执行轨迹和最终结果。
 
-First, run the development server:
+## 已实现能力
+
+- 助手创建、中文意图编译、业务落地检查和流程设计审计
+- React Flow 流程画布、草稿保存、版本发布与历史版本恢复
+- 模型步骤、演示工具、知识检索、人工确认、条件、循环、等待外部消息
+- 并行分支（全部成功、任一成功、保留失败继续）和顺序子流程
+- 长期经验读取与写入，写入前自动移除常见敏感字段
+- 调用其他助手、交接给其他助手、冻结目标版本和独立子运行
+- 定时任务、SSE 实时状态、运行轨迹、失败恢复路径
+- PDF、DOCX、TXT、Markdown、HTML、JSON、CSV、XML 知识文件解析
+- 验收样例、冻结版本批量运行、结果断言和通过/失败汇总
+- 模型连接密钥加密保存；真实模型开关默认关闭
+
+## 技术栈
+
+- Next.js App Router + TypeScript Strict
+- React + Tailwind CSS + React Flow
+- Neon Postgres + Drizzle ORM
+- Vercel Workflow SDK + Vercel AI SDK
+- Vitest + Testing Library + `@workflow/vitest` + Playwright
+- pnpm + GitHub Actions + Vercel
+
+## 本地启动
+
+环境要求：Node.js 24、pnpm 11、一个可用的 Neon Postgres 数据库。
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install --frozen-lockfile
+copy .env.example .env.local
+pnpm db:migrate
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+打开 <http://localhost:3000>。Workflow 运行时由 `next dev` 一并启动，不需要单独运行服务。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+最小 `.env.local` 配置：
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```dotenv
+DATABASE_URL=postgresql://...
+DATABASE_URL_POOLED=postgresql://...
+MODEL_MOCK=1
+```
 
-## Learn More
+`DATABASE_URL` 用于迁移，`DATABASE_URL_POOLED` 用于应用运行。首次启动前必须执行全部迁移；迁移文件只追加，不要修改已经提交的迁移历史。
 
-To learn more about Next.js, take a look at the following resources:
+## 常用命令
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+pnpm dev             # 本地开发
+pnpm build           # 生产构建和 Workflow 编译
+pnpm lint            # 静态检查
+pnpm test            # 领域、契约和组件测试
+pnpm test:workflow   # 真实数据库上的持久工作流测试
+pnpm test:e2e        # Playwright 关键路径
+pnpm db:generate     # 根据 schema 生成新迁移
+pnpm db:migrate      # 应用迁移
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+普通测试不依赖真实数据库。`test:workflow` 和 `test:e2e` 会写入测试数据，必须指向隔离数据库；CI 会创建临时 Neon 分支并在结束时清理。
 
-## Deploy on Vercel
+## 使用路径
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. 在“助手”页填写名称和业务目标，创建流程草稿。
+2. 在详情页检查并调整流程节点，保存草稿。
+3. 发布版本；运行永远使用已发布的冻结快照。
+4. 从详情页手动运行，或在“定时任务”中配置自动触发。
+5. 在“运行记录”查看实时状态、审批、等待消息、步骤轨迹和结果。
+6. 添加验收样例，批量验证当前版本；需要回退时从历史版本生成新的当前版本。
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 生产配置
 
-## 本地开发与运行引擎
+完整变量见 [`.env.example`](./.env.example)。上线前至少需要：
 
-- Workflow 运行时随 `pnpm dev`（next dev）一起启动，无需单独进程。`/api/health` 的 workflow 探测依赖它：若不经 dev 启动（例如直接 `next start` 而运行时未起），`workflow` 位会报 `false`。
-- 模型配置（`.env.local`）：设 `MODEL_MOCK=1` 走确定性演示输出；或配置 `MODEL_BASE_URL` / `MODEL_API_KEY` / `MODEL_ID` 接真实 OpenAI 兼容模型。发布真实（非 mock）版本时必须提供 `MODEL_ID`。
+- Neon 直连和池化连接串
+- `CRON_SECRET`
+- 模型连接加密主钥 `MODEL_ENCRYPTION_KEY`
+- 完成访问保护后再开启 `REAL_MODELS_ENABLED=1`
+- 需要长期保留知识原文件时配置 `BLOB_READ_WRITE_TOKEN`
+
+尚需人工账号、密钥或生产环境操作的事项统一记录在 [`docs/manual-configuration.md`](./docs/manual-configuration.md)。未配置的真实工具会在运行前明确阻止，不会静默伪装成成功。
+
+## 质量门槛
+
+Pull Request 必须通过：
+
+```bash
+pnpm exec tsc --noEmit
+pnpm lint
+pnpm test
+pnpm build
+```
+
+带 Neon 临时分支的 CI 还会执行数据库迁移、Workflow 集成测试和 Playwright E2E。项目分层、迁移与 UI 文案约束见 [`AGENTS.md`](./AGENTS.md)。

@@ -46,7 +46,10 @@ export default async function AgentDetailPage({
         ← 返回助手列表
       </Link>
       <header className="flex flex-col gap-2">
-        <h1 className="text-2xl font-bold">{detail.agent.name}</h1>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-bold">{detail.agent.name}</h1>
+          <a href={`/api/agents/${agentId}/export`} download className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:border-gray-500">导出定义</a>
+        </div>
         {detail.agent.description ? (
           <p className="text-sm text-gray-500">{detail.agent.description}</p>
         ) : null}

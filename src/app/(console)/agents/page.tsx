@@ -1,5 +1,6 @@
 import { CreateAgentForm } from "@/features/agents/CreateAgentForm";
 import { AgentList } from "@/features/agents/AgentList";
+import { ImportAgentForm } from "@/features/agents/ImportAgentForm";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { listAgents } from "@/server/queries/agents";
 
@@ -19,6 +20,7 @@ export default async function AgentsPage() {
         <h2 className="text-xl font-semibold">创建新助手</h2>
         <CreateAgentForm />
       </section>
+      <ImportAgentForm />
     </main>
   );
 }
