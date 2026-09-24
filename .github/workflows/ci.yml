@@ -43,11 +43,15 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: 跳过提示（未配置 NEON_API_KEY 或 NEON_PROJECT_ID 时）
-        if: env.NEON_API_KEY == '' || vars.NEON_PROJECT_ID == ''
-        run: echo "NEON_API_KEY 或 NEON_PROJECT_ID 未配置，跳过集成测试"
+      - name: 检查 Neon 集成测试配置
+        env:
+          NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+        run: |
+          if [[ -z "$NEON_API_KEY" || -z "$NEON_PROJECT_ID" ]]; then
+            echo "::error::NEON_API_KEY 或 NEON_PROJECT_ID 未配置，无法运行集成测试"
+            exit 1
+          fi
       - name: 创建 Neon 临时分支
-        if: env.NEON_API_KEY != '' && vars.NEON_PROJECT_ID != ''
         # neonctl v5 的 --output json 输出单个合并对象，connection_uris[0] 是含
         # connection_uri 字段的对象；INFO/WARNING 日志走 stderr，stdout 为纯 JSON。
         # --suspend-timeout 3600：playwright install 期间数分钟无 DB 活动，
@@ -61,7 +65,6 @@ jobs:
           echo "::add-mask::$BRANCH_URL"
           rm -f branch.json
       - name: 迁移 + 集成测试 + E2E
-        if: env.NEON_API_KEY != '' && env.BRANCH_URL != ''
         env:
           DATABASE_URL: ${{ env.BRANCH_URL }}
           DATABASE_URL_POOLED: ${{ env.BRANCH_URL }}
@@ -73,7 +76,7 @@ jobs:
           pnpm exec playwright install --with-deps chromium
           pnpm test:e2e
       - name: 删除临时分支
-        if: always() && env.NEON_API_KEY != ''
+        if: always() && env.NEON_API_KEY != '' && vars.NEON_PROJECT_ID != ''
         # neonctl v5 删除分支无交互确认（源码直连 API），没有 --force 选项
         # 守卫不看 BRANCH_URL：分支名由 run_id 确定，create 成功但取 URL 失败时同样要能清理
         run: |
