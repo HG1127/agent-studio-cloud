@@ -16,7 +16,7 @@ import { WorkflowDraft } from "@/contracts/workflow";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { cancelRunAction } from "@/server/actions/cancel-run";
-import { failRun, initializeRun } from "@/server/steps/run-state";
+import { failRun, finalizeRun, initializeRun } from "@/server/steps/run-state";
 
 const RUN_ID = "00000000-0000-4000-8000-0000000000c1";
 const CHILD_RUN_ID = "00000000-0000-4000-8000-0000000000c4";
@@ -162,6 +162,17 @@ describe("取消运行", () => {
 
     const [run] = await db.select().from(runs).where(eq(runs.id, RUN_ID));
     expect(run).toMatchObject({ status: "failed", error: "启动句柄回写失败" });
+    expect(appendTraceMock).not.toHaveBeenCalled();
+  });
+
+  it("迟到的完成回调不能把已取消运行改成已完成", async () => {
+    await insertWaitingRun();
+    await db.update(runs).set({ status: "cancelled", error: "已由员工取消" }).where(eq(runs.id, RUN_ID));
+
+    await finalizeRun(RUN_ID, { answer: "迟到结果" });
+
+    const [run] = await db.select().from(runs).where(eq(runs.id, RUN_ID));
+    expect(run).toMatchObject({ status: "cancelled", result: null, error: "已由员工取消" });
     expect(appendTraceMock).not.toHaveBeenCalled();
   });
 });

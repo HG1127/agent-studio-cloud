@@ -121,7 +121,12 @@ export async function finalizeRun(
   "use step";
   await persistContext(runId, contextOutputs);
   const now = new Date();
-  await db.update(runs).set({ status: "completed", result, finishedAt: now, updatedAt: now }).where(eq(runs.id, runId));
+  const updated = await db
+    .update(runs)
+    .set({ status: "completed", result, finishedAt: now, updatedAt: now })
+    .where(and(eq(runs.id, runId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])))
+    .returning({ id: runs.id });
+  if (updated.length === 0) return;
   await appendTrace({
     runId,
     kind: "run.completed",
