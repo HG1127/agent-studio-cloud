@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { start } from "workflow/api";
 import { AgentManifest } from "@/contracts/manifest";
-import type { StartRunResult } from "@/contracts/run";
+import { RunInputPayload, type StartRunResult } from "@/contracts/run";
 import { agentVersions, agents, runs } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
@@ -89,7 +89,12 @@ export async function startRunCore(args: {
   sourceKey?: string | null;
   versionId?: string;
 }): Promise<StartRunResult> {
-  const { agentId, input: runInput } = args;
+  const { agentId } = args;
+  const parsedRunInput = RunInputPayload.safeParse(args.input);
+  if (!parsedRunInput.success) {
+    return { ok: false, error: parsedRunInput.error.issues[0]?.message ?? "运行输入格式不正确" };
+  }
+  const runInput = parsedRunInput.data;
   try {
     const [agent] = await db
       .select()

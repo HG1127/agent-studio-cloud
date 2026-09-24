@@ -1,8 +1,48 @@
 import { z } from "zod";
 
+export const MAX_RUN_INPUT_BYTES = 100 * 1024;
+const MAX_RUN_INPUT_DEPTH = 12;
+const MAX_RUN_INPUT_ENTRIES = 2_000;
+const MAX_RUN_INPUT_KEYS = 100;
+
+function runInputIssue(value: Record<string, unknown>): string | null {
+  if (Object.keys(value).length > MAX_RUN_INPUT_KEYS) return `运行输入最多包含 ${MAX_RUN_INPUT_KEYS} 个字段`;
+  const stack: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
+  const visited = new WeakSet<object>();
+  let entries = 0;
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (current.depth > MAX_RUN_INPUT_DEPTH) return `运行输入最多嵌套 ${MAX_RUN_INPUT_DEPTH} 层`;
+    const item = current.value;
+    if (item === null || typeof item === "string" || typeof item === "boolean") continue;
+    if (typeof item === "number") {
+      if (!Number.isFinite(item)) return "运行输入中的数字必须是有限值";
+      continue;
+    }
+    if (typeof item !== "object") return "运行输入只能包含可序列化的 JSON 数据";
+    if (visited.has(item)) return "运行输入不能包含循环引用";
+    visited.add(item);
+    if (!Array.isArray(item) && Object.getPrototypeOf(item) !== Object.prototype && Object.getPrototypeOf(item) !== null) {
+      return "运行输入只能包含普通对象和数组";
+    }
+    const children = Array.isArray(item) ? item : Object.values(item);
+    entries += children.length;
+    if (entries > MAX_RUN_INPUT_ENTRIES) return `运行输入最多包含 ${MAX_RUN_INPUT_ENTRIES} 个数据项`;
+    for (const child of children) stack.push({ value: child, depth: current.depth + 1 });
+  }
+  const bytes = new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  return bytes > MAX_RUN_INPUT_BYTES ? "运行输入不能超过 100 KB" : null;
+}
+
+export const RunInputPayload = z.record(z.string().max(100), z.unknown()).superRefine((value, ctx) => {
+  const issue = runInputIssue(value);
+  if (issue) ctx.addIssue({ code: "custom", message: issue });
+});
+export type RunInputPayload = z.infer<typeof RunInputPayload>;
+
 export const RunStartInput = z.object({
   agentId: z.string().uuid(),
-  input: z.record(z.string(), z.unknown()).default({}),
+  input: RunInputPayload.default({}),
 });
 export type RunStartInput = z.infer<typeof RunStartInput>;
 
