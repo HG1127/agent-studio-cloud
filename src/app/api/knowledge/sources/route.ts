@@ -69,17 +69,36 @@ export async function POST(req: Request) {
         return storageUnavailable();
       }
     }
-    const status = duplicate.status === "archived"
-      ? (duplicate.chunkCount > 0 ? "indexed" : duplicate.error ? "failed" : "parsing")
-      : duplicate.status;
-    if (duplicate.archivedAt || blobPathname !== duplicate.blobPathname) {
-      await db.update(knowledgeSources).set({ archivedAt: null, status, blobPathname, updatedAt: new Date() }).where(eq(knowledgeSources.id, duplicate.id));
+    const retrying = duplicate.status === "failed"
+      || (duplicate.status === "archived" && duplicate.chunkCount === 0 && Boolean(duplicate.error));
+    const status = retrying
+      ? "parsing"
+      : duplicate.status === "archived"
+        ? (duplicate.chunkCount > 0 ? "indexed" : "parsing")
+        : duplicate.status;
+    const error = retrying ? null : duplicate.error;
+    if (duplicate.archivedAt || retrying || blobPathname !== duplicate.blobPathname) {
+      await db.update(knowledgeSources).set({ archivedAt: null, status, error, blobPathname, updatedAt: new Date() }).where(eq(knowledgeSources.id, duplicate.id));
+    }
+    if (retrying) {
+      try {
+        await start(knowledgeIngestWorkflow, [{
+          sourceId: duplicate.id,
+          filename: file.name,
+          mime: file.type || duplicate.mime,
+          base64: bytes.toString("base64"),
+        }]);
+      } catch (startError) {
+        console.error("知识重新入库工作流启动失败：", startError);
+        await db.update(knowledgeSources).set({ status: "failed", error: "解析任务启动失败，请重新上传", updatedAt: new Date() }).where(eq(knowledgeSources.id, duplicate.id));
+        return Response.json({ ok: false, error: "解析任务启动失败，请重新上传" }, { status: 500 });
+      }
     }
     return Response.json({
       ok: true,
       deduped: true,
       blobStored: Boolean(blobPathname),
-      source: toView({ ...duplicate, archivedAt: null, status, blobPathname }),
+      source: toView({ ...duplicate, archivedAt: null, status, error, blobPathname }),
     });
   }
   let blobPathname: string | null = null;

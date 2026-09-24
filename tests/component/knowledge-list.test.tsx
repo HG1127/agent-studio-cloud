@@ -42,6 +42,15 @@ describe("知识库列表", () => {
     expect(setKnowledgeSourceArchivedAction).toHaveBeenLastCalledWith({ sourceId: source.id, archived: false });
   });
 
+  it("解析失败时说明可以重新上传重试", () => {
+    render(<KnowledgeList initial={[{
+      id: "00000000-0000-4000-8000-0000000000f3", name: "损坏资料.txt", mime: "text/plain",
+      sizeBytes: 100, status: "failed", chunkCount: 0, charCount: 0, error: "解析超时",
+      createdAt: "2026-09-23T00:00:00.000Z",
+    }]} />);
+    expect(screen.getByText(/重新上传同一文件即可重试/)).toBeInTheDocument();
+  });
+
   it("未保存原文件时明确提示存储缺失", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       json: async () => ({

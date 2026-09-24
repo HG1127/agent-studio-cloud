@@ -91,7 +91,7 @@ export function KnowledgeList({ initial, archived = false }: { initial: Knowledg
               <p className="text-sm font-medium text-gray-900">{source.name}</p>
               <p className="mt-0.5 text-xs text-gray-500">
                 {STATUS_LABELS[source.status]} · {(source.sizeBytes / 1024).toFixed(1)} KB · {source.chunkCount} 段 · 上传于 {source.createdAt.slice(0, 10)}
-                {source.status === "failed" && source.error ? ` · ${source.error}` : ""}
+              {source.status === "failed" && source.error ? ` · ${source.error} · 重新上传同一文件即可重试` : ""}
               </p>
             </div>
             <button

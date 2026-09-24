@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const put = vi.hoisted(() => vi.fn());
+const startMock = vi.hoisted(() => vi.fn());
 const dbState = vi.hoisted(() => ({ rows: [] as unknown[], update: vi.fn() }));
 
 vi.mock("@vercel/blob", () => ({ put }));
@@ -10,13 +11,14 @@ vi.mock("@/lib/db", () => ({
     update: () => ({ set: () => ({ where: dbState.update }) }),
   },
 }));
-vi.mock("workflow/api", () => ({ start: vi.fn() }));
+vi.mock("workflow/api", () => ({ start: startMock }));
 
 import { POST } from "./route";
 
 afterEach(() => {
   delete process.env.BLOB_READ_WRITE_TOKEN;
   put.mockReset();
+  startMock.mockReset().mockResolvedValue(undefined);
   dbState.rows = [];
   dbState.update.mockReset();
 });
@@ -75,6 +77,23 @@ describe("知识原文件上传", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ ok: true, deduped: true, source: { status: "indexed" } });
+    expect(dbState.update).toHaveBeenCalledOnce();
+  });
+
+  it("重新上传解析失败的同一文件会复用记录并重新入库", async () => {
+    dbState.rows = [{
+      id: "00000000-0000-4000-8000-0000000000f3", name: "售后手册.txt", mime: "text/plain",
+      sizeBytes: 12, status: "failed", chunkCount: 0, charCount: 0, error: "上次解析超时",
+      createdAt: new Date("2026-09-24T00:00:00Z"), blobPathname: null, archivedAt: null,
+    }];
+    const form = new FormData();
+    form.set("file", new File(["退货说明"], "售后手册.txt", { type: "text/plain" }));
+
+    const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, deduped: true, source: { status: "parsing", error: null } });
+    expect(startMock).toHaveBeenCalledOnce();
     expect(dbState.update).toHaveBeenCalledOnce();
   });
 });

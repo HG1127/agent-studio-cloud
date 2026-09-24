@@ -44,6 +44,8 @@ export async function indexKnowledgeChunks(args: { sourceId: string; text: strin
     .limit(1);
   if (!source) throw new FatalError("找不到要入库的知识来源");
   const chunks = chunkText(args.text);
+  // 失败后重新上传会复用同一来源；先清理可能存在的半成品，确保重试幂等。
+  await db.delete(knowledgeChunks).where(eq(knowledgeChunks.sourceId, args.sourceId));
   for (let i = 0; i < chunks.length; i += 200) {
     const batch = chunks.slice(i, i + 200);
     await db.insert(knowledgeChunks).values(
