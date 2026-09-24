@@ -6,6 +6,7 @@ import { agents, agentVersions, runSteps, runs, traceEvents } from "@/db/schema"
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
+import { listChildRuns } from "@/server/queries/runs";
 
 const PARENT_AGENT_ID = "00000000-0000-4000-8000-0000000006a1";
 const PARENT_VERSION_ID = "00000000-0000-4000-8000-0000000006a2";
@@ -156,6 +157,9 @@ describe("助手协作运行", () => {
         status: "completed",
       });
       expect(child?.input).toMatchObject({ brief: expect.stringContaining("客户留存") });
+      expect(await listChildRuns(parent.id, DEMO_WORKSPACE_ID)).toEqual([
+        expect.objectContaining({ id: child?.id, sourceType: "agent_call", agentName: "研究助手" }),
+      ]);
     } finally {
       await cleanup(parentRunId);
     }
@@ -192,6 +196,9 @@ describe("助手协作运行", () => {
         status: "completed",
       });
       expect(JSON.stringify(child?.input)).not.toContain("not-shared");
+      expect(await listChildRuns(parent.id, DEMO_WORKSPACE_ID)).toEqual([
+        expect.objectContaining({ id: child?.id, sourceType: "handoff", agentName: "研究助手" }),
+      ]);
     } finally {
       await cleanup(parentRunId);
     }

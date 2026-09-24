@@ -1,9 +1,9 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RunView } from "@/contracts/run";
 
-const mocks = vi.hoisted(() => ({ steps: vi.fn() }));
+const mocks = vi.hoisted(() => ({ steps: vi.fn(), childRuns: vi.fn() }));
 vi.mock("@/server/queries/runs", () => ({
   getRunView: async () => RunView.parse({
     id: "00000000-0000-4000-8000-000000000001",
@@ -14,6 +14,7 @@ vi.mock("@/server/queries/runs", () => ({
   }),
   listRunSteps: mocks.steps,
   listApprovals: async () => [],
+  listChildRuns: mocks.childRuns,
   getRunContext: async () => ({ outputs: { analyze: { output: "分析完成" } } }),
   getPendingWait: async () => null,
 }));
@@ -26,7 +27,10 @@ vi.mock("@/features/runs/WaitEventPanel", () => ({ WaitEventPanel: () => null })
 
 import { RunDetail } from "@/features/runs/RunDetail";
 
-afterEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.childRuns.mockResolvedValue([]);
+});
 
 describe("运行详情步骤数据", () => {
   it("提供完整运行报告下载入口", async () => {
@@ -63,5 +67,38 @@ describe("运行详情步骤数据", () => {
     render(await RunDetail({ runId: "00000000-0000-4000-8000-000000000001" }));
     expect(screen.queryByText("查看步骤数据（开发者数据）")).not.toBeInTheDocument();
     expect(screen.queryByText(/inputTokens/)).not.toBeInTheDocument();
+  });
+
+  it("父运行展示可进入的协作与交接子任务", async () => {
+    mocks.steps.mockResolvedValue([]);
+    mocks.childRuns.mockResolvedValue([
+      {
+        id: "00000000-0000-4000-8000-000000000011",
+        agentId: "00000000-0000-4000-8000-000000000012",
+        agentName: "资料研究助手",
+        status: "running",
+        sourceType: "agent_call",
+        agentArchived: false,
+        startedAt: null,
+        finishedAt: null,
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000013",
+        agentId: "00000000-0000-4000-8000-000000000014",
+        agentName: "交付助手",
+        status: "completed",
+        sourceType: "handoff",
+        agentArchived: false,
+        startedAt: null,
+        finishedAt: null,
+      },
+    ]);
+
+    render(await RunDetail({ runId: "00000000-0000-4000-8000-000000000001" }));
+
+    expect(screen.getByRole("heading", { name: "协作子任务" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "资料研究助手" })).toHaveAttribute("href", "/runs/00000000-0000-4000-8000-000000000011");
+    expect(screen.getByText("助手协作")).toBeVisible();
+    expect(screen.getByText("助手交接")).toBeVisible();
   });
 });

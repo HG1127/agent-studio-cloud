@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, like, or } from "drizzle-orm";
 import { z } from "zod";
 import {
   ApprovalPayload,
@@ -66,6 +66,41 @@ export async function listRunAgentOptions(workspaceId: string): Promise<RunAgent
     .where(eq(runs.workspaceId, workspaceId))
     .orderBy(asc(agents.name));
   return rows.map((row) => RunAgentOption.parse(row));
+}
+
+export async function listChildRuns(parentRunId: string, workspaceId: string): Promise<RunSummary[]> {
+  if (!RUN_ID.safeParse(parentRunId).success) return [];
+  const rows = await db
+    .select({
+      id: runs.id,
+      agentId: runs.agentId,
+      agentName: agents.name,
+      status: runs.status,
+      sourceType: runs.sourceType,
+      agentArchivedAt: agents.archivedAt,
+      startedAt: runs.startedAt,
+      finishedAt: runs.finishedAt,
+    })
+    .from(runs)
+    .innerJoin(agents, eq(agents.id, runs.agentId))
+    .where(and(
+      eq(runs.workspaceId, workspaceId),
+      or(
+        like(runs.sourceKey, `agent-call:${parentRunId}:%`),
+        like(runs.sourceKey, `handoff:${parentRunId}:%`),
+      ),
+    ))
+    .orderBy(asc(runs.createdAt));
+  return rows.map((row) => RunSummary.parse({
+    id: row.id,
+    agentId: row.agentId,
+    agentName: row.agentName,
+    status: row.status,
+    sourceType: row.sourceType,
+    agentArchived: row.agentArchivedAt !== null,
+    startedAt: row.startedAt?.toISOString() ?? null,
+    finishedAt: row.finishedAt?.toISOString() ?? null,
+  }));
 }
 
 export async function getPendingWait(runId: string, workspaceId: string): Promise<PendingWaitViewType | null> {

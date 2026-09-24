@@ -9,7 +9,7 @@ import { RetryRunButton } from "@/features/runs/RetryRunButton";
 import { CopyResultButton } from "@/features/runs/CopyResultButton";
 import type { RunStatus } from "@/contracts/run";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
-import { getPendingWait, getRunView, listApprovals, listRunSteps } from "@/server/queries/runs";
+import { getPendingWait, getRunView, listApprovals, listChildRuns, listRunSteps } from "@/server/queries/runs";
 import { listTrace } from "@/server/queries/trace";
 
 const LIVE_STATUSES: ReadonlySet<RunStatus> = new Set(["queued", "running", "waiting_approval", "waiting_event"]);
@@ -37,11 +37,12 @@ function formatDateTime(iso: string): string {
 export async function RunDetail({ runId }: { runId: string }) {
   const run = await getRunView(runId, DEMO_WORKSPACE_ID);
   if (!run) notFound();
-  const [steps, approvals, trace, pendingWait] = await Promise.all([
+  const [steps, approvals, trace, pendingWait, childRuns] = await Promise.all([
     listRunSteps(runId, DEMO_WORKSPACE_ID),
     listApprovals(runId, DEMO_WORKSPACE_ID),
     listTrace(runId, DEMO_WORKSPACE_ID),
     getPendingWait(runId, DEMO_WORKSPACE_ID),
+    listChildRuns(runId, DEMO_WORKSPACE_ID),
   ]);
   const live = LIVE_STATUSES.has(run.status);
   // 待确认的置顶，已决定的按时间在后
@@ -95,6 +96,25 @@ export async function RunDetail({ runId }: { runId: string }) {
 
       {run.status === "waiting_event" && pendingWait ? (
         <WaitEventPanel runId={runId} eventKey={pendingWait.eventKey} title={pendingWait.title} payloadSchema={pendingWait.payloadSchema} />
+      ) : null}
+
+      {childRuns.length > 0 ? (
+        <section className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-4">
+          <h2 className="text-sm font-semibold">协作子任务</h2>
+          <ul className="divide-y divide-gray-100">
+            {childRuns.map((child) => (
+              <li key={child.id} className="flex flex-wrap items-center justify-between gap-3 py-2">
+                <Link href={`/runs/${child.id}`} className="text-sm font-medium text-blue-700 hover:underline">
+                  {child.agentName}
+                </Link>
+                <span className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500">{child.sourceType === "handoff" ? "助手交接" : "助手协作"}</span>
+                  <RunStatusBadge status={child.status} />
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
       ) : null}
 
       <section className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-4">
