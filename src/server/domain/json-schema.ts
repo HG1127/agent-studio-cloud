@@ -18,7 +18,8 @@ function typeMatches(value: unknown, expected: unknown): boolean {
 }
 
 function validateValue(value: unknown, schema: unknown, path: string, depth: number): string | null {
-  if (!schema || typeof schema !== "object" || Array.isArray(schema) || depth > 8) return null;
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return null;
+  if (depth > 8) return `${path}字段结构层级超过 8 层`;
   const rule = schema as Record<string, unknown>;
   if (rule.type && !typeMatches(value, rule.type)) {
     return `${path}类型不正确（收到 ${valueType(value)}）`;

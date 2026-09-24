@@ -26,4 +26,15 @@ describe("外部消息字段校验", () => {
     expect(validateJsonObjectSchema({ complete: "yes", customer: { id: "c-1" } }, schema)).toContain("消息.complete类型不正确");
     expect(validateJsonObjectSchema({ complete: true, customer: { id: "c-1" }, state: "unknown" }, schema)).toBe("消息.state不是允许的值");
   });
+
+  it("拒绝超过支持深度的字段结构而不是静默跳过校验", () => {
+    let nestedSchema: Record<string, unknown> = { type: "string" };
+    let nestedPayload: Record<string, unknown> = { value: "ok" };
+    for (let depth = 0; depth < 10; depth += 1) {
+      nestedSchema = { type: "object", required: ["value"], properties: { value: nestedSchema } };
+      nestedPayload = { value: nestedPayload };
+    }
+
+    expect(validateJsonObjectSchema(nestedPayload, nestedSchema)).toContain("字段结构层级超过 8 层");
+  });
 });
