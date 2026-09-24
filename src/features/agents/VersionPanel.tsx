@@ -20,7 +20,7 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
   defaultModelLabel: string;
 }) {
   const router = useRouter();
-  const [publishedVersions, setPublishedVersions] = useState<VersionSummary[]>([]);
+  const [optimisticVersions, setOptimisticVersions] = useState<VersionSummary[]>([]);
   const [modelSelection, setModelSelection] = useState("");
   const modelOptions = connections.flatMap((connection) => connection.modelIds.map((modelId) => ({
     value: JSON.stringify([connection.id, modelId]),
@@ -33,7 +33,7 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
   const [demoNotice, setDemoNotice] = useState<string[] | null>(null);
   const [releaseNotice, setReleaseNotice] = useState<string | null>(null);
 
-  const displayedVersions = publishedVersions.reduce<VersionSummary[]>((current, published) => [
+  const displayedVersions = optimisticVersions.reduce<VersionSummary[]>((current, published) => [
     published,
     ...current
       .filter((version) => version.id !== published.id)
@@ -62,7 +62,7 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
       const result = await publishVersionAction(agentId, selection);
       if (result.ok) {
         if (result.version) {
-          setPublishedVersions((current) => [...current, result.version]);
+          setOptimisticVersions((current) => [...current, result.version]);
         }
         const exempted = result.exempted ?? [];
         if (exempted.length > 0) setDemoNotice(exempted.map((issue) => issue.title));
@@ -87,8 +87,10 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
     setReleaseNotice(null);
     try {
       const result = await restoreVersionAction(agentId, versionId);
-      if (result.ok) router.refresh();
-      else setFailure({ error: result.error, issues: [] });
+      if (result.ok) {
+        setOptimisticVersions((current) => [...current, result.version]);
+        router.refresh();
+      } else setFailure({ error: result.error, issues: [] });
     } catch {
       setFailure({ error: "恢复失败，请稍后重试", issues: [] });
     } finally {

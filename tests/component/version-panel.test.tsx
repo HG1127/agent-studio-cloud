@@ -58,12 +58,23 @@ describe("VersionPanel", () => {
   });
 
   it("历史版本可恢复为新的当前版本", async () => {
-    restoreMock.mockResolvedValue({ ok: true, version: 3 });
+    restoreMock.mockResolvedValue({
+      ok: true,
+      version: {
+        id: "00000000-0000-4000-8000-0000000000a3",
+        version: 3,
+        status: "production",
+        createdAt: "2026-09-22T08:30:00.000Z",
+      },
+    });
     const user = userEvent.setup();
     renderPanel();
     await user.click(screen.getByRole("button", { name: "恢复为当前版本" }));
     await waitFor(() => expect(restoreMock).toHaveBeenCalledWith(AGENT_ID, VERSIONS[1].id));
     expect(refreshMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("版本 3")).toBeInTheDocument();
+    expect(screen.getByText("当前版本")).toBeInTheDocument();
+    expect(screen.getAllByText("历史版本")).toHaveLength(2);
   });
 
   it("待验收与未上线版本不能绕过门禁恢复", () => {

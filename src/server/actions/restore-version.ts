@@ -4,7 +4,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { AgentManifest } from "@/contracts/manifest";
-import type { RestoreVersionResult } from "@/contracts/version";
+import { VersionSummary, type RestoreVersionResult } from "@/contracts/version";
 import { agentVersions, agents } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
@@ -37,8 +37,7 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        let restoredVersion = 0;
-        await db.transaction(async (tx) => {
+        const restoredVersion = await db.transaction(async (tx) => {
           await tx
             .update(agentVersions)
             .set({ status: "retired", updatedAt: new Date() })
@@ -47,15 +46,20 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
             .select({ maxVersion: sql<number>`coalesce(max(${agentVersions.version}), 0)`.mapWith(Number) })
             .from(agentVersions)
             .where(eq(agentVersions.agentId, agentId));
-          restoredVersion = (row?.maxVersion ?? 0) + 1;
-          await tx.insert(agentVersions).values({
+          const [created] = await tx.insert(agentVersions).values({
             agentId,
             workspaceId: agent.workspaceId,
             createdBy: DEMO_USER_ID,
-            version: restoredVersion,
+            version: (row?.maxVersion ?? 0) + 1,
             status: "production",
             manifest: manifest.data,
+          }).returning({
+            id: agentVersions.id,
+            version: agentVersions.version,
+            status: agentVersions.status,
+            createdAt: agentVersions.createdAt,
           });
+          return VersionSummary.parse({ ...created, createdAt: created.createdAt.toISOString() });
         });
         revalidatePath(`/agents/${agentId}`);
         return { ok: true, version: restoredVersion };
