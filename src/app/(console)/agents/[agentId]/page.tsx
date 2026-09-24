@@ -33,12 +33,16 @@ export default async function AgentDetailPage({
   searchParams,
 }: {
   params: Promise<{ agentId: string }>;
-  searchParams: Promise<{ versionsPage?: string }>;
+  searchParams: Promise<{ versionsPage?: string; archivedCasesPage?: string }>;
 }) {
   const { agentId } = await params;
-  const rawVersionPage = Number((await searchParams).versionsPage ?? "1");
+  const query = await searchParams;
+  const rawVersionPage = Number(query.versionsPage ?? "1");
   const versionPage = Number.isInteger(rawVersionPage) && rawVersionPage > 0 ? rawVersionPage : 1;
   const versionPageSize = 50;
+  const rawArchivedCasesPage = Number(query.archivedCasesPage ?? "1");
+  const archivedCasesPage = Number.isInteger(rawArchivedCasesPage) && rawArchivedCasesPage > 0 ? rawArchivedCasesPage : 1;
+  const archivedCasesPageSize = 25;
   const detail = await getAgentDetail(agentId, DEMO_WORKSPACE_ID);
   if (!detail) notFound();
   const audit = detail.draft ? auditWorkflow(detail.draft) : null;
@@ -47,7 +51,11 @@ export default async function AgentDetailPage({
     listModelConnections(),
     listAgentTargets(DEMO_WORKSPACE_ID, agentId),
     listEvaluationCases(agentId, DEMO_WORKSPACE_ID),
-    listEvaluationCases(agentId, DEMO_WORKSPACE_ID, true),
+    listEvaluationCases(agentId, DEMO_WORKSPACE_ID, {
+      archived: true,
+      limit: archivedCasesPageSize + 1,
+      offset: (archivedCasesPage - 1) * archivedCasesPageSize,
+    }),
     listEvaluationRuns(agentId, DEMO_WORKSPACE_ID),
   ]);
   const defaultModelLabel = process.env.MODEL_MOCK === "1" ? "演示模式" : process.env.MODEL_ID?.trim() ? "服务端默认模型" : "尚未配置默认模型";
@@ -88,7 +96,15 @@ export default async function AgentDetailPage({
         versionPage={versionPage}
         hasMoreVersions={versions.length > versionPageSize}
       />
-      <EvaluationPanel agentId={agentId} cases={evaluationCases} archivedCases={archivedEvaluationCases} runs={evaluationRuns} />
+      <EvaluationPanel
+        agentId={agentId}
+        cases={evaluationCases}
+        archivedCases={archivedEvaluationCases.slice(0, archivedCasesPageSize)}
+        runs={evaluationRuns}
+        archivedPage={archivedCasesPage}
+        hasMoreArchived={archivedEvaluationCases.length > archivedCasesPageSize}
+        versionsPage={versionPage}
+      />
       <RunLauncher agentId={agentId} inputFields={inputFields} />
     </main>
   );

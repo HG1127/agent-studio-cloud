@@ -3,7 +3,14 @@ import { EvaluationCaseView, EvaluationRunView, type EvaluationCaseView as Evalu
 import { agentVersions, evaluationCaseResults, evaluationCases, evaluationRuns } from "@/db/schema";
 import { db } from "@/lib/db";
 
-export async function listEvaluationCases(agentId: string, workspaceId: string, archived = false): Promise<EvaluationCaseViewType[]> {
+export async function listEvaluationCases(
+  agentId: string,
+  workspaceId: string,
+  options: { archived?: boolean; limit?: number; offset?: number } = {},
+): Promise<EvaluationCaseViewType[]> {
+  const archived = options.archived ?? false;
+  const limit = Math.min(Math.max(options.limit ?? 100, 1), 101);
+  const offset = Math.max(options.offset ?? 0, 0);
   const rows = await db
     .select()
     .from(evaluationCases)
@@ -12,7 +19,9 @@ export async function listEvaluationCases(agentId: string, workspaceId: string, 
       eq(evaluationCases.workspaceId, workspaceId),
       archived ? isNotNull(evaluationCases.archivedAt) : isNull(evaluationCases.archivedAt),
     ))
-    .orderBy(desc(evaluationCases.createdAt));
+    .orderBy(desc(evaluationCases.createdAt))
+    .limit(limit)
+    .offset(offset);
   return rows.flatMap((row) => {
     const parsed = EvaluationCaseView.safeParse({ ...row, createdAt: row.createdAt.toISOString() });
     return parsed.success ? [parsed.data] : [];

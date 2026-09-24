@@ -50,11 +50,22 @@ function expectationLabel(expectation: EvaluationExpectation): string {
   return `${target}需要包含“${String(expectation.value ?? "")}”`;
 }
 
-export function EvaluationPanel({ agentId, cases, archivedCases = [], runs }: {
+export function EvaluationPanel({
+  agentId,
+  cases,
+  archivedCases = [],
+  runs,
+  archivedPage = 1,
+  hasMoreArchived = false,
+  versionsPage = 1,
+}: {
   agentId: string;
   cases: EvaluationCaseView[];
   archivedCases?: EvaluationCaseView[];
   runs: EvaluationRunView[];
+  archivedPage?: number;
+  hasMoreArchived?: boolean;
+  versionsPage?: number;
 }) {
   const router = useRouter();
   const [name, setName] = useState("");
@@ -236,9 +247,9 @@ export function EvaluationPanel({ agentId, cases, archivedCases = [], runs }: {
           ))}
         </ul>
       ) : <p className="text-sm text-gray-500">还没有验收样例。</p>}
-      {archivedCases.length > 0 ? (
+      {archivedCases.length > 0 || archivedPage > 1 ? (
         <details className="border-t border-gray-100 pt-3">
-          <summary className="cursor-pointer text-xs font-medium text-gray-600">已归档样例（{archivedCases.length}）</summary>
+          <summary className="cursor-pointer text-xs font-medium text-gray-600">已归档样例（第 {archivedPage} 页）</summary>
           <ul className="mt-2 divide-y divide-gray-100">
             {archivedCases.map((testCase) => (
               <li key={testCase.id} className="flex items-center justify-between gap-3 py-2 text-sm text-gray-500">
@@ -247,6 +258,23 @@ export function EvaluationPanel({ agentId, cases, archivedCases = [], runs }: {
               </li>
             ))}
           </ul>
+          {archivedPage > 1 || hasMoreArchived ? (
+            <nav aria-label="已归档样例分页" className="mt-3 flex items-center gap-3 text-xs">
+              {archivedPage > 1 ? (
+                <Link
+                  href={`/agents/${agentId}?versionsPage=${versionsPage}&archivedCasesPage=${archivedPage - 1}`}
+                  className="text-blue-700 hover:underline"
+                >上一页</Link>
+              ) : null}
+              <span className="text-gray-500">第 {archivedPage} 页</span>
+              {hasMoreArchived ? (
+                <Link
+                  href={`/agents/${agentId}?versionsPage=${versionsPage}&archivedCasesPage=${archivedPage + 1}`}
+                  className="text-blue-700 hover:underline"
+                >下一页</Link>
+              ) : null}
+            </nav>
+          ) : null}
         </details>
       ) : null}
       {runs.length > 0 ? (

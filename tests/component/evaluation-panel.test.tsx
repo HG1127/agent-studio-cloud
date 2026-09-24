@@ -201,4 +201,26 @@ describe("EvaluationPanel", () => {
     await user.click(screen.getByRole("button", { name: "恢复" }));
     await waitFor(() => expect(archiveMock).toHaveBeenLastCalledWith({ agentId: AGENT_ID, caseId: CASES[0].id, archived: false }));
   });
+
+  it("归档样例较多时保留版本页并提供翻页", () => {
+    render(<EvaluationPanel
+      agentId={AGENT_ID}
+      cases={[]}
+      archivedCases={CASES}
+      runs={[]}
+      archivedPage={2}
+      hasMoreArchived
+      versionsPage={3}
+    />);
+
+    expect(screen.getByText("已归档样例（第 2 页）")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "上一页" })).toHaveAttribute(
+      "href",
+      `/agents/${AGENT_ID}?versionsPage=3&archivedCasesPage=1`,
+    );
+    expect(screen.getByRole("link", { name: "下一页" })).toHaveAttribute(
+      "href",
+      `/agents/${AGENT_ID}?versionsPage=3&archivedCasesPage=3`,
+    );
+  });
 });
