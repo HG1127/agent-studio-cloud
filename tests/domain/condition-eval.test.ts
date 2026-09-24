@@ -51,10 +51,13 @@ describe("compare", () => {
   it("neq：不等为真", () => {
     expect(compare("high", "neq", "low")).toBe(true);
     expect(compare("high", "neq", "high")).toBe(false);
+    expect(compare(undefined, "neq", "high")).toBe(false);
+    expect(compare(null, "neq", "high")).toBe(false);
   });
   it("contains：字符串包含", () => {
     expect(compare("发货延迟导致投诉", "contains", "延迟")).toBe(true);
     expect(compare("发货延迟导致投诉", "contains", "退款")).toBe(false);
+    expect(compare("发货延迟导致投诉", "contains", "")).toBe(false);
   });
   it("contains：数组包含", () => {
     expect(compare(["a", "b"], "contains", "a")).toBe(true);
@@ -66,6 +69,9 @@ describe("compare", () => {
     expect(compare(3, "gte", 3)).toBe(true);
     expect(compare(2, "gte", 3)).toBe(false);
     expect(compare("abc", "gt", 1)).toBe(false);
+    expect(compare(undefined, "gte", 0)).toBe(false);
+    expect(compare("", "gte", 0)).toBe(false);
+    expect(compare(0, "gte", "")).toBe(false);
   });
   it("lt / lte：按数值比较", () => {
     expect(compare(2, "lt", 3)).toBe(true);

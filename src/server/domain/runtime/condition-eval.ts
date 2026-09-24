@@ -25,8 +25,9 @@ export function compare(actual: unknown, operator: string, expected: unknown): b
     case "eq":
       return actual === expected;
     case "neq":
-      return actual !== expected;
+      return actual !== undefined && actual !== null && actual !== expected;
     case "contains":
+      if (expected === undefined || expected === null || (typeof expected === "string" && !expected.trim())) return false;
       if (typeof actual === "string") return actual.includes(String(expected ?? ""));
       if (Array.isArray(actual)) return actual.some((item) => item === expected);
       return false;
@@ -34,6 +35,8 @@ export function compare(actual: unknown, operator: string, expected: unknown): b
     case "gte":
     case "lt":
     case "lte": {
+      if (actual === undefined || actual === null || expected === undefined || expected === null) return false;
+      if ((typeof actual === "string" && !actual.trim()) || (typeof expected === "string" && !expected.trim())) return false;
       const left = Number(actual);
       const right = Number(expected);
       if (!Number.isFinite(left) || !Number.isFinite(right)) return false;
