@@ -54,8 +54,9 @@ jobs:
       - name: 创建 Neon 临时分支
         # 锁 @5 major：v5 会静默吞未知 flag，不锁则未来升级可能静默破坏调用参数
         run: |
-          npx --yes neonctl@5 branches create --name ci-${{ github.run_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --api-key "$NEON_API_KEY" --output json > /dev/null
-          BRANCH_URL=$(npx --yes neonctl@5 connection-string ci-${{ github.run_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --database-name neondb --role-name neondb_owner --api-key "$NEON_API_KEY")
+          CI_BRANCH="ci-${{ github.run_id }}-${{ github.run_attempt }}"
+          npx --yes neonctl@5 branches create --name "$CI_BRANCH" --project-id ${{ vars.NEON_PROJECT_ID }} --api-key "$NEON_API_KEY" --output json > /dev/null
+          BRANCH_URL=$(npx --yes neonctl@5 connection-string "$CI_BRANCH" --project-id ${{ vars.NEON_PROJECT_ID }} --database-name neondb --role-name neondb_owner --api-key "$NEON_API_KEY")
           if [[ "$BRANCH_URL" != postgres://* && "$BRANCH_URL" != postgresql://* ]]; then
             echo "::error::Neon 临时分支未返回有效连接串"
             exit 1
@@ -85,4 +86,5 @@ jobs:
         # 守卫不看 BRANCH_URL：分支名由 run_id 确定，create 成功但取 URL 失败时同样要能清理
         run: |
           # 容忍分支不存在（create 被跳过或取 URL 前已失败），清理失败不应挂红 job
-          npx --yes neonctl@5 branches delete ci-${{ github.run_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --api-key "$NEON_API_KEY" || true
+          CI_BRANCH="ci-${{ github.run_id }}-${{ github.run_attempt }}"
+          npx --yes neonctl@5 branches delete "$CI_BRANCH" --project-id ${{ vars.NEON_PROJECT_ID }} --api-key "$NEON_API_KEY" || true
