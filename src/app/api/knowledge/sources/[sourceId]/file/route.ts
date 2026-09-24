@@ -22,13 +22,16 @@ export async function GET(_request: Request, context: { params: Promise<{ source
   try {
     const blob = await get(source.blobPathname, { access: "private", token });
     if (!blob?.stream) return Response.json({ ok: false, error: "原文件不存在或暂时无法读取" }, { status: 404 });
+    const headers = new Headers({
+      "content-type": blob.blob.contentType || source.mime || "application/octet-stream",
+      "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(source.name)}`,
+      "cache-control": "private, no-store",
+    });
+    if (typeof blob.blob.size === "number" && Number.isFinite(blob.blob.size) && blob.blob.size >= 0) {
+      headers.set("content-length", String(blob.blob.size));
+    }
     return new Response(blob.stream, {
-      headers: {
-        "content-type": blob.blob.contentType || source.mime || "application/octet-stream",
-        "content-length": String(blob.blob.size ?? ""),
-        "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(source.name)}`,
-        "cache-control": "private, no-store",
-      },
+      headers,
     });
   } catch (error) {
     console.error("读取知识原文件失败", error);

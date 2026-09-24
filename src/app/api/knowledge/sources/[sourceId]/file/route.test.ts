@@ -29,8 +29,23 @@ describe("知识原文件下载", () => {
     const response = await GET(new Request("http://localhost"), { params: Promise.resolve({ sourceId: SOURCE_ID }) });
     expect(response.status).toBe(200);
     expect(response.headers.get("content-disposition")).toContain(encodeURIComponent("售后手册.txt"));
+    expect(response.headers.get("content-length")).toBe("12");
     expect(await response.text()).toBe("退货说明");
     expect(getMock).toHaveBeenCalledWith("knowledge/manual.txt", { access: "private", token: "test-token" });
+  });
+
+  it("存储服务未返回文件大小时不发送空的长度响应头", async () => {
+    process.env.BLOB_READ_WRITE_TOKEN = "test-token";
+    rows.value = [{ name: "售后手册.txt", mime: "text/plain", blobPathname: "knowledge/manual.txt" }];
+    getMock.mockResolvedValue({
+      stream: new ReadableStream({ start(controller) { controller.close(); } }),
+      blob: { contentType: "text/plain" },
+    });
+
+    const response = await GET(new Request("http://localhost"), { params: Promise.resolve({ sourceId: SOURCE_ID }) });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.has("content-length")).toBe(false);
   });
 
   it("没有存储配置时返回可行动错误", async () => {
