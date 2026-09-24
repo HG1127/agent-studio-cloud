@@ -3,11 +3,12 @@ import { notFound } from "next/navigation";
 import { ApprovalPanel } from "@/features/runs/ApprovalPanel";
 import { RunStatusBadge } from "@/features/runs/RunList";
 import { TraceTimeline } from "@/features/runs/TraceTimeline";
+import { WaitEventPanel } from "@/features/runs/WaitEventPanel";
 import { CancelRunButton } from "@/features/runs/CancelRunButton";
 import { RetryRunButton } from "@/features/runs/RetryRunButton";
 import type { RunStatus } from "@/contracts/run";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
-import { getRunContext, getRunView, listApprovals, listRunSteps } from "@/server/queries/runs";
+import { getPendingWait, getRunContext, getRunView, listApprovals, listRunSteps } from "@/server/queries/runs";
 import { listTrace } from "@/server/queries/trace";
 
 const LIVE_STATUSES: ReadonlySet<RunStatus> = new Set(["queued", "running", "waiting_approval", "waiting_event"]);
@@ -42,11 +43,12 @@ function extractOutputs(context: Record<string, unknown> | null): Array<[string,
 export async function RunDetail({ runId }: { runId: string }) {
   const run = await getRunView(runId, DEMO_WORKSPACE_ID);
   if (!run) notFound();
-  const [steps, approvals, trace, context] = await Promise.all([
+  const [steps, approvals, trace, context, pendingWait] = await Promise.all([
     listRunSteps(runId, DEMO_WORKSPACE_ID),
     listApprovals(runId, DEMO_WORKSPACE_ID),
     listTrace(runId, DEMO_WORKSPACE_ID),
     getRunContext(runId, DEMO_WORKSPACE_ID),
+    getPendingWait(runId, DEMO_WORKSPACE_ID),
   ]);
   const live = LIVE_STATUSES.has(run.status);
   // 待确认的置顶，已决定的按时间在后
@@ -92,6 +94,10 @@ export async function RunDetail({ runId }: { runId: string }) {
       {pendingApprovals.map((approval) => (
         <ApprovalPanel key={approval.id} runId={runId} approval={approval} />
       ))}
+
+      {run.status === "waiting_event" && pendingWait ? (
+        <WaitEventPanel runId={runId} eventKey={pendingWait.eventKey} title={pendingWait.title} />
+      ) : null}
 
       <section className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-4">
         <h2 className="text-sm font-semibold">运行输入</h2>

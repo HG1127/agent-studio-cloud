@@ -3,12 +3,14 @@ import { z } from "zod";
 import {
   ApprovalPayload,
   ApprovalView,
+  PendingWaitView,
+  type PendingWaitView as PendingWaitViewType,
   RunAgentOption,
   type RunListFilters,
   RunSummary,
   RunView,
 } from "@/contracts/run";
-import { agents, approvals, runSteps, runs, type Run, type RunStep } from "@/db/schema";
+import { agents, approvals, runSteps, runs, traceEvents, type Run, type RunStep } from "@/db/schema";
 import { db } from "@/lib/db";
 
 const RUN_ID = z.string().uuid();
@@ -56,6 +58,24 @@ export async function listRunAgentOptions(workspaceId: string): Promise<RunAgent
     .where(eq(runs.workspaceId, workspaceId))
     .orderBy(asc(agents.name));
   return rows.map((row) => RunAgentOption.parse(row));
+}
+
+export async function getPendingWait(runId: string, workspaceId: string): Promise<PendingWaitViewType | null> {
+  if (!RUN_ID.safeParse(runId).success) return null;
+  const [row] = await db
+    .select({ title: traceEvents.title, data: traceEvents.data })
+    .from(traceEvents)
+    .innerJoin(runs, eq(runs.id, traceEvents.runId))
+    .where(and(
+      eq(traceEvents.runId, runId),
+      eq(traceEvents.workspaceId, workspaceId),
+      eq(traceEvents.kind, "wait.started"),
+      eq(runs.status, "waiting_event"),
+    ))
+    .orderBy(desc(traceEvents.seq))
+    .limit(1);
+  const parsed = PendingWaitView.safeParse({ eventKey: row?.data?.eventKey, title: row?.title });
+  return parsed.success ? parsed.data : null;
 }
 
 export async function getRunView(runId: string, workspaceId: string): Promise<RunView | null> {

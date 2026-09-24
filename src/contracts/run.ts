@@ -31,6 +31,18 @@ export type RunListFilters = z.infer<typeof RunListFilters>;
 export const WaitEventPayload = z.record(z.string(), z.unknown());
 export type WaitEventPayload = z.infer<typeof WaitEventPayload>;
 
+export const WaitEventResumeResult = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true) }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+export type WaitEventResumeResult = z.infer<typeof WaitEventResumeResult>;
+
+export const PendingWaitView = z.object({
+  eventKey: z.string().min(1),
+  title: z.string().min(1),
+});
+export type PendingWaitView = z.infer<typeof PendingWaitView>;
+
 // 启动动作返回的判别联合唯一来源：失败时不创建 run，只返回中文错误
 export const StartRunResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true), runId: z.string().uuid() }),
