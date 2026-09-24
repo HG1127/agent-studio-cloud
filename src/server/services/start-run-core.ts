@@ -8,6 +8,7 @@ import { db } from "@/lib/db";
 import { prepareParallelBranches } from "@/server/domain/runtime/parallel-runtime";
 import { prepareSubflow } from "@/server/domain/runtime/subflow-runtime";
 import { validateAgentCallNode } from "@/server/domain/runtime/agent-call-runtime";
+import { validateHandoffNode } from "@/server/domain/runtime/handoff-runtime";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
 
 // M1 运行引擎支持的节点类型：其余编排类节点后续任务扩展
@@ -27,6 +28,7 @@ const SUPPORTED_NODE_TYPES: ReadonlySet<string> = new Set([
   "subflow",
   "memory",
   "agent_call",
+  "handoff",
 ]);
 
 export async function startRunCore(args: {
@@ -122,6 +124,25 @@ export async function startRunCore(args: {
           ))
           .limit(1);
         if (!target) unsupported.push(`${node.title}（所选协作助手版本不可用）`);
+      }
+      if (node.type === "handoff") {
+        const error = validateHandoffNode(node, agent.id);
+        if (error) {
+          unsupported.push(`${node.title}（${error}）`);
+          continue;
+        }
+        const [target] = await db
+          .select({ id: agentVersions.id })
+          .from(agentVersions)
+          .innerJoin(agents, eq(agents.id, agentVersions.agentId))
+          .where(and(
+            eq(agentVersions.id, node.toAgent!.versionId!),
+            eq(agentVersions.agentId, node.toAgent!.id),
+            eq(agentVersions.workspaceId, agent.workspaceId),
+            isNull(agents.archivedAt),
+          ))
+          .limit(1);
+        if (!target) unsupported.push(`${node.title}（所选接收助手版本不可用）`);
       }
     }
     if (unsupported.length > 0) {

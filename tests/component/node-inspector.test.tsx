@@ -29,6 +29,12 @@ const AGENT_CALL_NODE = WorkflowNode.parse({
   type: "agent_call",
   agentCall: { targetAgentId: "", versionId: "" },
 });
+const HANDOFF_NODE = WorkflowNode.parse({
+  id: "step_6",
+  title: "交给履约助手",
+  type: "handoff",
+  toAgent: { id: "", versionId: "" },
+});
 
 describe("NodeInspector", () => {
   it("修改节点名称时回调携带新值", () => {
@@ -93,6 +99,34 @@ describe("NodeInspector", () => {
         targetAgentName: "研究助手",
         versionId: "00000000-0000-4000-8000-000000000012",
         inputContract: { fields: [{ name: "brief" }] },
+      }),
+    }));
+  });
+
+  it("助手交接节点冻结版本、交付物和敏感信息边界", async () => {
+    const onNodeChange = vi.fn();
+    const user = userEvent.setup();
+    render(<NodeInspector
+      node={HANDOFF_NODE}
+      agentTargets={[{
+        agentId: "00000000-0000-4000-8000-000000000021",
+        agentName: "履约助手",
+        versionId: "00000000-0000-4000-8000-000000000022",
+        version: 2,
+        inputContract: { fields: [{ name: "brief", label: "任务说明", type: "string" }] },
+        outputContract: { fields: [{ path: "result", label: "履约结果" }] },
+      }]}
+      onNodeChange={onNodeChange}
+      onNodeDelete={vi.fn()}
+    />);
+    await user.selectOptions(screen.getByLabelText("接收助手"), "00000000-0000-4000-8000-000000000022");
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      toAgent: { id: "00000000-0000-4000-8000-000000000021", name: "履约助手", versionId: "00000000-0000-4000-8000-000000000022" },
+      contract: expect.objectContaining({
+        deliverables: ["履约结果"],
+        mustNotInclude: expect.arrayContaining(["密钥和访问令牌"]),
+        inputSchema: [expect.objectContaining({ name: "brief" })],
+        outputSchema: [expect.objectContaining({ name: "result" })],
       }),
     }));
   });

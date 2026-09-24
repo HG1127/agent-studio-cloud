@@ -12,7 +12,9 @@ export function buildAgentCallInput(args: {
     previousResults: Object.values(args.outputs),
     request: args.node.description || args.node.title,
   });
-  return Object.fromEntries(args.targetManifest.inputContract.fields.map((field) => [
+  const fields = args.targetManifest.inputContract.fields;
+  if (fields.length === 0) return { context };
+  return Object.fromEntries(fields.map((field) => [
     field.name,
     args.input[field.name] ?? args.outputs[field.name] ?? context,
   ]));

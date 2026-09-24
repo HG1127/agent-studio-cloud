@@ -11,6 +11,25 @@ interface NodeInspectorProps {
   onNodeDelete: (nodeId: string) => void;
 }
 
+const DEFAULT_HANDOFF_PROHIBITED = ["密钥和访问令牌", "与本次任务无关的个人隐私", "未确认的内部草稿"];
+
+function contractFields(contract: Record<string, unknown>, key: "name" | "path") {
+  const fields = Array.isArray(contract.fields) ? contract.fields : [];
+  return fields.flatMap((value) => {
+    if (!value || typeof value !== "object") return [];
+    const row = value as Record<string, unknown>;
+    const name = String(row[key] || row.name || row.path || "").trim();
+    if (!name) return [];
+    const rawType = String(row.type || "any");
+    const type = (["string", "number", "boolean", "object", "array", "any"] as string[]).includes(rawType) ? rawType : "any";
+    return [{ name, label: String(row.label || name), type: type as "string" | "number" | "boolean" | "object" | "array" | "any", required: row.required !== false }];
+  });
+}
+
+function lines(value: string): string[] {
+  return value.split(/\r?\n/).map((row) => row.trim()).filter(Boolean);
+}
+
 // M1 编辑范围：title/description，加 human 的负责人与确认事项；condition 的说明以「判断说明」呈现
 export function NodeInspector({ node, agentTargets = [], onNodeChange, onNodeDelete }: NodeInspectorProps) {
   const isHuman = node.type === "human";
@@ -127,6 +146,70 @@ export function NodeInspector({ node, agentTargets = [], onNodeChange, onNodeDel
             ))}
           </select>
           {agentTargets.length === 0 ? <p className="text-xs text-gray-500">还没有其他已发布助手可供选择</p> : null}
+        </div>
+      ) : null}
+      {node.type === "handoff" ? (
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1">
+            <label htmlFor="node-handoff-target" className="text-sm font-medium">接收助手</label>
+            <select
+              id="node-handoff-target"
+              value={node.toAgent?.versionId ?? ""}
+              onChange={(event) => {
+                const target = agentTargets.find((item) => item.versionId === event.target.value);
+                const outputFields = target ? contractFields(target.outputContract, "path") : [];
+                const inputFields = target ? contractFields(target.inputContract, "name") : [];
+                onNodeChange({
+                  ...node,
+                  toAgent: target ? { id: target.agentId, name: target.agentName, versionId: target.versionId } : { id: "", versionId: "" },
+                  contract: target ? {
+                    deliverables: outputFields.map((field) => field.label || field.name).length > 0
+                      ? outputFields.map((field) => field.label || field.name)
+                      : ["完成交接任务并返回可核对的结果"],
+                    mustNotInclude: DEFAULT_HANDOFF_PROHIBITED,
+                    inputSchema: inputFields.length > 0 ? inputFields : [{ name: "brief", label: "交接说明", type: "string", required: true }],
+                    outputSchema: outputFields.length > 0 ? outputFields : [{ name: "result", label: "交接结果", type: "any", required: true }],
+                    memoryPolicy: { mode: "none", shared: [], private: ["密钥", "个人隐私", "内部草稿"] },
+                  } : undefined,
+                });
+              }}
+              className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
+            >
+              <option value="">请选择已发布助手</option>
+              {agentTargets.map((target) => (
+                <option key={target.versionId} value={target.versionId}>{target.agentName}（版本 {target.version}）</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label htmlFor="node-handoff-deliverables" className="text-sm font-medium">必须交付</label>
+            <textarea
+              id="node-handoff-deliverables"
+              value={(node.contract?.deliverables ?? []).join("\n")}
+              rows={3}
+              placeholder="每行一项"
+              onChange={(event) => onNodeChange({
+                ...node,
+                contract: { ...node.contract, deliverables: lines(event.target.value), mustNotInclude: node.contract?.mustNotInclude ?? DEFAULT_HANDOFF_PROHIBITED, inputSchema: node.contract?.inputSchema ?? [], outputSchema: node.contract?.outputSchema ?? [] },
+              })}
+              className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label htmlFor="node-handoff-prohibited" className="text-sm font-medium">禁止传递</label>
+            <textarea
+              id="node-handoff-prohibited"
+              value={(node.contract?.mustNotInclude ?? []).join("\n")}
+              rows={3}
+              placeholder="每行一项"
+              onChange={(event) => onNodeChange({
+                ...node,
+                contract: { ...node.contract, deliverables: node.contract?.deliverables ?? [], mustNotInclude: lines(event.target.value), inputSchema: node.contract?.inputSchema ?? [], outputSchema: node.contract?.outputSchema ?? [] },
+              })}
+              className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
+            />
+          </div>
+          <p className="text-xs text-gray-500">交接时会冻结助手版本，并自动移除密钥、令牌等敏感字段。</p>
         </div>
       ) : null}
       {deletable ? (

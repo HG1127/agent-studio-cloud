@@ -55,9 +55,64 @@ const parentManifest = AgentManifest.parse({
   },
 });
 
+const handoffManifest = AgentManifest.parse({
+  schemaVersion: "4.0",
+  workflowFingerprint: "d".repeat(64),
+  inputContract: { fields: [{ name: "topic", required: true }] },
+  resourceSelection: { model: { modelId: "mock", mock: true } },
+  designAudit: { status: "passed", issueCount: 0, criticalCount: 0 },
+  workflowSnapshot: {
+    id: "handoff-parent",
+    startNodeId: "start",
+    rootAgent: { id: PARENT_AGENT_ID, name: "主助手", role: "统筹" },
+    memoryPolicy: { taskContext: true, longTerm: false },
+    nodes: {
+      start: { id: "start", title: "收到任务", type: "trigger", next: "handoff" },
+      handoff: {
+        id: "handoff",
+        title: "交给研究助手",
+        type: "handoff",
+        next: "done",
+        toAgent: { id: TARGET_AGENT_ID, name: "研究助手", versionId: TARGET_VERSION_ID },
+        contract: {
+          deliverables: ["研究结果"],
+          mustNotInclude: ["密钥和访问令牌"],
+          inputSchema: [{ name: "brief", type: "string" }],
+          outputSchema: [{ name: "result", type: "any" }],
+          memoryPolicy: { mode: "none", shared: [], private: ["密钥"] },
+        },
+      },
+      done: { id: "done", title: "完成任务", type: "end", next: null },
+    },
+  },
+});
+
+async function insertTarget() {
+  await db.insert(agents).values({
+    id: TARGET_AGENT_ID,
+    workspaceId: DEMO_WORKSPACE_ID,
+    createdBy: DEMO_USER_ID,
+    name: "研究助手",
+    intentText: "完成研究",
+    status: "published",
+  });
+  await db.insert(agentVersions).values({
+    id: TARGET_VERSION_ID,
+    agentId: TARGET_AGENT_ID,
+    workspaceId: DEMO_WORKSPACE_ID,
+    createdBy: DEMO_USER_ID,
+    version: 1,
+    status: "production",
+    manifest: targetManifest,
+  });
+}
+
 async function cleanup(parentRunId?: string) {
   const childRows = parentRunId
-    ? await db.select({ id: runs.id }).from(runs).where(eq(runs.sourceKey, `agent-call:${parentRunId}:research`))
+    ? await db.select({ id: runs.id }).from(runs).where(inArray(runs.sourceKey, [
+        `agent-call:${parentRunId}:research`,
+        `handoff:${parentRunId}:handoff`,
+      ]))
     : [];
   const runIds = [...childRows.map((row) => row.id), ...(parentRunId ? [parentRunId] : [])];
   if (runIds.length > 0) {
@@ -74,23 +129,7 @@ describe("助手协作运行", () => {
     let parentRunId: string | undefined;
     await cleanup();
     try {
-      await db.insert(agents).values({
-        id: TARGET_AGENT_ID,
-        workspaceId: DEMO_WORKSPACE_ID,
-        createdBy: DEMO_USER_ID,
-        name: "研究助手",
-        intentText: "完成研究",
-        status: "published",
-      });
-      await db.insert(agentVersions).values({
-        id: TARGET_VERSION_ID,
-        agentId: TARGET_AGENT_ID,
-        workspaceId: DEMO_WORKSPACE_ID,
-        createdBy: DEMO_USER_ID,
-        version: 1,
-        status: "production",
-        manifest: targetManifest,
-      });
+      await insertTarget();
       const [parent] = await db.insert(runs).values({
         workspaceId: DEMO_WORKSPACE_ID,
         createdBy: DEMO_USER_ID,
@@ -117,6 +156,42 @@ describe("助手协作运行", () => {
         status: "completed",
       });
       expect(child?.input).toMatchObject({ brief: expect.stringContaining("客户留存") });
+    } finally {
+      await cleanup(parentRunId);
+    }
+  }, 240_000);
+
+  it("按交接契约创建独立子运行并返回交付物", async () => {
+    let parentRunId: string | undefined;
+    await cleanup();
+    try {
+      await insertTarget();
+      const [parent] = await db.insert(runs).values({
+        workspaceId: DEMO_WORKSPACE_ID,
+        createdBy: DEMO_USER_ID,
+        agentId: PARENT_AGENT_ID,
+        versionId: PARENT_VERSION_ID,
+        status: "queued",
+        input: { topic: "客户续约", apiKey: "not-shared" },
+      }).returning({ id: runs.id });
+      parentRunId = parent.id;
+
+      const handle = await start(agentRunWorkflow, [parent.id, handoffManifest, { topic: "客户续约", apiKey: "not-shared" }]);
+      await handle.returnValue;
+
+      const [finishedParent] = await db.select().from(runs).where(eq(runs.id, parent.id)).limit(1);
+      const [child] = await db.select().from(runs).where(eq(runs.sourceKey, `handoff:${parent.id}:handoff`)).limit(1);
+      expect(finishedParent?.status).toBe("completed");
+      expect(finishedParent?.result).toMatchObject({
+        handoff: { assistant: "研究助手", status: "completed", deliverables: ["研究结果"], result: {} },
+      });
+      expect(child).toMatchObject({
+        agentId: TARGET_AGENT_ID,
+        versionId: TARGET_VERSION_ID,
+        sourceType: "handoff",
+        status: "completed",
+      });
+      expect(JSON.stringify(child?.input)).not.toContain("not-shared");
     } finally {
       await cleanup(parentRunId);
     }

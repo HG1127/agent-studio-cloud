@@ -32,6 +32,23 @@ export const ParallelBranch = z.object({
   outputs: z.array(z.string()).default([]),
   steps: z.array(z.record(z.string(), z.unknown())).min(1),
 });
+export const HandoffField = z.object({
+  name: z.string().min(1),
+  label: z.string().optional(),
+  type: z.enum(["string", "number", "boolean", "object", "array", "any"]).default("any"),
+  required: z.boolean().default(true),
+});
+export const HandoffContract = z.object({
+  deliverables: z.array(z.string().min(1)).default([]),
+  mustNotInclude: z.array(z.string().min(1)).default([]),
+  inputSchema: z.array(HandoffField).default([]),
+  outputSchema: z.array(HandoffField).default([]),
+  memoryPolicy: z.object({
+    mode: z.enum(["none", "self", "team"]).default("none"),
+    shared: z.array(z.string()).default([]),
+    private: z.array(z.string()).default([]),
+  }).optional(),
+});
 export const WorkflowNode = z.object({
   id: z.string(), title: z.string(), type: WorkflowNodeType,
   agent: z.object({ id: z.string(), name: z.string(), role: z.string() }).optional(),
@@ -66,7 +83,8 @@ export const WorkflowNode = z.object({
   memory: z.object({ mode: z.enum(["read", "write"]), query: z.string().optional(), limit: z.number().int().min(1).max(20).optional(), contentFrom: z.string().optional() }).optional(),
   subflow: z.object({ name: z.string(), steps: z.array(z.record(z.string(), z.unknown())).default([]), inputs: z.array(z.string()).default([]), outputs: z.array(z.string()).default([]), failurePolicy: z.string().optional() }).optional(),
   agentCall: z.object({ targetAgentId: z.string(), versionId: z.string(), targetAgentName: z.string().optional(), workflowId: z.string().optional(), memoryAccess: z.object({ mode: z.enum(["self", "team", "none"]) }).optional(), inputContract: z.record(z.string(), z.unknown()).optional(), outputContract: z.record(z.string(), z.unknown()).optional() }).optional(),
-  toAgent: z.object({ id: z.string() }).optional(),
+  toAgent: z.object({ id: z.string(), name: z.string().optional(), versionId: z.string().optional() }).optional(),
+  contract: HandoffContract.optional(),
   businessSpec: z.record(z.string(), z.unknown()).nullable().default(null),
 });
 export const WorkflowDraft = z.object({
@@ -92,3 +110,4 @@ export type WorkflowNodeType = z.infer<typeof WorkflowNodeType>;
 export type WorkflowNode = z.infer<typeof WorkflowNode>;
 export type WorkflowDraft = z.infer<typeof WorkflowDraft>;
 export type ParallelBranch = z.infer<typeof ParallelBranch>;
+export type HandoffContract = z.infer<typeof HandoffContract>;

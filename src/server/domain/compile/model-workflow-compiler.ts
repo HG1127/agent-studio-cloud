@@ -7,7 +7,7 @@ import { WorkflowDraft } from "@/contracts/workflow";
 // 人工前置节点直接豁免审批门禁。
 
 const ALLOWED_TYPES = new Set([
-  "ai", "human", "tool", "knowledge", "condition", "system", "subflow", "loop", "memory", "rule", "parallel", "wait", "agent_call",
+  "ai", "human", "tool", "knowledge", "condition", "system", "subflow", "loop", "memory", "rule", "parallel", "wait", "agent_call", "handoff",
 ]);
 const CONDITION_OPERATORS = new Set([
   "eq", "neq", "contains", "gt", "gte", "lt", "lte", "truthy", "exists",
@@ -674,6 +674,16 @@ export function compileModelWorkflowPlan(options: {
         memoryAccess: { mode: "none" },
         inputContract: { fields: [] },
         outputContract: { fields: [] },
+      };
+    }
+    if (step.type === "handoff") {
+      extra.toAgent = step.toAgent || { id: "", name: "", versionId: "" };
+      extra.contract = step.contract || {
+        deliverables: [],
+        mustNotInclude: ["密钥和访问令牌", "与本次任务无关的个人隐私", "未确认的内部草稿"],
+        inputSchema: [],
+        outputSchema: [],
+        memoryPolicy: { mode: "none", shared: [], private: ["密钥", "个人隐私", "内部草稿"] },
       };
     }
     if (step.type === "rule") extra.rule = step.rule || { kind: "business_rule" };

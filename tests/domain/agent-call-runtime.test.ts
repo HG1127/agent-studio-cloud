@@ -34,6 +34,13 @@ describe("助手调用运行逻辑", () => {
     expect(validateAgentCallNode(self, "agent-a")).toContain("不能调用");
   });
 
+  it("目标没有声明输入字段时仍传递完整上下文", () => {
+    const noInputManifest = AgentManifest.parse({ ...targetManifest, inputContract: { fields: [] } });
+    const node = WorkflowNode.parse({ id: "call", title: "调用助手", type: "agent_call", agentCall: { targetAgentId: "target", versionId: "version" } });
+    const input = buildAgentCallInput({ node, targetManifest: noInputManifest, input: { topic: "续约" }, outputs: {} });
+    expect(String(input.context)).toContain("续约");
+  });
+
   it("模型流程编译器保留助手调用节点供画布绑定", () => {
     const result = compileModelWorkflowPlan({
       intent: {

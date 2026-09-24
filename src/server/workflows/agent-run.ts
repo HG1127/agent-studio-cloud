@@ -8,6 +8,7 @@ import { prepareParallelBranches, type PreparedParallelBranch } from "@/server/d
 import { prepareSubflow, type PreparedSubflow } from "@/server/domain/runtime/subflow-runtime";
 import { evaluateCondition } from "@/server/steps/condition-step";
 import { beginAgentCall, finishAgentCall } from "@/server/steps/agent-call-step";
+import { beginHandoff, finishHandoff } from "@/server/steps/handoff-step";
 import { runInlineSystemStep } from "@/server/steps/inline-system-step";
 import { runKnowledgeStep } from "@/server/steps/knowledge-step";
 import { beginLoopIteration, completeLoop } from "@/server/steps/loop-step";
@@ -181,6 +182,36 @@ export async function agentRunWorkflow(
           childRunId: preparedCall.childRunId,
           node,
           targetName: preparedCall.targetName,
+          failed: true,
+          handled,
+          error: reason,
+        });
+        outputs[node.id] = result.output;
+        if (node.onErrorNext) {
+          currentId = node.onErrorNext;
+          continue;
+        }
+        throw new FatalError(`步骤「${node.title}」未能完成`);
+      }
+      if (node.type === "handoff") {
+        if (executionContext.depth >= 3) throw new FatalError(`步骤「${node.title}」超过助手交接层级上限`);
+        const preparedHandoff = await beginHandoff({ runId, node, parentInput: input, outputs });
+        const [settled] = await Promise.allSettled([
+          agentRunWorkflow(preparedHandoff.childRunId, preparedHandoff.manifest, preparedHandoff.input, { depth: executionContext.depth + 1 }),
+        ]);
+        if (settled.status === "fulfilled") {
+          const result = await finishHandoff({ runId, childRunId: preparedHandoff.childRunId, node, targetName: preparedHandoff.targetName });
+          outputs[node.id] = result.output;
+          currentId = node.next;
+          continue;
+        }
+        const reason = executionFailureReason(settled.reason, `接收助手「${preparedHandoff.targetName}」执行失败`);
+        const handled = Boolean(node.onErrorNext);
+        const result = await finishHandoff({
+          runId,
+          childRunId: preparedHandoff.childRunId,
+          node,
+          targetName: preparedHandoff.targetName,
           failed: true,
           handled,
           error: reason,

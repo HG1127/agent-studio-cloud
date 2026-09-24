@@ -61,6 +61,9 @@ export function RunList({ runs }: { runs: RunSummary[] }) {
                 {run.sourceType === "agent_call" && (
                   <span className="rounded bg-blue-50 px-1.5 py-0.5 text-xs text-blue-700">助手协作</span>
                 )}
+                {run.sourceType === "handoff" && (
+                  <span className="rounded bg-orange-50 px-1.5 py-0.5 text-xs text-orange-700">助手交接</span>
+                )}
                 <RunStatusBadge status={run.status} />
               </span>
             </div>
