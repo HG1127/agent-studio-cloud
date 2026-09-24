@@ -67,4 +67,29 @@ describe("运行报告导出", () => {
     expect(await response.json()).toEqual({ ok: false, error: "找不到这次运行" });
     expect(mocks.listRunSteps).not.toHaveBeenCalled();
   });
+
+  it("导出前隐藏运行输入、上下文和步骤结果中的敏感字段", async () => {
+    mocks.getRunView.mockResolvedValueOnce({
+      ...(await mocks.getRunView()),
+      input: { customer: "甲公司", apiKey: "sk-input-secret" },
+      result: { nested: { authorization: "Bearer result-secret", status: "完成" } },
+    });
+    mocks.getRunContext.mockResolvedValueOnce({ outputs: { password: "context-secret", review: "通过" } });
+    mocks.listRunSteps.mockResolvedValueOnce([{
+      nodeId: "review", nodeTitle: "审核合同", nodeType: "ai", status: "succeeded", attempt: 1,
+      output: { token: "step-secret", output: "通过" }, error: null,
+      startedAt: new Date("2026-09-24T01:00:10.000Z"), finishedAt: new Date("2026-09-24T01:00:20.000Z"),
+    }]);
+
+    const response = await GET(new Request("http://localhost"), { params: Promise.resolve({ runId: RUN_ID }) });
+    const body = JSON.stringify(await response.json());
+    expect(body).toContain("甲公司");
+    expect(body).toContain("完成");
+    expect(body).toContain("通过");
+    expect(body).toContain("[已隐藏敏感信息]");
+    expect(body).not.toContain("sk-input-secret");
+    expect(body).not.toContain("result-secret");
+    expect(body).not.toContain("context-secret");
+    expect(body).not.toContain("step-secret");
+  });
 });

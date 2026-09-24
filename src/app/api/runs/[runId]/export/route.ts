@@ -1,5 +1,6 @@
 import { RunReportFile } from "@/contracts/run";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
+import { redactSensitiveData } from "@/server/domain/security/redact-sensitive";
 import { getRunContext, getRunView, listApprovals, listRunSteps } from "@/server/queries/runs";
 import { listTrace } from "@/server/queries/trace";
 
@@ -42,7 +43,7 @@ export async function GET(_request: Request, context: { params: Promise<{ runId:
   });
   const date = (run.finishedAt ?? run.startedAt ?? report.exportedAt).slice(0, 10);
   const filename = `${safeFilename(run.agentName)}-${date}-运行报告.json`;
-  return new Response(JSON.stringify(report, null, 2), {
+  return new Response(JSON.stringify(redactSensitiveData(report), null, 2), {
     headers: {
       "content-type": "application/json; charset=utf-8",
       "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
