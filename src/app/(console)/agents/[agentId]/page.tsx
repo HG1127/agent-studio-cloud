@@ -2,12 +2,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { RunLauncher } from "@/features/agents/RunLauncher";
 import { VersionPanel } from "@/features/agents/VersionPanel";
+import { EvaluationPanel } from "@/features/agents/EvaluationPanel";
 import { FlowCanvas } from "@/features/workflow-canvas/FlowCanvas";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { auditWorkflow, type DesignAuditResult } from "@/server/domain/audit";
 import { getAgentDetail, listAgentTargets } from "@/server/queries/agents";
 import { listVersions } from "@/server/queries/versions";
 import { listModelConnections } from "@/server/queries/model-connections";
+import { listEvaluationCases, listEvaluationRuns } from "@/server/queries/evaluations";
 
 export const dynamic = "force-dynamic";
 
@@ -30,10 +32,12 @@ export default async function AgentDetailPage({
   const detail = await getAgentDetail(agentId, DEMO_WORKSPACE_ID);
   if (!detail) notFound();
   const audit = detail.draft ? auditWorkflow(detail.draft) : null;
-  const [versions, connections, agentTargets] = await Promise.all([
+  const [versions, connections, agentTargets, evaluationCases, evaluationRuns] = await Promise.all([
     listVersions(agentId),
     listModelConnections(),
     listAgentTargets(DEMO_WORKSPACE_ID, agentId),
+    listEvaluationCases(agentId, DEMO_WORKSPACE_ID),
+    listEvaluationRuns(agentId, DEMO_WORKSPACE_ID),
   ]);
   const defaultModelLabel = process.env.MODEL_MOCK === "1" ? "演示模式" : process.env.MODEL_ID?.trim() ? "服务端默认模型" : "尚未配置默认模型";
   return (
@@ -56,6 +60,7 @@ export default async function AgentDetailPage({
         </section>
       )}
       <VersionPanel agentId={agentId} versions={versions} connections={connections} defaultModelLabel={defaultModelLabel} />
+      <EvaluationPanel agentId={agentId} cases={evaluationCases} runs={evaluationRuns} />
       <RunLauncher agentId={agentId} />
     </main>
   );

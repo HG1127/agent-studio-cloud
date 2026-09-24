@@ -7,6 +7,7 @@ import type { WorkflowDraft } from "@/contracts/workflow";
 import { db } from "@/lib/db";
 import { runSteps, runs } from "@/db/schema";
 import { appendTrace } from "@/server/steps/trace-step";
+import { completeEvaluationForRun } from "@/server/services/evaluation-state";
 
 async function requireRun(runId: string) {
   const [run] = await db
@@ -115,6 +116,7 @@ export async function finalizeRun(runId: string, result: Record<string, unknown>
     title: "流程执行完成",
     detail: `共 ${Object.keys(result).length} 个步骤产出`,
   });
+  await completeEvaluationForRun(runId, result);
 }
 
 export async function failRun(runId: string, error: string): Promise<void> {
@@ -129,6 +131,7 @@ export async function failRun(runId: string, error: string): Promise<void> {
     .returning({ id: runs.id });
   if (updated.length === 0) return; // 已是终态（含终审修复的兜底重入），幂等
   await appendTrace({ runId, kind: "run.failed", level: "error", title: "流程执行失败", detail: error });
+  await completeEvaluationForRun(runId, null, error);
 }
 
 // 等待结束后把 run 拉回 running 并留下持久轨迹（瞬态状态不可断言，轨迹可）

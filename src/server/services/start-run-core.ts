@@ -34,8 +34,9 @@ const SUPPORTED_NODE_TYPES: ReadonlySet<string> = new Set([
 export async function startRunCore(args: {
   agentId: string;
   input: Record<string, unknown>;
-  sourceType?: "manual" | "schedule";
+  sourceType?: "manual" | "schedule" | "evaluation";
   sourceKey?: string | null;
+  versionId?: string;
 }): Promise<StartRunResult> {
   const { agentId, input: runInput } = args;
   try {
@@ -50,7 +51,9 @@ export async function startRunCore(args: {
     const [version] = await db
       .select()
       .from(agentVersions)
-      .where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.status, "production")))
+      .where(args.versionId
+        ? and(eq(agentVersions.id, args.versionId), eq(agentVersions.agentId, agentId), eq(agentVersions.workspaceId, agent.workspaceId))
+        : and(eq(agentVersions.agentId, agentId), eq(agentVersions.status, "production")))
       .orderBy(desc(agentVersions.version))
       .limit(1);
     if (!version) {

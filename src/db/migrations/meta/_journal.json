@@ -57,6 +57,13 @@
       "when": 1790245107015,
       "tag": "0007_faithful_thunderball",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790248473147,
+      "tag": "0008_flippant_inertia",
+      "breakpoints": true
     }
   ]
 }

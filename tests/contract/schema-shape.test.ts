@@ -12,6 +12,9 @@ import {
   traceEvents,
   approvals,
   modelConnections,
+  evaluationCases,
+  evaluationRuns,
+  evaluationCaseResults,
 } from "@/db/schema";
 
 function cols(table: PgTable): Record<string, Column> {
@@ -227,5 +230,19 @@ describe("M1 schema 形状", () => {
     expect(isDefault.default).toBe(false);
     expect(expectColumn(modelConnections, "archivedAt", "archived_at", "PgTimestamp").notNull).toBe(false);
     expect(getTableConfig(modelConnections).indexes.some((idx) => indexColumnNames(idx).join(",") === "workspace_id")).toBe(true);
+  });
+
+  it("自动验收表包含租户、创建人、时间与结果关联字段", () => {
+    for (const table of [evaluationCases, evaluationRuns, evaluationCaseResults]) {
+      expect(expectColumn(table, "workspaceId", "workspace_id", "PgUUID").notNull).toBe(true);
+      expect(expectColumn(table, "createdBy", "created_by", "PgUUID").notNull).toBe(true);
+      expect(expectColumn(table, "createdAt", "created_at", "PgTimestamp").notNull).toBe(true);
+      expect(expectColumn(table, "updatedAt", "updated_at", "PgTimestamp").notNull).toBe(true);
+    }
+    expect(expectColumn(evaluationCases, "input", "input", "PgJsonb").notNull).toBe(true);
+    expect(expectColumn(evaluationCases, "expectations", "expectations", "PgJsonb").notNull).toBe(true);
+    expect(expectColumn(evaluationRuns, "versionId", "version_id", "PgUUID").notNull).toBe(true);
+    expect(expectColumn(evaluationCaseResults, "evaluationRunId", "evaluation_run_id", "PgUUID").notNull).toBe(true);
+    expect(expectColumn(evaluationCaseResults, "evaluationCaseId", "evaluation_case_id", "PgUUID").notNull).toBe(true);
   });
 });

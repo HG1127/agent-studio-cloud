@@ -7,3 +7,4 @@ export * from "./knowledge";
 export * from "./schedules";
 export * from "./connections";
 export * from "./memory";
+export * from "./evaluations";
