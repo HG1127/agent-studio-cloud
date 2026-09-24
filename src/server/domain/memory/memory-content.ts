@@ -1,4 +1,4 @@
-const SENSITIVE_KEY = /(?:password|passcode|secret|token|api[_-]?key|authorization|cookie|密码|密钥|令牌)/i;
+const SENSITIVE_KEY = /(?:password|passcode|secret|token|api[_-]?key|(?:private|access|secret)[_-]?key|authorization|cookie|credential|session[_-]?id|密码|密钥|令牌|凭据|身份证|银行卡|手机号)/i;
 const MAX_MEMORY_CHARS = 20_000;
 
 function redact(value: unknown, depth = 0): unknown {

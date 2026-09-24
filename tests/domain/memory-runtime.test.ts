@@ -5,13 +5,27 @@ import { selectRelevantMemories } from "@/server/domain/memory/memory-search";
 describe("长期经验运行逻辑", () => {
   it("保存前隐藏敏感字段并保留业务结果", () => {
     const content = buildMemoryContent({
-      input: { customer: "甲公司", apiKey: "sk-private", nested: { password: "secret", topic: "续约" } },
+      input: {
+        customer: "甲公司",
+        apiKey: "sk-private",
+        privateKey: "private-key-content",
+        accessKey: "access-key-content",
+        credential: "credential-content",
+        sessionId: "session-content",
+        手机号: "13800000000",
+        nested: { password: "secret", topic: "续约" },
+      },
       outputs: { summary: "建议提前三十天沟通" },
     });
     expect(content).toContain("甲公司");
     expect(content).toContain("提前三十天");
     expect(content).not.toContain("sk-private");
     expect(content).not.toContain('"secret"');
+    expect(content).not.toContain("private-key-content");
+    expect(content).not.toContain("access-key-content");
+    expect(content).not.toContain("credential-content");
+    expect(content).not.toContain("session-content");
+    expect(content).not.toContain("13800000000");
     expect(content).toContain("[已隐藏敏感信息]");
   });
 
