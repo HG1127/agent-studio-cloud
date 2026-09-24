@@ -15,6 +15,9 @@ export const EvaluationCaseCreateInput = z.object({
 });
 export type EvaluationCaseCreateInput = z.infer<typeof EvaluationCaseCreateInput>;
 
+export const EvaluationCaseUpdateInput = EvaluationCaseCreateInput.extend({ caseId: z.string().uuid() });
+export type EvaluationCaseUpdateInput = z.infer<typeof EvaluationCaseUpdateInput>;
+
 export const EvaluationCaseView = z.object({
   id: z.string().uuid(),
   name: z.string(),

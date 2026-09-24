@@ -3,8 +3,30 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import type { EvaluationCaseView, EvaluationRunView } from "@/contracts/evaluation";
-import { archiveEvaluationCaseAction, createEvaluationCaseAction, startEvaluationAction } from "@/server/actions/evaluations";
+import type { EvaluationCaseView, EvaluationExpectation, EvaluationRunView } from "@/contracts/evaluation";
+import {
+  archiveEvaluationCaseAction,
+  createEvaluationCaseAction,
+  startEvaluationAction,
+  updateEvaluationCaseAction,
+} from "@/server/actions/evaluations";
+
+function commonExpectation(expectations: EvaluationExpectation[]): string {
+  const row = expectations.find((item) => item.path === "" && item.operator === "contains");
+  return typeof row?.value === "string" ? row.value : "";
+}
+
+function mergeCommonExpectation(expectations: EvaluationExpectation[], value: string): EvaluationExpectation[] {
+  const preserved = expectations.filter((item) => !(item.path === "" && item.operator === "contains"));
+  return value.trim() ? [...preserved, { path: "", operator: "contains", value: value.trim() }] : preserved;
+}
+
+function expectationLabel(expectation: EvaluationExpectation): string {
+  const target = expectation.path || "全部结果";
+  if (expectation.operator === "exists") return `${target}需要存在`;
+  if (expectation.operator === "equals") return `${target}需要等于 ${JSON.stringify(expectation.value)}`;
+  return `${target}需要包含“${String(expectation.value ?? "")}”`;
+}
 
 export function EvaluationPanel({ agentId, cases, runs }: {
   agentId: string;
@@ -15,6 +37,8 @@ export function EvaluationPanel({ agentId, cases, runs }: {
   const [name, setName] = useState("");
   const [inputText, setInputText] = useState('{"input":"请处理这条验收任务"}');
   const [expectedText, setExpectedText] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingExpectations, setEditingExpectations] = useState<EvaluationExpectation[]>([]);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,7 +48,24 @@ export function EvaluationPanel({ agentId, cases, runs }: {
     return () => window.clearInterval(timer);
   }, [router, runs]);
 
-  async function createCase() {
+  function resetCaseForm() {
+    setName("");
+    setInputText('{"input":"请处理这条验收任务"}');
+    setExpectedText("");
+    setEditingId(null);
+    setEditingExpectations([]);
+  }
+
+  function editCase(testCase: EvaluationCaseView) {
+    setError(null);
+    setEditingId(testCase.id);
+    setName(testCase.name);
+    setInputText(JSON.stringify(testCase.input));
+    setExpectedText(commonExpectation(testCase.expectations));
+    setEditingExpectations(testCase.expectations);
+  }
+
+  async function saveCase() {
     setError(null);
     let input: Record<string, unknown>;
     try {
@@ -32,25 +73,29 @@ export function EvaluationPanel({ agentId, cases, runs }: {
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
       input = parsed as Record<string, unknown>;
     } catch {
-      setError("运行输入必须是一个 JSON 对象");
+      setError("运行输入必须使用对象格式");
       return;
     }
     setPending(true);
     try {
-      const result = await createEvaluationCaseAction({
+      const payload = {
         agentId,
         name,
         input,
-        expectations: expectedText.trim() ? [{ path: "", operator: "contains", value: expectedText.trim() }] : [],
-      });
+        expectations: editingId
+          ? mergeCommonExpectation(editingExpectations, expectedText)
+          : expectedText.trim() ? [{ path: "", operator: "contains" as const, value: expectedText.trim() }] : [],
+      };
+      const result = editingId
+        ? await updateEvaluationCaseAction({ ...payload, caseId: editingId })
+        : await createEvaluationCaseAction(payload);
       if (!result.ok) setError(result.error);
       else {
-        setName("");
-        setExpectedText("");
+        resetCaseForm();
         router.refresh();
       }
     } catch {
-      setError("保存验收样例失败，请稍后重试");
+      setError(editingId ? "更新验收样例失败，请稍后重试" : "保存验收样例失败，请稍后重试");
     } finally {
       setPending(false);
     }
@@ -104,15 +149,28 @@ export function EvaluationPanel({ agentId, cases, runs }: {
           className="rounded-md border border-gray-300 px-3 py-2 font-mono text-sm" />
         <input aria-label="结果应包含" value={expectedText} onChange={(event) => setExpectedText(event.target.value)} placeholder="可不填"
           className="rounded-md border border-gray-300 px-3 py-2 text-sm" />
-        <button type="button" disabled={pending || !name.trim()} onClick={createCase}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm disabled:text-gray-400">添加样例</button>
+        <button type="button" disabled={pending || !name.trim()} onClick={saveCase}
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm disabled:text-gray-400">{editingId ? "保存修改" : "添加样例"}</button>
       </div>
+      {editingId ? <button type="button" disabled={pending} onClick={resetCaseForm} className="w-fit text-xs text-gray-500 hover:text-gray-800">取消编辑</button> : null}
       {cases.length > 0 ? (
         <ul className="divide-y divide-gray-100">
           {cases.map((testCase) => (
-            <li key={testCase.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-              <span>{testCase.name}</span>
-              <button type="button" disabled={pending} onClick={() => archiveCase(testCase.id)} className="text-xs text-gray-500 hover:text-red-600">删除</button>
+            <li key={testCase.id} className="flex items-start justify-between gap-3 py-2 text-sm">
+              <div className="min-w-0">
+                <span>{testCase.name}</span>
+                <details className="mt-1 text-xs text-gray-500">
+                  <summary className="cursor-pointer">查看样例内容</summary>
+                  <p className="mt-1 break-words">运行输入：{JSON.stringify(testCase.input)}</p>
+                  {testCase.expectations.length > 0 ? <ul className="mt-1 list-disc pl-4">
+                    {testCase.expectations.map((expectation, index) => <li key={index}>{expectationLabel(expectation)}</li>)}
+                  </ul> : <p className="mt-1">只检查流程是否成功完成</p>}
+                </details>
+              </div>
+              <span className="flex shrink-0 gap-3">
+                <button type="button" disabled={pending} onClick={() => editCase(testCase)} className="text-xs text-blue-700 hover:underline">编辑</button>
+                <button type="button" disabled={pending} onClick={() => archiveCase(testCase.id)} className="text-xs text-gray-500 hover:text-red-600">删除</button>
+              </span>
             </li>
           ))}
         </ul>

@@ -3,8 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EvaluationPanel } from "@/features/agents/EvaluationPanel";
 
-const { createMock, archiveMock, startMock, refreshMock } = vi.hoisted(() => ({
+const { createMock, updateMock, archiveMock, startMock, refreshMock } = vi.hoisted(() => ({
   createMock: vi.fn(),
+  updateMock: vi.fn(),
   archiveMock: vi.fn(),
   startMock: vi.fn(),
   refreshMock: vi.fn(),
@@ -12,6 +13,7 @@ const { createMock, archiveMock, startMock, refreshMock } = vi.hoisted(() => ({
 
 vi.mock("@/server/actions/evaluations", () => ({
   createEvaluationCaseAction: createMock,
+  updateEvaluationCaseAction: updateMock,
   archiveEvaluationCaseAction: archiveMock,
   startEvaluationAction: startMock,
 }));
@@ -29,6 +31,7 @@ const CASES = [{
 describe("EvaluationPanel", () => {
   afterEach(() => {
     createMock.mockReset();
+    updateMock.mockReset();
     archiveMock.mockReset();
     startMock.mockReset();
     refreshMock.mockReset();
@@ -57,7 +60,7 @@ describe("EvaluationPanel", () => {
     await user.type(screen.getByLabelText("样例名称"), "错误样例");
     fireEvent.change(screen.getByLabelText("运行输入"), { target: { value: "[]" } });
     await user.click(screen.getByRole("button", { name: "添加样例" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("JSON 对象");
+    expect(await screen.findByRole("alert")).toHaveTextContent("对象格式");
     expect(createMock).not.toHaveBeenCalled();
   });
 
@@ -88,5 +91,35 @@ describe("EvaluationPanel", () => {
     expect(screen.getByRole("link", { name: "查看运行" })).toHaveAttribute("href", "/runs/00000000-0000-4000-8000-000000000034");
     await user.click(screen.getByRole("button", { name: "运行全部样例" }));
     await waitFor(() => expect(startMock).toHaveBeenCalledWith(AGENT_ID));
+  });
+
+  it("编辑样例时更新输入和常用断言并保留高级断言", async () => {
+    updateMock.mockResolvedValue({ ok: true });
+    const cases = [{
+      ...CASES[0],
+      expectations: [
+        { path: "", operator: "contains" as const, value: "续约" },
+        { path: "outputs.review", operator: "exists" as const },
+      ],
+    }];
+    const user = userEvent.setup();
+    render(<EvaluationPanel agentId={AGENT_ID} cases={cases} runs={[]} />);
+    await user.click(screen.getByRole("button", { name: "编辑" }));
+    expect(screen.getByLabelText("样例名称")).toHaveValue("客户续约");
+    fireEvent.change(screen.getByLabelText("运行输入"), { target: { value: '{"input":"生成新版续约方案"}' } });
+    await user.clear(screen.getByLabelText("结果应包含"));
+    await user.type(screen.getByLabelText("结果应包含"), "新版续约");
+    await user.click(screen.getByRole("button", { name: "保存修改" }));
+    await waitFor(() => expect(updateMock).toHaveBeenCalledWith({
+      agentId: AGENT_ID,
+      caseId: CASES[0].id,
+      name: "客户续约",
+      input: { input: "生成新版续约方案" },
+      expectations: [
+        { path: "outputs.review", operator: "exists" },
+        { path: "", operator: "contains", value: "新版续约" },
+      ],
+    }));
+    expect(refreshMock).toHaveBeenCalledOnce();
   });
 });
