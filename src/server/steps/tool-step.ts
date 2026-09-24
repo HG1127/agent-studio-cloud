@@ -65,10 +65,13 @@ export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Re
   } else {
     const registration = getToolRegistration(tool.registryToolId);
     if (!registration) return reject(`步骤「${node.title}」绑定的业务工具未在服务端配置`);
+    const requestPayload = { action: tool.action || registration.action, input: args.input, outputs: args.outputs };
+    const inputSchemaError = validateJsonObjectSchema(requestPayload, tool.inputSchema);
+    if (inputSchemaError) return reject(`工具输入不符合字段契约：${inputSchemaError}`);
     const invoked = await invokeHttpTool({
       tool: registration,
       idempotencyKey: `${args.runId}:${node.id}`,
-      action: tool.action || registration.action,
+      action: requestPayload.action,
       input: args.input,
       outputs: args.outputs,
     });

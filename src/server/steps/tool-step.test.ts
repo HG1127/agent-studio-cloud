@@ -50,6 +50,25 @@ describe("真实工具步骤", () => {
     expect(mocks.persistStep).toHaveBeenLastCalledWith(expect.objectContaining({ status: "failed" }));
   });
 
+  it("调用前拒绝不符合冻结输入契约的数据", async () => {
+    const strictNode = WorkflowNode.parse({
+      ...node,
+      tool: {
+        ...node.tool!,
+        inputSchema: {
+          type: "object",
+          required: ["input"],
+          properties: {
+            input: { type: "object", required: ["customerId"], properties: { customerId: { type: "string" } } },
+          },
+        },
+      },
+    });
+    await expect(runToolStep({ runId: "run-1", node: strictNode, input: {}, outputs: {} }))
+      .rejects.toThrow("工具输入不符合字段契约");
+    expect(mocks.invokeHttpTool).not.toHaveBeenCalled();
+  });
+
   it("保留外部系统瞬时失败的可重试语义", async () => {
     mocks.invokeHttpTool.mockResolvedValue({ ok: false, error: "业务系统暂时不可用，稍后自动重试", retryable: true });
     await expect(runToolStep({ runId: "run-1", node, input: {}, outputs: {} }))

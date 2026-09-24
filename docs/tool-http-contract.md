@@ -10,7 +10,7 @@
 - `method`：`POST`、`PUT` 或 `PATCH`，缺省为 `POST`。
 - `headers`：仅服务端使用的鉴权请求头；最多 20 项，禁止换行。
 - `action`、`scope`、`risk`：业务动作、权限范围和风险级别。
-- `inputSchema`、`outputSchema`：受支持的 JSON Schema 子集。回执不符合 `outputSchema` 时，本次步骤失败，不会把坏数据传给后续步骤。
+- `inputSchema`、`outputSchema`：受支持的 JSON Schema 子集。`inputSchema` 校验下面的完整请求 JSON，`outputSchema` 校验业务回执；任一不匹配时本次步骤失败，不会调用业务系统或把坏数据传给后续步骤。
 
 ## 请求
 
