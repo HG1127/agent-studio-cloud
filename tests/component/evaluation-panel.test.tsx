@@ -94,6 +94,21 @@ describe("EvaluationPanel", () => {
     await waitFor(() => expect(startMock).toHaveBeenCalledWith(AGENT_ID));
   });
 
+  it("已有一轮验收运行时禁止重复启动", () => {
+    render(<EvaluationPanel agentId={AGENT_ID} cases={CASES} runs={[{
+      id: "00000000-0000-4000-8000-000000000035",
+      version: 4,
+      status: "running",
+      totalCount: 1,
+      passedCount: 0,
+      failedCount: 0,
+      startedAt: "2026-09-24T00:00:00.000Z",
+      finishedAt: null,
+      results: [],
+    }]} />);
+    expect(screen.getByRole("button", { name: "验收运行中" })).toBeDisabled();
+  });
+
   it("编辑样例时更新输入和常用断言并保留高级断言", async () => {
     updateMock.mockResolvedValue({ ok: true });
     const cases = [{

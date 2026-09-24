@@ -42,6 +42,7 @@ export function EvaluationPanel({ agentId, cases, archivedCases = [], runs }: {
   const [editingExpectations, setEditingExpectations] = useState<EvaluationExpectation[]>([]);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const evaluationRunning = runs.some((run) => run.status === "running");
 
   useEffect(() => {
     if (!runs.some((run) => run.status === "running")) return;
@@ -137,9 +138,9 @@ export function EvaluationPanel({ agentId, cases, archivedCases = [], runs }: {
           <h2 className="text-sm font-semibold">自动验收</h2>
           <p className="mt-1 text-xs text-gray-500">优先验证待验收版本；全部通过后自动上线。没有待验收版本时验证当前版本。</p>
         </div>
-        <button type="button" disabled={pending || cases.length === 0} onClick={startEvaluation}
+        <button type="button" disabled={pending || cases.length === 0 || evaluationRunning} onClick={startEvaluation}
           className="rounded-md bg-violet-700 px-3 py-2 text-sm text-white hover:bg-violet-600 disabled:bg-gray-300">
-          {pending ? "正在处理…" : "运行全部样例"}
+          {pending ? "正在处理…" : evaluationRunning ? "验收运行中" : "运行全部样例"}
         </button>
       </div>
       {error ? <p role="alert" className="rounded-md bg-red-50 p-2 text-sm text-red-700">{error}</p> : null}

@@ -93,6 +93,16 @@ export async function setEvaluationCaseArchivedAction(input: unknown): Promise<E
 
 export async function startEvaluationAction(agentId: string): Promise<EvaluationActionResult> {
   if (!z.string().uuid().safeParse(agentId).success) return { ok: false, error: "助手信息不正确" };
+  const [runningEvaluation] = await db
+    .select({ id: evaluationRuns.id })
+    .from(evaluationRuns)
+    .where(and(
+      eq(evaluationRuns.agentId, agentId),
+      eq(evaluationRuns.workspaceId, DEMO_WORKSPACE_ID),
+      eq(evaluationRuns.status, "running"),
+    ))
+    .limit(1);
+  if (runningEvaluation) return { ok: false, error: "这个助手已有一轮自动验收正在运行，请等待完成后再试" };
   const [version] = await db
     .select({ id: agentVersions.id })
     .from(agentVersions)
