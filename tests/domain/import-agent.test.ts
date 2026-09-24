@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AgentManifest } from "@/contracts/manifest";
 import { WorkflowDraft } from "@/contracts/workflow";
-import { normalizeAgentImport } from "@/server/domain/import-agent";
+import { importedCollaborationKeys, normalizeAgentImport, rebindImportedWorkflow } from "@/server/domain/import-agent";
 
 const workflow = WorkflowDraft.parse({
   id: "workflow-import",
@@ -55,5 +55,29 @@ describe("助手导入格式归一化", () => {
 
   it("拒绝未知文件格式", () => {
     expect(normalizeAgentImport({ format: "unknown", formatVersion: 1 })).toBeNull();
+  });
+
+  it("导入副本重绑定根助手并清理当前工作区不存在的协作引用", () => {
+    const withCollaboration = WorkflowDraft.parse({
+      ...workflow,
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "call" },
+        call: { id: "call", title: "协作", type: "agent_call", next: "handoff", agentCall: { targetAgentId: "target-a", versionId: "version-a", workflowId: "version-a" } },
+        handoff: { id: "handoff", title: "交接", type: "handoff", next: "done", toAgent: { id: "target-b", versionId: "version-b" }, contract: { deliverables: ["结果"], mustNotInclude: ["密钥"], inputSchema: [], outputSchema: [] } },
+        done: { id: "done", title: "结束", type: "end" },
+      },
+    });
+    expect(importedCollaborationKeys(withCollaboration)).toEqual(["target-a:version-a", "target-b:version-b"]);
+
+    const rebound = rebindImportedWorkflow({
+      workflow: withCollaboration,
+      agentId: "new-agent",
+      agentName: "导入副本",
+      validCollaborationKeys: new Set(["target-a:version-a"]),
+    });
+    expect(rebound).toMatchObject({ versionId: null, rootAgent: { id: "new-agent", name: "导入副本" } });
+    expect(rebound.nodes.call.agentCall).toMatchObject({ targetAgentId: "target-a", versionId: "version-a" });
+    expect(rebound.nodes.handoff.toAgent).toEqual({ id: "", versionId: "" });
+    expect(rebound.nodes.handoff.contract).toBeUndefined();
   });
 });
