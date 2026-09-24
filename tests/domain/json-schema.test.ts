@@ -37,4 +37,28 @@ describe("外部消息字段校验", () => {
 
     expect(validateJsonObjectSchema(nestedPayload, nestedSchema)).toContain("字段结构层级超过 8 层");
   });
+
+  it("执行文字长度、格式、数值范围、数组数量和禁止多余字段约束", () => {
+    const constrained = {
+      type: "object",
+      additionalProperties: false,
+      required: ["code", "score", "tags"],
+      properties: {
+        code: { type: "string", minLength: 3, maxLength: 5, pattern: "^[A-Z]+$" },
+        score: { type: "number", minimum: 0, exclusiveMaximum: 100 },
+        tags: { type: "array", minItems: 1, maxItems: 2, items: { type: "string" } },
+      },
+    };
+    expect(validateJsonObjectSchema({ code: "ABC", score: 99, tags: ["重点"] }, constrained)).toBeNull();
+    expect(validateJsonObjectSchema({ code: "ab", score: 99, tags: ["重点"] }, constrained)).toContain("长度不能少于");
+    expect(validateJsonObjectSchema({ code: "ABC", score: 100, tags: ["重点"] }, constrained)).toContain("必须小于 100");
+    expect(validateJsonObjectSchema({ code: "ABC", score: 99, tags: [] }, constrained)).toContain("至少需要 1 项");
+    expect(validateJsonObjectSchema({ code: "ABC", score: 99, tags: ["重点"], extra: true }, constrained)).toContain("extra不是允许的字段");
+  });
+
+  it("拒绝不支持或格式错误的契约规则", () => {
+    expect(validateJsonObjectSchema({}, { type: "object", allOf: [] })).toContain("暂不支持的规则“allOf”");
+    expect(validateJsonObjectSchema({}, { type: "object", properties: { code: { type: "string", pattern: "[" } } })).toContain("不是有效正则表达式");
+    expect(validateJsonObjectSchema({}, { type: "object", maxProperties: -1 })).toContain("必须是非负整数");
+  });
 });
