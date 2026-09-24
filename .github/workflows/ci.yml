@@ -55,7 +55,7 @@ jobs:
         # 锁 @5 major：v5 会静默吞未知 flag，不锁则未来升级可能静默破坏调用参数
         run: |
           npx --yes neonctl@5 branches create --name ci-${{ github.run_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --api-key "$NEON_API_KEY" --output json > /dev/null
-          BRANCH_URL=$(npx --yes neonctl@5 connection-string ci-${{ github.run_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --api-key "$NEON_API_KEY")
+          BRANCH_URL=$(npx --yes neonctl@5 connection-string ci-${{ github.run_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --database-name neondb --role-name neondb_owner --api-key "$NEON_API_KEY")
           if [[ "$BRANCH_URL" != postgres://* && "$BRANCH_URL" != postgresql://* ]]; then
             echo "::error::Neon 临时分支未返回有效连接串"
             exit 1
