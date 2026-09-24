@@ -11,6 +11,7 @@ export interface EvaluateConditionInput {
   node: WorkflowNode;
   outputs: Record<string, unknown>;
   input: Record<string, unknown>;
+  currentItem?: unknown;
 }
 
 export async function evaluateCondition(args: EvaluateConditionInput): Promise<string | null> {
@@ -53,7 +54,7 @@ export async function evaluateCondition(args: EvaluateConditionInput): Promise<s
   if (!condition) {
     return reject(`步骤「${node.title}」缺少条件配置，无法继续`);
   }
-  const ctx: RunEvalContext = { input: args.input, variables: {}, context: { outputs: args.outputs } };
+  const ctx: RunEvalContext = { input: args.input, variables: {}, context: { outputs: args.outputs, currentItem: args.currentItem } };
   const actual = resolvePath(condition.source ?? "", ctx);
   let nextId = condition.defaultNext ?? null;
   let matchedLabel: string | null = null;
