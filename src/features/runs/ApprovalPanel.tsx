@@ -83,7 +83,7 @@ function ApprovalForm({
   onDecide: (decision: "approved" | "rejected", note: string) => Promise<void>;
 }) {
   const [note, setNote] = useState("");
-  const reviewable = review ? presentBusinessOutput(review.content).reviewable : false;
+  const reviewable = review ? presentBusinessOutput(review.content).reviewable : true;
 
   return (
     <section className="flex flex-col gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4">
@@ -93,7 +93,7 @@ function ApprovalForm({
       </p>
       <p className="text-sm text-gray-700">{reason}</p>
       <ReviewContent review={review} />
-      {reviewable ? (
+      {review && reviewable ? (
         <p className="text-xs text-amber-900">确认前请核对草稿中的事实和适用条件。</p>
       ) : null}
       <label className="flex flex-col gap-1 text-sm text-gray-700">
