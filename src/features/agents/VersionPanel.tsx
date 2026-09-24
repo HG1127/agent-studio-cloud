@@ -46,6 +46,7 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
             : version.status,
       })),
   ], versions);
+  const currentVersion = displayedVersions.find((version) => version.status === "production");
 
   async function handlePublish() {
     setPending(true);
@@ -169,6 +170,10 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
               <span className="text-gray-500">{formatTime(version.createdAt)}</span>
               <a href={`/api/agents/${agentId}/versions/${version.id}/export`} download
                 className="text-xs text-blue-700 hover:underline">下载此版本</a>
+              {currentVersion && currentVersion.id !== version.id ? (
+                <a href={`/agents/${agentId}/versions/compare?from=${version.id}&to=${currentVersion.id}`}
+                  className="text-xs text-blue-700 hover:underline">与当前版本对比</a>
+              ) : null}
               {version.status === "retired" ? (
                 <button
                   type="button"

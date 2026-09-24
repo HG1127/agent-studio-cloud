@@ -52,6 +52,10 @@ describe("VersionPanel", () => {
       "href",
       `/api/agents/${AGENT_ID}/versions/${VERSIONS[0].id}/export`,
     );
+    expect(screen.getByRole("link", { name: "与当前版本对比" })).toHaveAttribute(
+      "href",
+      `/agents/${AGENT_ID}/versions/compare?from=${VERSIONS[1].id}&to=${VERSIONS[0].id}`,
+    );
     expect(screen.getAllByText(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)).toHaveLength(2);
   });
 

@@ -109,7 +109,7 @@ describe("知识库列表", () => {
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup({ applyAccept: false });
     const { container } = render(<UploadSourceForm />);
-    const input = container.querySelector('input[type="file"]')!;
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
     await user.upload(input, new window.File(["内容"], "资料.exe", { type: "application/octet-stream" }));
     await user.click(screen.getByRole("button", { name: "上传文档" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("暂不支持这种文件类型");

@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { VersionSummary } from "@/contracts/version";
 import { agents, agentVersions } from "@/db/schema";
@@ -46,4 +46,32 @@ export async function getVersionExportSource(agentId: string, versionId: string,
     ))
     .limit(1);
   return row ?? null;
+}
+
+export async function getVersionComparisonSource(agentId: string, versionIds: [string, string], workspaceId: string) {
+  const uuid = z.string().uuid();
+  if (!uuid.safeParse(agentId).success || versionIds.some((id) => !uuid.safeParse(id).success) || versionIds[0] === versionIds[1]) {
+    return null;
+  }
+  const rows = await db
+    .select({
+      id: agentVersions.id,
+      agentName: agents.name,
+      version: agentVersions.version,
+      status: agentVersions.status,
+      manifest: agentVersions.manifest,
+    })
+    .from(agentVersions)
+    .innerJoin(agents, eq(agents.id, agentVersions.agentId))
+    .where(and(
+      eq(agentVersions.agentId, agentId),
+      inArray(agentVersions.id, versionIds),
+      eq(agentVersions.workspaceId, workspaceId),
+      eq(agents.workspaceId, workspaceId),
+    ));
+  if (rows.length !== 2) return null;
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const before = byId.get(versionIds[0]);
+  const after = byId.get(versionIds[1]);
+  return before && after ? { agentName: before.agentName, before, after } : null;
 }
