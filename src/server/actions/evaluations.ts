@@ -1,6 +1,6 @@
 "use server";
 
-import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import {
@@ -9,10 +9,11 @@ import {
   EvaluationCaseUpdateInput,
   type EvaluationActionResult,
 } from "@/contracts/evaluation";
-import { agentVersions, agents, evaluationCaseResults, evaluationCases, evaluationRuns } from "@/db/schema";
+import { agents, evaluationCaseResults, evaluationCases } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { markEvaluationStartFailure } from "@/server/services/evaluation-state";
+import { prepareEvaluationRun } from "@/server/services/evaluation-start";
 import { startRunCore } from "@/server/services/start-run-core";
 
 export async function createEvaluationCaseAction(input: unknown): Promise<EvaluationActionResult> {
@@ -93,74 +94,34 @@ export async function setEvaluationCaseArchivedAction(input: unknown): Promise<E
 
 export async function startEvaluationAction(agentId: string): Promise<EvaluationActionResult> {
   if (!z.string().uuid().safeParse(agentId).success) return { ok: false, error: "助手信息不正确" };
-  const [runningEvaluation] = await db
-    .select({ id: evaluationRuns.id })
-    .from(evaluationRuns)
-    .where(and(
-      eq(evaluationRuns.agentId, agentId),
-      eq(evaluationRuns.workspaceId, DEMO_WORKSPACE_ID),
-      eq(evaluationRuns.status, "running"),
-    ))
-    .limit(1);
-  if (runningEvaluation) return { ok: false, error: "这个助手已有一轮自动验收正在运行，请等待完成后再试" };
-  const [version] = await db
-    .select({ id: agentVersions.id })
-    .from(agentVersions)
-    .innerJoin(agents, eq(agents.id, agentVersions.agentId))
-    .where(and(
-      eq(agentVersions.agentId, agentId),
-      eq(agentVersions.workspaceId, DEMO_WORKSPACE_ID),
-      inArray(agentVersions.status, ["candidate", "production"]),
-      isNull(agents.archivedAt),
-    ))
-    .orderBy(desc(agentVersions.version))
-    .limit(1);
-  if (!version) return { ok: false, error: "请先发布一个待验收版本" };
-  const cases = await db
-    .select({ id: evaluationCases.id, input: evaluationCases.input })
-    .from(evaluationCases)
-    .where(and(
-      eq(evaluationCases.agentId, agentId),
-      eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID),
-      isNull(evaluationCases.archivedAt),
-    ));
-  if (cases.length === 0) return { ok: false, error: "请先添加至少一条验收样例" };
-  const [evaluation] = await db.insert(evaluationRuns).values({
-    workspaceId: DEMO_WORKSPACE_ID,
-    createdBy: DEMO_USER_ID,
-    agentId,
-    versionId: version.id,
-    status: "running",
-    totalCount: cases.length,
-  }).returning({ id: evaluationRuns.id });
-  await db.insert(evaluationCaseResults).values(cases.map((testCase) => ({
-    workspaceId: DEMO_WORKSPACE_ID,
-    createdBy: DEMO_USER_ID,
-    evaluationRunId: evaluation.id,
-    evaluationCaseId: testCase.id,
-    status: "running",
-  })));
-  for (const testCase of cases) {
-    const started = await startRunCore({
-      agentId,
-      versionId: version.id,
-      input: testCase.input,
-      sourceType: "evaluation",
-      sourceKey: `evaluation:${evaluation.id}:${testCase.id}`,
-    });
-    if (started.ok) {
-      await db
-        .update(evaluationCaseResults)
-        .set({ runId: started.runId, updatedAt: new Date() })
-        .where(and(
-          eq(evaluationCaseResults.evaluationRunId, evaluation.id),
-          eq(evaluationCaseResults.evaluationCaseId, testCase.id),
-        ));
-    } else {
-      await markEvaluationStartFailure(evaluation.id, testCase.id, started.error);
+  try {
+    const prepared = await prepareEvaluationRun(agentId);
+    if (!prepared.ok) return prepared;
+    for (const testCase of prepared.cases) {
+      const started = await startRunCore({
+        agentId,
+        versionId: prepared.versionId,
+        input: testCase.input,
+        sourceType: "evaluation",
+        sourceKey: `evaluation:${prepared.evaluationId}:${testCase.id}`,
+      });
+      if (started.ok) {
+        await db
+          .update(evaluationCaseResults)
+          .set({ runId: started.runId, updatedAt: new Date() })
+          .where(and(
+            eq(evaluationCaseResults.evaluationRunId, prepared.evaluationId),
+            eq(evaluationCaseResults.evaluationCaseId, testCase.id),
+          ));
+      } else {
+        await markEvaluationStartFailure(prepared.evaluationId, testCase.id, started.error);
+      }
     }
+    revalidatePath(`/agents/${agentId}`);
+    revalidatePath("/runs");
+    return { ok: true };
+  } catch (error) {
+    console.error("启动自动验收失败", error);
+    return { ok: false, error: "启动自动验收失败，请稍后重试" };
   }
-  revalidatePath(`/agents/${agentId}`);
-  revalidatePath("/runs");
-  return { ok: true };
 }

@@ -1,0 +1,69 @@
+import { eq } from "drizzle-orm";
+import { afterEach, describe, expect, it } from "vitest";
+import { AgentManifest } from "@/contracts/manifest";
+
+import { agentVersions, agents, evaluationCaseResults, evaluationCases, evaluationRuns } from "@/db/schema";
+import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
+import { db } from "@/lib/db";
+import { prepareEvaluationRun } from "@/server/services/evaluation-start";
+
+const AGENT_ID = "00000000-0000-4000-8000-0000000000a1";
+const VERSION_ID = "00000000-0000-4000-8000-0000000000a2";
+
+const manifest = AgentManifest.parse({
+  schemaVersion: "4.0",
+  workflowFingerprint: "evaluation-concurrency",
+  workflowSnapshot: {
+    id: "workflow", versionId: null, startNodeId: "start",
+    rootAgent: { id: "agent", name: "并发验收助手", role: "owner" },
+    nodes: {
+      start: { id: "start", title: "开始", type: "trigger", next: "end", requirementIds: [], businessSpec: null },
+      end: { id: "end", title: "结束", type: "end", next: null, requirementIds: [], businessSpec: null },
+    },
+    variables: [], memoryPolicy: { taskContext: true, longTerm: false }, outputContract: { fields: [] }, ui: { positions: {} },
+  },
+  inputContract: { fields: [] }, outputContract: { fields: [] },
+  resourceSelection: { model: { modelId: "mock", mock: true, connectionId: null } },
+  designAudit: { status: "passed", issueCount: 0, criticalCount: 0 }, knowledgeSnapshot: [],
+});
+
+afterEach(async () => {
+  const evaluations = await db.select({ id: evaluationRuns.id }).from(evaluationRuns).where(eq(evaluationRuns.agentId, AGENT_ID));
+  for (const evaluation of evaluations) {
+    await db.delete(evaluationCaseResults).where(eq(evaluationCaseResults.evaluationRunId, evaluation.id));
+  }
+  await db.delete(evaluationRuns).where(eq(evaluationRuns.agentId, AGENT_ID));
+  await db.delete(evaluationCases).where(eq(evaluationCases.agentId, AGENT_ID));
+  await db.delete(agentVersions).where(eq(agentVersions.agentId, AGENT_ID));
+  await db.delete(agents).where(eq(agents.id, AGENT_ID));
+});
+
+async function insertFixture() {
+  await db.insert(agents).values({
+    id: AGENT_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID,
+    name: "并发验收助手", intentText: "验证自动验收只会启动一次",
+  });
+  await db.insert(agentVersions).values({
+    id: VERSION_ID, agentId: AGENT_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID,
+    version: 1, status: "candidate", manifest,
+  });
+  await db.insert(evaluationCases).values({
+    workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, agentId: AGENT_ID,
+    name: "基础样例", input: {}, expectations: [],
+  });
+}
+
+describe("自动验收并发启动", () => {
+  it("同一助手同时发起两次时只创建一轮验收", async () => {
+    await insertFixture();
+    const results = await Promise.all([prepareEvaluationRun(AGENT_ID), prepareEvaluationRun(AGENT_ID)]);
+
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    expect(results.find((result) => !result.ok)).toEqual({
+      ok: false,
+      error: "这个助手已有一轮自动验收正在运行，请等待完成后再试",
+    });
+    const active = await db.select().from(evaluationRuns).where(eq(evaluationRuns.agentId, AGENT_ID));
+    expect(active).toHaveLength(1);
+  });
+});
