@@ -37,8 +37,12 @@ describe("创建助手管道 buildAgentDraft", () => {
     expect(result.draft?.businessGrounding).toBeTruthy();
     expect(Array.isArray(result.issues)).toBe(true);
     expect(result.diagnostics.error).toBeUndefined();
-    // M1 演示绑定后 business_source_unresolved 消失（见下条用例说明），剩余 2 个 critical 全在发布豁免清单内
-    expect(result.diagnostics.audit).toMatchObject({ status: "blocked", counts: { critical: 2 } });
+    // 创建期已经补齐最终交付契约；剩余关键问题仅允许是明确控制节点的业务审计误报。
+    expect(result.draft?.outputContract?.fields.length).toBeGreaterThan(0);
+    expect(result.diagnostics.audit).toMatchObject({ status: "blocked", counts: { critical: 1 } });
+    expect(result.issues.filter((issue) => issue.severity === "critical").every((issue) =>
+      issue.code === "meta_node_detected" && result.draft?.nodes[issue.nodeId ?? ""]?.ui?.visibility === "control",
+    )).toBe(true);
     expect(() => WorkflowDraft.parse(result.draft)).not.toThrow();
   });
 

@@ -132,7 +132,7 @@ describe("buildManifest", () => {
   });
 });
 
-// filterPublishBlockers（M1 演示发布策略）用例：issues/draft 均为手造最小结构，只裁决 code 与
+// filterPublishBlockers 用例：issues/draft 均为手造最小结构，只裁决 code 与
 // nodeId 指向节点的 control 身份，与具体草稿内容解耦
 function blockerIssue(code: string, nodeId: string | null, overrides: Partial<AuditIssue> = {}): AuditIssue {
   return {
@@ -162,8 +162,8 @@ const blockerDraft: WorkflowDraftType = WorkflowDraft.parse({
   memoryPolicy: { taskContext: true, longTerm: false },
 });
 
-describe("filterPublishBlockers（M1 演示发布策略）", () => {
-  it("演示豁免码进 exempted；business_source_unresolved 与 dead_end 留在 blocking", () => {
+describe("filterPublishBlockers", () => {
+  it("只豁免明确的控制节点误报，其余关键缺口全部阻止发布", () => {
     const issues = [
       blockerIssue("output_contract_missing", null),
       blockerIssue("end_without_delivery", "finish"),
@@ -172,8 +172,10 @@ describe("filterPublishBlockers（M1 演示发布策略）", () => {
       blockerIssue("dead_end", "biz"),
     ];
     const { blocking, exempted } = filterPublishBlockers(issues, blockerDraft);
-    expect(exempted.map((issue) => issue.code)).toEqual(["output_contract_missing", "end_without_delivery", "meta_node_detected"]);
-    expect(blocking.map((issue) => issue.code)).toEqual(["business_source_unresolved", "dead_end"]);
+    expect(exempted.map((issue) => issue.code)).toEqual(["meta_node_detected"]);
+    expect(blocking.map((issue) => issue.code)).toEqual([
+      "output_contract_missing", "end_without_delivery", "business_source_unresolved", "dead_end",
+    ]);
   });
 
   it("业务节点的 meta_node_detected 不豁免；nodeId 缺失或指向未知节点也不豁免", () => {

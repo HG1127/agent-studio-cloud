@@ -186,13 +186,16 @@ function safeFixIssue(draft: WorkflowDraft, issue: AuditIssue, applied: string[]
   skipped.push(issue.title);
 }
 
-export function applySafeAuditFixes(input: WorkflowDraft): SafeAuditFixResult {
+export function applySafeAuditFixes(input: WorkflowDraft, options: { codes?: ReadonlySet<string> } = {}): SafeAuditFixResult {
   const draft = structuredClone(input);
   const applied: string[] = [];
   const skipped: string[] = [];
   const processed = new Set<string>();
   for (let pass = 0; pass < 3; pass += 1) {
-    const issues = auditWorkflow(draft).issues.filter((item) => item.fixable && !processed.has(`${item.code}:${item.nodeId ?? "workflow"}`));
+    const issues = auditWorkflow(draft).issues.filter((item) =>
+      item.fixable
+      && (!options.codes || options.codes.has(item.code))
+      && !processed.has(`${item.code}:${item.nodeId ?? "workflow"}`));
     if (issues.length === 0) break;
     for (const issue of issues) {
       processed.add(`${issue.code}:${issue.nodeId ?? "workflow"}`);

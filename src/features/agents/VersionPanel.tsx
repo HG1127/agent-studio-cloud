@@ -167,7 +167,7 @@ export function VersionPanel({
       ) : null}
       {demoNotice ? (
         <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
-          <p>已发布。演示期提醒：还有 {demoNotice.length} 个设计检查问题待处理</p>
+          <p>已发布。还有 {demoNotice.length} 个控制面检查提醒</p>
           <ul className="mt-2 list-disc space-y-1 pl-5">
             {demoNotice.map((title, index) => (
               <li key={index}>{title}</li>

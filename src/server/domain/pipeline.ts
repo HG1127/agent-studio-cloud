@@ -8,6 +8,7 @@ import { WorkflowDraft } from "@/contracts/workflow";
 import { attachComplexIntentContract, compileIntentWorkflow, type IntentStep } from "@/server/domain/intent";
 import { groundBusinessWorkflow } from "@/server/domain/grounding";
 import { auditWorkflow, type AuditIssue, type DesignAuditResult } from "@/server/domain/audit";
+import { applySafeAuditFixes } from "@/server/domain/audit/safe-audit-fixes";
 
 export interface AgentDraftAuditSummary {
   status: DesignAuditResult["status"];
@@ -53,7 +54,10 @@ export function finalizeAgentDraft(params: {
     });
     const enriched = attachComplexIntentContract(grounded, intent, intentText);
     // parse 在此补全默认值并把形状收敛到契约——入库与后续画布都消费契约形状，不落原始结构
-    const draft = WorkflowDraft.parse(enriched);
+    const parsedDraft = WorkflowDraft.parse(enriched);
+    const draft = applySafeAuditFixes(parsedDraft, {
+      codes: new Set(["output_contract_missing", "end_without_delivery"]),
+    }).draft;
     const audit = auditWorkflow(draft);
     return {
       draft,
@@ -97,11 +101,9 @@ export function bindDemoCapabilities(workflow: WorkflowDraft): void {
   requirements.unresolvedTools = [];
 }
 
-// M1 演示发布策略（蓝图问答/自动修复在 M2 上线后移除本豁免）：编译产物必然携带的三类
-// 「设计检查」阻塞（输出契约缺失、结束前未交付、控制节点标题误标）在演示期放行；
-// 数据来源未落实（business_source_unresolved）与流程死路（dead_end）照常拦截——
-// 来源未落实的版本发布了也无法运行，豁免只会误导。
-const DEMO_EXEMPT_CODES: ReadonlySet<string> = new Set(["output_contract_missing", "end_without_delivery", "meta_node_detected"]);
+// 控制面节点可能因标题像目标声明而被业务审计误报；仅对明确隐藏的控制节点豁免。
+// 最终交付物与结束前交付步骤已有确定性自动补全，不再允许带着这两类关键缺口发布。
+const PUBLISH_EXEMPT_CODES: ReadonlySet<string> = new Set(["meta_node_detected"]);
 
 function isControlDraftNode(nodeId: string | null, draft: WorkflowDraft): boolean {
   if (!nodeId) return false;
@@ -115,7 +117,7 @@ export function filterPublishBlockers(issues: AuditIssue[], draft: WorkflowDraft
   for (const issue of issues) {
     // 只有 critical 参与裁决：warning/info 本就不拦发布，也不进豁免提醒
     if (issue.severity !== "critical") continue;
-    const exempt = DEMO_EXEMPT_CODES.has(issue.code) && (issue.code !== "meta_node_detected" || isControlDraftNode(issue.nodeId, draft));
+    const exempt = PUBLISH_EXEMPT_CODES.has(issue.code) && isControlDraftNode(issue.nodeId, draft);
     (exempt ? exempted : blocking).push(issue);
   }
   return { blocking, exempted };
