@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { EvaluationExpectation } from "@/contracts/evaluation";
 import { evaluateExpectations } from "@/server/domain/evaluation";
 
 describe("评估断言", () => {
@@ -18,5 +19,17 @@ describe("评估断言", () => {
     ]);
     expect(outcome.passed).toBe(false);
     expect(outcome.errors).toEqual(["summary未包含“已发送”", "receipt不存在"]);
+  });
+
+  it("包含检查遇到不存在的字段时返回失败而不是抛出异常", () => {
+    expect(evaluateExpectations({}, [
+      { path: "missing.text", operator: "contains", value: "完成" },
+    ])).toEqual({ passed: false, errors: ["missing.text未包含“完成”"] });
+  });
+
+  it("契约拒绝空的包含预期和缺省的等于预期", () => {
+    expect(EvaluationExpectation.safeParse({ path: "result", operator: "contains", value: " " }).success).toBe(false);
+    expect(EvaluationExpectation.safeParse({ path: "result", operator: "equals" }).success).toBe(false);
+    expect(EvaluationExpectation.safeParse({ path: "result", operator: "exists" }).success).toBe(true);
   });
 });

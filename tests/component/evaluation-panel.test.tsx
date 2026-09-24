@@ -165,6 +165,19 @@ describe("EvaluationPanel", () => {
     }));
   });
 
+  it("包含检查未填写预期文字时阻止保存", async () => {
+    const user = userEvent.setup();
+    render(<EvaluationPanel agentId={AGENT_ID} cases={[]} runs={[]} />);
+    await user.type(screen.getByLabelText("样例名称"), "空条件样例");
+    await user.click(screen.getByText("字段检查（0）"));
+    await user.click(screen.getByRole("button", { name: "添加字段检查" }));
+    await user.type(screen.getByLabelText("字段检查 1 路径"), "result");
+    await user.selectOptions(screen.getByLabelText("字段检查 1 方式"), "contains");
+    await user.click(screen.getByRole("button", { name: "添加样例" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("包含检查必须填写预期文字");
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
   it("可以归档并恢复验收样例", async () => {
     archiveMock.mockResolvedValue({ ok: true });
     const user = userEvent.setup();

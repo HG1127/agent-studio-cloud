@@ -4,6 +4,13 @@ export const EvaluationExpectation = z.object({
   path: z.string().default(""),
   operator: z.enum(["equals", "contains", "exists"]),
   value: z.unknown().optional(),
+}).superRefine((expectation, context) => {
+  if (expectation.operator === "contains" && (typeof expectation.value !== "string" || !expectation.value.trim())) {
+    context.addIssue({ code: "custom", path: ["value"], message: "包含检查必须填写预期文字" });
+  }
+  if (expectation.operator === "equals" && !("value" in expectation)) {
+    context.addIssue({ code: "custom", path: ["value"], message: "等于检查必须填写预期值" });
+  }
 });
 export type EvaluationExpectation = z.infer<typeof EvaluationExpectation>;
 

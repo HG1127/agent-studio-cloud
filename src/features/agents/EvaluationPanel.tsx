@@ -106,6 +106,10 @@ export function EvaluationPanel({ agentId, cases, archivedCases = [], runs }: {
       setError("字段检查必须填写结果字段路径");
       return;
     }
+    if (advancedExpectations.some((expectation) => expectation.operator === "contains" && !expectation.valueText.trim())) {
+      setError("包含检查必须填写预期文字");
+      return;
+    }
     setPending(true);
     try {
       const payload = {

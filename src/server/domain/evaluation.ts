@@ -23,7 +23,7 @@ export function evaluateExpectations(
       if (JSON.stringify(actual) !== JSON.stringify(expectation.value)) errors.push(`${expectation.path || "结果"}与预期不一致`);
       continue;
     }
-    const text = typeof actual === "string" ? actual : JSON.stringify(actual);
+    const text = typeof actual === "string" ? actual : (JSON.stringify(actual) ?? "");
     if (!text.includes(String(expectation.value ?? ""))) errors.push(`${expectation.path || "结果"}未包含“${String(expectation.value ?? "")}”`);
   }
   return { passed: errors.length === 0, errors };
