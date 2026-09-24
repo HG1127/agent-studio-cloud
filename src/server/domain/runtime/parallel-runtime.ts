@@ -1,4 +1,4 @@
-import { WorkflowNode, type ParallelBranch } from "@/contracts/workflow";
+import { MAX_PARALLEL_BRANCHES, MAX_PARALLEL_STEPS, WorkflowNode, type ParallelBranch } from "@/contracts/workflow";
 
 const SUPPORTED_INLINE_TYPES = new Set(["ai", "tool", "knowledge", "system", "memory", "agent_call", "handoff"]);
 
@@ -30,11 +30,17 @@ export function prepareParallelBranches(node: WorkflowNode): PreparedParallel {
   if (!parallel || parallel.branches.length < 2) {
     return { ok: false, error: `步骤「${node.title}」至少需要两项并行工作` };
   }
+  if (parallel.branches.length > MAX_PARALLEL_BRANCHES) {
+    return { ok: false, error: `步骤「${node.title}」最多允许 ${MAX_PARALLEL_BRANCHES} 项并行工作` };
+  }
   const ids = new Set<string>();
   const branches: PreparedParallelBranch[] = [];
   for (const branch of parallel.branches) {
     if (ids.has(branch.id)) return { ok: false, error: `步骤「${node.title}」存在重复的并行工作标识` };
     ids.add(branch.id);
+    if (branch.steps.length > MAX_PARALLEL_STEPS) {
+      return { ok: false, error: `并行工作「${branch.label}」最多允许 ${MAX_PARALLEL_STEPS} 个步骤` };
+    }
     const steps: WorkflowNode[] = [];
     for (const [stepIndex, raw] of branch.steps.entries()) {
       const parsed = WorkflowNode.safeParse({

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { WorkflowNode } from "@/contracts/workflow";
+import { MAX_PARALLEL_BRANCHES, MAX_PARALLEL_STEPS, WorkflowNode } from "@/contracts/workflow";
 import { prepareParallelBranches, resolveParallelOutcome } from "@/server/domain/runtime/parallel-runtime";
 
 function parallelNode(overrides: Record<string, unknown> = {}) {
@@ -92,5 +92,17 @@ describe("并行分支运行准备", () => {
       },
     });
     expect(prepareParallelBranches(node)).toMatchObject({ ok: true });
+  });
+
+  it("即使旧版本绕过新契约也拒绝过量并发和过长分支", () => {
+    const tooManyBranches = parallelNode();
+    tooManyBranches.parallel!.branches = Array.from({ length: MAX_PARALLEL_BRANCHES + 1 }, (_, index) => ({
+      id: `branch_${index}`, label: `工作 ${index}`, inputs: [], outputs: [], steps: [{ id: "step", title: "处理", type: "ai" }],
+    }));
+    expect(prepareParallelBranches(tooManyBranches)).toMatchObject({ ok: false, error: expect.stringContaining("最多允许") });
+
+    const tooManySteps = parallelNode();
+    tooManySteps.parallel!.branches[0].steps = Array.from({ length: MAX_PARALLEL_STEPS + 1 }, (_, index) => ({ id: `step_${index}`, title: `步骤 ${index}`, type: "ai" }));
+    expect(prepareParallelBranches(tooManySteps)).toMatchObject({ ok: false, error: expect.stringContaining("最多允许") });
   });
 });

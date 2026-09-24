@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { WorkflowDraft } from "@/contracts/workflow";
+import {
+  MAX_CONDITION_BRANCHES,
+  MAX_PARALLEL_BRANCHES,
+  MAX_WORKFLOW_NODES,
+  WorkflowDraft,
+  WorkflowNode,
+} from "@/contracts/workflow";
 
 const baseDraft = {
   id: "wf_1",
@@ -36,5 +42,23 @@ describe("WorkflowDraft", () => {
   it("ui 内层缺 positions 时同样得到空对象默认值", () => {
     const result = WorkflowDraft.parse({ ...baseDraft, ui: {} });
     expect(result.ui).toEqual({ positions: {} });
+  });
+  it("限制流程总步骤数、条件分支和并行工作数量", () => {
+    const nodes = Object.fromEntries(Array.from({ length: MAX_WORKFLOW_NODES + 1 }, (_, index) => [
+      `node_${index}`,
+      { id: `node_${index}`, title: `步骤 ${index}`, type: "system" },
+    ]));
+    expect(WorkflowDraft.safeParse({ ...baseDraft, nodes }).success).toBe(false);
+    expect(WorkflowNode.safeParse({
+      id: "condition", title: "判断", type: "condition",
+      condition: { source: "input.value", branches: Array.from({ length: MAX_CONDITION_BRANCHES + 1 }, (_, index) => ({ label: `情况 ${index}`, next: null })) },
+    }).success).toBe(false);
+    expect(WorkflowNode.safeParse({
+      id: "parallel", title: "并行", type: "parallel",
+      parallel: {
+        strategy: "all", failurePolicy: "fail_fast",
+        branches: Array.from({ length: MAX_PARALLEL_BRANCHES + 1 }, (_, index) => ({ id: `branch_${index}`, label: `工作 ${index}`, steps: [{ id: "step", title: "处理", type: "ai" }] })),
+      },
+    }).success).toBe(false);
   });
 });

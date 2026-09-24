@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { WorkflowNode } from "@/contracts/workflow";
+import { MAX_SUBFLOW_STEPS, WorkflowNode } from "@/contracts/workflow";
 import { prepareSubflow } from "@/server/domain/runtime/subflow-runtime";
 
 function subflowNode(steps: Array<Record<string, unknown>>) {
@@ -50,5 +50,11 @@ describe("一组步骤运行准备", () => {
       { id: "handoff", title: "交接助手", type: "handoff", toAgent: { id: "target", versionId: "version" } },
     ]));
     expect(result).toMatchObject({ ok: true });
+  });
+
+  it("即使旧版本绕过新契约也拒绝过长步骤组", () => {
+    const node = subflowNode([{ id: "first", title: "第一步", type: "ai" }]);
+    node.subflow!.steps = Array.from({ length: MAX_SUBFLOW_STEPS + 1 }, (_, index) => ({ id: `step_${index}`, title: `步骤 ${index}`, type: "ai" }));
+    expect(prepareSubflow(node)).toMatchObject({ ok: false, error: expect.stringContaining("最多允许") });
   });
 });

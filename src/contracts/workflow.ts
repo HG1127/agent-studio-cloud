@@ -1,5 +1,12 @@
 import { z } from "zod";
 
+export const MAX_WORKFLOW_NODES = 200;
+export const MAX_CONDITION_BRANCHES = 20;
+export const MAX_PARALLEL_BRANCHES = 8;
+export const MAX_PARALLEL_STEPS = 20;
+export const MAX_SUBFLOW_STEPS = 50;
+export const MAX_WORKFLOW_VARIABLES = 100;
+
 export const WorkflowNodeType = z.enum([
   "trigger", "end", "ai", "human", "tool", "knowledge", "condition",
   "system", "subflow", "loop", "memory", "rule", "parallel", "wait",
@@ -30,7 +37,7 @@ export const ParallelBranch = z.object({
   label: z.string().min(1),
   inputs: z.array(z.string()).default([]),
   outputs: z.array(z.string()).default([]),
-  steps: z.array(z.record(z.string(), z.unknown())).min(1),
+  steps: z.array(z.record(z.string(), z.unknown())).min(1).max(MAX_PARALLEL_STEPS),
 });
 export const HandoffField = z.object({
   name: z.string().min(1),
@@ -77,7 +84,7 @@ export const WorkflowNode = z.object({
   knowledge: z.object({ space: z.string(), query: z.string().optional() }).optional(),
   condition: z.object({
     source: z.string().nullable(), operator: z.string().default("eq"),
-    branches: z.array(ConditionBranch).default([]), defaultNext: z.string().nullable().default(null),
+    branches: z.array(ConditionBranch).max(MAX_CONDITION_BRANCHES).default([]), defaultNext: z.string().nullable().default(null),
   }).optional(),
   system: z.object({ kind: z.string().optional() }).optional(),
   rule: z.object({ kind: z.string(), sourceNodeId: z.string().optional(), requireBusinessReceipt: z.boolean().optional() }).optional(),
@@ -86,10 +93,10 @@ export const WorkflowNode = z.object({
     checkToolReceipts: z.boolean().default(false), checkHumanBoundary: z.boolean().default(false),
   }).optional(),
   loop: z.object({ collectionPath: z.string(), itemKey: z.string(), maxIterations: z.number().int().min(1).max(100), bodyNext: z.string().nullable(), exitNext: z.string().nullable() }).optional(),
-  parallel: z.object({ strategy: z.enum(["all", "any", "all_settled"]), failurePolicy: z.enum(["fail_fast", "continue"]), branches: z.array(ParallelBranch) }).optional(),
+  parallel: z.object({ strategy: z.enum(["all", "any", "all_settled"]), failurePolicy: z.enum(["fail_fast", "continue"]), branches: z.array(ParallelBranch).max(MAX_PARALLEL_BRANCHES) }).optional(),
   wait: z.object({ mode: z.enum(["delay", "until", "event"]), durationMs: z.number().default(0), until: z.string().nullable().default(null), eventKey: z.string(), eventLabel: z.string().optional(), payloadSchema: z.record(z.string(), z.unknown()).default({ type: "object" }), timeoutMs: z.number().default(0), onTimeoutNext: z.string().nullable().default(null) }).optional(),
   memory: z.object({ mode: z.enum(["read", "write"]), query: z.string().optional(), limit: z.number().int().min(1).max(20).optional(), contentFrom: z.string().optional() }).optional(),
-  subflow: z.object({ name: z.string(), steps: z.array(z.record(z.string(), z.unknown())).default([]), inputs: z.array(z.string()).default([]), outputs: z.array(z.string()).default([]), failurePolicy: z.string().optional() }).optional(),
+  subflow: z.object({ name: z.string(), steps: z.array(z.record(z.string(), z.unknown())).max(MAX_SUBFLOW_STEPS).default([]), inputs: z.array(z.string()).default([]), outputs: z.array(z.string()).default([]), failurePolicy: z.string().optional() }).optional(),
   agentCall: z.object({ targetAgentId: z.string(), versionId: z.string(), targetAgentName: z.string().optional(), workflowId: z.string().optional(), memoryAccess: z.object({ mode: z.enum(["self", "team", "none"]) }).optional(), inputContract: z.record(z.string(), z.unknown()).optional(), outputContract: z.record(z.string(), z.unknown()).optional() }).optional(),
   toAgent: z.object({ id: z.string(), name: z.string().optional(), versionId: z.string().optional() }).optional(),
   contract: HandoffContract.optional(),
@@ -99,8 +106,8 @@ export const WorkflowDraft = z.object({
   id: z.string(), versionId: z.string().nullable().default(null),
   startNodeId: z.string().default("start"),
   rootAgent: z.object({ id: z.string(), name: z.string(), role: z.string() }),
-  nodes: z.record(z.string(), WorkflowNode),
-  variables: z.array(WorkflowVariable).default([]),
+  nodes: z.record(z.string(), WorkflowNode).refine((nodes) => Object.keys(nodes).length <= MAX_WORKFLOW_NODES, `流程步骤不能超过 ${MAX_WORKFLOW_NODES} 个`),
+  variables: z.array(WorkflowVariable).max(MAX_WORKFLOW_VARIABLES).default([]),
   memoryPolicy: z.object({ taskContext: z.boolean(), longTerm: z.boolean(), description: z.string().optional() }),
   runtimeRequirements: z.object({ externalTools: z.array(z.unknown()).default([]), unresolvedTools: z.array(z.unknown()).default([]), toolReceiptVerification: z.boolean().default(true) }).optional(),
   intentSource: z.record(z.string(), z.unknown()).optional(),

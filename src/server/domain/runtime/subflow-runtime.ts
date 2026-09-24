@@ -1,4 +1,4 @@
-import { WorkflowNode } from "@/contracts/workflow";
+import { MAX_SUBFLOW_STEPS, WorkflowNode } from "@/contracts/workflow";
 
 const SUPPORTED_INLINE_TYPES = new Set(["ai", "tool", "knowledge", "system", "memory", "agent_call", "handoff"]);
 
@@ -15,6 +15,9 @@ export function prepareSubflow(node: WorkflowNode): PrepareSubflowResult {
   const subflow = node.subflow;
   if (!subflow?.name.trim() || subflow.steps.length === 0) {
     return { ok: false, error: `步骤「${node.title}」的一组步骤配置不完整` };
+  }
+  if (subflow.steps.length > MAX_SUBFLOW_STEPS) {
+    return { ok: false, error: `一组步骤「${subflow.name}」最多允许 ${MAX_SUBFLOW_STEPS} 个步骤` };
   }
   const steps: WorkflowNode[] = [];
   const ids = new Set<string>();

@@ -2,7 +2,13 @@
 
 import { useState } from "react";
 import type { AgentTargetOption } from "@/contracts/agent";
-import type { WorkflowNode } from "@/contracts/workflow";
+import {
+  MAX_CONDITION_BRANCHES,
+  MAX_PARALLEL_BRANCHES,
+  MAX_PARALLEL_STEPS,
+  MAX_SUBFLOW_STEPS,
+  type WorkflowNode,
+} from "@/contracts/workflow";
 import { NODE_TYPE_LABELS } from "./CustomNodes";
 
 interface NodeInspectorProps {
@@ -178,8 +184,8 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
                   className="px-1 text-xs text-red-600">删除</button>
               </div>
             ))}
-            <button type="button" onClick={() => onNodeChange({ ...node, condition: { ...node.condition!, branches: [...node.condition!.branches, { label: `情况 ${node.condition!.branches.length + 1}`, value: "", next: null }] } })}
-              className="w-fit text-xs text-blue-700">添加情况</button>
+            <button type="button" disabled={node.condition.branches.length >= MAX_CONDITION_BRANCHES} onClick={() => onNodeChange({ ...node, condition: { ...node.condition!, branches: [...node.condition!.branches, { label: `情况 ${node.condition!.branches.length + 1}`, value: "", next: null }] } })}
+              className="w-fit text-xs text-blue-700 disabled:text-gray-400">添加情况</button>
             <p className="text-xs text-gray-500">添加后，从节点右侧对应圆点连接到下一步；最下方圆点代表其他情况。</p>
           </div>
         </div>
@@ -225,15 +231,15 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
                   </div>
                 ))}
               </div>
-              <button type="button" onClick={() => onNodeChange({ ...node, parallel: { ...node.parallel!, branches: node.parallel!.branches.map((item, index) => index === branchIndex ? { ...item, steps: [...item.steps, inlineStep(item.steps, `处理${item.label}的新步骤`)] } : item) } })}
-                className="mt-2 text-xs text-blue-700">添加步骤</button>
+              <button type="button" disabled={branch.steps.length >= MAX_PARALLEL_STEPS} onClick={() => onNodeChange({ ...node, parallel: { ...node.parallel!, branches: node.parallel!.branches.map((item, index) => index === branchIndex ? { ...item, steps: [...item.steps, inlineStep(item.steps, `处理${item.label}的新步骤`)] } : item) } })}
+                className="mt-2 text-xs text-blue-700 disabled:text-gray-400">添加步骤</button>
             </div>
           ))}
-          <button type="button" onClick={() => {
+          <button type="button" disabled={node.parallel.branches.length >= MAX_PARALLEL_BRANCHES} onClick={() => {
             const index = node.parallel!.branches.length + 1;
             const branch = { id: `branch_${index}`, label: `工作${index}`, inputs: [], outputs: [], steps: [inlineStep([], `处理工作${index}`)] };
             onNodeChange({ ...node, parallel: { ...node.parallel!, branches: [...node.parallel!.branches, branch] } });
-          }} className="w-fit text-xs text-blue-700">添加并行工作</button>
+          }} className="w-fit text-xs text-blue-700 disabled:text-gray-400">添加并行工作</button>
         </div>
       ) : null}
       {node.type === "subflow" && node.subflow ? (
@@ -275,8 +281,8 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
               </div>
             ))}
           </div>
-          <button type="button" onClick={() => onNodeChange({ ...node, subflow: { ...node.subflow!, steps: [...node.subflow!.steps, inlineStep(node.subflow!.steps, "处理下一步")] } })}
-            className="w-fit text-xs text-blue-700">添加步骤</button>
+          <button type="button" disabled={node.subflow.steps.length >= MAX_SUBFLOW_STEPS} onClick={() => onNodeChange({ ...node, subflow: { ...node.subflow!, steps: [...node.subflow!.steps, inlineStep(node.subflow!.steps, "处理下一步")] } })}
+            className="w-fit text-xs text-blue-700 disabled:text-gray-400">添加步骤</button>
         </div>
       ) : null}
       {node.type === "loop" && node.loop ? (
