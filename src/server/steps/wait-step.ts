@@ -32,7 +32,9 @@ export async function beginWait(args: { runId: string; node: WorkflowNode }): Pr
     kind: "wait.started",
     title: `「${args.node.title}」正在等待`,
     detail: waitDescription(args.node),
-    data: args.node.wait.mode === "event" ? { eventKey: args.node.wait.eventKey } : null,
+    data: args.node.wait.mode === "event"
+      ? { eventKey: args.node.wait.eventKey, payloadSchema: args.node.wait.payloadSchema }
+      : null,
   });
 }
 

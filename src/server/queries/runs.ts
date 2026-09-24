@@ -82,7 +82,11 @@ export async function getPendingWait(runId: string, workspaceId: string): Promis
     ))
     .orderBy(desc(traceEvents.seq))
     .limit(1);
-  const parsed = PendingWaitView.safeParse({ eventKey: row?.data?.eventKey, title: row?.title });
+  const parsed = PendingWaitView.safeParse({
+    eventKey: row?.data?.eventKey,
+    title: row?.title,
+    payloadSchema: row?.data?.payloadSchema ?? { type: "object" },
+  });
   return parsed.success ? parsed.data : null;
 }
 

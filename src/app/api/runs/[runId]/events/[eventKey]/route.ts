@@ -5,6 +5,8 @@ import { WaitEventPayload } from "@/contracts/run";
 import { runs } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
+import { validateJsonObjectSchema } from "@/server/domain/json-schema";
+import { getPendingWait } from "@/server/queries/runs";
 
 export const dynamic = "force-dynamic";
 
@@ -29,14 +31,29 @@ export async function POST(req: Request, { params }: { params: Promise<{ runId: 
     return Response.json({ ok: false, error: "消息内容必须是 JSON 对象" }, { status: 400 });
   }
   const { runId, eventKey } = parsedParams.data;
-  const [run] = await db
-    .select({ status: runs.status })
-    .from(runs)
-    .where(and(eq(runs.id, runId), eq(runs.workspaceId, DEMO_WORKSPACE_ID)))
-    .limit(1);
+  let run: { status: string } | undefined;
+  let pendingWait: Awaited<ReturnType<typeof getPendingWait>>;
+  try {
+    [run] = await db
+      .select({ status: runs.status })
+      .from(runs)
+      .where(and(eq(runs.id, runId), eq(runs.workspaceId, DEMO_WORKSPACE_ID)))
+      .limit(1);
+    pendingWait = run?.status === "waiting_event" ? await getPendingWait(runId, DEMO_WORKSPACE_ID) : null;
+  } catch (error) {
+    console.error("读取等待消息状态失败", error);
+    return Response.json({ ok: false, error: "暂时无法读取等待状态，请稍后重试" }, { status: 500 });
+  }
   if (!run) return Response.json({ ok: false, error: "找不到这次运行" }, { status: 404 });
   if (run.status !== "waiting_event") {
     return Response.json({ ok: false, error: "这次运行当前没有等待外部消息" }, { status: 409 });
+  }
+  if (!pendingWait || pendingWait.eventKey !== eventKey) {
+    return Response.json({ ok: false, error: "消息未匹配到当前等待步骤" }, { status: 409 });
+  }
+  const payloadError = validateJsonObjectSchema(payload.data, pendingWait.payloadSchema);
+  if (payloadError) {
+    return Response.json({ ok: false, error: payloadError }, { status: 400 });
   }
   try {
     await resumeHook(`wait:${runId}:${eventKey}`, payload.data);

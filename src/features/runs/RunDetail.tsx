@@ -88,7 +88,7 @@ export async function RunDetail({ runId }: { runId: string }) {
       ))}
 
       {run.status === "waiting_event" && pendingWait ? (
-        <WaitEventPanel runId={runId} eventKey={pendingWait.eventKey} title={pendingWait.title} />
+        <WaitEventPanel runId={runId} eventKey={pendingWait.eventKey} title={pendingWait.title} payloadSchema={pendingWait.payloadSchema} />
       ) : null}
 
       <section className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-4">

@@ -4,12 +4,20 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { WaitEventPayload, WaitEventResumeResult } from "@/contracts/run";
 
-export function WaitEventPanel({ runId, eventKey, title }: { runId: string; eventKey: string; title: string }) {
+export function WaitEventPanel({ runId, eventKey, title, payloadSchema = { type: "object" } }: {
+  runId: string;
+  eventKey: string;
+  title: string;
+  payloadSchema?: Record<string, unknown>;
+}) {
   const router = useRouter();
   const [content, setContent] = useState("{}");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const requiredFields = Array.isArray(payloadSchema.required)
+    ? payloadSchema.required.filter((field): field is string => typeof field === "string")
+    : [];
 
   return (
     <section className="rounded-lg border border-cyan-200 bg-cyan-50 p-4">
@@ -67,6 +75,7 @@ export function WaitEventPanel({ runId, eventKey, title }: { runId: string; even
           className="rounded-md border border-cyan-200 bg-white px-3 py-2 font-mono text-sm text-gray-800"
         />
         <p className="text-xs text-cyan-700">示例：{`{"complete": true, "note": "资料已补齐"}`}</p>
+        {requiredFields.length > 0 ? <p className="text-xs text-cyan-700">必填字段：{requiredFields.join("、")}</p> : null}
         <button type="submit" disabled={pending} className="w-fit rounded-md bg-cyan-800 px-3 py-1.5 text-sm text-white disabled:opacity-50">
           {pending ? "提交中…" : "提交并继续"}
         </button>

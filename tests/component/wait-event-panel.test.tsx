@@ -37,4 +37,14 @@ describe("等待消息面板", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("消息内容需要是一个对象");
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("展示等待消息的必填字段", () => {
+    render(<WaitEventPanel
+      runId="00000000-0000-4000-8000-000000000001"
+      eventKey="customer.updated"
+      title="等待客户补充资料"
+      payloadSchema={{ type: "object", required: ["complete", "note"] }}
+    />);
+    expect(screen.getByText("必填字段：complete、note")).toBeInTheDocument();
+  });
 });
