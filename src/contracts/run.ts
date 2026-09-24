@@ -61,6 +61,7 @@ export const RunView = z.object({
   id: z.string().uuid(),
   agentId: z.string().uuid(),
   agentName: z.string(),
+  agentArchived: z.boolean().default(false),
   status: RunStatus,
   sourceType: RunSourceType.default("manual"),
   parentRunId: z.string().uuid().nullable().default(null),

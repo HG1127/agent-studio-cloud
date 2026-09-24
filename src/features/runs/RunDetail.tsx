@@ -65,9 +65,13 @@ export async function RunDetail({ runId }: { runId: string }) {
           {run.startedAt ? `开始于 ${formatDateTime(run.startedAt)}` : "尚未开始"}
           {run.finishedAt ? ` · 结束于 ${formatDateTime(run.finishedAt)}` : ""}
         </p>
-        <Link href={`/agents/${run.agentId}`} className="w-fit text-sm text-gray-500 hover:text-gray-700">
-          查看这个助手
-        </Link>
+        {run.agentArchived ? (
+          <p className="text-sm text-gray-500">这个助手已停用，历史运行仍保留。</p>
+        ) : (
+          <Link href={`/agents/${run.agentId}`} className="w-fit text-sm text-gray-500 hover:text-gray-700">
+            查看这个助手
+          </Link>
+        )}
         {run.parentRunId ? (
           <Link href={`/runs/${run.parentRunId}`} className="w-fit text-sm text-blue-700 hover:underline">
             查看上级运行
@@ -81,7 +85,7 @@ export async function RunDetail({ runId }: { runId: string }) {
           下载运行报告
         </a>
         {live ? <CancelRunButton runId={runId} cancelsChain={["agent_call", "handoff"].includes(run.sourceType)} /> : null}
-        {!live ? <RetryRunButton runId={runId} /> : null}
+        {!live && !run.agentArchived ? <RetryRunButton runId={runId} /> : null}
       </header>
 
       {run.status === "failed" && run.error ? (

@@ -3,15 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RunView } from "@/contracts/run";
 
-const mocks = vi.hoisted(() => ({ steps: vi.fn(), childRuns: vi.fn() }));
+const mocks = vi.hoisted(() => ({ steps: vi.fn(), childRuns: vi.fn(), runView: vi.fn() }));
 vi.mock("@/server/queries/runs", () => ({
-  getRunView: async () => RunView.parse({
-    id: "00000000-0000-4000-8000-000000000001",
-    agentId: "00000000-0000-4000-8000-000000000002",
-    agentName: "业务助手", status: "completed", sourceType: "agent_call",
-    parentRunId: "00000000-0000-4000-8000-000000000003", input: {}, result: { ok: true },
-    error: null, startedAt: null, finishedAt: null,
-  }),
+  getRunView: mocks.runView,
   listRunSteps: mocks.steps,
   listApprovals: async () => [],
   listChildRuns: mocks.childRuns,
@@ -22,7 +16,7 @@ vi.mock("@/server/queries/trace", () => ({ listTrace: async () => [] }));
 vi.mock("@/features/runs/TraceTimeline", () => ({ TraceTimeline: () => null }));
 vi.mock("@/features/runs/ApprovalPanel", () => ({ ApprovalPanel: () => null }));
 vi.mock("@/features/runs/CancelRunButton", () => ({ CancelRunButton: () => null }));
-vi.mock("@/features/runs/RetryRunButton", () => ({ RetryRunButton: () => null }));
+vi.mock("@/features/runs/RetryRunButton", () => ({ RetryRunButton: () => <button type="button">重新运行</button> }));
 vi.mock("@/features/runs/WaitEventPanel", () => ({ WaitEventPanel: () => null }));
 
 import { RunDetail } from "@/features/runs/RunDetail";
@@ -30,6 +24,13 @@ import { RunDetail } from "@/features/runs/RunDetail";
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.childRuns.mockResolvedValue([]);
+  mocks.runView.mockResolvedValue(RunView.parse({
+    id: "00000000-0000-4000-8000-000000000001",
+    agentId: "00000000-0000-4000-8000-000000000002",
+    agentName: "业务助手", status: "completed", sourceType: "agent_call",
+    parentRunId: "00000000-0000-4000-8000-000000000003", input: {}, result: { ok: true },
+    error: null, startedAt: null, finishedAt: null,
+  }));
 });
 
 describe("运行详情步骤数据", () => {
@@ -100,5 +101,28 @@ describe("运行详情步骤数据", () => {
     expect(screen.getByRole("link", { name: "资料研究助手" })).toHaveAttribute("href", "/runs/00000000-0000-4000-8000-000000000011");
     expect(screen.getByText("助手协作")).toBeVisible();
     expect(screen.getByText("助手交接")).toBeVisible();
+  });
+
+  it("助手停用后保留历史详情但不显示失效入口", async () => {
+    mocks.steps.mockResolvedValue([]);
+    mocks.runView.mockResolvedValue(RunView.parse({
+      id: "00000000-0000-4000-8000-000000000001",
+      agentId: "00000000-0000-4000-8000-000000000002",
+      agentName: "已停用助手",
+      agentArchived: true,
+      status: "completed",
+      sourceType: "manual",
+      input: {},
+      result: {},
+      error: null,
+      startedAt: null,
+      finishedAt: null,
+    }));
+
+    render(await RunDetail({ runId: "00000000-0000-4000-8000-000000000001" }));
+
+    expect(screen.getByText("这个助手已停用，历史运行仍保留。")).toBeVisible();
+    expect(screen.queryByRole("link", { name: "查看这个助手" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重新运行" })).not.toBeInTheDocument();
   });
 });

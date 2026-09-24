@@ -128,7 +128,7 @@ export async function getPendingWait(runId: string, workspaceId: string): Promis
 export async function getRunView(runId: string, workspaceId: string): Promise<RunView | null> {
   if (!RUN_ID.safeParse(runId).success) return null;
   const [row] = await db
-    .select({ run: runs, agentName: agents.name })
+    .select({ run: runs, agentName: agents.name, agentArchivedAt: agents.archivedAt })
     .from(runs)
     .innerJoin(agents, eq(agents.id, runs.agentId))
     .where(and(eq(runs.id, runId), eq(runs.workspaceId, workspaceId)))
@@ -142,6 +142,7 @@ export async function getRunView(runId: string, workspaceId: string): Promise<Ru
     id: row.run.id,
     agentId: row.run.agentId,
     agentName: row.agentName,
+    agentArchived: row.agentArchivedAt !== null,
     status: row.run.status,
     sourceType: row.run.sourceType,
     parentRunId,

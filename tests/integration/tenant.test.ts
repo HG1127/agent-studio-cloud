@@ -34,5 +34,6 @@ describe("租户过滤", () => {
     await db.update(agents).set({ archivedAt: new Date() }).where(eq(agents.id, AGENT_ID));
     const list = await listRuns(DEMO_WORKSPACE_ID);
     expect(list.find((r) => r.id === RUN_ID)).toMatchObject({ id: RUN_ID, agentArchived: true });
+    expect(await getRunView(RUN_ID, DEMO_WORKSPACE_ID)).toMatchObject({ id: RUN_ID, agentArchived: true });
   });
 });
