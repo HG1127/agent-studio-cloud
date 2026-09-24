@@ -45,6 +45,7 @@ async function executeAutomaticNode(args: {
   manifest: AgentManifest;
   input: Record<string, unknown>;
   outputs: Record<string, unknown>;
+  depth: number;
 }): Promise<unknown> {
   if (args.node.type === "ai") {
     return (await runModelStep(args)).output;
@@ -58,6 +59,35 @@ async function executeAutomaticNode(args: {
   if (args.node.type === "system") {
     return (await runInlineSystemStep({ runId: args.runId, node: args.node })).output;
   }
+  if (args.node.type === "memory") {
+    return (await runMemoryStep({ runId: args.runId, node: args.node, input: args.input, outputs: args.outputs })).output;
+  }
+  if (args.node.type === "agent_call") {
+    if (args.depth >= 3) throw new FatalError(`步骤「${args.node.title}」超过助手协作层级上限`);
+    const prepared = await beginAgentCall({ runId: args.runId, node: args.node, parentInput: args.input, outputs: args.outputs });
+    const [settled] = await Promise.allSettled([
+      agentRunWorkflow(prepared.childRunId, prepared.manifest, prepared.input, { depth: args.depth + 1 }),
+    ]);
+    if (settled.status === "fulfilled") {
+      return (await finishAgentCall({ runId: args.runId, childRunId: prepared.childRunId, node: args.node, targetName: prepared.targetName })).output;
+    }
+    const reason = executionFailureReason(settled.reason, `协作助手「${prepared.targetName}」执行失败`);
+    await finishAgentCall({ runId: args.runId, childRunId: prepared.childRunId, node: args.node, targetName: prepared.targetName, failed: true, handled: false, error: reason });
+    throw new FatalError(reason);
+  }
+  if (args.node.type === "handoff") {
+    if (args.depth >= 3) throw new FatalError(`步骤「${args.node.title}」超过助手交接层级上限`);
+    const prepared = await beginHandoff({ runId: args.runId, node: args.node, parentInput: args.input, outputs: args.outputs });
+    const [settled] = await Promise.allSettled([
+      agentRunWorkflow(prepared.childRunId, prepared.manifest, prepared.input, { depth: args.depth + 1 }),
+    ]);
+    if (settled.status === "fulfilled") {
+      return (await finishHandoff({ runId: args.runId, childRunId: prepared.childRunId, node: args.node, targetName: prepared.targetName })).output;
+    }
+    const reason = executionFailureReason(settled.reason, `接收助手「${prepared.targetName}」执行失败`);
+    await finishHandoff({ runId: args.runId, childRunId: prepared.childRunId, node: args.node, targetName: prepared.targetName, failed: true, handled: false, error: reason });
+    throw new FatalError(reason);
+  }
   throw new FatalError(`步骤「${args.node.title}」暂不支持自动执行`);
 }
 
@@ -67,6 +97,7 @@ async function executeParallelBranch(args: {
   manifest: AgentManifest;
   input: Record<string, unknown>;
   parentOutputs: Record<string, unknown>;
+  depth: number;
 }): Promise<ParallelBranchResult> {
   const branchOutputs: Record<string, unknown> = {};
   for (const node of args.branch.steps) {
@@ -76,6 +107,7 @@ async function executeParallelBranch(args: {
       manifest: args.manifest,
       input: args.input,
       outputs: { ...args.parentOutputs, ...branchOutputs },
+      depth: args.depth,
     });
   }
   return { id: args.branch.id, label: args.branch.label, status: "completed", outputs: branchOutputs };
@@ -87,6 +119,7 @@ async function executeSubflow(args: {
   manifest: AgentManifest;
   input: Record<string, unknown>;
   parentOutputs: Record<string, unknown>;
+  depth: number;
 }): Promise<Array<{ title: string; output: unknown }>> {
   const childOutputs: Record<string, unknown> = {};
   const steps: Array<{ title: string; output: unknown }> = [];
@@ -97,6 +130,7 @@ async function executeSubflow(args: {
       manifest: args.manifest,
       input: args.input,
       outputs: { ...args.parentOutputs, ...childOutputs },
+      depth: args.depth,
     });
     childOutputs[node.id] = output;
     steps.push({ title: node.title, output });
@@ -355,6 +389,7 @@ export async function agentRunWorkflow(
           manifest,
           input,
           parentOutputs: outputs,
+          depth: executionContext.depth,
         })));
         const branchResults: ParallelBranchResult[] = settledBranches.map((result, index) => {
           if (result.status === "fulfilled") return result.value;
@@ -407,6 +442,7 @@ export async function agentRunWorkflow(
           manifest,
           input,
           parentOutputs: outputs,
+          depth: executionContext.depth,
         })]);
         if (settled.status === "fulfilled") {
           const output = {

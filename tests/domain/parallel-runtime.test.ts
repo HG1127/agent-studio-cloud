@@ -79,4 +79,18 @@ describe("并行分支运行准备", () => {
     });
     expect(prepareParallelBranches(node)).toMatchObject({ ok: false, error: expect.stringContaining("human") });
   });
+
+  it("允许经验与多助手自动步骤进入并行分支", () => {
+    const node = parallelNode({
+      parallel: {
+        strategy: "all",
+        failurePolicy: "fail_fast",
+        branches: [
+          { id: "memory", label: "读取经验", steps: [{ id: "read", title: "读取经验", type: "memory", memory: { mode: "read" } }] },
+          { id: "agent", label: "助手协作", steps: [{ id: "call", title: "助手协作", type: "agent_call", agentCall: { targetAgentId: "target", versionId: "version" } }] },
+        ],
+      },
+    });
+    expect(prepareParallelBranches(node)).toMatchObject({ ok: true });
+  });
 });

@@ -31,6 +31,42 @@ const SUPPORTED_NODE_TYPES: ReadonlySet<string> = new Set([
   "handoff",
 ]);
 
+async function collaboratorIssue(node: AgentManifest["workflowSnapshot"]["nodes"][string], currentAgentId: string, workspaceId: string): Promise<string | null> {
+  if (node.type === "agent_call") {
+    const error = validateAgentCallNode(node, currentAgentId);
+    if (error) return error;
+    const [target] = await db
+      .select({ id: agentVersions.id })
+      .from(agentVersions)
+      .innerJoin(agents, eq(agents.id, agentVersions.agentId))
+      .where(and(
+        eq(agentVersions.id, node.agentCall!.versionId),
+        eq(agentVersions.agentId, node.agentCall!.targetAgentId),
+        eq(agentVersions.workspaceId, workspaceId),
+        isNull(agents.archivedAt),
+      ))
+      .limit(1);
+    return target ? null : `步骤「${node.title}」所选协作助手版本不可用`;
+  }
+  if (node.type === "handoff") {
+    const error = validateHandoffNode(node, currentAgentId);
+    if (error) return error;
+    const [target] = await db
+      .select({ id: agentVersions.id })
+      .from(agentVersions)
+      .innerJoin(agents, eq(agents.id, agentVersions.agentId))
+      .where(and(
+        eq(agentVersions.id, node.toAgent!.versionId!),
+        eq(agentVersions.agentId, node.toAgent!.id),
+        eq(agentVersions.workspaceId, workspaceId),
+        isNull(agents.archivedAt),
+      ))
+      .limit(1);
+    return target ? null : `步骤「${node.title}」所选接收助手版本不可用`;
+  }
+  return null;
+}
+
 export async function startRunCore(args: {
   agentId: string;
   input: Record<string, unknown>;
@@ -91,6 +127,9 @@ export async function startRunCore(args: {
               if (!step.tool || step.tool.unresolved === true || !demoBound) unsupported.push(`${node.title} / ${branch.label} / ${step.title}`);
             }
             if (step.type === "knowledge" && !step.knowledge?.space) unsupported.push(`${node.title} / ${branch.label} / ${step.title}`);
+            if (step.type === "memory" && !step.memory) unsupported.push(`${node.title} / ${branch.label} / ${step.title}（经验设置不完整）`);
+            const collaboratorError = await collaboratorIssue(step, agent.id, agent.workspaceId);
+            if (collaboratorError) unsupported.push(`${node.title} / ${branch.label} / ${collaboratorError}`);
           }
         }
       }
@@ -106,46 +145,19 @@ export async function startRunCore(args: {
             if (!step.tool || step.tool.unresolved === true || !demoBound) unsupported.push(`${node.title} / ${step.title}`);
           }
           if (step.type === "knowledge" && !step.knowledge?.space) unsupported.push(`${node.title} / ${step.title}`);
+          if (step.type === "memory" && !step.memory) unsupported.push(`${node.title} / ${step.title}（经验设置不完整）`);
+          const collaboratorError = await collaboratorIssue(step, agent.id, agent.workspaceId);
+          if (collaboratorError) unsupported.push(`${node.title} / ${collaboratorError}`);
         }
       }
       if (node.type === "memory" && !node.memory) unsupported.push(`${node.title}（经验设置不完整）`);
       if (node.type === "agent_call") {
-        const error = validateAgentCallNode(node, agent.id);
-        if (error) {
-          unsupported.push(`${node.title}（${error}）`);
-          continue;
-        }
-        const [target] = await db
-          .select({ id: agentVersions.id })
-          .from(agentVersions)
-          .innerJoin(agents, eq(agents.id, agentVersions.agentId))
-          .where(and(
-            eq(agentVersions.id, node.agentCall!.versionId),
-            eq(agentVersions.agentId, node.agentCall!.targetAgentId),
-            eq(agentVersions.workspaceId, agent.workspaceId),
-            isNull(agents.archivedAt),
-          ))
-          .limit(1);
-        if (!target) unsupported.push(`${node.title}（所选协作助手版本不可用）`);
+        const error = await collaboratorIssue(node, agent.id, agent.workspaceId);
+        if (error) unsupported.push(error);
       }
       if (node.type === "handoff") {
-        const error = validateHandoffNode(node, agent.id);
-        if (error) {
-          unsupported.push(`${node.title}（${error}）`);
-          continue;
-        }
-        const [target] = await db
-          .select({ id: agentVersions.id })
-          .from(agentVersions)
-          .innerJoin(agents, eq(agents.id, agentVersions.agentId))
-          .where(and(
-            eq(agentVersions.id, node.toAgent!.versionId!),
-            eq(agentVersions.agentId, node.toAgent!.id),
-            eq(agentVersions.workspaceId, agent.workspaceId),
-            isNull(agents.archivedAt),
-          ))
-          .limit(1);
-        if (!target) unsupported.push(`${node.title}（所选接收助手版本不可用）`);
+        const error = await collaboratorIssue(node, agent.id, agent.workspaceId);
+        if (error) unsupported.push(error);
       }
     }
     if (unsupported.length > 0) {

@@ -1,6 +1,6 @@
 import { WorkflowNode, type ParallelBranch } from "@/contracts/workflow";
 
-const SUPPORTED_INLINE_TYPES = new Set(["ai", "tool", "knowledge", "system"]);
+const SUPPORTED_INLINE_TYPES = new Set(["ai", "tool", "knowledge", "system", "memory", "agent_call", "handoff"]);
 
 export type PreparedParallelBranch = Omit<ParallelBranch, "steps"> & { steps: WorkflowNode[] };
 export type PreparedParallel =

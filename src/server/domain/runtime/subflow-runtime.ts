@@ -1,6 +1,6 @@
 import { WorkflowNode } from "@/contracts/workflow";
 
-const SUPPORTED_INLINE_TYPES = new Set(["ai", "tool", "knowledge", "system"]);
+const SUPPORTED_INLINE_TYPES = new Set(["ai", "tool", "knowledge", "system", "memory", "agent_call", "handoff"]);
 
 export type PreparedSubflow = {
   ok: true;

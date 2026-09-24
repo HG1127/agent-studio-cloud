@@ -43,4 +43,12 @@ describe("一组步骤运行准备", () => {
       { id: "review", title: "等待员工确认", type: "human" },
     ]))).toMatchObject({ ok: false, error: expect.stringContaining("human") });
   });
+
+  it("允许经验与多助手自动步骤进入顺序子流程", () => {
+    const result = prepareSubflow(subflowNode([
+      { id: "memory", title: "读取经验", type: "memory", memory: { mode: "read" } },
+      { id: "handoff", title: "交接助手", type: "handoff", toAgent: { id: "target", versionId: "version" } },
+    ]));
+    expect(result).toMatchObject({ ok: true });
+  });
 });
