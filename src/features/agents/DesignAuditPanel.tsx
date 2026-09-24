@@ -1,9 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { AuditIssueView } from "@/contracts/audit";
 import { applyAuditFixesAction } from "@/server/actions/apply-audit-fixes";
+import { DRAFT_STATE_EVENT, type DraftStateDetail } from "@/lib/draft-state";
 
 function userText(value: string): string {
   return value.replaceAll("Agent", "助手").replaceAll("Workflow", "流程").replaceAll("Schema", "字段结构").replaceAll("Checkpoint", "恢复点");
@@ -15,15 +16,24 @@ export function DesignAuditPanel({ agentId, score, issues }: { agentId: string; 
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [hasUnsavedDraft, setHasUnsavedDraft] = useState(false);
   const fixable = issues.some((issue) => issue.fixable);
   const visibleIssues = expanded ? issues : issues.slice(0, 8);
+  useEffect(() => {
+    const receiveDraftState = (event: Event) => {
+      const detail = (event as CustomEvent<DraftStateDetail>).detail;
+      if (detail?.agentId === agentId) setHasUnsavedDraft(detail.dirty);
+    };
+    window.addEventListener(DRAFT_STATE_EVENT, receiveDraftState);
+    return () => window.removeEventListener(DRAFT_STATE_EVENT, receiveDraftState);
+  }, [agentId]);
   return <section className="rounded-lg border border-gray-200 bg-white p-4">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div>
         <h2 className="text-sm font-semibold">设计检查</h2>
         <p className="mt-1 text-xs text-gray-500">当前得分 {score}，发布前必须解决所有阻塞问题。</p>
       </div>
-      {fixable ? <button type="button" disabled={pending} onClick={async () => {
+      {fixable ? <button type="button" disabled={pending || hasUnsavedDraft} onClick={async () => {
         setPending(true); setNotice(null); setError(null);
         try {
           const result = await applyAuditFixesAction(agentId);
@@ -37,9 +47,10 @@ export function DesignAuditPanel({ agentId, score, issues }: { agentId: string; 
           setPending(false);
         }
       }} className="rounded-md border border-blue-300 px-3 py-1.5 text-sm text-blue-700 hover:border-blue-500 disabled:opacity-50">
-        {pending ? "正在修复…" : "应用安全修复"}
+        {pending ? "正在修复…" : hasUnsavedDraft ? "保存后再修复" : "应用安全修复"}
       </button> : null}
     </div>
+    {hasUnsavedDraft && fixable ? <p role="status" className="mt-2 text-sm text-amber-700">流程有未保存修改，保存后才能应用安全修复。</p> : null}
     {issues.length > 0 ? <ul className="mt-3 space-y-2">
       {visibleIssues.map((issue) => <li key={issue.id} className="rounded-md bg-gray-50 p-2 text-sm">
         <p className={issue.severity === "critical" ? "font-medium text-red-700" : "font-medium text-amber-700"}>{userText(issue.title)}</p>

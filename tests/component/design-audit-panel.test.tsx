@@ -1,7 +1,8 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DesignAuditPanel } from "@/features/agents/DesignAuditPanel";
+import { DRAFT_STATE_EVENT } from "@/lib/draft-state";
 
 const { actionMock, refreshMock } = vi.hoisted(() => ({ actionMock: vi.fn(), refreshMock: vi.fn() }));
 vi.mock("@/server/actions/apply-audit-fixes", () => ({ applyAuditFixesAction: actionMock }));
@@ -46,5 +47,15 @@ describe("设计检查面板", () => {
     await user.click(screen.getByRole("button", { name: "查看其他 2 项问题" }));
     expect(screen.getByText("问题 10")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "收起其他问题" })).toBeInTheDocument();
+  });
+
+  it("有未保存修改时阻止基于旧草稿自动修复", () => {
+    render(<DesignAuditPanel agentId="00000000-0000-4000-8000-000000000081" score={76} issues={[issue]} />);
+    act(() => window.dispatchEvent(new CustomEvent(DRAFT_STATE_EVENT, {
+      detail: { agentId: "00000000-0000-4000-8000-000000000081", dirty: true },
+    })));
+    expect(screen.getByRole("button", { name: "保存后再修复" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("保存后才能应用安全修复");
+    expect(actionMock).not.toHaveBeenCalled();
   });
 });

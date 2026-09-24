@@ -71,6 +71,7 @@ describe("VersionPanel", () => {
     act(() => window.dispatchEvent(new CustomEvent(DRAFT_STATE_EVENT, { detail: { agentId: AGENT_ID, dirty: true } })));
     expect(screen.getByRole("button", { name: "请先保存草稿" })).toBeDisabled();
     expect(screen.getByRole("status")).toHaveTextContent("保存后才能发布");
+    expect(screen.getByRole("button", { name: "恢复为当前版本" })).toBeDisabled();
     expect(actionMock).not.toHaveBeenCalled();
   });
 

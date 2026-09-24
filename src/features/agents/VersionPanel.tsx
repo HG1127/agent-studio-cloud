@@ -193,7 +193,7 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
               {version.status === "retired" ? (
                 <button
                   type="button"
-                  disabled={pending || restoringId !== null}
+                  disabled={pending || restoringId !== null || hasUnsavedDraft}
                   onClick={() => handleRestore(version.id)}
                   className="ml-auto rounded-md border border-gray-300 px-2.5 py-1 text-xs text-gray-700 hover:border-gray-500 disabled:text-gray-400"
                 >
