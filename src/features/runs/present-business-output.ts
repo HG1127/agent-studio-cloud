@@ -25,7 +25,8 @@ export function presentBusinessOutput(raw: string): PresentedBusinessOutput {
     return { text: "这一步没有生成可审阅的正文，请核对步骤数据后重试。", reviewable: false };
   }
 
-  if (/^[{[]/.test(content)) {
+  const looksStructured = content.startsWith("{") || /^\[\s*(?:\{|\[|"|-?\d|true|false|null|\])/.test(content);
+  if (looksStructured) {
     try {
       const parsed: unknown = JSON.parse(content);
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
