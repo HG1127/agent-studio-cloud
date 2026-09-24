@@ -9,6 +9,7 @@ import { approvals, runs } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { completeEvaluationForRun } from "@/server/services/evaluation-state";
+import { MAX_COLLABORATION_DEPTH, parseCollaborationParentId } from "@/server/domain/runtime/collaboration-chain";
 
 const LIVE_STATUSES = ["queued", "running", "waiting_approval", "waiting_event"];
 
@@ -24,9 +25,9 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
     if (!LIVE_STATUSES.includes(run.status)) return { ok: false, error: "这次运行已经结束，无法取消" };
     let rootRunId = runId;
     let root = run;
-    for (let depth = 0; depth < 3 && !root.workflowRunId; depth += 1) {
+    for (let depth = 0; depth < MAX_COLLABORATION_DEPTH && !root.workflowRunId; depth += 1) {
       if (!root.sourceKey || !["agent_call", "handoff"].includes(root.sourceType)) break;
-      const parentId = /^(?:agent-call|handoff):([0-9a-f-]{36}):/i.exec(root.sourceKey)?.[1];
+      const parentId = parseCollaborationParentId(root);
       if (!parentId) break;
       const [parent] = await db
         .select({ status: runs.status, workflowRunId: runs.workflowRunId, sourceType: runs.sourceType, sourceKey: runs.sourceKey })
@@ -51,7 +52,7 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
       if (rows.length > 0) {
         const descendantIds: string[] = [];
         let parents = [rootRunId];
-        for (let depth = 0; depth < 3 && parents.length > 0; depth += 1) {
+        for (let depth = 0; depth < MAX_COLLABORATION_DEPTH && parents.length > 0; depth += 1) {
           const children = await tx
             .select({ id: runs.id })
             .from(runs)

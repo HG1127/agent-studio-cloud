@@ -6,6 +6,8 @@ import type { WorkflowNode } from "@/contracts/workflow";
 import { agents, agentVersions, runs } from "@/db/schema";
 import { db } from "@/lib/db";
 import { buildHandoffInput } from "@/server/domain/runtime/handoff-runtime";
+import { validateCollaborationTarget } from "@/server/domain/runtime/collaboration-chain";
+import { loadCollaborationChain } from "@/server/services/collaboration-chain";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 
@@ -25,7 +27,14 @@ export async function beginHandoff(args: {
     .where(eq(runs.id, args.runId))
     .limit(1);
   if (!parent) throw new FatalError("找不到这次运行");
-  if (parent.agentId === targetRef.id) throw new FatalError(`步骤「${args.node.title}」不能交接给当前助手自身`);
+  let chain;
+  try {
+    chain = await loadCollaborationChain(args.runId, parent.workspaceId);
+  } catch {
+    throw new FatalError(`步骤「${args.node.title}」无法确认助手协作调用链`);
+  }
+  const chainIssue = validateCollaborationTarget(chain, targetRef.id);
+  if (chainIssue) throw new FatalError(`步骤「${args.node.title}」${chainIssue}`);
   const [target] = await db
     .select({ name: agents.name, manifest: agentVersions.manifest })
     .from(agentVersions)

@@ -7,11 +7,14 @@ import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
 import { listChildRuns } from "@/server/queries/runs";
+import { beginAgentCall } from "@/server/steps/agent-call-step";
 
 const PARENT_AGENT_ID = "00000000-0000-4000-8000-0000000006a1";
 const PARENT_VERSION_ID = "00000000-0000-4000-8000-0000000006a2";
 const TARGET_AGENT_ID = "00000000-0000-4000-8000-0000000006a3";
 const TARGET_VERSION_ID = "00000000-0000-4000-8000-0000000006a4";
+const CYCLE_ROOT_RUN_ID = "00000000-0000-4000-8000-0000000006a5";
+const CYCLE_CHILD_RUN_ID = "00000000-0000-4000-8000-0000000006a6";
 
 const targetManifest = AgentManifest.parse({
   schemaVersion: "4.0",
@@ -115,7 +118,12 @@ async function cleanup(parentRunId?: string) {
         `handoff:${parentRunId}:handoff`,
       ]))
     : [];
-  const runIds = [...childRows.map((row) => row.id), ...(parentRunId ? [parentRunId] : [])];
+  const runIds = [
+    ...childRows.map((row) => row.id),
+    ...(parentRunId ? [parentRunId] : []),
+    CYCLE_CHILD_RUN_ID,
+    CYCLE_ROOT_RUN_ID,
+  ];
   if (runIds.length > 0) {
     await db.delete(traceEvents).where(inArray(traceEvents.runId, runIds));
     await db.delete(runSteps).where(inArray(runSteps.runId, runIds));
@@ -126,6 +134,45 @@ async function cleanup(parentRunId?: string) {
 }
 
 describe("助手协作运行", () => {
+  it("拒绝创建会回到祖先助手的循环调用", async () => {
+    await cleanup();
+    try {
+      await db.insert(runs).values([
+        {
+          id: CYCLE_ROOT_RUN_ID,
+          workspaceId: DEMO_WORKSPACE_ID,
+          createdBy: DEMO_USER_ID,
+          agentId: TARGET_AGENT_ID,
+          versionId: TARGET_VERSION_ID,
+          status: "running",
+          input: {},
+        },
+        {
+          id: CYCLE_CHILD_RUN_ID,
+          workspaceId: DEMO_WORKSPACE_ID,
+          createdBy: DEMO_USER_ID,
+          agentId: PARENT_AGENT_ID,
+          versionId: PARENT_VERSION_ID,
+          status: "running",
+          input: {},
+          sourceType: "agent_call",
+          sourceKey: `agent-call:${CYCLE_ROOT_RUN_ID}:delegate`,
+        },
+      ]);
+
+      await expect(beginAgentCall({
+        runId: CYCLE_CHILD_RUN_ID,
+        node: parentManifest.workflowSnapshot.nodes.research,
+        parentInput: {},
+        outputs: {},
+      })).rejects.toThrow("循环");
+      expect(await db.select().from(runs).where(eq(runs.sourceKey, `agent-call:${CYCLE_CHILD_RUN_ID}:research`)))
+        .toHaveLength(0);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it("冻结目标版本、创建独立子运行并把结果带回主流程", async () => {
     let parentRunId: string | undefined;
     await cleanup();
