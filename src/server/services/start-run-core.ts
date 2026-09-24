@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { start } from "workflow/api";
 import { AgentManifest } from "@/contracts/manifest";
 import type { StartRunResult } from "@/contracts/run";
@@ -31,6 +31,13 @@ const SUPPORTED_NODE_TYPES: ReadonlySet<string> = new Set([
   "agent_call",
   "handoff",
 ]);
+
+async function markRunStartFailed(runId: string): Promise<void> {
+  await db
+    .update(runs)
+    .set({ status: "failed", error: "运行启动失败，请稍后重试", finishedAt: new Date(), updatedAt: new Date() })
+    .where(and(eq(runs.id, runId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])));
+}
 
 async function collaboratorIssue(node: AgentManifest["workflowSnapshot"]["nodes"][string], currentAgentId: string, workspaceId: string): Promise<string | null> {
   if (node.type === "agent_call") {
@@ -181,18 +188,27 @@ export async function startRunCore(args: {
       })
       .returning({ id: runs.id });
     const runId = run.id;
+    let workflowRun: Awaited<ReturnType<typeof start>>;
     try {
-      const workflowRun = await start(agentRunWorkflow, [runId, manifest, runInput]);
+      workflowRun = await start(agentRunWorkflow, [runId, manifest, runInput]);
+    } catch (error) {
+      console.error("运行启动失败", error);
+      await markRunStartFailed(runId);
+      return { ok: false, error: "运行启动失败，请稍后重试" };
+    }
+    try {
       await db
         .update(runs)
         .set({ workflowRunId: workflowRun.runId, updatedAt: new Date() })
         .where(eq(runs.id, runId));
     } catch (error) {
-      console.error("运行启动失败", error);
-      await db
-        .update(runs)
-        .set({ status: "failed", error: "运行启动失败，请稍后重试", finishedAt: new Date(), updatedAt: new Date() })
-        .where(eq(runs.id, runId));
+      console.error("运行启动句柄保存失败", error);
+      try {
+        await workflowRun.cancel();
+      } catch (cancelError) {
+        console.error("取消失联的工作流失败", cancelError);
+      }
+      await markRunStartFailed(runId);
       return { ok: false, error: "运行启动失败，请稍后重试" };
     }
     return { ok: true, runId };
