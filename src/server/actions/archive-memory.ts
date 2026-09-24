@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { MemoryArchiveInput, type MemoryArchiveResult } from "@/contracts/memory";
 import { agentMemories } from "@/db/schema";
@@ -17,9 +17,10 @@ export async function setMemoryArchivedAction(input: MemoryArchiveInput): Promis
       .where(and(
         eq(agentMemories.id, parsed.data.memoryId),
         eq(agentMemories.workspaceId, DEMO_WORKSPACE_ID),
+        parsed.data.archived ? isNull(agentMemories.archivedAt) : isNotNull(agentMemories.archivedAt),
       ))
       .returning({ id: agentMemories.id });
-    if (!updated) return { ok: false, error: "找不到这条经验，请刷新页面后重试" };
+    if (!updated) return { ok: false, error: "经验状态已经变化，请刷新页面后重试" };
     revalidatePath("/memory");
     return { ok: true };
   } catch {
