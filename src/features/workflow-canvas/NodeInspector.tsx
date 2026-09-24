@@ -16,12 +16,12 @@ function localDateTime(value: string | null): string {
   return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 }
 
-// M1 编辑范围：title/description，加 human 的负责人与确认事项；condition 的说明以「判断说明」呈现
 export function NodeInspector({ node, onNodeChange, onNodeDelete }: NodeInspectorProps) {
   const isHuman = node.type === "human";
   const isCondition = node.type === "condition";
   const knowledge = node.knowledge;
   const wait = node.wait;
+  const loop = node.loop;
   const deletable = node.type !== "trigger" && node.type !== "end";
   return (
     <aside aria-label="节点详情" className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4">
@@ -148,6 +148,55 @@ export function NodeInspector({ node, onNodeChange, onNodeDelete }: NodeInspecto
                 </p>
               ) : null}
             </>
+          ) : null}
+        </section>
+      ) : null}
+      {node.type === "loop" && loop ? (
+        <section className="flex flex-col gap-3 rounded-md border border-indigo-100 bg-indigo-50 p-3">
+          <h3 className="text-sm font-semibold">逐项处理设置</h3>
+          <label className="flex flex-col gap-1 text-sm">
+            要处理的列表
+            <input
+              value={loop.collectionPath}
+              maxLength={200}
+              onChange={(event) => onNodeChange({ ...node, loop: { ...loop, collectionPath: event.target.value.trim() } })}
+              placeholder="input.records"
+              className="rounded-md border border-gray-300 bg-white px-3 py-2"
+            />
+          </label>
+          <p className="text-xs text-gray-600">填写输入中的列表路径，例如 input.records；也可以引用前面步骤的结果。</p>
+          {!loop.collectionPath ? <p className="text-xs text-amber-800">请填写列表路径。</p> : null}
+          <label className="flex flex-col gap-1 text-sm">
+            单项名称
+            <input
+              value={loop.itemKey}
+              maxLength={80}
+              onChange={(event) => onNodeChange({ ...node, loop: { ...loop, itemKey: event.target.value } })}
+              placeholder="currentItem"
+              className="rounded-md border border-gray-300 bg-white px-3 py-2"
+            />
+          </label>
+          <p className="text-xs text-gray-600">运行结果会记录当前处理项及这个名称。</p>
+          <label className="flex flex-col gap-1 text-sm">
+            最多处理项数
+            <input
+              type="number"
+              min={1}
+              max={100}
+              step={1}
+              value={loop.maxIterations}
+              onChange={(event) => {
+                const count = Number(event.target.value);
+                if (Number.isInteger(count) && count >= 1 && count <= 100) {
+                  onNodeChange({ ...node, loop: { ...loop, maxIterations: count } });
+                }
+              }}
+              className="rounded-md border border-gray-300 bg-white px-3 py-2"
+            />
+          </label>
+          <p className="text-xs text-gray-600">超出的项目不会处理，最多可设置 100 项。</p>
+          {!loop.bodyNext || !loop.exitNext ? (
+            <p className="text-xs text-amber-800">请分别从节点右侧的“逐项处理”和“完成”连接后续步骤。</p>
           ) : null}
         </section>
       ) : null}
