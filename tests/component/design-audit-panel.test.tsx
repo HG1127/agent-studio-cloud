@@ -32,4 +32,19 @@ describe("设计检查面板", () => {
     expect(screen.getByText("当前设计检查通过。")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "应用安全修复" })).not.toBeInTheDocument();
   });
+
+  it("可以展开查看全部设计问题", async () => {
+    const issues = Array.from({ length: 10 }, (_, index) => ({
+      ...issue,
+      id: `issue-${index + 1}`,
+      title: `问题 ${index + 1}`,
+      detail: `说明 ${index + 1}`,
+    }));
+    const user = userEvent.setup();
+    render(<DesignAuditPanel agentId="00000000-0000-4000-8000-000000000081" score={40} issues={issues} />);
+    expect(screen.queryByText("问题 10")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "查看其他 2 项问题" }));
+    expect(screen.getByText("问题 10")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "收起其他问题" })).toBeInTheDocument();
+  });
 });

@@ -14,7 +14,9 @@ export function DesignAuditPanel({ agentId, score, issues }: { agentId: string; 
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const fixable = issues.some((issue) => issue.fixable);
+  const visibleIssues = expanded ? issues : issues.slice(0, 8);
   return <section className="rounded-lg border border-gray-200 bg-white p-4">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div>
@@ -39,12 +41,14 @@ export function DesignAuditPanel({ agentId, score, issues }: { agentId: string; 
       </button> : null}
     </div>
     {issues.length > 0 ? <ul className="mt-3 space-y-2">
-      {issues.slice(0, 8).map((issue) => <li key={issue.id} className="rounded-md bg-gray-50 p-2 text-sm">
+      {visibleIssues.map((issue) => <li key={issue.id} className="rounded-md bg-gray-50 p-2 text-sm">
         <p className={issue.severity === "critical" ? "font-medium text-red-700" : "font-medium text-amber-700"}>{userText(issue.title)}</p>
         <p className="mt-0.5 text-xs text-gray-600">{userText(issue.detail)}</p>
       </li>)}
     </ul> : <p className="mt-3 text-sm text-emerald-700">当前设计检查通过。</p>}
-    {issues.length > 8 ? <p className="mt-2 text-xs text-gray-500">另有 {issues.length - 8} 项问题未展开。</p> : null}
+    {issues.length > 8 ? <button type="button" onClick={() => setExpanded((current) => !current)} className="mt-2 text-xs text-blue-700 hover:underline">
+      {expanded ? "收起其他问题" : `查看其他 ${issues.length - 8} 项问题`}
+    </button> : null}
     {notice ? <p role="status" className="mt-2 text-sm text-blue-700">{notice}</p> : null}
     {error ? <p role="alert" className="mt-2 text-sm text-red-700">{error}</p> : null}
   </section>;
