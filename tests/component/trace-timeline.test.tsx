@@ -1,4 +1,4 @@
-// TraceTimeline 组件测试：静态三行渲染 + SSE 增量上屏（去重）+ 等待确认即刷新 + done 后断开并刷新 + 非实时不建连。
+// TraceTimeline 组件测试：静态三行渲染 + SSE 增量上屏（去重）+ 等待态变化即刷新 + done 后断开并刷新 + 非实时不建连。
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TraceTimeline } from "@/features/runs/TraceTimeline";
@@ -127,6 +127,26 @@ describe("TraceTimeline", () => {
       });
     });
     expect(screen.getByText("等待「负责人确认发送内容」确认")).toBeInTheDocument();
+    expect(refreshMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("收到等待消息轨迹事件后刷新页面状态", () => {
+    (globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
+    render(<TraceTimeline runId={RUN_ID} initialEvents={EVENTS} live />);
+    const source = FakeEventSource.instances[0];
+    act(() => {
+      source.emit("trace", {
+        id: "b2c3d4e5-0000-4000-8000-0000000000b5",
+        seq: 5,
+        nodeId: "wait_customer",
+        kind: "wait.started",
+        level: "info",
+        title: "「等待客户补充资料」正在等待",
+        detail: "等待消息：客户已补充资料",
+        at: "2026-09-21T08:30:09.000Z",
+      });
+    });
+    expect(screen.getByText("「等待客户补充资料」正在等待")).toBeInTheDocument();
     expect(refreshMock).toHaveBeenCalledTimes(1);
   });
 

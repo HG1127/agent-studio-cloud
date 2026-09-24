@@ -5,7 +5,7 @@ import { compare, resolvePath, type RunEvalContext } from "@/server/domain/runti
 const ctx: RunEvalContext = {
   input: { city: "杭州", severity: "high", count: 3, nested: { flag: true } },
   variables: { owner: "王经理" },
-  context: { outputs: { analyze: { summary: "投诉原因已定位" } } },
+  context: { outputs: { analyze: { summary: "投诉原因已定位" } }, currentItem: { priority: "high" } },
 };
 
 describe("resolvePath", () => {
@@ -17,6 +17,9 @@ describe("resolvePath", () => {
   });
   it("从 context.outputs.<nodeId> 取值", () => {
     expect(resolvePath("context.outputs.analyze", ctx)).toEqual({ summary: "投诉原因已定位" });
+  });
+  it("从 context.currentItem 取当前循环项", () => {
+    expect(resolvePath("context.currentItem.priority", ctx)).toBe("high");
   });
   it("支持嵌套路径 input.a.b", () => {
     expect(resolvePath("input.nested.flag", ctx)).toBe(true);
