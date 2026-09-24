@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { RunFilters } from "@/features/runs/RunFilters";
-import { RunList } from "@/features/runs/RunList";
+import { RunList, RunPagination } from "@/features/runs/RunList";
 
 describe("运行记录", () => {
   it("停用助手的历史运行仍然可见并有明确标记", () => {
@@ -28,5 +28,16 @@ describe("运行记录", () => {
     expect(screen.getByLabelText("发起方式")).toHaveValue("schedule");
     expect(screen.getByLabelText("助手")).toHaveValue("00000000-0000-4000-8000-000000000002");
     expect(screen.getByRole("link", { name: "清除筛选" })).toHaveAttribute("href", "/runs");
+  });
+
+  it("翻页时保留筛选条件，第一页和末页不显示无效入口", () => {
+    const filters = { status: "failed" as const, sourceType: "manual" as const };
+    const { rerender } = render(<RunPagination page={2} hasNext filters={filters} />);
+    expect(screen.getByText("第 2 页")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "上一页" })).toHaveAttribute("href", "/runs?status=failed&source=manual");
+    expect(screen.getByRole("link", { name: "下一页" })).toHaveAttribute("href", "/runs?status=failed&source=manual&page=3");
+
+    rerender(<RunPagination page={1} hasNext={false} filters={{}} />);
+    expect(screen.queryByRole("navigation", { name: "运行记录翻页" })).not.toBeInTheDocument();
   });
 });

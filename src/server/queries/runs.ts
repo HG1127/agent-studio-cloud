@@ -15,7 +15,13 @@ import { db } from "@/lib/db";
 
 const RUN_ID = z.string().uuid();
 
-export async function listRuns(workspaceId: string, filters: RunListFilters = {}): Promise<RunSummary[]> {
+export async function listRuns(
+  workspaceId: string,
+  filters: RunListFilters = {},
+  pagination: { limit?: number; offset?: number } = {},
+): Promise<RunSummary[]> {
+  const limit = Math.min(101, Math.max(1, pagination.limit ?? 100));
+  const offset = Math.max(0, pagination.offset ?? 0);
   const rows = await db
     .select({
       id: runs.id,
@@ -35,7 +41,9 @@ export async function listRuns(workspaceId: string, filters: RunListFilters = {}
       filters.sourceType ? eq(runs.sourceType, filters.sourceType) : undefined,
       filters.agentId ? eq(runs.agentId, filters.agentId) : undefined,
     ))
-    .orderBy(desc(runs.createdAt));
+    .orderBy(desc(runs.createdAt))
+    .limit(limit)
+    .offset(offset);
   return rows.map((row) =>
     RunSummary.parse({
       id: row.id,

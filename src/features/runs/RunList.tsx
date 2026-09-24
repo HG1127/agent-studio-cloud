@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { RunStatus, type RunSummary } from "@/contracts/run";
+import { RunStatus, type RunListFilters, type RunSummary } from "@/contracts/run";
 
 // 状态徽标唯一文案源：列表页与详情页共用
 export const RUN_STATUS_LABEL: Record<RunStatus, string> = {
@@ -80,5 +80,34 @@ export function RunList({ runs }: { runs: RunSummary[] }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+function paginationHref(page: number, filters: RunListFilters): string {
+  const params = new URLSearchParams();
+  if (filters.status) params.set("status", filters.status);
+  if (filters.sourceType) params.set("source", filters.sourceType);
+  if (filters.agentId) params.set("agent", filters.agentId);
+  if (page > 1) params.set("page", String(page));
+  const query = params.toString();
+  return query ? `/runs?${query}` : "/runs";
+}
+
+export function RunPagination({ page, hasNext, filters }: {
+  page: number;
+  hasNext: boolean;
+  filters: RunListFilters;
+}) {
+  if (page === 1 && !hasNext) return null;
+  return (
+    <nav aria-label="运行记录翻页" className="flex items-center justify-between gap-3 text-sm">
+      {page > 1
+        ? <Link href={paginationHref(page - 1, filters)} className="rounded-md border border-gray-300 px-3 py-1.5 hover:border-gray-500">上一页</Link>
+        : <span />}
+      <span className="text-gray-500">第 {page} 页</span>
+      {hasNext
+        ? <Link href={paginationHref(page + 1, filters)} className="rounded-md border border-gray-300 px-3 py-1.5 hover:border-gray-500">下一页</Link>
+        : <span />}
+    </nav>
   );
 }
