@@ -14,7 +14,7 @@ export function ImportAgentForm() {
   async function importFile(file: File | undefined) {
     if (!file) return;
     if (file.size > MAX_IMPORT_BYTES) {
-      setError("助手定义文件不能超过 5MB");
+      setError("导入文件不能超过 5MB");
       return;
     }
     setPending(true);
@@ -45,7 +45,7 @@ export function ImportAgentForm() {
     <div className="flex flex-col gap-2 rounded-lg border border-dashed border-gray-300 p-4">
       <div>
         <h2 className="text-sm font-semibold">导入助手</h2>
-        <p className="mt-1 text-xs text-gray-500">导入从本系统导出的 JSON 定义，发布版本和运行历史不会一并导入。</p>
+        <p className="mt-1 text-xs text-gray-500">支持助手定义或单个冻结版本。导入后生成可编辑草稿，发布状态和运行历史不会一并导入。</p>
       </div>
       <label className="w-fit cursor-pointer rounded-md border border-gray-300 px-3 py-2 text-sm hover:border-gray-500">
         {pending ? "正在导入…" : "选择 JSON 文件"}

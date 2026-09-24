@@ -8,6 +8,11 @@ vi.mock("@/server/actions/import-agent", () => ({ importAgentAction: importMock 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: pushMock }) }));
 
 describe("ImportAgentForm", () => {
+  it("说明助手定义和冻结版本都可以导入", () => {
+    render(<ImportAgentForm />);
+    expect(screen.getByText(/支持助手定义或单个冻结版本/)).toBeInTheDocument();
+  });
+
   afterEach(() => {
     importMock.mockReset();
     pushMock.mockReset();

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { WorkflowDraft } from "./workflow";
+import { VersionExportFile } from "./version";
 
 export const AgentCreateInput = z.object({
   name: z.string().min(1).max(60),
@@ -65,6 +66,9 @@ export const AgentExportFile = z.object({
   workflow: WorkflowDraft,
 });
 export type AgentExportFile = z.infer<typeof AgentExportFile>;
+
+export const AgentImportFile = z.union([AgentExportFile, VersionExportFile]);
+export type AgentImportFile = z.infer<typeof AgentImportFile>;
 
 export const ImportAgentResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true), agentId: z.string().uuid() }),
