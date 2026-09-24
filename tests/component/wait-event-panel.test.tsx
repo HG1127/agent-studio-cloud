@@ -47,4 +47,31 @@ describe("等待消息面板", () => {
     />);
     expect(screen.getByText("必填字段：complete、note")).toBeInTheDocument();
   });
+
+  it("按字段契约生成包含嵌套字段与枚举值的消息模板", () => {
+    render(<WaitEventPanel
+      runId="00000000-0000-4000-8000-000000000001"
+      eventKey="customer.updated"
+      title="等待客户补充资料"
+      payloadSchema={{
+        type: "object",
+        required: ["complete", "customer", "state"],
+        properties: {
+          complete: { type: "boolean" },
+          customer: {
+            type: "object",
+            required: ["id", "score"],
+            properties: { id: { type: "string" }, score: { type: "number" } },
+          },
+          state: { enum: ["ready", "cancelled"] },
+        },
+      }}
+    />);
+
+    expect(screen.getByLabelText("消息内容")).toHaveValue(JSON.stringify({
+      complete: false,
+      customer: { id: "", score: 0 },
+      state: "ready",
+    }, null, 2));
+  });
 });

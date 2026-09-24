@@ -4,6 +4,26 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { WaitEventPayload, WaitEventResumeResult } from "@/contracts/run";
 
+function schemaExample(schema: unknown, depth = 0): unknown {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema) || depth > 8) return "";
+  const rule = schema as Record<string, unknown>;
+  if ("default" in rule) return rule.default;
+  if (Array.isArray(rule.enum) && rule.enum.length > 0) return rule.enum[0];
+  if (rule.type === "boolean") return false;
+  if (rule.type === "number" || rule.type === "integer") return 0;
+  if (rule.type === "array") return [];
+  if (rule.type === "object" || rule.properties) {
+    const properties = rule.properties && typeof rule.properties === "object" && !Array.isArray(rule.properties)
+      ? rule.properties as Record<string, unknown>
+      : {};
+    const required = Array.isArray(rule.required)
+      ? rule.required.filter((field): field is string => typeof field === "string")
+      : [];
+    return Object.fromEntries(required.map((field) => [field, schemaExample(properties[field], depth + 1)]));
+  }
+  return "";
+}
+
 export function WaitEventPanel({ runId, eventKey, title, payloadSchema = { type: "object" } }: {
   runId: string;
   eventKey: string;
@@ -11,7 +31,7 @@ export function WaitEventPanel({ runId, eventKey, title, payloadSchema = { type:
   payloadSchema?: Record<string, unknown>;
 }) {
   const router = useRouter();
-  const [content, setContent] = useState("{}");
+  const [content, setContent] = useState(() => JSON.stringify(schemaExample(payloadSchema), null, 2));
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -74,7 +94,7 @@ export function WaitEventPanel({ runId, eventKey, title, payloadSchema = { type:
           spellCheck={false}
           className="rounded-md border border-cyan-200 bg-white px-3 py-2 font-mono text-sm text-gray-800"
         />
-        <p className="text-xs text-cyan-700">示例：{`{"complete": true, "note": "资料已补齐"}`}</p>
+        <p className="text-xs text-cyan-700">请把模板中的占位内容替换为本次实际消息。</p>
         {requiredFields.length > 0 ? <p className="text-xs text-cyan-700">必填字段：{requiredFields.join("、")}</p> : null}
         <button type="submit" disabled={pending} className="w-fit rounded-md bg-cyan-800 px-3 py-1.5 text-sm text-white disabled:opacity-50">
           {pending ? "提交中…" : "提交并继续"}
