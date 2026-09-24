@@ -51,7 +51,8 @@ export async function createAgentAction(input: AgentCreateInput): Promise<Create
         const provider = createOpenAICompatible({ name: "custom-model", baseURL: compileModel.baseUrl, apiKey: compileModel.apiKey });
         const { text } = await generateText({
           model: provider(compileModel.modelId), system: prompt.system, prompt: prompt.user,
-          abortSignal: AbortSignal.timeout(50_000), maxRetries: 0,
+          // 模型编排只是创建体验增强，超时后应尽快回退到确定性规则编排。
+          abortSignal: AbortSignal.timeout(15_000), maxRetries: 0,
         });
         const parsed = CompileStepListSchema.safeParse(extractJsonObject(text));
         if (parsed.success) {

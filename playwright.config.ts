@@ -9,7 +9,7 @@ export default defineConfig({
     url: "http://localhost:3210/api/health",
     // CI 里必须由 Playwright 自己起 dev（否则会复用不存在的 server）；本地才允许复用
     reuseExistingServer: !process.env.CI,
-    env: { MODEL_MOCK: "1", PORT: "3210" },
+    env: { MODEL_MOCK: "1", LLM_COMPILE: "0", PORT: "3210" },
     timeout: 120_000,
   },
   use: { baseURL: "http://localhost:3210" },

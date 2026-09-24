@@ -86,7 +86,13 @@ describe("VersionPanel", () => {
   });
 
   it("点「发布新版本」调用发布动作，成功后刷新页面", async () => {
-    actionMock.mockResolvedValue({ ok: true });
+    const published = {
+      id: "00000000-0000-4000-8000-0000000000a3",
+      version: 3,
+      status: "production",
+      createdAt: "2026-09-22T08:30:00.000Z",
+    };
+    actionMock.mockResolvedValue({ ok: true, release: "production", exempted: [], version: published });
     const user = userEvent.setup();
     renderPanel();
     await user.click(screen.getByRole("button", { name: "发布新版本" }));
@@ -96,6 +102,9 @@ describe("VersionPanel", () => {
     await waitFor(() => {
       expect(refreshMock).toHaveBeenCalledTimes(1);
     });
+    expect(screen.getByText("版本 3")).toBeInTheDocument();
+    expect(screen.getByText("当前版本")).toBeInTheDocument();
+    expect(screen.getAllByText("历史版本")).toHaveLength(2);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 

@@ -20,6 +20,7 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
   defaultModelLabel: string;
 }) {
   const router = useRouter();
+  const [publishedVersions, setPublishedVersions] = useState<VersionSummary[]>([]);
   const [modelSelection, setModelSelection] = useState("");
   const modelOptions = connections.flatMap((connection) => connection.modelIds.map((modelId) => ({
     value: JSON.stringify([connection.id, modelId]),
@@ -31,6 +32,20 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
   const [failure, setFailure] = useState<{ error: string; issues: string[] } | null>(null);
   const [demoNotice, setDemoNotice] = useState<string[] | null>(null);
   const [releaseNotice, setReleaseNotice] = useState<string | null>(null);
+
+  const displayedVersions = publishedVersions.reduce<VersionSummary[]>((current, published) => [
+    published,
+    ...current
+      .filter((version) => version.id !== published.id)
+      .map((version) => ({
+        ...version,
+        status: version.status === "candidate"
+          ? "superseded"
+          : published.status === "production" && version.status === "production"
+            ? "retired"
+            : version.status,
+      })),
+  ], versions);
 
   async function handlePublish() {
     setPending(true);
@@ -46,6 +61,9 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
     try {
       const result = await publishVersionAction(agentId, selection);
       if (result.ok) {
+        if (result.version) {
+          setPublishedVersions((current) => [...current, result.version]);
+        }
         const exempted = result.exempted ?? [];
         if (exempted.length > 0) setDemoNotice(exempted.map((issue) => issue.title));
         if (result.release === "candidate") {
@@ -126,9 +144,9 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
           </ul>
         </div>
       ) : null}
-      {versions.length > 0 ? (
+      {displayedVersions.length > 0 ? (
         <ul className="flex flex-col divide-y divide-gray-100">
-          {versions.map((version) => (
+          {displayedVersions.map((version) => (
             <li key={version.id} className="flex flex-wrap items-center gap-3 py-2 text-sm">
               <span className="font-medium">版本 {version.version}</span>
               <span

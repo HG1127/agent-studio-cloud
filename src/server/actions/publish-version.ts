@@ -3,7 +3,7 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import type { PublishVersionResult } from "@/contracts/version";
+import { VersionSummary, type PublishVersionResult } from "@/contracts/version";
 import { PublishModelSelection } from "@/contracts/connections";
 import { WorkflowDraft } from "@/contracts/workflow";
 import { agentVersions, agents, evaluationCases, knowledgeSources, modelConnections, workflowDefinitions } from "@/db/schema";
@@ -111,7 +111,7 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
     // 并发发布会撞 (agent_id, version) 唯一索引：整个事务重读 maxVersion 后重试一次
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        await db.transaction(async (tx) => {
+        const publishedVersion = await db.transaction(async (tx) => {
           const now = new Date();
           await tx
             .update(agentVersions)
@@ -127,17 +127,23 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
             .select({ maxVersion: sql<number>`coalesce(max(${agentVersions.version}), 0)`.mapWith(Number) })
             .from(agentVersions)
             .where(eq(agentVersions.agentId, agentId));
-          await tx.insert(agentVersions).values({
+          const [created] = await tx.insert(agentVersions).values({
             agentId,
             workspaceId: agent.workspaceId,
             createdBy: DEMO_USER_ID,
             version: (row?.maxVersion ?? 0) + 1,
             status: release,
             manifest,
+          }).returning({
+            id: agentVersions.id,
+            version: agentVersions.version,
+            status: agentVersions.status,
+            createdAt: agentVersions.createdAt,
           });
+          return VersionSummary.parse({ ...created, createdAt: created.createdAt.toISOString() });
         });
         revalidatePath(`/agents/${agentId}`);
-        return { ok: true, release, exempted: exempted.map((issue) => ({ title: issue.title })) };
+        return { ok: true, release, version: publishedVersion, exempted: exempted.map((issue) => ({ title: issue.title })) };
       } catch (error) {
         if (!isUniqueViolation(error)) throw error;
         if (attempt > 0) {

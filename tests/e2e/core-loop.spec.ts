@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 // 关键用户路径：创建 → 画布 → 发布 → 运行 → 审批 → 结果。
-// 固定走 mock 模型（webServer env MODEL_MOCK=1），断言确定性中文文案；
+// 固定走 mock 模型与规则编排（webServer env），断言确定性中文文案；
 // 运行数据残留可接受，助手名带时间戳后缀防重。
 test("创建助手到审批完成的完整闭环", async ({ page }) => {
   const agentName = `客服测试助手-${Date.now()}`;

@@ -17,6 +17,7 @@ export const PublishVersionResult = z.discriminatedUnion("ok", [
     ok: z.literal(true),
     release: z.enum(["candidate", "production"]),
     exempted: z.array(z.object({ title: z.string() })),
+    version: VersionSummary,
   }),
   z.object({ ok: z.literal(false), error: z.string(), issues: z.array(z.string()) }),
 ]);
