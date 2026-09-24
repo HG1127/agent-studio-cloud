@@ -32,6 +32,7 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
       .limit(1);
     if (!source) return { ok: false, error: "找不到这个历史版本，请刷新页面后重试" };
     if (source.status === "production") return { ok: false, error: "这个版本已经是当前版本" };
+    if (source.status !== "retired") return { ok: false, error: "只有曾经上线的历史版本才能恢复为当前版本" };
     const manifest = AgentManifest.safeParse(source.manifest);
     if (!manifest.success) return { ok: false, error: "历史版本格式过旧，无法直接恢复" };
 
