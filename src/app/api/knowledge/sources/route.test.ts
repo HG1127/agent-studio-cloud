@@ -135,6 +135,24 @@ describe("知识原文件上传", () => {
     expect(dbState.update).toHaveBeenCalledOnce();
   });
 
+  it("重新上传长时间停在解析中的同一文件会恢复入库任务", async () => {
+    dbState.rows = [{
+      id: "00000000-0000-4000-8000-0000000000f3", name: "售后手册.txt", mime: "text/plain",
+      sizeBytes: 12, status: "parsing", chunkCount: 0, charCount: 0, error: null,
+      createdAt: new Date("2026-09-24T00:00:00Z"), updatedAt: new Date(Date.now() - 10 * 60 * 1000),
+      blobPathname: null, archivedAt: null,
+    }];
+    const form = new FormData();
+    form.set("file", new File(["退货说明"], "售后手册.txt", { type: "text/plain" }));
+
+    const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, deduped: true, source: { status: "parsing" } });
+    expect(startMock).toHaveBeenCalledOnce();
+    expect(dbState.update).toHaveBeenCalledOnce();
+  });
+
   it("并发上传同一份新资料时复用已抢先创建的记录", async () => {
     const concurrent = {
       id: "00000000-0000-4000-8000-0000000000f4", name: "售后手册.txt", mime: "text/plain",

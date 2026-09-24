@@ -11,6 +11,7 @@ export const dynamic = "force-dynamic";
 
 const ALLOWED_EXT = new Set(["pdf", "docx", "txt", "md", "html", "json", "csv", "xml"]);
 const MAX_BYTES = 4 * 1024 * 1024;
+const STALE_PARSING_MS = 5 * 60 * 1000;
 
 function toView(row: typeof knowledgeSources.$inferSelect) {
   return {
@@ -73,7 +74,9 @@ export async function POST(req: Request) {
         return storageUnavailable();
       }
     }
-    const retrying = duplicate.status === "failed"
+    const lastUpdatedAt = duplicate.updatedAt ?? duplicate.createdAt;
+    const staleParsing = duplicate.status === "parsing" && lastUpdatedAt.getTime() < Date.now() - STALE_PARSING_MS;
+    const retrying = duplicate.status === "failed" || staleParsing
       || (duplicate.status === "archived" && duplicate.chunkCount === 0 && Boolean(duplicate.error));
     const status = retrying
       ? "parsing"
