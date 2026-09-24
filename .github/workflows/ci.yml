@@ -52,16 +52,16 @@ jobs:
             exit 1
           fi
       - name: 创建 Neon 临时分支
-        # neonctl v5 的 --output json 输出单个合并对象，connection_uris[0] 是含
-        # connection_uri 字段的对象；INFO/WARNING 日志走 stderr，stdout 为纯 JSON。
         # 锁 @5 major：v5 会静默吞未知 flag，不锁则未来升级可能静默破坏调用参数
         run: |
-          npx --yes neonctl@5 branches create --name ci-${{ github.run_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --api-key "$NEON_API_KEY" --output json > branch.json
-          BRANCH_URL=$(jq -r '.connection_uris[0].connection_uri' branch.json)
-          echo "BRANCH_URL=$BRANCH_URL" >> "$GITHUB_ENV"
-          # 连接串含密码：注册日志掩码后，URL 即使在后续步骤报错回显也不泄密码
+          npx --yes neonctl@5 branches create --name ci-${{ github.run_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --api-key "$NEON_API_KEY" --output json > /dev/null
+          BRANCH_URL=$(npx --yes neonctl@5 connection-string ci-${{ github.run_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --api-key "$NEON_API_KEY")
+          if [[ "$BRANCH_URL" != postgres://* && "$BRANCH_URL" != postgresql://* ]]; then
+            echo "::error::Neon 临时分支未返回有效连接串"
+            exit 1
+          fi
           echo "::add-mask::$BRANCH_URL"
-          rm -f branch.json
+          echo "BRANCH_URL=$BRANCH_URL" >> "$GITHUB_ENV"
       - name: 迁移 + 集成测试 + E2E
         env:
           DATABASE_URL: ${{ env.BRANCH_URL }}
@@ -78,6 +78,5 @@ jobs:
         # neonctl v5 删除分支无交互确认（源码直连 API），没有 --force 选项
         # 守卫不看 BRANCH_URL：分支名由 run_id 确定，create 成功但取 URL 失败时同样要能清理
         run: |
-          rm -f branch.json
           # 容忍分支不存在（create 被跳过或取 URL 前已失败），清理失败不应挂红 job
           npx --yes neonctl@5 branches delete ci-${{ github.run_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --api-key "$NEON_API_KEY" || true
