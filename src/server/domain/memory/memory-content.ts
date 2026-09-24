@@ -17,10 +17,11 @@ export function buildMemoryContent(args: {
   contentFrom?: string;
   input: Record<string, unknown>;
   outputs: Record<string, unknown>;
-}): string {
-  const selected = args.contentFrom && args.contentFrom !== "run_summary"
-    ? args.outputs[args.contentFrom]
+}): string | null {
+  const explicitSource = args.contentFrom?.trim() && args.contentFrom !== "run_summary" ? args.contentFrom.trim() : null;
+  const selected = explicitSource
+    ? args.outputs[explicitSource]
     : { input: args.input, results: args.outputs };
-  const fallback = selected === undefined ? { input: args.input, results: args.outputs } : selected;
-  return JSON.stringify(redact(fallback), null, 2).slice(0, MAX_MEMORY_CHARS);
+  if (explicitSource && selected === undefined) return null;
+  return JSON.stringify(redact(selected), null, 2).slice(0, MAX_MEMORY_CHARS);
 }

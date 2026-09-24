@@ -35,4 +35,17 @@ describe("长期经验运行逻辑", () => {
     expect(selectRelevantMemories("客户续约", [older, newer], 5)).toEqual([older]);
     expect(selectRelevantMemories("", [older, newer], 1)).toEqual([newer]);
   });
+
+  it("显式内容来源不存在时不回退保存全部运行数据", () => {
+    expect(buildMemoryContent({
+      contentFrom: "missing_node",
+      input: { customer: "甲公司" },
+      outputs: { summary: "已完成" },
+    })).toBeNull();
+    expect(buildMemoryContent({
+      contentFrom: "summary",
+      input: {},
+      outputs: { summary: "仅保存这一条" },
+    })).toContain("仅保存这一条");
+  });
 });

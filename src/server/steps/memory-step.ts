@@ -60,6 +60,9 @@ export async function runMemoryStep(args: {
   }
 
   const content = buildMemoryContent({ contentFrom: memory.contentFrom, input: args.input, outputs: args.outputs });
+  if (content === null) {
+    throw new FatalError(`步骤「${args.node.title}」指定的经验内容来源“${memory.contentFrom}”不存在`);
+  }
   await db
     .insert(agentMemories)
     .values({
