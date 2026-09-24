@@ -24,6 +24,14 @@ export interface RunModelStepInput {
   input: Record<string, unknown>;
 }
 
+class UnusableModelOutputError extends Error {}
+
+function cleanModelOutput(raw: string): string {
+  const output = raw.replace(/<think\b[^>]*>[\s\S]*?<\/think\s*>/gi, "").trim();
+  if (!output || /<\/?think\b/i.test(output)) throw new UnusableModelOutputError();
+  return output;
+}
+
 export async function runModelStep(args: RunModelStepInput): Promise<{ output: string }> {
   "use step";
   const { node } = args;
@@ -110,7 +118,7 @@ export async function runModelStep(args: RunModelStepInput): Promise<{ output: s
       prompt: prompt.user,
       abortSignal: AbortSignal.timeout(60_000),
     });
-    const output = text.trim();
+    const output = cleanModelOutput(text);
     await persistStep({
       runId: args.runId,
       nodeId: node.id,
@@ -121,10 +129,13 @@ export async function runModelStep(args: RunModelStepInput): Promise<{ output: s
     });
     return { output };
   } catch (error) {
-    const retryable = isTransientModelError(error);
-    const reason = retryable
-      ? "模型服务暂时不可用，稍后自动重试"
-      : "模型调用失败，请检查连接地址、密钥和模型名称";
+    const unusableOutput = error instanceof UnusableModelOutputError;
+    const retryable = !unusableOutput && isTransientModelError(error);
+    const reason = unusableOutput
+      ? "模型没有返回可用的业务正文，请调整步骤要求后重试"
+      : retryable
+        ? "模型服务暂时不可用，稍后自动重试"
+        : "模型调用失败，请检查连接地址、密钥和模型名称";
     await persistStep({
       runId: args.runId,
       nodeId: node.id,
