@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { WorkflowNode } from "@/contracts/workflow";
-import { fromDateTimeLocalValue, NodeInspector, toDateTimeLocalValue } from "@/features/workflow-canvas/NodeInspector";
+import { fromDateTimeLocalValue, NodeInspector, parseConditionValue, toDateTimeLocalValue } from "@/features/workflow-canvas/NodeInspector";
 
 const AI_NODE = WorkflowNode.parse({ id: "step_1", title: "生成回复方案", type: "ai" });
 const HUMAN_NODE = WorkflowNode.parse({
@@ -105,6 +105,14 @@ describe("NodeInspector", () => {
     expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({ condition: expect.objectContaining({ source: "input.total" }) }));
     await user.click(screen.getByRole("button", { name: "添加情况" }));
     expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({ condition: expect.objectContaining({ branches: [expect.objectContaining({ label: "情况 1" })] }) }));
+  });
+
+  it("条件比较值保留数字和布尔类型，普通文字仍按字符串保存", () => {
+    expect(parseConditionValue("42")).toBe(42);
+    expect(parseConditionValue("true")).toBe(true);
+    expect(parseConditionValue("null")).toBeNull();
+    expect(parseConditionValue("已完成")).toBe("已完成");
+    expect(parseConditionValue('{"unsafe":"object"}')).toBe('{"unsafe":"object"}');
   });
 
   it("等待、经验和逐项处理节点暴露运行所需设置", () => {

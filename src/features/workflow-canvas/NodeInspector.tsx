@@ -170,8 +170,8 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
                 <input aria-label={`情况 ${index + 1} 名称`} value={branch.label} placeholder="情况名称"
                   onChange={(event) => onNodeChange({ ...node, condition: { ...node.condition!, branches: node.condition!.branches.map((item, itemIndex) => itemIndex === index ? { ...item, label: event.target.value } : item) } })}
                   className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
-                <input aria-label={`情况 ${index + 1} 比较值`} value={String(branch.value ?? "")} placeholder="比较值"
-                  onChange={(event) => onNodeChange({ ...node, condition: { ...node.condition!, branches: node.condition!.branches.map((item, itemIndex) => itemIndex === index ? { ...item, value: event.target.value } : item) } })}
+                <input aria-label={`情况 ${index + 1} 比较值`} value={branch.value === null ? "null" : String(branch.value ?? "")} placeholder="比较值"
+                  onChange={(event) => onNodeChange({ ...node, condition: { ...node.condition!, branches: node.condition!.branches.map((item, itemIndex) => itemIndex === index ? { ...item, value: parseConditionValue(event.target.value) } : item) } })}
                   className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
                 <button type="button" aria-label={`删除情况 ${index + 1}`}
                   onClick={() => onNodeChange({ ...node, condition: { ...node.condition!, branches: node.condition!.branches.filter((_, itemIndex) => itemIndex !== index) } })}
@@ -520,4 +520,15 @@ export function fromDateTimeLocalValue(value: string): string | null {
   if (!value) return null;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+export function parseConditionValue(value: string): unknown {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    return typeof parsed === "object" && parsed !== null ? value : parsed;
+  } catch {
+    return value;
+  }
 }

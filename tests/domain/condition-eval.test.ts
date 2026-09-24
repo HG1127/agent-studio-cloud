@@ -47,6 +47,9 @@ describe("compare", () => {
     expect(compare("high", "eq", "high")).toBe(true);
     expect(compare("high", "eq", "low")).toBe(false);
     expect(compare(3, "eq", "3")).toBe(false);
+    expect(compare(3, "eq", 3)).toBe(true);
+    expect(compare(true, "eq", true)).toBe(true);
+    expect(compare(true, "eq", "true")).toBe(false);
   });
   it("neq：不等为真", () => {
     expect(compare("high", "neq", "low")).toBe(true);
