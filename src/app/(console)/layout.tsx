@@ -4,6 +4,7 @@ const NAV_ITEMS = [
   { href: "/", label: "总览" },
   { href: "/agents", label: "助手" },
   { href: "/knowledge", label: "知识库" },
+  { href: "/memory", label: "经验库" },
   { href: "/settings", label: "模型连接" },
   { href: "/schedules", label: "定时任务" },
   { href: "/runs", label: "运行记录" },
