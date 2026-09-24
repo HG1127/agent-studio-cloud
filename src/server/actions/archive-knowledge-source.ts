@@ -13,32 +13,36 @@ export async function setKnowledgeSourceArchivedAction(input: unknown): Promise<
     return { ok: false, error: "知识来源标识不正确，请刷新页面后重试" };
   }
   try {
-    const [source] = await db
-      .select({ status: knowledgeSources.status, chunkCount: knowledgeSources.chunkCount, error: knowledgeSources.error })
-      .from(knowledgeSources)
-      .where(and(
-        eq(knowledgeSources.id, parsed.data.sourceId),
-        eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID),
-        parsed.data.archived ? isNull(knowledgeSources.archivedAt) : isNotNull(knowledgeSources.archivedAt),
-      ))
-      .limit(1);
-    if (!source) return { ok: false, error: "知识资料状态已经变化，请刷新页面后重试" };
-
-    const now = new Date();
-    const rows = await db
-      .update(knowledgeSources)
-      .set({
-        archivedAt: parsed.data.archived ? now : null,
-        status: parsed.data.archived ? "archived" : restoredKnowledgeStatus(source),
-        updatedAt: now,
-      })
-      .where(and(
-        eq(knowledgeSources.id, parsed.data.sourceId),
-        eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID),
-        parsed.data.archived ? isNull(knowledgeSources.archivedAt) : isNotNull(knowledgeSources.archivedAt),
-      ))
-      .returning({ id: knowledgeSources.id });
-    if (rows.length === 0) return { ok: false, error: "知识资料状态已经变化，请刷新页面后重试" };
+    const updated = await db.transaction(async (tx) => {
+      // 与解析入库步骤锁同一来源行，恢复状态必须使用锁内最新的分片数和错误。
+      const [source] = await tx
+        .select({ status: knowledgeSources.status, chunkCount: knowledgeSources.chunkCount, error: knowledgeSources.error })
+        .from(knowledgeSources)
+        .where(and(
+          eq(knowledgeSources.id, parsed.data.sourceId),
+          eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID),
+          parsed.data.archived ? isNull(knowledgeSources.archivedAt) : isNotNull(knowledgeSources.archivedAt),
+        ))
+        .for("update")
+        .limit(1);
+      if (!source) return false;
+      const now = new Date();
+      const rows = await tx
+        .update(knowledgeSources)
+        .set({
+          archivedAt: parsed.data.archived ? now : null,
+          status: parsed.data.archived ? "archived" : restoredKnowledgeStatus(source),
+          updatedAt: now,
+        })
+        .where(and(
+          eq(knowledgeSources.id, parsed.data.sourceId),
+          eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID),
+          parsed.data.archived ? isNull(knowledgeSources.archivedAt) : isNotNull(knowledgeSources.archivedAt),
+        ))
+        .returning({ id: knowledgeSources.id });
+      return rows.length > 0;
+    });
+    if (!updated) return { ok: false, error: "知识资料状态已经变化，请刷新页面后重试" };
     revalidatePath("/knowledge");
     return { ok: true };
   } catch (error) {
