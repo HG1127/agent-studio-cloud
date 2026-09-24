@@ -6,6 +6,7 @@ import { agentVersions, agents, runs } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { prepareParallelBranches } from "@/server/domain/runtime/parallel-runtime";
+import { prepareSubflow } from "@/server/domain/runtime/subflow-runtime";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
 
 // M1 运行引擎支持的节点类型：其余编排类节点后续任务扩展
@@ -22,6 +23,7 @@ const SUPPORTED_NODE_TYPES: ReadonlySet<string> = new Set([
   "wait",
   "loop",
   "parallel",
+  "subflow",
 ]);
 
 export async function startRunCore(args: {
@@ -82,6 +84,20 @@ export async function startRunCore(args: {
             }
             if (step.type === "knowledge" && !step.knowledge?.space) unsupported.push(`${node.title} / ${branch.label} / ${step.title}`);
           }
+        }
+      }
+      if (node.type === "subflow") {
+        const prepared = prepareSubflow(node);
+        if (!prepared.ok) {
+          unsupported.push(`${node.title}（${prepared.error}）`);
+          continue;
+        }
+        for (const step of prepared.steps) {
+          if (step.type === "tool") {
+            const demoBound = step.tool && (step.tool.registryToolId === "demo" || step.tool.protocol === "demo");
+            if (!step.tool || step.tool.unresolved === true || !demoBound) unsupported.push(`${node.title} / ${step.title}`);
+          }
+          if (step.type === "knowledge" && !step.knowledge?.space) unsupported.push(`${node.title} / ${step.title}`);
         }
       }
     }

@@ -5,12 +5,15 @@ import type { WorkflowNode } from "@/contracts/workflow";
 import { requestApproval, recordDecision } from "@/server/steps/approval-step";
 import { resolveLoopCollection, workflowExecutionLimit } from "@/server/domain/runtime/loop-runtime";
 import { prepareParallelBranches, type PreparedParallelBranch } from "@/server/domain/runtime/parallel-runtime";
+import { prepareSubflow, type PreparedSubflow } from "@/server/domain/runtime/subflow-runtime";
 import { evaluateCondition } from "@/server/steps/condition-step";
+import { runInlineSystemStep } from "@/server/steps/inline-system-step";
 import { runKnowledgeStep } from "@/server/steps/knowledge-step";
 import { beginLoopIteration, completeLoop } from "@/server/steps/loop-step";
 import { runModelStep } from "@/server/steps/model-step";
-import { beginParallel, finishParallel, runParallelSystemStep } from "@/server/steps/parallel-step";
+import { beginParallel, finishParallel } from "@/server/steps/parallel-step";
 import { failRun, finalizeRun, initializeRun, markRunRunning } from "@/server/steps/run-state";
+import { beginSubflow, finishSubflow } from "@/server/steps/subflow-step";
 import { runQualityGate } from "@/server/steps/quality-step";
 import { appendTrace } from "@/server/steps/trace-step";
 import { runToolStep } from "@/server/steps/tool-step";
@@ -24,13 +27,35 @@ type ParallelBranchResult = {
   error?: string;
 };
 
-function parallelFailureReason(error: unknown, branchLabel: string): string {
+function executionFailureReason(error: unknown, fallback: string): string {
   const message = error instanceof Error
     ? error.message
     : typeof error === "object" && error !== null && "message" in error
       ? String(error.message)
       : String(error ?? "");
-  return /[\u4e00-\u9fff]/.test(message) ? message : `并行工作「${branchLabel}」执行失败`;
+  return /[\u4e00-\u9fff]/.test(message) ? message : fallback;
+}
+
+async function executeAutomaticNode(args: {
+  runId: string;
+  node: WorkflowNode;
+  manifest: AgentManifest;
+  input: Record<string, unknown>;
+  outputs: Record<string, unknown>;
+}): Promise<unknown> {
+  if (args.node.type === "ai") {
+    return (await runModelStep(args)).output;
+  }
+  if (args.node.type === "tool") {
+    return (await runToolStep({ runId: args.runId, node: args.node })).receipt;
+  }
+  if (args.node.type === "knowledge") {
+    return (await runKnowledgeStep({ runId: args.runId, node: args.node, manifest: args.manifest, input: args.input })).receipt;
+  }
+  if (args.node.type === "system") {
+    return (await runInlineSystemStep({ runId: args.runId, node: args.node })).output;
+  }
+  throw new FatalError(`步骤「${args.node.title}」暂不支持自动执行`);
 }
 
 async function executeParallelBranch(args: {
@@ -42,30 +67,38 @@ async function executeParallelBranch(args: {
 }): Promise<ParallelBranchResult> {
   const branchOutputs: Record<string, unknown> = {};
   for (const node of args.branch.steps) {
-    const visibleOutputs = { ...args.parentOutputs, ...branchOutputs };
-    if (node.type === "ai") {
-      const result = await runModelStep({ ...args, node, outputs: visibleOutputs });
-      branchOutputs[node.id] = result.output;
-      continue;
-    }
-    if (node.type === "tool") {
-      const result = await runToolStep({ runId: args.runId, node });
-      branchOutputs[node.id] = result.receipt;
-      continue;
-    }
-    if (node.type === "knowledge") {
-      const result = await runKnowledgeStep({ runId: args.runId, node, manifest: args.manifest, input: args.input });
-      branchOutputs[node.id] = result.receipt;
-      continue;
-    }
-    if (node.type === "system") {
-      const result = await runParallelSystemStep({ runId: args.runId, node });
-      branchOutputs[node.id] = result.output;
-      continue;
-    }
-    throw new FatalError(`并行工作「${args.branch.label}」包含不支持的步骤`);
+    branchOutputs[node.id] = await executeAutomaticNode({
+      runId: args.runId,
+      node,
+      manifest: args.manifest,
+      input: args.input,
+      outputs: { ...args.parentOutputs, ...branchOutputs },
+    });
   }
   return { id: args.branch.id, label: args.branch.label, status: "completed", outputs: branchOutputs };
+}
+
+async function executeSubflow(args: {
+  runId: string;
+  subflow: PreparedSubflow;
+  manifest: AgentManifest;
+  input: Record<string, unknown>;
+  parentOutputs: Record<string, unknown>;
+}): Promise<Array<{ title: string; output: unknown }>> {
+  const childOutputs: Record<string, unknown> = {};
+  const steps: Array<{ title: string; output: unknown }> = [];
+  for (const node of args.subflow.steps) {
+    const output = await executeAutomaticNode({
+      runId: args.runId,
+      node,
+      manifest: args.manifest,
+      input: args.input,
+      outputs: { ...args.parentOutputs, ...childOutputs },
+    });
+    childOutputs[node.id] = output;
+    steps.push({ title: node.title, output });
+  }
+  return steps;
 }
 
 export async function agentRunWorkflow(runId: string, manifest: AgentManifest, input: Record<string, unknown>) {
@@ -255,7 +288,7 @@ export async function agentRunWorkflow(runId: string, manifest: AgentManifest, i
             label: branch.label,
             status: "failed",
             outputs: {},
-            error: parallelFailureReason(result.reason, branch.label),
+            error: executionFailureReason(result.reason, `并行工作「${branch.label}」执行失败`),
           };
         });
         const failed = branchResults.filter((branch) => branch.status === "failed");
@@ -279,6 +312,48 @@ export async function agentRunWorkflow(runId: string, manifest: AgentManifest, i
         await finishParallel({ runId, node, output, failed: failed.length > 0, handled: true });
         currentId = node.next;
         continue;
+      }
+      if (node.type === "subflow") {
+        const prepared = prepareSubflow(node);
+        if (!prepared.ok) throw new FatalError(prepared.error);
+        await beginSubflow({ runId, node, stepCount: prepared.steps.length });
+        const [settled] = await Promise.allSettled([executeSubflow({
+          runId,
+          subflow: prepared,
+          manifest,
+          input,
+          parentOutputs: outputs,
+        })]);
+        if (settled.status === "fulfilled") {
+          const output = {
+            name: prepared.name,
+            status: "completed",
+            expectedOutputs: prepared.outputNames,
+            steps: settled.value,
+          };
+          outputs[node.id] = output;
+          await finishSubflow({ runId, node, output, failed: false, handled: true });
+          currentId = node.next;
+          continue;
+        }
+        const output = {
+          name: prepared.name,
+          status: "failed",
+          expectedOutputs: prepared.outputNames,
+          error: executionFailureReason(settled.reason, `一组步骤「${prepared.name}」执行失败`),
+        };
+        outputs[node.id] = output;
+        const handled = prepared.failurePolicy === "continue" || Boolean(node.onErrorNext);
+        await finishSubflow({ runId, node, output, failed: true, handled });
+        if (prepared.failurePolicy === "continue") {
+          currentId = node.next;
+          continue;
+        }
+        if (node.onErrorNext) {
+          currentId = node.onErrorNext;
+          continue;
+        }
+        throw new FatalError(`步骤「${node.title}」未能完成`);
       }
       // 其余节点类型 M1 不支持自动执行
       throw new FatalError(`步骤「${node.title}」暂不支持自动执行`);
