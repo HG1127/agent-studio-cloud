@@ -9,11 +9,19 @@ interface NodeInspectorProps {
   onNodeDelete: (nodeId: string) => void;
 }
 
+function localDateTime(value: string | null): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+}
+
 // M1 编辑范围：title/description，加 human 的负责人与确认事项；condition 的说明以「判断说明」呈现
 export function NodeInspector({ node, onNodeChange, onNodeDelete }: NodeInspectorProps) {
   const isHuman = node.type === "human";
   const isCondition = node.type === "condition";
   const knowledge = node.knowledge;
+  const wait = node.wait;
   const deletable = node.type !== "trigger" && node.type !== "end";
   return (
     <aside aria-label="节点详情" className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4">
@@ -57,6 +65,91 @@ export function NodeInspector({ node, onNodeChange, onNodeDelete }: NodeInspecto
             className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
           />
         </div>
+      ) : null}
+      {node.type === "wait" && wait ? (
+        <section className="flex flex-col gap-3 rounded-md border border-cyan-100 bg-cyan-50 p-3">
+          <h3 className="text-sm font-semibold">等待设置</h3>
+          <label className="flex flex-col gap-1 text-sm">
+            等待方式
+            <select
+              value={wait.mode}
+              onChange={(event) => onNodeChange({ ...node, wait: { ...wait, mode: event.target.value as typeof wait.mode } })}
+              className="rounded-md border border-gray-300 bg-white px-3 py-2"
+            >
+              <option value="delay">等待一段时间</option>
+              <option value="until">到指定时间继续</option>
+              <option value="event">收到消息后继续</option>
+            </select>
+          </label>
+          {wait.mode === "delay" ? (
+            <label className="flex flex-col gap-1 text-sm">
+              等待秒数
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={Math.round(wait.durationMs / 1000)}
+                onChange={(event) => onNodeChange({ ...node, wait: { ...wait, durationMs: Math.max(0, Math.round(Number(event.target.value) * 1000)) } })}
+                className="rounded-md border border-gray-300 bg-white px-3 py-2"
+              />
+            </label>
+          ) : null}
+          {wait.mode === "until" ? (
+            <label className="flex flex-col gap-1 text-sm">
+              继续时间（本地时间）
+              <input
+                type="datetime-local"
+                value={localDateTime(wait.until)}
+                onChange={(event) => {
+                  const date = event.target.value ? new Date(event.target.value) : null;
+                  onNodeChange({ ...node, wait: { ...wait, until: date && !Number.isNaN(date.getTime()) ? date.toISOString() : null } });
+                }}
+                className="rounded-md border border-gray-300 bg-white px-3 py-2"
+              />
+              {!wait.until ? <span className="text-xs text-amber-800">请填写继续时间。</span> : null}
+            </label>
+          ) : null}
+          {wait.mode === "event" ? (
+            <>
+              <label className="flex flex-col gap-1 text-sm">
+                等待的消息名称
+                <input
+                  value={wait.eventLabel ?? ""}
+                  maxLength={80}
+                  onChange={(event) => onNodeChange({ ...node, wait: { ...wait, eventLabel: event.target.value } })}
+                  className="rounded-md border border-gray-300 bg-white px-3 py-2"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                消息标识
+                <input
+                  value={wait.eventKey}
+                  maxLength={120}
+                  onChange={(event) => onNodeChange({ ...node, wait: { ...wait, eventKey: event.target.value.replace(/[^a-zA-Z0-9._:-]/g, "") } })}
+                  className="rounded-md border border-gray-300 bg-white px-3 py-2"
+                />
+              </label>
+              <p className="text-xs text-gray-600">外部系统发送消息时使用此标识。只能填写英文字母、数字和 . _ : -。</p>
+              {!wait.eventKey ? <p className="text-xs text-amber-800">请填写消息标识。</p> : null}
+              <label className="flex flex-col gap-1 text-sm">
+                最长等待秒数（0 表示一直等待）
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={Math.round(wait.timeoutMs / 1000)}
+                  onChange={(event) => onNodeChange({ ...node, wait: { ...wait, timeoutMs: Math.max(0, Math.round(Number(event.target.value) * 1000)) } })}
+                  className="rounded-md border border-gray-300 bg-white px-3 py-2"
+                />
+              </label>
+              {wait.timeoutMs > 0 ? (
+                <p className={wait.onTimeoutNext ? "text-xs text-gray-600" : "text-xs text-amber-800"}>
+                  从右侧“超时后”连线到处理步骤；没有连线时，超时会停止运行。
+                </p>
+              ) : null}
+            </>
+          ) : null}
+        </section>
       ) : null}
       {isHuman ? (
         <>

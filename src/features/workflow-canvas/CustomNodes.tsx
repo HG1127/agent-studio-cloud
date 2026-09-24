@@ -57,7 +57,7 @@ function isDemoTool(node: WorkflowNode): boolean {
   return node.type === "tool" && (node.tool?.registryToolId === "demo" || node.tool?.protocol === "demo");
 }
 
-// 出边句柄与草稿字段一一对应：next/reject/error/default/body/exit/branch-N
+// 出边句柄与草稿字段一一对应：next/reject/error/default/body/exit/timeout/branch-N
 export function WorkflowNodeView(props: NodeProps) {
   const node = (props.data as WorkflowFlowNodeData).node;
   const isTrigger = node.type === "trigger";
@@ -82,6 +82,9 @@ export function WorkflowNodeView(props: NodeProps) {
       ) : null}
       {node.type === "ai" || node.type === "tool" ? (
         <Handle id="error" type="source" position={Position.Right} style={{ ...HANDLE_STYLE, top: "78%" }} title="未完成时" />
+      ) : null}
+      {node.type === "wait" && node.wait?.mode === "event" ? (
+        <Handle id="timeout" type="source" position={Position.Right} style={{ ...HANDLE_STYLE, top: "78%" }} title="超时后" />
       ) : null}
       {isCondition
         ? node.condition?.branches.map((branch, index) => (

@@ -24,7 +24,7 @@ interface FlowCanvasProps {
   draft: WorkflowDraft;
 }
 
-type EdgeKind = "next" | "reject" | "error" | "branch" | "body";
+type EdgeKind = "next" | "reject" | "error" | "branch" | "body" | "timeout";
 
 const EDGE_STYLES: Record<EdgeKind, { color: string; dashed: boolean }> = {
   next: { color: "#6b7280", dashed: false },
@@ -32,6 +32,7 @@ const EDGE_STYLES: Record<EdgeKind, { color: string; dashed: boolean }> = {
   error: { color: "#ea580c", dashed: true },
   branch: { color: "#2563eb", dashed: false },
   body: { color: "#7c3aed", dashed: true },
+  timeout: { color: "#0891b2", dashed: true },
 };
 
 // 出边规格与草稿字段一一对应，句柄 id 同时用于连线与删边时回写
@@ -59,6 +60,9 @@ function outgoingSpecs(node: WorkflowNode): EdgeSpec[] {
   if (node.type === "loop") {
     if (node.loop?.bodyNext) specs.push({ handle: "body", target: node.loop.bodyNext, kind: "body", label: "逐项处理" });
     if (node.loop?.exitNext) specs.push({ handle: "exit", target: node.loop.exitNext, kind: "next", label: "完成" });
+  }
+  if (node.type === "wait" && node.wait?.mode === "event" && node.wait.onTimeoutNext) {
+    specs.push({ handle: "timeout", target: node.wait.onTimeoutNext, kind: "timeout", label: "超时后" });
   }
   if (node.next) specs.push({ handle: "next", target: node.next, kind: "next" });
   return specs;
@@ -100,6 +104,9 @@ function removeNode(draft: WorkflowDraft, nodeId: string): WorkflowDraft {
         exitNext: node.loop.exitNext === nodeId ? null : node.loop.exitNext,
       };
     }
+    if (node.wait?.onTimeoutNext === nodeId) {
+      cleaned.wait = { ...node.wait, onTimeoutNext: null };
+    }
     nodes[id] = cleaned;
   }
   const positions = { ...draft.ui.positions };
@@ -114,6 +121,11 @@ function applyConnection(draft: WorkflowDraft, connection: Connection): Workflow
   const node = draft.nodes[source];
   if (sourceHandle === "reject") return patchNode(draft, source, { ...node, rejectNext: target });
   if (sourceHandle === "error") return patchNode(draft, source, { ...node, onErrorNext: target });
+  if (sourceHandle === "timeout") {
+    return node.type === "wait" && node.wait?.mode === "event"
+      ? patchNode(draft, source, { ...node, wait: { ...node.wait, onTimeoutNext: target } })
+      : draft;
+  }
   if (sourceHandle === "default") {
     const condition = node.condition ?? { source: null, operator: "eq" as const, branches: [], defaultNext: null };
     return patchNode(draft, source, { ...node, condition: { ...condition, defaultNext: target } });
@@ -152,6 +164,11 @@ function clearEdge(draft: WorkflowDraft, edgeId: string): WorkflowDraft {
   }
   if (handle === "error") {
     return node.onErrorNext === target ? patchNode(draft, source, { ...node, onErrorNext: null }) : draft;
+  }
+  if (handle === "timeout") {
+    return node.wait?.onTimeoutNext === target
+      ? patchNode(draft, source, { ...node, wait: { ...node.wait, onTimeoutNext: null } })
+      : draft;
   }
   if (handle === "default" && node.condition) {
     return node.condition.defaultNext === target
