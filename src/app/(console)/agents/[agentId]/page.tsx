@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { RunLauncher } from "@/features/agents/RunLauncher";
 import { VersionPanel } from "@/features/agents/VersionPanel";
 import { EvaluationPanel } from "@/features/agents/EvaluationPanel";
+import { AgentMetadataEditor } from "@/features/agents/AgentMetadataEditor";
 import { FlowCanvas } from "@/features/workflow-canvas/FlowCanvas";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { auditWorkflow, type DesignAuditResult } from "@/server/domain/audit";
@@ -57,6 +58,7 @@ export default async function AgentDetailPage({
         {detail.agent.description ? (
           <p className="text-sm text-gray-500">{detail.agent.description}</p>
         ) : null}
+        <AgentMetadataEditor agentId={agentId} initialName={detail.agent.name} initialDescription={detail.agent.description} />
         <p className="text-sm text-gray-500">{auditStatusLine(audit)}</p>
       </header>
       {detail.draft ? (
