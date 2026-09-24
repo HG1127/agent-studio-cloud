@@ -123,7 +123,31 @@ export async function POST(req: Request) {
       blobPathname,
       createdBy: DEMO_USER_ID,
     })
+    .onConflictDoNothing({ target: [knowledgeSources.workspaceId, knowledgeSources.sha256] })
     .returning();
+  if (!row) {
+    const [concurrent] = await db
+      .select()
+      .from(knowledgeSources)
+      .where(and(eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID), eq(knowledgeSources.sha256, sha256)))
+      .limit(1);
+    if (!concurrent) {
+      return Response.json({ ok: false, error: "资料记录创建失败，请稍后重试" }, { status: 500 });
+    }
+    const effectiveBlobPathname = concurrent.blobPathname ?? blobPathname;
+    if (!concurrent.blobPathname && effectiveBlobPathname) {
+      await db
+        .update(knowledgeSources)
+        .set({ blobPathname: effectiveBlobPathname, updatedAt: new Date() })
+        .where(eq(knowledgeSources.id, concurrent.id));
+    }
+    return Response.json({
+      ok: true,
+      deduped: true,
+      blobStored: Boolean(effectiveBlobPathname),
+      source: toView({ ...concurrent, blobPathname: effectiveBlobPathname }),
+    });
+  }
   try {
     await start(knowledgeIngestWorkflow, [{ sourceId: row.id, filename: file.name, mime: row.mime, base64: bytes.toString("base64") }]);
   } catch (error) {
