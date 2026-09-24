@@ -10,7 +10,7 @@ import { knowledgeIngestWorkflow } from "@/server/workflows/knowledge-ingest";
 export const dynamic = "force-dynamic";
 
 const ALLOWED_EXT = new Set(["pdf", "docx", "txt", "md", "html", "json", "csv", "xml"]);
-const MAX_BYTES = 8 * 1024 * 1024;
+const MAX_BYTES = 4 * 1024 * 1024;
 
 function toView(row: typeof knowledgeSources.$inferSelect) {
   return {
@@ -51,7 +51,7 @@ export async function POST(req: Request) {
     return Response.json({ ok: false, error: "暂不支持这种文件类型，可上传：PDF、DOCX、TXT、MD、HTML、JSON、CSV、XML" }, { status: 400 });
   }
   if (file.size > MAX_BYTES) {
-    return Response.json({ ok: false, error: "文件超过 8MB 限制，请拆分后再上传" }, { status: 400 });
+    return Response.json({ ok: false, error: "文件超过 4MB 限制，请拆分后再上传" }, { status: 400 });
   }
   const bytes = Buffer.from(await file.arrayBuffer());
   const sha256 = createHash("sha256").update(bytes).digest("hex");

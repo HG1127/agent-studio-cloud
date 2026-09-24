@@ -115,9 +115,9 @@ describe("知识库列表", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("暂不支持这种文件类型");
     expect(fetchMock).not.toHaveBeenCalled();
 
-    await user.upload(input, new window.File([new Uint8Array(8 * 1024 * 1024 + 1)], "资料.pdf", { type: "application/pdf" }));
+    await user.upload(input, new window.File([new Uint8Array(4 * 1024 * 1024 + 1)], "资料.pdf", { type: "application/pdf" }));
     await user.click(screen.getByRole("button", { name: "上传文档" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("文件超过 8MB 限制");
+    expect(await screen.findByRole("alert")).toHaveTextContent("文件超过 4MB 限制");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

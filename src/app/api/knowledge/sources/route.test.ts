@@ -40,6 +40,17 @@ afterEach(() => {
 });
 
 describe("知识原文件上传", () => {
+  it("服务端拒绝超过生产入口限制的文件", async () => {
+    const form = new FormData();
+    form.set("file", new File([new Uint8Array(4 * 1024 * 1024 + 1)], "超大资料.pdf", { type: "application/pdf" }));
+
+    const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ ok: false, error: "文件超过 4MB 限制，请拆分后再上传" });
+    expect(startMock).not.toHaveBeenCalled();
+  });
+
   it("只尝试私有存储，存储失败时不写入资料记录", async () => {
     process.env.BLOB_READ_WRITE_TOKEN = "test-token";
     put.mockRejectedValue(new Error("store unavailable"));
