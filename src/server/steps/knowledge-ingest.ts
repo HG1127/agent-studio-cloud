@@ -11,12 +11,12 @@ interface ParseArgs {
   sourceId: string;
   filename: string;
   mime: string;
-  base64: string;
+  content: ReadableStream<Uint8Array>;
 }
 
 export async function parseKnowledgeFile(args: ParseArgs): Promise<{ text: string }> {
   "use step";
-  const buffer = Buffer.from(args.base64, "base64");
+  const buffer = Buffer.from(await new Response(args.content).arrayBuffer());
   const ext = args.filename.split(".").pop()?.toLowerCase() ?? "";
   let text: string;
   if (ext === "pdf") {

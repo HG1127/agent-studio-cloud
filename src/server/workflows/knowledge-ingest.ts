@@ -4,7 +4,7 @@ export interface KnowledgeIngestArgs {
   sourceId: string;
   filename: string;
   mime: string;
-  base64: string;
+  content: ReadableStream<Uint8Array>;
 }
 
 export async function knowledgeIngestWorkflow(args: KnowledgeIngestArgs): Promise<{ chunkCount: number }> {

@@ -17,9 +17,8 @@ describe("知识入库工作流", () => {
     });
     try {
       const text = `${"退货政策：签收后 7 天内可退，需保留包装。".repeat(60)}\n${"客户资料说明。".repeat(40)}`;
-      const base64 = Buffer.from(text, "utf8").toString("base64");
       const handle = await start(knowledgeIngestWorkflow, [
-        { sourceId: SOURCE_ID, filename: "售后手册.txt", mime: "text/plain", base64 },
+        { sourceId: SOURCE_ID, filename: "售后手册.txt", mime: "text/plain", content: new Blob([text]).stream() },
       ]);
       const result = await handle.returnValue;
       expect(result.chunkCount).toBeGreaterThan(1);
@@ -41,9 +40,8 @@ describe("知识入库工作流", () => {
       sizeBytes: 10, sha256: `m3-fail-${SOURCE_ID_FAIL}`, status: "parsing", createdBy: DEMO_USER_ID,
     });
     try {
-      const base64 = Buffer.from("fake", "utf8").toString("base64");
       const handle = await start(knowledgeIngestWorkflow, [
-        { sourceId: SOURCE_ID_FAIL, filename: "图片.png", mime: "image/png", base64 },
+        { sourceId: SOURCE_ID_FAIL, filename: "图片.png", mime: "image/png", content: new Blob(["fake"]).stream() },
       ]);
       await expect(handle.returnValue).rejects.toThrow();
       const [source] = await db.select().from(knowledgeSources).where(eq(knowledgeSources.id, SOURCE_ID_FAIL)).limit(1);

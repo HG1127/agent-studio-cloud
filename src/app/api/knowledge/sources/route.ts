@@ -116,7 +116,7 @@ export async function POST(req: Request) {
           sourceId: duplicate.id,
           filename: file.name,
           mime: file.type || duplicate.mime,
-          base64: bytes.toString("base64"),
+          content: new Blob([bytes]).stream(),
         }]);
       } catch (startError) {
         console.error("知识重新入库工作流启动失败：", startError);
@@ -178,7 +178,7 @@ export async function POST(req: Request) {
     });
   }
   try {
-    await start(knowledgeIngestWorkflow, [{ sourceId: row.id, filename: file.name, mime: row.mime, base64: bytes.toString("base64") }]);
+    await start(knowledgeIngestWorkflow, [{ sourceId: row.id, filename: file.name, mime: row.mime, content: new Blob([bytes]).stream() }]);
   } catch (error) {
     console.error("知识入库工作流启动失败：", error);
     await db.update(knowledgeSources).set({ status: "failed", error: "解析任务启动失败，请重试上传", updatedAt: new Date() }).where(eq(knowledgeSources.id, row.id));
