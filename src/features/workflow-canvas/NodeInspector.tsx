@@ -30,6 +30,21 @@ function lines(value: string): string[] {
   return value.split(/\r?\n/).map((row) => row.trim()).filter(Boolean);
 }
 
+function inlineStep(steps: Array<Record<string, unknown>>, title: string): Record<string, unknown> {
+  let index = steps.length + 1;
+  while (steps.some((step) => step.id === `step_${index}`)) index += 1;
+  return { id: `step_${index}`, title, type: "ai", description: "完成这一步并返回结果" };
+}
+
+function changeInlineStep(
+  steps: Array<Record<string, unknown>>,
+  index: number,
+  field: "title" | "description",
+  value: string,
+): Array<Record<string, unknown>> {
+  return steps.map((step, stepIndex) => stepIndex === index ? { ...step, [field]: value } : step);
+}
+
 // M1 编辑范围：title/description，加 human 的负责人与确认事项；condition 的说明以「判断说明」呈现
 export function NodeInspector({ node, agentTargets = [], onNodeChange, onNodeDelete }: NodeInspectorProps) {
   const isHuman = node.type === "human";
@@ -116,6 +131,101 @@ export function NodeInspector({ node, agentTargets = [], onNodeChange, onNodeDel
               className="w-fit text-xs text-blue-700">添加情况</button>
             <p className="text-xs text-gray-500">添加后，从节点右侧对应圆点连接到下一步；最下方圆点代表其他情况。</p>
           </div>
+        </div>
+      ) : null}
+      {node.type === "parallel" && node.parallel ? (
+        <div className="flex flex-col gap-3 border-t border-gray-100 pt-3">
+          <label className="flex flex-col gap-1 text-sm font-medium">完成方式
+            <select aria-label="并行完成方式" value={node.parallel.strategy}
+              onChange={(event) => onNodeChange({ ...node, parallel: { ...node.parallel!, strategy: event.target.value as "all" | "any" | "all_settled" } })}
+              className="rounded-md border border-gray-300 px-3 py-2 text-sm font-normal">
+              <option value="all">全部完成</option><option value="any">任一完成</option><option value="all_settled">全部结束，保留失败结果</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-sm font-medium">失败处理
+            <select aria-label="并行失败处理" value={node.parallel.failurePolicy}
+              onChange={(event) => onNodeChange({ ...node, parallel: { ...node.parallel!, failurePolicy: event.target.value as "fail_fast" | "continue" } })}
+              className="rounded-md border border-gray-300 px-3 py-2 text-sm font-normal">
+              <option value="fail_fast">停止整个流程</option><option value="continue">记录问题后继续</option>
+            </select>
+          </label>
+          {node.parallel.branches.map((branch, branchIndex) => (
+            <div key={branch.id} className="rounded-md border border-gray-200 p-3">
+              <div className="flex items-center gap-2">
+                <input aria-label={`并行工作 ${branchIndex + 1} 名称`} value={branch.label}
+                  onChange={(event) => onNodeChange({ ...node, parallel: { ...node.parallel!, branches: node.parallel!.branches.map((item, index) => index === branchIndex ? { ...item, label: event.target.value } : item) } })}
+                  className="min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm" />
+                {node.parallel!.branches.length > 2 ? <button type="button" aria-label={`删除并行工作 ${branchIndex + 1}`}
+                  onClick={() => onNodeChange({ ...node, parallel: { ...node.parallel!, branches: node.parallel!.branches.filter((_, index) => index !== branchIndex) } })}
+                  className="text-xs text-red-600">删除</button> : null}
+              </div>
+              <div className="mt-2 space-y-2">
+                {branch.steps.map((step, stepIndex) => (
+                  <div key={String(step.id ?? stepIndex)} className="grid gap-1 md:grid-cols-[1fr_2fr_auto]">
+                    <input aria-label={`并行工作 ${branchIndex + 1} 步骤 ${stepIndex + 1} 名称`} value={String(step.title ?? "")}
+                      onChange={(event) => onNodeChange({ ...node, parallel: { ...node.parallel!, branches: node.parallel!.branches.map((item, index) => index === branchIndex ? { ...item, steps: changeInlineStep(item.steps, stepIndex, "title", event.target.value) } : item) } })}
+                      className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
+                    <input aria-label={`并行工作 ${branchIndex + 1} 步骤 ${stepIndex + 1} 说明`} value={String(step.description ?? "")}
+                      onChange={(event) => onNodeChange({ ...node, parallel: { ...node.parallel!, branches: node.parallel!.branches.map((item, index) => index === branchIndex ? { ...item, steps: changeInlineStep(item.steps, stepIndex, "description", event.target.value) } : item) } })}
+                      className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
+                    {branch.steps.length > 1 ? <button type="button" aria-label={`删除并行工作 ${branchIndex + 1} 步骤 ${stepIndex + 1}`}
+                      onClick={() => onNodeChange({ ...node, parallel: { ...node.parallel!, branches: node.parallel!.branches.map((item, index) => index === branchIndex ? { ...item, steps: item.steps.filter((_, index2) => index2 !== stepIndex) } : item) } })}
+                      className="text-xs text-red-600">删除</button> : null}
+                  </div>
+                ))}
+              </div>
+              <button type="button" onClick={() => onNodeChange({ ...node, parallel: { ...node.parallel!, branches: node.parallel!.branches.map((item, index) => index === branchIndex ? { ...item, steps: [...item.steps, inlineStep(item.steps, `处理${item.label}的新步骤`)] } : item) } })}
+                className="mt-2 text-xs text-blue-700">添加步骤</button>
+            </div>
+          ))}
+          <button type="button" onClick={() => {
+            const index = node.parallel!.branches.length + 1;
+            const branch = { id: `branch_${index}`, label: `工作${index}`, inputs: [], outputs: [], steps: [inlineStep([], `处理工作${index}`)] };
+            onNodeChange({ ...node, parallel: { ...node.parallel!, branches: [...node.parallel!.branches, branch] } });
+          }} className="w-fit text-xs text-blue-700">添加并行工作</button>
+        </div>
+      ) : null}
+      {node.type === "subflow" && node.subflow ? (
+        <div className="flex flex-col gap-3 border-t border-gray-100 pt-3">
+          <label className="flex flex-col gap-1 text-sm font-medium">步骤组名称
+            <input aria-label="步骤组名称" value={node.subflow.name}
+              onChange={(event) => onNodeChange({ ...node, subflow: { ...node.subflow!, name: event.target.value } })}
+              className="rounded-md border border-gray-300 px-3 py-2 text-sm font-normal" />
+          </label>
+          <label className="flex flex-col gap-1 text-sm font-medium">失败处理
+            <select aria-label="步骤组失败处理" value={node.subflow.failurePolicy ?? "checkpoint"}
+              onChange={(event) => onNodeChange({ ...node, subflow: { ...node.subflow!, failurePolicy: event.target.value } })}
+              className="rounded-md border border-gray-300 px-3 py-2 text-sm font-normal">
+              <option value="checkpoint">停止整个流程</option><option value="continue">记录问题后继续</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-sm font-medium">需要的数据
+            <textarea aria-label="步骤组输入" rows={2} value={node.subflow.inputs.join("\n")} placeholder="每行一项，可不填"
+              onChange={(event) => onNodeChange({ ...node, subflow: { ...node.subflow!, inputs: lines(event.target.value) } })}
+              className="rounded-md border border-gray-300 px-3 py-2 text-sm font-normal" />
+          </label>
+          <label className="flex flex-col gap-1 text-sm font-medium">产出的数据
+            <textarea aria-label="步骤组输出" rows={2} value={node.subflow.outputs.join("\n")} placeholder="每行一项，可不填"
+              onChange={(event) => onNodeChange({ ...node, subflow: { ...node.subflow!, outputs: lines(event.target.value) } })}
+              className="rounded-md border border-gray-300 px-3 py-2 text-sm font-normal" />
+          </label>
+          <div className="space-y-2">
+            {node.subflow.steps.map((step, stepIndex) => (
+              <div key={String(step.id ?? stepIndex)} className="grid gap-1 md:grid-cols-[1fr_2fr_auto]">
+                <input aria-label={`步骤组步骤 ${stepIndex + 1} 名称`} value={String(step.title ?? "")}
+                  onChange={(event) => onNodeChange({ ...node, subflow: { ...node.subflow!, steps: changeInlineStep(node.subflow!.steps, stepIndex, "title", event.target.value) } })}
+                  className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
+                <input aria-label={`步骤组步骤 ${stepIndex + 1} 说明`} value={String(step.description ?? "")}
+                  onChange={(event) => onNodeChange({ ...node, subflow: { ...node.subflow!, steps: changeInlineStep(node.subflow!.steps, stepIndex, "description", event.target.value) } })}
+                  className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
+                {node.subflow!.steps.length > 1 ? <button type="button" aria-label={`删除步骤组步骤 ${stepIndex + 1}`}
+                  onClick={() => onNodeChange({ ...node, subflow: { ...node.subflow!, steps: node.subflow!.steps.filter((_, index) => index !== stepIndex) } })}
+                  className="text-xs text-red-600">删除</button> : null}
+              </div>
+            ))}
+          </div>
+          <button type="button" onClick={() => onNodeChange({ ...node, subflow: { ...node.subflow!, steps: [...node.subflow!.steps, inlineStep(node.subflow!.steps, "处理下一步")] } })}
+            className="w-fit text-xs text-blue-700">添加步骤</button>
         </div>
       ) : null}
       {node.type === "loop" && node.loop ? (

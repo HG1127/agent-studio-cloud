@@ -26,5 +26,7 @@ describe("新增画布节点", () => {
     expect(createWorkflowNode(draft, "tool").draft.nodes.tool_1.tool).toMatchObject({ registryToolId: "demo", risk: "low" });
     expect(createWorkflowNode(draft, "wait").draft.nodes.wait_1.wait).toMatchObject({ mode: "delay", durationMs: 60_000 });
     expect(createWorkflowNode(draft, "loop").draft.nodes.loop_1.loop).toMatchObject({ collectionPath: "input.items", maxIterations: 20 });
+    expect(createWorkflowNode(draft, "parallel").draft.nodes.parallel_1.parallel?.branches).toHaveLength(2);
+    expect(createWorkflowNode(draft, "subflow").draft.nodes.subflow_1.subflow?.steps).toHaveLength(1);
   });
 });

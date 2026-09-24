@@ -6,6 +6,8 @@ export const ADDABLE_NODE_TYPES = [
   "tool",
   "knowledge",
   "condition",
+  "parallel",
+  "subflow",
   "loop",
   "wait",
   "memory",
@@ -19,6 +21,8 @@ const TITLES: Record<(typeof ADDABLE_NODE_TYPES)[number], string> = {
   tool: "新增业务操作",
   knowledge: "新增资料读取",
   condition: "新增情况判断",
+  parallel: "新增同时处理",
+  subflow: "新增一组步骤",
   loop: "新增逐项处理",
   wait: "新增等待步骤",
   memory: "新增经验参考",
@@ -46,6 +50,23 @@ export function createWorkflowNode(draft: WorkflowDraft, type: (typeof ADDABLE_N
         ? { knowledge: { space: "业务资料库", query: "" } }
         : type === "condition"
           ? { condition: { source: "input.input", operator: "eq", branches: [{ label: "满足", value: "是", next: null }], defaultNext: null } }
+          : type === "parallel"
+            ? { parallel: {
+                strategy: "all" as const,
+                failurePolicy: "fail_fast" as const,
+                branches: [
+                  { id: "branch_1", label: "工作一", inputs: [], outputs: [], steps: [{ id: "step_1", title: "处理工作一", type: "ai", description: "完成这项工作并返回结果" }] },
+                  { id: "branch_2", label: "工作二", inputs: [], outputs: [], steps: [{ id: "step_1", title: "处理工作二", type: "ai", description: "完成这项工作并返回结果" }] },
+                ],
+              } }
+            : type === "subflow"
+              ? { subflow: {
+                  name: "一组顺序步骤",
+                  steps: [{ id: "step_1", title: "处理第一步", type: "ai", description: "完成这一步并返回结果" }],
+                  inputs: [],
+                  outputs: [],
+                  failurePolicy: "checkpoint",
+                } }
           : type === "loop"
             ? { loop: { collectionPath: "input.items", itemKey: "item", maxIterations: 20, bodyNext: null, exitNext: null } }
             : type === "wait"

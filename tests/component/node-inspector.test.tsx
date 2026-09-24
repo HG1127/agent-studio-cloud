@@ -46,6 +46,20 @@ const LOOP_NODE = WorkflowNode.parse({
   id: "step_9", title: "逐项检查", type: "loop",
   loop: { collectionPath: "input.items", itemKey: "item", maxIterations: 20, bodyNext: null, exitNext: null },
 });
+const PARALLEL_NODE = WorkflowNode.parse({
+  id: "step_10", title: "同时准备材料", type: "parallel",
+  parallel: {
+    strategy: "all", failurePolicy: "fail_fast",
+    branches: [
+      { id: "branch_1", label: "准备合同", steps: [{ id: "step_1", title: "起草合同", type: "ai" }] },
+      { id: "branch_2", label: "准备报价", steps: [{ id: "step_1", title: "生成报价", type: "ai" }] },
+    ],
+  },
+});
+const SUBFLOW_NODE = WorkflowNode.parse({
+  id: "step_11", title: "完成交付准备", type: "subflow",
+  subflow: { name: "交付准备", steps: [{ id: "step_1", title: "检查材料", type: "ai" }], inputs: [], outputs: [], failurePolicy: "checkpoint" },
+});
 
 describe("NodeInspector", () => {
   it("修改节点名称时回调携带新值", () => {
@@ -99,6 +113,30 @@ describe("NodeInspector", () => {
     expect(screen.getByLabelText("最多参考条数")).toHaveValue(5);
     rerender(<NodeInspector node={LOOP_NODE} onNodeChange={vi.fn()} onNodeDelete={vi.fn()} />);
     expect(screen.getByLabelText("列表数据")).toHaveValue("input.items");
+  });
+
+  it("并行节点可以修改策略、工作名称并添加步骤", async () => {
+    const onNodeChange = vi.fn();
+    const user = userEvent.setup();
+    render(<NodeInspector node={PARALLEL_NODE} onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
+    await user.selectOptions(screen.getByLabelText("并行完成方式"), "any");
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({ parallel: expect.objectContaining({ strategy: "any" }) }));
+    fireEvent.change(screen.getByLabelText("并行工作 1 名称"), { target: { value: "准备正式合同" } });
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({ parallel: expect.objectContaining({ branches: expect.arrayContaining([expect.objectContaining({ label: "准备正式合同" })]) }) }));
+    await user.click(screen.getAllByRole("button", { name: "添加步骤" })[0]);
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({ parallel: expect.objectContaining({ branches: [expect.objectContaining({ steps: expect.arrayContaining([expect.objectContaining({ type: "ai" })]) }), expect.anything()] }) }));
+  });
+
+  it("顺序步骤组可以修改名称、输出和内部步骤", async () => {
+    const onNodeChange = vi.fn();
+    const user = userEvent.setup();
+    render(<NodeInspector node={SUBFLOW_NODE} onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("步骤组名称"), { target: { value: "正式交付准备" } });
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({ subflow: expect.objectContaining({ name: "正式交付准备" }) }));
+    fireEvent.change(screen.getByLabelText("步骤组输出"), { target: { value: "合同\n报价" } });
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({ subflow: expect.objectContaining({ outputs: ["合同", "报价"] }) }));
+    await user.click(screen.getByRole("button", { name: "添加步骤" }));
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({ subflow: expect.objectContaining({ steps: expect.arrayContaining([expect.objectContaining({ title: "处理下一步" })]) }) }));
   });
 
   it("知识节点可以单独修改检索内容", () => {
