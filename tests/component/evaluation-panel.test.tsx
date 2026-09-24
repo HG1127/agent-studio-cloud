@@ -15,6 +15,7 @@ vi.mock("@/server/actions/evaluations", () => ({
   createEvaluationCaseAction: createMock,
   updateEvaluationCaseAction: updateMock,
   archiveEvaluationCaseAction: archiveMock,
+  setEvaluationCaseArchivedAction: archiveMock,
   startEvaluationAction: startMock,
 }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: refreshMock }) }));
@@ -121,5 +122,18 @@ describe("EvaluationPanel", () => {
       ],
     }));
     expect(refreshMock).toHaveBeenCalledOnce();
+  });
+
+  it("可以归档并恢复验收样例", async () => {
+    archiveMock.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    const { rerender } = render(<EvaluationPanel agentId={AGENT_ID} cases={CASES} runs={[]} />);
+    await user.click(screen.getByRole("button", { name: "归档" }));
+    await waitFor(() => expect(archiveMock).toHaveBeenCalledWith({ agentId: AGENT_ID, caseId: CASES[0].id, archived: true }));
+
+    rerender(<EvaluationPanel agentId={AGENT_ID} cases={[]} archivedCases={CASES} runs={[]} />);
+    await user.click(screen.getByText(/已归档样例/));
+    await user.click(screen.getByRole("button", { name: "恢复" }));
+    await waitFor(() => expect(archiveMock).toHaveBeenLastCalledWith({ agentId: AGENT_ID, caseId: CASES[0].id, archived: false }));
   });
 });

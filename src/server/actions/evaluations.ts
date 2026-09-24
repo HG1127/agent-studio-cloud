@@ -1,9 +1,14 @@
 "use server";
 
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { EvaluationCaseCreateInput, EvaluationCaseUpdateInput, type EvaluationActionResult } from "@/contracts/evaluation";
+import {
+  EvaluationCaseArchiveInput,
+  EvaluationCaseCreateInput,
+  EvaluationCaseUpdateInput,
+  type EvaluationActionResult,
+} from "@/contracts/evaluation";
 import { agentVersions, agents, evaluationCaseResults, evaluationCases, evaluationRuns } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
@@ -60,22 +65,30 @@ export async function updateEvaluationCaseAction(input: unknown): Promise<Evalua
 }
 
 export async function archiveEvaluationCaseAction(agentId: string, caseId: string): Promise<EvaluationActionResult> {
-  if (!z.string().uuid().safeParse(agentId).success || !z.string().uuid().safeParse(caseId).success) {
-    return { ok: false, error: "验收样例信息不正确" };
+  return setEvaluationCaseArchivedAction({ agentId, caseId, archived: true });
+}
+
+export async function setEvaluationCaseArchivedAction(input: unknown): Promise<EvaluationActionResult> {
+  const parsed = EvaluationCaseArchiveInput.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "验收样例信息不正确" };
+  try {
+    const updated = await db
+      .update(evaluationCases)
+      .set({ archivedAt: parsed.data.archived ? new Date() : null, updatedAt: new Date() })
+      .where(and(
+        eq(evaluationCases.id, parsed.data.caseId),
+        eq(evaluationCases.agentId, parsed.data.agentId),
+        eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID),
+        parsed.data.archived ? isNull(evaluationCases.archivedAt) : isNotNull(evaluationCases.archivedAt),
+      ))
+      .returning({ id: evaluationCases.id });
+    if (updated.length === 0) return { ok: false, error: "验收样例状态已经变化，请刷新页面后重试" };
+    revalidatePath(`/agents/${parsed.data.agentId}`);
+    return { ok: true };
+  } catch (error) {
+    console.error("更新验收样例状态失败", error);
+    return { ok: false, error: "更新验收样例状态失败，请稍后重试" };
   }
-  const updated = await db
-    .update(evaluationCases)
-    .set({ archivedAt: new Date(), updatedAt: new Date() })
-    .where(and(
-      eq(evaluationCases.id, caseId),
-      eq(evaluationCases.agentId, agentId),
-      eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID),
-      isNull(evaluationCases.archivedAt),
-    ))
-    .returning({ id: evaluationCases.id });
-  if (updated.length === 0) return { ok: false, error: "找不到这条验收样例" };
-  revalidatePath(`/agents/${agentId}`);
-  return { ok: true };
 }
 
 export async function startEvaluationAction(agentId: string): Promise<EvaluationActionResult> {

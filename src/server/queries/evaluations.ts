@@ -1,13 +1,17 @@
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { EvaluationCaseView, EvaluationRunView, type EvaluationCaseView as EvaluationCaseViewType, type EvaluationRunView as EvaluationRunViewType } from "@/contracts/evaluation";
 import { agentVersions, evaluationCaseResults, evaluationCases, evaluationRuns } from "@/db/schema";
 import { db } from "@/lib/db";
 
-export async function listEvaluationCases(agentId: string, workspaceId: string): Promise<EvaluationCaseViewType[]> {
+export async function listEvaluationCases(agentId: string, workspaceId: string, archived = false): Promise<EvaluationCaseViewType[]> {
   const rows = await db
     .select()
     .from(evaluationCases)
-    .where(and(eq(evaluationCases.agentId, agentId), eq(evaluationCases.workspaceId, workspaceId), isNull(evaluationCases.archivedAt)))
+    .where(and(
+      eq(evaluationCases.agentId, agentId),
+      eq(evaluationCases.workspaceId, workspaceId),
+      archived ? isNotNull(evaluationCases.archivedAt) : isNull(evaluationCases.archivedAt),
+    ))
     .orderBy(desc(evaluationCases.createdAt));
   return rows.flatMap((row) => {
     const parsed = EvaluationCaseView.safeParse({ ...row, createdAt: row.createdAt.toISOString() });

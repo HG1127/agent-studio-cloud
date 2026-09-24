@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { EvaluationCaseView, EvaluationExpectation, EvaluationRunView } from "@/contracts/evaluation";
 import {
-  archiveEvaluationCaseAction,
   createEvaluationCaseAction,
   startEvaluationAction,
+  setEvaluationCaseArchivedAction,
   updateEvaluationCaseAction,
 } from "@/server/actions/evaluations";
 
@@ -28,9 +28,10 @@ function expectationLabel(expectation: EvaluationExpectation): string {
   return `${target}需要包含“${String(expectation.value ?? "")}”`;
 }
 
-export function EvaluationPanel({ agentId, cases, runs }: {
+export function EvaluationPanel({ agentId, cases, archivedCases = [], runs }: {
   agentId: string;
   cases: EvaluationCaseView[];
+  archivedCases?: EvaluationCaseView[];
   runs: EvaluationRunView[];
 }) {
   const router = useRouter();
@@ -115,15 +116,15 @@ export function EvaluationPanel({ agentId, cases, runs }: {
     }
   }
 
-  async function archiveCase(caseId: string) {
+  async function changeCaseState(caseId: string, archived: boolean) {
     setPending(true);
     setError(null);
     try {
-      const result = await archiveEvaluationCaseAction(agentId, caseId);
+      const result = await setEvaluationCaseArchivedAction({ agentId, caseId, archived });
       if (!result.ok) setError(result.error);
       else router.refresh();
     } catch {
-      setError("删除验收样例失败，请稍后重试");
+      setError(archived ? "归档验收样例失败，请稍后重试" : "恢复验收样例失败，请稍后重试");
     } finally {
       setPending(false);
     }
@@ -169,12 +170,25 @@ export function EvaluationPanel({ agentId, cases, runs }: {
               </div>
               <span className="flex shrink-0 gap-3">
                 <button type="button" disabled={pending} onClick={() => editCase(testCase)} className="text-xs text-blue-700 hover:underline">编辑</button>
-                <button type="button" disabled={pending} onClick={() => archiveCase(testCase.id)} className="text-xs text-gray-500 hover:text-red-600">删除</button>
+                <button type="button" disabled={pending} onClick={() => changeCaseState(testCase.id, true)} className="text-xs text-gray-500 hover:text-red-600">归档</button>
               </span>
             </li>
           ))}
         </ul>
       ) : <p className="text-sm text-gray-500">还没有验收样例。</p>}
+      {archivedCases.length > 0 ? (
+        <details className="border-t border-gray-100 pt-3">
+          <summary className="cursor-pointer text-xs font-medium text-gray-600">已归档样例（{archivedCases.length}）</summary>
+          <ul className="mt-2 divide-y divide-gray-100">
+            {archivedCases.map((testCase) => (
+              <li key={testCase.id} className="flex items-center justify-between gap-3 py-2 text-sm text-gray-500">
+                <span>{testCase.name}</span>
+                <button type="button" disabled={pending} onClick={() => changeCaseState(testCase.id, false)} className="text-xs text-blue-700 hover:underline">恢复</button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
       {runs.length > 0 ? (
         <div className="flex flex-col gap-2 border-t border-gray-100 pt-3">
           <h3 className="text-xs font-medium text-gray-600">最近验收</h3>

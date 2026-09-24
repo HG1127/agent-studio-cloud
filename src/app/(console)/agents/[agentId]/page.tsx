@@ -36,11 +36,12 @@ export default async function AgentDetailPage({
   const detail = await getAgentDetail(agentId, DEMO_WORKSPACE_ID);
   if (!detail) notFound();
   const audit = detail.draft ? auditWorkflow(detail.draft) : null;
-  const [versions, connections, agentTargets, evaluationCases, evaluationRuns] = await Promise.all([
+  const [versions, connections, agentTargets, evaluationCases, archivedEvaluationCases, evaluationRuns] = await Promise.all([
     listVersions(agentId),
     listModelConnections(),
     listAgentTargets(DEMO_WORKSPACE_ID, agentId),
     listEvaluationCases(agentId, DEMO_WORKSPACE_ID),
+    listEvaluationCases(agentId, DEMO_WORKSPACE_ID, true),
     listEvaluationRuns(agentId, DEMO_WORKSPACE_ID),
   ]);
   const defaultModelLabel = process.env.MODEL_MOCK === "1" ? "演示模式" : process.env.MODEL_ID?.trim() ? "服务端默认模型" : "尚未配置默认模型";
@@ -72,7 +73,7 @@ export default async function AgentDetailPage({
       )}
       {audit ? <DesignAuditPanel agentId={agentId} score={audit.score} issues={AuditIssueView.array().parse(audit.issues)} /> : null}
       <VersionPanel agentId={agentId} versions={versions} connections={connections} defaultModelLabel={defaultModelLabel} />
-      <EvaluationPanel agentId={agentId} cases={evaluationCases} runs={evaluationRuns} />
+      <EvaluationPanel agentId={agentId} cases={evaluationCases} archivedCases={archivedEvaluationCases} runs={evaluationRuns} />
       <RunLauncher agentId={agentId} inputFields={inputFields} />
     </main>
   );

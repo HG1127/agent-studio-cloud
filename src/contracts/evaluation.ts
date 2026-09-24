@@ -54,3 +54,10 @@ export const EvaluationActionResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(false), error: z.string() }),
 ]);
 export type EvaluationActionResult = z.infer<typeof EvaluationActionResult>;
+
+export const EvaluationCaseArchiveInput = z.object({
+  agentId: z.string().uuid(),
+  caseId: z.string().uuid(),
+  archived: z.boolean(),
+});
+export type EvaluationCaseArchiveInput = z.infer<typeof EvaluationCaseArchiveInput>;
