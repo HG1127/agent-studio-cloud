@@ -44,26 +44,28 @@ export async function indexKnowledgeChunks(args: { sourceId: string; text: strin
     .limit(1);
   if (!source) throw new FatalError("找不到要入库的知识来源");
   const chunks = chunkText(args.text);
-  // 失败后重新上传会复用同一来源；先清理可能存在的半成品，确保重试幂等。
-  await db.delete(knowledgeChunks).where(eq(knowledgeChunks.sourceId, args.sourceId));
-  for (let i = 0; i < chunks.length; i += 200) {
-    const batch = chunks.slice(i, i + 200);
-    await db.insert(knowledgeChunks).values(
-      batch.map((chunk) => ({
-        workspaceId: source.workspaceId,
-        sourceId: args.sourceId,
-        chunkIndex: chunk.index,
-        content: chunk.content,
-        charStart: chunk.charStart,
-        charEnd: chunk.charEnd,
-      })),
-    );
-  }
   const charCount = chunks.reduce((sum, chunk) => sum + chunk.content.length, 0);
-  await db
-    .update(knowledgeSources)
-    .set({ status: "indexed", chunkCount: chunks.length, charCount, parseEngine: "builtin", error: null, updatedAt: new Date() })
-    .where(eq(knowledgeSources.id, args.sourceId));
+  await db.transaction(async (tx) => {
+    // 失败后重新上传会复用同一来源；事务保证旧分片不会被半套新数据覆盖。
+    await tx.delete(knowledgeChunks).where(eq(knowledgeChunks.sourceId, args.sourceId));
+    for (let i = 0; i < chunks.length; i += 200) {
+      const batch = chunks.slice(i, i + 200);
+      await tx.insert(knowledgeChunks).values(
+        batch.map((chunk) => ({
+          workspaceId: source.workspaceId,
+          sourceId: args.sourceId,
+          chunkIndex: chunk.index,
+          content: chunk.content,
+          charStart: chunk.charStart,
+          charEnd: chunk.charEnd,
+        })),
+      );
+    }
+    await tx
+      .update(knowledgeSources)
+      .set({ status: "indexed", chunkCount: chunks.length, charCount, parseEngine: "builtin", error: null, updatedAt: new Date() })
+      .where(eq(knowledgeSources.id, args.sourceId));
+  });
   return { chunkCount: chunks.length };
 }
 

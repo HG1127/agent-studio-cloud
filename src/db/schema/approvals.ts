@@ -17,6 +17,9 @@ export const approvals = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("approvals_run_id_idx").on(t.runId)],
+  (t) => [
+    index("approvals_run_id_idx").on(t.runId),
+    index("approvals_workspace_status_created_idx").on(t.workspaceId, t.status, t.createdAt),
+  ],
 );
 export type Approval = typeof approvals.$inferSelect;
