@@ -26,10 +26,10 @@ export interface AgentPipelineResult {
   diagnostics: AgentDraftDiagnostics;
 }
 
-export function buildAgentDraft(options: { name: string; intentText: string }): AgentPipelineResult {
+export function buildAgentDraft(options: { name: string; intentText: string; capabilities?: unknown[] }): AgentPipelineResult {
   const { name, intentText } = options;
   try {
-    const compiled = compileIntentWorkflow({ text: intentText, name, caps: [], humanReasons: [], sourceType: "idea" });
+    const compiled = compileIntentWorkflow({ text: intentText, name, caps: options.capabilities ?? [], humanReasons: [], sourceType: "idea" });
     return finalizeAgentDraft({ name, intentText, workflow: compiled.workflow, orderedSteps: compiled.orderedSteps });
   } catch (error) {
     return { draft: null, issues: [], diagnostics: { error: error instanceof Error ? error.message : String(error) } };

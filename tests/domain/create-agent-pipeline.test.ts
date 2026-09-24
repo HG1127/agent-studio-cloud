@@ -15,6 +15,22 @@ vi.mock("@/server/domain/intent", async (importOriginal) => {
 });
 
 describe("创建助手管道 buildAgentDraft", () => {
+  it("意图明确提到已配置业务系统时自动绑定真实工具", () => {
+    const result = buildAgentDraft({
+      name: "客户跟进助手",
+      intentText: "收到客户跟进结果后，通过客户系统更新客户状态，最后输出处理回执",
+      capabilities: [{
+        id: "crm.update", label: "客户系统", action: "update_customer", searchText: "更新客户状态",
+        scope: "customer.write", source: "connected-registry", risk: "medium", registryToolId: "crm.update",
+        protocol: "http-json", inputSchema: { type: "object" }, outputSchema: { type: "object" },
+      }],
+    });
+    const tools = Object.values(result.draft?.nodes ?? {}).filter((node) => node.type === "tool");
+    expect(tools).toContainEqual(expect.objectContaining({
+      tool: expect.objectContaining({ registryToolId: "crm.update", protocol: "http-json" }),
+    }));
+  });
+
   it("intent-golden-1 文本：草稿含业务落地、审计摘要与 issues 数组，且通过草稿契约校验", () => {
     const result = buildAgentDraft({ name: golden1.input.name, intentText: golden1.input.text });
     expect(result.draft).not.toBeNull();

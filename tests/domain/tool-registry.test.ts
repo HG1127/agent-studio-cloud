@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { parseToolRegistry } from "@/server/tools/tool-registry";
+import { afterEach, describe, expect, it } from "vitest";
+import { listToolCompilerCapabilities, listToolRegistryOptions, parseToolRegistry } from "@/server/tools/tool-registry";
 
 const valid = {
   id: "crm.update",
@@ -14,6 +14,7 @@ const valid = {
 };
 
 describe("服务端工具注册表", () => {
+  afterEach(() => { delete process.env.TOOL_REGISTRY_JSON; });
   it("解析有效工具且保留服务端请求配置", () => {
     expect(parseToolRegistry(JSON.stringify([valid]))[0]).toMatchObject({
       id: "crm.update", method: "POST", endpoint: valid.endpoint, headers: valid.headers,
@@ -30,5 +31,13 @@ describe("服务端工具注册表", () => {
   it("配置缺失或 JSON 损坏时返回空列表", () => {
     expect(parseToolRegistry(undefined)).toEqual([]);
     expect(parseToolRegistry("not-json")).toEqual([]);
+  });
+
+  it("给画布和编译器的投影不包含地址与鉴权请求头", () => {
+    process.env.TOOL_REGISTRY_JSON = JSON.stringify([valid]);
+    const exposed = JSON.stringify({ options: listToolRegistryOptions(), capabilities: listToolCompilerCapabilities() });
+    expect(exposed).toContain("crm.update");
+    expect(exposed).not.toContain(valid.endpoint);
+    expect(exposed).not.toContain("server-secret");
   });
 });

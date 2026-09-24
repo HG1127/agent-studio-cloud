@@ -60,6 +60,22 @@ export function listToolRegistryOptions(): ToolRegistryOptionType[] {
   }));
 }
 
+export function listToolCompilerCapabilities(): unknown[] {
+  return listToolRegistryOptions().map((tool) => ({
+    id: tool.id,
+    label: tool.name,
+    action: tool.action,
+    searchText: tool.description,
+    scope: tool.scope,
+    source: "connected-registry",
+    risk: tool.risk,
+    registryToolId: tool.id,
+    protocol: "http-json",
+    inputSchema: tool.inputSchema,
+    outputSchema: tool.outputSchema,
+  }));
+}
+
 export function getToolRegistration(id: string | null | undefined): ToolRegistration | null {
   if (!id) return null;
   return loadToolRegistry().find((tool) => tool.id === id) ?? null;

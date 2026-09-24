@@ -13,6 +13,7 @@ import { buildAgentDraft, finalizeAgentDraft } from "@/server/domain/pipeline";
 import { decryptApiKey, resolveEncryptionKey } from "@/server/domain/crypto";
 import { CompileStepListSchema, buildCompilePrompt, extractJsonObject, shouldUseLlmCompile, stepListToWorkflowDraft } from "@/server/domain/intent/llm-compile";
 import { db } from "@/lib/db";
+import { listToolCompilerCapabilities } from "@/server/tools/tool-registry";
 
 async function resolveCompileModel(): Promise<{ baseUrl: string; apiKey: string; modelId: string } | null> {
   const [connection] = await db.select({
@@ -42,7 +43,7 @@ export async function createAgentAction(input: AgentCreateInput): Promise<Create
     return { ok: false, error: "请填写助手名称，并用至少 10 个字描述你想让助手完成的工作" };
   }
   const { name, intentText } = parsedInput.data;
-  let built = buildAgentDraft({ name, intentText });
+  let built = buildAgentDraft({ name, intentText, capabilities: listToolCompilerCapabilities() });
   if (realModelsEnabled() && shouldUseLlmCompile({ llmCompile: process.env.LLM_COMPILE })) {
     try {
       const compileModel = await resolveCompileModel();
