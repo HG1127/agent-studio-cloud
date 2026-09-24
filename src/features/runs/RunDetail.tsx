@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ApprovalPanel } from "@/features/runs/ApprovalPanel";
+import { presentBusinessOutput } from "@/features/runs/present-business-output";
 import { RunStatusBadge } from "@/features/runs/RunList";
 import { TraceTimeline } from "@/features/runs/TraceTimeline";
 import type { RunStatus } from "@/contracts/run";
@@ -52,6 +53,7 @@ export async function RunDetail({ runId }: { runId: string }) {
   const decidedApprovals = approvals.filter((approval) => approval.status !== "pending");
   const outputs = extractOutputs(context);
   const stepTitleByNode = new Map(steps.map((step) => [step.nodeId, step.nodeTitle]));
+  const stepTypeByNode = new Map(steps.map((step) => [step.nodeId, step.nodeType]));
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 p-8">
@@ -100,7 +102,9 @@ export async function RunDetail({ runId }: { runId: string }) {
                     {stepTitleByNode.get(nodeId) ?? "步骤结果"}
                   </p>
                   <p className="whitespace-pre-wrap break-words text-sm text-gray-700">
-                    {typeof output === "string" ? output : JSON.stringify(output, null, 2)}
+                    {typeof output === "string" && stepTypeByNode.get(nodeId) === "ai"
+                      ? presentBusinessOutput(output).text
+                      : typeof output === "string" ? output : JSON.stringify(output, null, 2)}
                   </p>
                 </li>
               ))}

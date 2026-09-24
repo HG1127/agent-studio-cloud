@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { ApprovalReview, ApprovalView } from "@/contracts/run";
+import { presentBusinessOutput } from "@/features/runs/present-business-output";
 import { decideApprovalAction } from "@/server/actions/decide-approval";
 
 // 审批面板：runs 详情页（Task 13）挂载。界面只显示业务信息，不出现内部标识。
@@ -56,11 +57,12 @@ function ReviewContent({ review, title = "待确认草稿" }: { review: Approval
   if (!review) {
     return <p className="text-sm text-amber-800">这一步没有生成可展示的正文，请核对运行输入和上游步骤结果。</p>;
   }
+  const presented = presentBusinessOutput(review.content);
   return (
     <div className="flex flex-col gap-2 rounded-md border border-gray-200 bg-white p-3">
       <h3 className="text-sm font-semibold">{title}</h3>
       <p className="text-xs text-gray-500">来自「{review.sourceTitle}」</p>
-      <p className="max-h-80 overflow-auto whitespace-pre-wrap break-words text-sm text-gray-800">{review.content}</p>
+      <p className="max-h-80 overflow-auto whitespace-pre-wrap break-words text-sm text-gray-800">{presented.text}</p>
     </div>
   );
 }
@@ -81,6 +83,7 @@ function ApprovalForm({
   onDecide: (decision: "approved" | "rejected", note: string) => Promise<void>;
 }) {
   const [note, setNote] = useState("");
+  const reviewable = review ? presentBusinessOutput(review.content).reviewable : true;
 
   return (
     <section className="flex flex-col gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4">
@@ -90,6 +93,9 @@ function ApprovalForm({
       </p>
       <p className="text-sm text-gray-700">{reason}</p>
       <ReviewContent review={review} />
+      {review && reviewable ? (
+        <p className="text-xs text-amber-900">确认前请核对草稿中的事实和适用条件。</p>
+      ) : null}
       <label className="flex flex-col gap-1 text-sm text-gray-700">
         备注
         <textarea
@@ -109,7 +115,7 @@ function ApprovalForm({
       <div className="flex gap-2">
         <button
           type="button"
-          disabled={submitting !== null}
+          disabled={submitting !== null || !reviewable}
           onClick={() => onDecide("approved", note)}
           className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:bg-gray-400"
         >
