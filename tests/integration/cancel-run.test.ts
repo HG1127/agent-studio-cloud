@@ -11,12 +11,12 @@ vi.mock("workflow/api", () => ({ getRun: getRunMock }));
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 vi.mock("@/server/steps/trace-step", () => ({ appendTrace: appendTraceMock }));
 
-import { approvals, runs } from "@/db/schema";
+import { approvals, runSteps, runs } from "@/db/schema";
 import { WorkflowDraft } from "@/contracts/workflow";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { cancelRunAction } from "@/server/actions/cancel-run";
-import { failRun, finalizeRun, initializeRun } from "@/server/steps/run-state";
+import { failRun, finalizeRun, initializeRun, persistStep } from "@/server/steps/run-state";
 
 const RUN_ID = "00000000-0000-4000-8000-0000000000c1";
 const CHILD_RUN_ID = "00000000-0000-4000-8000-0000000000c4";
@@ -30,6 +30,7 @@ const draft = WorkflowDraft.parse({
 
 async function cleanup() {
   await db.delete(approvals).where(inArray(approvals.runId, [RUN_ID, CHILD_RUN_ID, GRANDCHILD_RUN_ID]));
+  await db.delete(runSteps).where(inArray(runSteps.runId, [RUN_ID, CHILD_RUN_ID, GRANDCHILD_RUN_ID]));
   await db.delete(runs).where(inArray(runs.id, [CHILD_RUN_ID, GRANDCHILD_RUN_ID, RUN_ID]));
 }
 
@@ -173,6 +174,19 @@ describe("取消运行", () => {
 
     const [run] = await db.select().from(runs).where(eq(runs.id, RUN_ID));
     expect(run).toMatchObject({ status: "cancelled", result: null, error: "已由员工取消" });
+    expect(appendTraceMock).not.toHaveBeenCalled();
+  });
+
+  it("运行取消后忽略迟到的步骤结果和轨迹", async () => {
+    await insertWaitingRun();
+    await db.update(runs).set({ status: "cancelled", error: "已由员工取消" }).where(eq(runs.id, RUN_ID));
+
+    await expect(persistStep({
+      runId: RUN_ID, nodeId: "late_step", nodeTitle: "迟到步骤", nodeType: "ai",
+      status: "succeeded", output: { answer: "迟到结果" },
+    })).rejects.toThrow("运行已经结束，忽略迟到的步骤结果");
+
+    expect(await db.select().from(runSteps).where(eq(runSteps.runId, RUN_ID))).toHaveLength(0);
     expect(appendTraceMock).not.toHaveBeenCalled();
   });
 });

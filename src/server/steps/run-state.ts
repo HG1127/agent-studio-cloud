@@ -57,6 +57,9 @@ export interface PersistStepInput {
 export async function persistStep(step: PersistStepInput): Promise<void> {
   "use step";
   const run = await requireRun(step.runId);
+  if (!["queued", "running", "waiting_approval", "waiting_event"].includes(run.status)) {
+    throw new FatalError("运行已经结束，忽略迟到的步骤结果");
+  }
   const now = new Date();
   const starting = step.status === "running";
   const title = step.nodeTitle ?? step.nodeId;
