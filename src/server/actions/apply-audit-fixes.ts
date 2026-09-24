@@ -13,32 +13,40 @@ import { applySafeAuditFixes } from "@/server/domain/audit/safe-audit-fixes";
 export async function applyAuditFixesAction(agentId: string): Promise<AuditFixActionResult> {
   if (!z.string().uuid().safeParse(agentId).success) return { ok: false, error: "助手信息不正确，请刷新页面后重试" };
   try {
-    const [agent] = await db.select({ id: agents.id }).from(agents).where(and(
-      eq(agents.id, agentId), eq(agents.workspaceId, DEMO_WORKSPACE_ID), isNull(agents.archivedAt),
-    )).limit(1);
-    if (!agent) return { ok: false, error: "找不到这个助手，请刷新页面后重试" };
-    const [definition] = await db
-      .select({ id: workflowDefinitions.id, draft: workflowDefinitions.draft })
-      .from(workflowDefinitions)
-      .where(and(eq(workflowDefinitions.agentId, agent.id), eq(workflowDefinitions.workspaceId, DEMO_WORKSPACE_ID)))
-      .orderBy(desc(workflowDefinitions.createdAt))
-      .limit(1);
-    if (!definition) return { ok: false, error: "找不到这个助手的流程草稿" };
-    const draft = WorkflowDraft.safeParse(definition.draft);
-    if (!draft.success) return { ok: false, error: "流程草稿格式不完整，无法自动修复" };
-    const result = applySafeAuditFixes(draft.data);
-    if (result.applied.length === 0) return { ok: false, error: "没有可安全自动修复的问题，其余问题需要人工判断" };
-    await db
-      .update(workflowDefinitions)
-      .set({ draft: result.draft, updatedAt: new Date() })
-      .where(eq(workflowDefinitions.id, definition.id));
-    revalidatePath(`/agents/${agent.id}`);
+    const outcome = await db.transaction(async (tx) => {
+      // 自动修复也必须与手工保存共用助手行锁，避免跨标签页覆盖刚保存的草稿。
+      const [agent] = await tx.select({ id: agents.id }).from(agents).where(and(
+        eq(agents.id, agentId), eq(agents.workspaceId, DEMO_WORKSPACE_ID), isNull(agents.archivedAt),
+      )).for("update").limit(1);
+      if (!agent) return { kind: "agent-missing" as const };
+      const [definition] = await tx
+        .select({ id: workflowDefinitions.id, draft: workflowDefinitions.draft })
+        .from(workflowDefinitions)
+        .where(and(eq(workflowDefinitions.agentId, agent.id), eq(workflowDefinitions.workspaceId, DEMO_WORKSPACE_ID)))
+        .orderBy(desc(workflowDefinitions.createdAt))
+        .limit(1);
+      if (!definition) return { kind: "definition-missing" as const };
+      const draft = WorkflowDraft.safeParse(definition.draft);
+      if (!draft.success) return { kind: "definition-invalid" as const };
+      const result = applySafeAuditFixes(draft.data);
+      if (result.applied.length === 0) return { kind: "nothing-fixable" as const };
+      await tx
+        .update(workflowDefinitions)
+        .set({ draft: result.draft, updatedAt: new Date() })
+        .where(and(eq(workflowDefinitions.id, definition.id), eq(workflowDefinitions.workspaceId, DEMO_WORKSPACE_ID)));
+      return { kind: "fixed" as const, agentId: agent.id, result };
+    });
+    if (outcome.kind === "agent-missing") return { ok: false, error: "找不到这个助手，请刷新页面后重试" };
+    if (outcome.kind === "definition-missing") return { ok: false, error: "找不到这个助手的流程草稿" };
+    if (outcome.kind === "definition-invalid") return { ok: false, error: "流程草稿格式不完整，无法自动修复" };
+    if (outcome.kind === "nothing-fixable") return { ok: false, error: "没有可安全自动修复的问题，其余问题需要人工判断" };
+    revalidatePath(`/agents/${outcome.agentId}`);
     return {
       ok: true,
-      applied: result.applied,
-      skipped: result.skipped,
-      remainingCritical: result.remainingCritical,
-      remainingWarnings: result.remainingWarnings,
+      applied: outcome.result.applied,
+      skipped: outcome.result.skipped,
+      remainingCritical: outcome.result.remainingCritical,
+      remainingWarnings: outcome.result.remainingWarnings,
     };
   } catch (error) {
     console.error("自动修复流程失败", error);

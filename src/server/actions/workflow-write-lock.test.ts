@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   updates: [] as Array<{ value: Record<string, unknown> }>,
   lock: vi.fn(),
   revalidatePath: vi.fn(),
+  applySafeAuditFixes: vi.fn(),
 }));
 
 const tx = {
@@ -32,7 +33,9 @@ const tx = {
 
 vi.mock("@/lib/db", () => ({ db: { transaction: async (run: (client: typeof tx) => unknown) => run(tx) } }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
+vi.mock("@/server/domain/audit/safe-audit-fixes", () => ({ applySafeAuditFixes: mocks.applySafeAuditFixes }));
 
+import { applyAuditFixesAction } from "@/server/actions/apply-audit-fixes";
 import { saveWorkflowAction } from "@/server/actions/save-workflow";
 import { updateAgentAction } from "@/server/actions/update-agent";
 
@@ -53,6 +56,7 @@ beforeEach(() => {
   mocks.updates = [];
   mocks.lock.mockReset();
   mocks.revalidatePath.mockReset();
+  mocks.applySafeAuditFixes.mockReset();
 });
 
 describe("助手与流程并发写入", () => {
@@ -85,5 +89,23 @@ describe("助手与流程并发写入", () => {
     expect(mocks.lock).toHaveBeenCalledOnce();
     expect(mocks.updates).toHaveLength(2);
     expect(mocks.updates[1].value.draft).toMatchObject({ rootAgent: { name: "新名称" } });
+  });
+
+  it("自动修复也锁定助手后再写入最新草稿", async () => {
+    mocks.selectRows = [[{ id: AGENT_ID }], [{ id: "definition-1", draft }]];
+    mocks.applySafeAuditFixes.mockReturnValue({
+      draft: { ...draft, rootAgent: { ...draft.rootAgent, role: "已修复" } },
+      applied: ["补充安全边界"],
+      skipped: [],
+      remainingCritical: 0,
+      remainingWarnings: 0,
+    });
+
+    const result = await applyAuditFixesAction(AGENT_ID);
+
+    expect(result).toMatchObject({ ok: true, applied: ["补充安全边界"] });
+    expect(mocks.lock).toHaveBeenCalledOnce();
+    expect(mocks.updates).toHaveLength(1);
+    expect(mocks.updates[0].value.draft).toMatchObject({ rootAgent: { role: "已修复" } });
   });
 });
