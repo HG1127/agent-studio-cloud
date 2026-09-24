@@ -21,12 +21,14 @@ describe("最终交付字段编辑", () => {
     ]);
   });
 
-  it("可以改显示名称、必需状态并删除", async () => {
+  it("可以改结果字段位置、显示名称、必需状态并删除", async () => {
     const field = { path: "draft", label: "生成方案", required: true, sourceNodeId: "draft" };
     const onChange = vi.fn();
     const user = userEvent.setup();
     render(<WorkflowOutputEditor nodes={nodes} fields={[field]} onChange={onChange} />);
     await user.click(screen.getByText(/最终交付字段/));
+    fireEvent.change(screen.getByLabelText("交付字段 1 位置"), { target: { value: "交付.方案" } });
+    expect(onChange).toHaveBeenLastCalledWith([{ ...field, path: "交付.方案" }]);
     fireEvent.change(screen.getByLabelText("交付字段 1 显示名称"), { target: { value: "最终方案" } });
     expect(onChange).toHaveBeenLastCalledWith([{ ...field, label: "最终方案" }]);
     await user.click(screen.getByRole("checkbox"));

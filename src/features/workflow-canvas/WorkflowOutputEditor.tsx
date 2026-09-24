@@ -24,17 +24,22 @@ export function WorkflowOutputEditor({ nodes, fields, onChange }: {
       <p className="mt-2 text-xs text-gray-500">选择流程步骤的结果作为本助手对员工或其他助手交付的内容。</p>
       {fields.length > 0 ? <div className="mt-3 space-y-3">
         {fields.map((field, index) => (
-          <div key={index} className="grid gap-2 rounded-md border border-gray-100 p-3 md:grid-cols-[1.5fr_1fr_auto_auto]">
+          <div key={index} className="grid gap-2 rounded-md border border-gray-100 p-3 md:grid-cols-[1.5fr_1fr_1fr_auto_auto]">
             <label className="flex flex-col gap-1 text-xs text-gray-600">来源步骤
               <select aria-label={`交付字段 ${index + 1} 来源`} value={field.sourceNodeId ?? field.path}
                 onChange={(event) => {
                   const source = nodes[event.target.value];
-                  update(index, { sourceNodeId: event.target.value, path: event.target.value, label: field.label || source?.title });
+                  update(index, { sourceNodeId: event.target.value, label: field.label || source?.title });
                 }} className="rounded-md border border-gray-300 px-2 py-1.5 text-sm">
                 {!candidates.some((node) => node.id === (field.sourceNodeId ?? field.path))
                   ? <option value={field.sourceNodeId ?? field.path}>来源已不可用</option> : null}
                 {candidates.map((node) => <option key={node.id} value={node.id}>{node.title}</option>)}
               </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-gray-600">结果字段位置
+              <input aria-label={`交付字段 ${index + 1} 位置`} value={field.path} placeholder="交付.方案"
+                onChange={(event) => update(index, { path: event.target.value })}
+                className="rounded-md border border-gray-300 px-2 py-1.5 text-sm" />
             </label>
             <label className="flex flex-col gap-1 text-xs text-gray-600">显示名称
               <input aria-label={`交付字段 ${index + 1} 显示名称`} value={field.label ?? ""}

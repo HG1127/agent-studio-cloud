@@ -14,6 +14,7 @@ import { auditWorkflow } from "@/server/domain/audit";
 import { buildManifest, filterPublishBlockers } from "@/server/domain/pipeline";
 import { releaseStatusForCaseCount } from "@/server/domain/release-gate";
 import { isUniqueViolation } from "@/server/unique-violation";
+import { validateOutputFieldPaths } from "@/server/domain/runtime/output-contract";
 
 export async function publishVersionAction(agentId: string, modelSelection?: PublishModelSelection): Promise<PublishVersionResult> {
   if (!z.string().uuid().safeParse(agentId).success) {
@@ -41,6 +42,10 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
     const parsed = WorkflowDraft.safeParse(definition.draft);
     if (!parsed.success) {
       return { ok: false, error: "流程草稿没有通过校验，请在画布上重新保存后再发布", issues: [] };
+    }
+    const outputPathError = validateOutputFieldPaths(parsed.data.outputContract?.fields ?? []);
+    if (outputPathError) {
+      return { ok: false, error: outputPathError, issues: [] };
     }
     const audit = auditWorkflow(parsed.data);
     // M1 演示发布策略：critical 门禁交给 filterPublishBlockers 裁决，豁免项随成功返回值透出给面板提醒

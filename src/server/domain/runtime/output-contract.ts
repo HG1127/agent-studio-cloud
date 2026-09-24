@@ -2,6 +2,21 @@ import type { WorkflowDraft } from "@/contracts/workflow";
 
 type OutputField = NonNullable<WorkflowDraft["outputContract"]>["fields"][number];
 
+export function validateOutputFieldPaths(fields: OutputField[]): string | null {
+  const paths = fields.map((field) => field.path.trim());
+  if (paths.some((path) => !/^[\p{L}_][\p{L}\p{N}_-]*(?:\.[\p{L}_][\p{L}\p{N}_-]*)*$/u.test(path))) {
+    return "最终交付字段位置格式不正确";
+  }
+  if (new Set(paths).size !== paths.length) return "最终交付字段位置不能重复";
+  const ordered = [...paths].sort();
+  for (let index = 0; index < ordered.length; index += 1) {
+    if (ordered.some((path, position) => position !== index && path.startsWith(`${ordered[index]}.`))) {
+      return `最终交付字段位置“${ordered[index]}”与其下级字段冲突`;
+    }
+  }
+  return null;
+}
+
 function readPath(value: Record<string, unknown>, path: string): unknown {
   const parts = path.replace(/^(?:context\.)?outputs\./, "").split(".").filter(Boolean);
   return parts.reduce<unknown>((current, key) => {

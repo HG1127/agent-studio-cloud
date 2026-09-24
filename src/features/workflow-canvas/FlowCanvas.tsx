@@ -22,6 +22,7 @@ import { updateWorkflowNode } from "./update-workflow-node";
 import { ADDABLE_NODE_TYPES, createWorkflowNode } from "./create-workflow-node";
 import { WorkflowInputEditor } from "./WorkflowInputEditor";
 import { WorkflowOutputEditor } from "./WorkflowOutputEditor";
+import { validateOutputFieldPaths } from "@/server/domain/runtime/output-contract";
 
 interface FlowCanvasProps {
   agentId: string;
@@ -299,9 +300,13 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets }: FlowC
       return;
     }
     const outputFields = draft.outputContract?.fields ?? [];
-    if (outputFields.some((field) => !field.path || !field.sourceNodeId || !draft.nodes[field.sourceNodeId])
-      || new Set(outputFields.map((field) => field.path)).size !== outputFields.length) {
-      setFeedback({ ok: false, text: "最终交付字段必须选择有效来源，且不能重复" });
+    if (outputFields.some((field) => !field.sourceNodeId || !draft.nodes[field.sourceNodeId])) {
+      setFeedback({ ok: false, text: "最终交付字段必须选择有效来源" });
+      return;
+    }
+    const outputPathError = validateOutputFieldPaths(outputFields);
+    if (outputPathError) {
+      setFeedback({ ok: false, text: outputPathError });
       return;
     }
     setPending(true);

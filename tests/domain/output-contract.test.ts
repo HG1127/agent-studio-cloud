@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { projectWorkflowResult } from "@/server/domain/runtime/output-contract";
+import { projectWorkflowResult, validateOutputFieldPaths } from "@/server/domain/runtime/output-contract";
 
 describe("最终交付结果", () => {
   it("没有交付契约时保留全部步骤结果", () => {
@@ -21,5 +21,18 @@ describe("最终交付结果", () => {
     expect(projectWorkflowResult({}, [
       { path: "note", label: "备注", required: false, sourceNodeId: "note" },
     ])).toEqual({ ok: true, result: {} });
+  });
+
+  it("拒绝无效、重复和父子冲突的交付字段位置", () => {
+    expect(validateOutputFieldPaths([{ path: "交付.方案", required: true, sourceNodeId: "draft" }])).toBeNull();
+    expect(validateOutputFieldPaths([{ path: "a b", required: true, sourceNodeId: "draft" }])).toBe("最终交付字段位置格式不正确");
+    expect(validateOutputFieldPaths([
+      { path: "result", required: true, sourceNodeId: "draft" },
+      { path: "result", required: false, sourceNodeId: "note" },
+    ])).toBe("最终交付字段位置不能重复");
+    expect(validateOutputFieldPaths([
+      { path: "交付", required: true, sourceNodeId: "draft" },
+      { path: "交付.方案", required: true, sourceNodeId: "plan" },
+    ])).toContain("与其下级字段冲突");
   });
 });
