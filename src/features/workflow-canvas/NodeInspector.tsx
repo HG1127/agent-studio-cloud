@@ -313,14 +313,16 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
               className="rounded-md border border-gray-300 px-3 py-2 text-sm font-normal" />
           </label> : null}
           {node.wait.mode === "until" ? <label className="flex flex-col gap-1 text-sm font-medium">继续时间
-            <input aria-label="继续时间" type="datetime-local" value={(node.wait.until ?? "").slice(0, 16)}
-              onChange={(event) => onNodeChange({ ...node, wait: { ...node.wait!, until: event.target.value || null } })}
+            <input aria-label="继续时间" type="datetime-local" value={toDateTimeLocalValue(node.wait.until)}
+              onChange={(event) => onNodeChange({ ...node, wait: { ...node.wait!, until: fromDateTimeLocalValue(event.target.value) } })}
               className="rounded-md border border-gray-300 px-3 py-2 text-sm font-normal" />
           </label> : null}
           {node.wait.mode === "event" ? <>
             <label className="flex flex-col gap-1 text-sm font-medium">消息标识
-              <input aria-label="消息标识" value={node.wait.eventKey} onChange={(event) => onNodeChange({ ...node, wait: { ...node.wait!, eventKey: event.target.value } })}
+              <input aria-label="消息标识" value={node.wait.eventKey} maxLength={120}
+                onChange={(event) => onNodeChange({ ...node, wait: { ...node.wait!, eventKey: event.target.value.replace(/[^a-zA-Z0-9._:-]/g, "").slice(0, 120) } })}
                 className="rounded-md border border-gray-300 px-3 py-2 text-sm font-normal" />
+              <span className="text-xs font-normal text-gray-500">仅使用字母、数字、点、下划线、冒号或短横线。</span>
             </label>
             <label className="flex flex-col gap-1 text-sm font-medium">超时分钟数
               <input aria-label="超时分钟数" type="number" min={0} value={Math.round(node.wait.timeoutMs / 60_000)}
@@ -506,4 +508,16 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
       ) : null}
     </aside>
   );
+}
+export function toDateTimeLocalValue(value: string | null | undefined): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+}
+
+export function fromDateTimeLocalValue(value: string): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }

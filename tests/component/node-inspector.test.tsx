@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { WorkflowNode } from "@/contracts/workflow";
-import { NodeInspector } from "@/features/workflow-canvas/NodeInspector";
+import { fromDateTimeLocalValue, NodeInspector, toDateTimeLocalValue } from "@/features/workflow-canvas/NodeInspector";
 
 const AI_NODE = WorkflowNode.parse({ id: "step_1", title: "生成回复方案", type: "ai" });
 const HUMAN_NODE = WorkflowNode.parse({
@@ -124,6 +124,9 @@ describe("NodeInspector", () => {
     const user = userEvent.setup();
     render(<NodeInspector node={EVENT_WAIT_NODE} onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
     const editor = screen.getByLabelText("消息字段契约");
+    fireEvent.change(screen.getByLabelText("消息标识"), { target: { value: "客户 ready!" } });
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({ wait: expect.objectContaining({ eventKey: "ready" }) }));
+    onNodeChange.mockClear();
 
     fireEvent.change(editor, { target: { value: "[]" } });
     await user.click(screen.getByRole("button", { name: "应用字段契约" }));
@@ -136,6 +139,14 @@ describe("NodeInspector", () => {
     expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
       wait: expect.objectContaining({ payloadSchema: schema }),
     }));
+  });
+
+  it("指定时间在本地输入值与带时区 ISO 时间之间无损往返", () => {
+    const local = "2026-09-25T10:30";
+    const stored = fromDateTimeLocalValue(local);
+    expect(stored).toMatch(/Z$/);
+    expect(toDateTimeLocalValue(stored)).toBe(local);
+    expect(fromDateTimeLocalValue("")).toBeNull();
   });
 
   it("保存经验时从业务步骤选择内容来源", async () => {
