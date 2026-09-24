@@ -67,6 +67,9 @@ export function RunList({ runs }: { runs: RunSummary[] }) {
                 {run.sourceType === "evaluation" && (
                   <span className="rounded bg-violet-50 px-1.5 py-0.5 text-xs text-violet-700">自动验收</span>
                 )}
+                {run.agentArchived && (
+                  <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">助手已停用</span>
+                )}
                 <RunStatusBadge status={run.status} />
               </span>
             </div>

@@ -1,12 +1,19 @@
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { ApprovalPayload, ApprovalView, RunSummary, RunView } from "@/contracts/run";
+import {
+  ApprovalPayload,
+  ApprovalView,
+  RunAgentOption,
+  type RunListFilters,
+  RunSummary,
+  RunView,
+} from "@/contracts/run";
 import { agents, approvals, runSteps, runs, type Run, type RunStep } from "@/db/schema";
 import { db } from "@/lib/db";
 
 const RUN_ID = z.string().uuid();
 
-export async function listRuns(workspaceId: string): Promise<RunSummary[]> {
+export async function listRuns(workspaceId: string, filters: RunListFilters = {}): Promise<RunSummary[]> {
   const rows = await db
     .select({
       id: runs.id,
@@ -14,12 +21,18 @@ export async function listRuns(workspaceId: string): Promise<RunSummary[]> {
       agentName: agents.name,
       status: runs.status,
       sourceType: runs.sourceType,
+      agentArchivedAt: agents.archivedAt,
       startedAt: runs.startedAt,
       finishedAt: runs.finishedAt,
     })
     .from(runs)
     .innerJoin(agents, eq(agents.id, runs.agentId))
-    .where(and(eq(runs.workspaceId, workspaceId), isNull(agents.archivedAt)))
+    .where(and(
+      eq(runs.workspaceId, workspaceId),
+      filters.status ? eq(runs.status, filters.status) : undefined,
+      filters.sourceType ? eq(runs.sourceType, filters.sourceType) : undefined,
+      filters.agentId ? eq(runs.agentId, filters.agentId) : undefined,
+    ))
     .orderBy(desc(runs.createdAt));
   return rows.map((row) =>
     RunSummary.parse({
@@ -28,10 +41,21 @@ export async function listRuns(workspaceId: string): Promise<RunSummary[]> {
       agentName: row.agentName,
       status: row.status,
       sourceType: row.sourceType,
+      agentArchived: row.agentArchivedAt !== null,
       startedAt: row.startedAt?.toISOString() ?? null,
       finishedAt: row.finishedAt?.toISOString() ?? null,
     }),
   );
+}
+
+export async function listRunAgentOptions(workspaceId: string): Promise<RunAgentOption[]> {
+  const rows = await db
+    .selectDistinct({ id: agents.id, name: agents.name })
+    .from(agents)
+    .innerJoin(runs, eq(runs.agentId, agents.id))
+    .where(eq(runs.workspaceId, workspaceId))
+    .orderBy(asc(agents.name));
+  return rows.map((row) => RunAgentOption.parse(row));
 }
 
 export async function getRunView(runId: string, workspaceId: string): Promise<RunView | null> {

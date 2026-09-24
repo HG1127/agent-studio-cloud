@@ -18,6 +18,16 @@ export const RunStatus = z.enum([
 ]);
 export type RunStatus = z.infer<typeof RunStatus>;
 
+export const RunSourceType = z.enum(["manual", "schedule", "agent_call", "handoff", "evaluation"]);
+export type RunSourceType = z.infer<typeof RunSourceType>;
+
+export const RunListFilters = z.object({
+  status: RunStatus.optional(),
+  sourceType: RunSourceType.optional(),
+  agentId: z.string().uuid().optional(),
+});
+export type RunListFilters = z.infer<typeof RunListFilters>;
+
 export const WaitEventPayload = z.record(z.string(), z.unknown());
 export type WaitEventPayload = z.infer<typeof WaitEventPayload>;
 
@@ -53,11 +63,15 @@ export const RunSummary = z.object({
   agentId: z.string().uuid(),
   agentName: z.string(),
   status: RunStatus,
-  sourceType: z.enum(["manual", "schedule", "agent_call", "handoff", "evaluation"]).default("manual"),
+  sourceType: RunSourceType.default("manual"),
+  agentArchived: z.boolean().default(false),
   startedAt: z.string().nullable(),
   finishedAt: z.string().nullable(),
 });
 export type RunSummary = z.infer<typeof RunSummary>;
+
+export const RunAgentOption = z.object({ id: z.string().uuid(), name: z.string() });
+export type RunAgentOption = z.infer<typeof RunAgentOption>;
 
 export const TraceEventView = z.object({
   id: z.string().uuid(),
