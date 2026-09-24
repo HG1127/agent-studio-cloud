@@ -107,6 +107,12 @@ describe("EvaluationPanel", () => {
       results: [],
     }]} />);
     expect(screen.getByRole("button", { name: "验收运行中" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("验收运行期间样例已锁定");
+    expect(screen.getByLabelText("样例名称")).toBeDisabled();
+    expect(screen.getByLabelText("运行输入")).toBeDisabled();
+    expect(screen.getByLabelText("结果应包含")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "编辑" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "归档" })).toBeDisabled();
   });
 
   it("编辑样例时更新输入和常用断言并保留高级断言", async () => {

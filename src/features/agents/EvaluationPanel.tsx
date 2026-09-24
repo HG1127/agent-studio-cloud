@@ -173,15 +173,16 @@ export function EvaluationPanel({ agentId, cases, archivedCases = [], runs }: {
           {pending ? "正在处理…" : evaluationRunning ? "验收运行中" : "运行全部样例"}
         </button>
       </div>
+      {evaluationRunning ? <p role="status" className="rounded-md bg-blue-50 p-2 text-sm text-blue-700">验收运行期间样例已锁定，完成后可继续新增、编辑或归档。</p> : null}
       {error ? <p role="alert" className="rounded-md bg-red-50 p-2 text-sm text-red-700">{error}</p> : null}
       <div className="grid gap-2 md:grid-cols-[1fr_2fr_1fr_auto]">
-        <input aria-label="样例名称" value={name} onChange={(event) => setName(event.target.value)} placeholder="样例名称"
+        <input aria-label="样例名称" disabled={evaluationRunning} value={name} onChange={(event) => setName(event.target.value)} placeholder="样例名称"
           className="rounded-md border border-gray-300 px-3 py-2 text-sm" />
-        <input aria-label="运行输入" value={inputText} onChange={(event) => setInputText(event.target.value)} placeholder='{"input":"业务输入"}'
+        <input aria-label="运行输入" disabled={evaluationRunning} value={inputText} onChange={(event) => setInputText(event.target.value)} placeholder='{"input":"业务输入"}'
           className="rounded-md border border-gray-300 px-3 py-2 font-mono text-sm" />
-        <input aria-label="结果应包含" value={expectedText} onChange={(event) => setExpectedText(event.target.value)} placeholder="可不填"
+        <input aria-label="结果应包含" disabled={evaluationRunning} value={expectedText} onChange={(event) => setExpectedText(event.target.value)} placeholder="可不填"
           className="rounded-md border border-gray-300 px-3 py-2 text-sm" />
-        <button type="button" disabled={pending || !name.trim()} onClick={saveCase}
+        <button type="button" disabled={pending || evaluationRunning || !name.trim()} onClick={saveCase}
           className="rounded-md border border-gray-300 px-3 py-2 text-sm disabled:text-gray-400">{editingId ? "保存修改" : "添加样例"}</button>
       </div>
       <details className="rounded-md border border-gray-100 p-3">
@@ -189,25 +190,25 @@ export function EvaluationPanel({ agentId, cases, archivedCases = [], runs }: {
         <p className="mt-2 text-xs text-gray-500">可检查结构化结果中的指定字段是否存在、等于或包含某个值。</p>
         {advancedExpectations.map((expectation, index) => (
           <div key={index} className="mt-2 grid gap-2 md:grid-cols-[1.5fr_120px_1.5fr_auto]">
-            <input aria-label={`字段检查 ${index + 1} 路径`} value={expectation.path} placeholder="例如：deliverables.plan"
+            <input aria-label={`字段检查 ${index + 1} 路径`} disabled={evaluationRunning} value={expectation.path} placeholder="例如：deliverables.plan"
               onChange={(event) => setAdvancedExpectations((current) => current.map((item, position) => position === index ? { ...item, path: event.target.value } : item))}
               className="rounded-md border border-gray-300 px-2 py-1.5 text-sm" />
-            <select aria-label={`字段检查 ${index + 1} 方式`} value={expectation.operator}
+            <select aria-label={`字段检查 ${index + 1} 方式`} disabled={evaluationRunning} value={expectation.operator}
               onChange={(event) => setAdvancedExpectations((current) => current.map((item, position) => position === index ? { ...item, operator: event.target.value as AdvancedExpectationDraft["operator"] } : item))}
               className="rounded-md border border-gray-300 px-2 py-1.5 text-sm">
               <option value="exists">需要存在</option>
               <option value="equals">需要等于</option>
               <option value="contains">需要包含</option>
             </select>
-            <input aria-label={`字段检查 ${index + 1} 预期值`} value={expectation.valueText} disabled={expectation.operator === "exists"}
+            <input aria-label={`字段检查 ${index + 1} 预期值`} value={expectation.valueText} disabled={evaluationRunning || expectation.operator === "exists"}
               placeholder={expectation.operator === "equals" ? "文字、数字、true 或 JSON" : "需要包含的文字"}
               onChange={(event) => setAdvancedExpectations((current) => current.map((item, position) => position === index ? { ...item, valueText: event.target.value } : item))}
               className="rounded-md border border-gray-300 px-2 py-1.5 text-sm disabled:bg-gray-100" />
-            <button type="button" disabled={pending} onClick={() => setAdvancedExpectations((current) => current.filter((_, position) => position !== index))}
+            <button type="button" disabled={pending || evaluationRunning} onClick={() => setAdvancedExpectations((current) => current.filter((_, position) => position !== index))}
               className="text-xs text-red-600 hover:underline">删除检查</button>
           </div>
         ))}
-        <button type="button" disabled={pending || advancedExpectations.length >= 19}
+        <button type="button" disabled={pending || evaluationRunning || advancedExpectations.length >= 19}
           onClick={() => setAdvancedExpectations((current) => [...current, { path: "", operator: "exists", valueText: "" }])}
           className="mt-3 rounded-md border border-gray-300 px-2.5 py-1.5 text-xs disabled:text-gray-400">添加字段检查</button>
       </details>
@@ -227,8 +228,8 @@ export function EvaluationPanel({ agentId, cases, archivedCases = [], runs }: {
                 </details>
               </div>
               <span className="flex shrink-0 gap-3">
-                <button type="button" disabled={pending} onClick={() => editCase(testCase)} className="text-xs text-blue-700 hover:underline">编辑</button>
-                <button type="button" disabled={pending} onClick={() => changeCaseState(testCase.id, true)} className="text-xs text-gray-500 hover:text-red-600">归档</button>
+                <button type="button" disabled={pending || evaluationRunning} onClick={() => editCase(testCase)} className="text-xs text-blue-700 hover:underline disabled:text-gray-400">编辑</button>
+                <button type="button" disabled={pending || evaluationRunning} onClick={() => changeCaseState(testCase.id, true)} className="text-xs text-gray-500 hover:text-red-600 disabled:text-gray-400">归档</button>
               </span>
             </li>
           ))}
@@ -241,7 +242,7 @@ export function EvaluationPanel({ agentId, cases, archivedCases = [], runs }: {
             {archivedCases.map((testCase) => (
               <li key={testCase.id} className="flex items-center justify-between gap-3 py-2 text-sm text-gray-500">
                 <span>{testCase.name}</span>
-                <button type="button" disabled={pending} onClick={() => changeCaseState(testCase.id, false)} className="text-xs text-blue-700 hover:underline">恢复</button>
+                <button type="button" disabled={pending || evaluationRunning} onClick={() => changeCaseState(testCase.id, false)} className="text-xs text-blue-700 hover:underline disabled:text-gray-400">恢复</button>
               </li>
             ))}
           </ul>
