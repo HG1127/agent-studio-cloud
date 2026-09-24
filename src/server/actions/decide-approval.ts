@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, exists } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { resumeHook } from "workflow/api";
@@ -31,12 +31,15 @@ export async function decideApprovalAction(
       return { ok: false, error: "找不到这条确认记录，请刷新页面后重试" };
     }
     const [run] = await db
-      .select({ agentId: runs.agentId })
+      .select({ agentId: runs.agentId, status: runs.status })
       .from(runs)
       .where(and(eq(runs.id, runId), eq(runs.workspaceId, DEMO_WORKSPACE_ID)))
       .limit(1);
     if (!run) {
       return { ok: false, error: "找不到这次运行，请刷新页面后重试" };
+    }
+    if (run.status !== "waiting_approval") {
+      return { ok: false, error: "这次运行已不再等待确认，请刷新页面查看最新状态" };
     }
     const approved = parsedInput.data.decision === "approved";
     const note = parsedInput.data.note?.trim() ? parsedInput.data.note.trim() : null;
@@ -59,9 +62,25 @@ export async function decideApprovalAction(
       await db
         .update(approvals)
         .set({ status: "pending", note: null, decidedAt: null, updatedAt: new Date() })
-        .where(eq(approvals.id, approvalId));
+        .where(and(
+          eq(approvals.id, approvalId),
+          eq(approvals.status, approved ? "approved" : "rejected"),
+          exists(
+            db
+              .select({ id: runs.id })
+              .from(runs)
+              .where(and(
+                eq(runs.id, runId),
+                eq(runs.workspaceId, DEMO_WORKSPACE_ID),
+                eq(runs.status, "waiting_approval"),
+              )),
+          ),
+        ));
       return { ok: false, error: "提交确认失败，请稍后重试" };
     }
+    revalidatePath(`/runs/${runId}`);
+    revalidatePath("/runs");
+    revalidatePath("/");
     revalidatePath(`/agents/${run.agentId}`);
     revalidatePath("/agents");
     return { ok: true };
