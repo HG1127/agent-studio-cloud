@@ -5,6 +5,7 @@ import type { StartRunResult } from "@/contracts/run";
 import { agentVersions, agents, runs } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
+import { prepareParallelBranches } from "@/server/domain/runtime/parallel-runtime";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
 
 // M1 运行引擎支持的节点类型：其余编排类节点后续任务扩展
@@ -20,6 +21,7 @@ const SUPPORTED_NODE_TYPES: ReadonlySet<string> = new Set([
   "system",
   "wait",
   "loop",
+  "parallel",
 ]);
 
 export async function startRunCore(args: {
@@ -53,19 +55,38 @@ export async function startRunCore(args: {
     }
     const manifest = manifestParsed.data;
     // 启动前置校验：不支持的节点类型 / 未绑定工具 / 未绑定知识来源 → 列出步骤名，不创建 run
-    const unsupported = Object.values(manifest.workflowSnapshot.nodes).filter((node) => {
-      if (!SUPPORTED_NODE_TYPES.has(node.type)) return true;
+    const unsupported: string[] = [];
+    for (const node of Object.values(manifest.workflowSnapshot.nodes)) {
+      if (!SUPPORTED_NODE_TYPES.has(node.type)) {
+        unsupported.push(node.title);
+        continue;
+      }
       if (node.type === "tool") {
         const demoBound = node.tool && (node.tool.registryToolId === "demo" || node.tool.protocol === "demo");
-        return !node.tool || node.tool.unresolved === true || !demoBound;
+        if (!node.tool || node.tool.unresolved === true || !demoBound) unsupported.push(node.title);
       }
       if (node.type === "knowledge") {
-        return !node.knowledge?.space;
+        if (!node.knowledge?.space) unsupported.push(node.title);
       }
-      return false;
-    });
+      if (node.type === "parallel") {
+        const prepared = prepareParallelBranches(node);
+        if (!prepared.ok) {
+          unsupported.push(`${node.title}（${prepared.error}）`);
+          continue;
+        }
+        for (const branch of prepared.branches) {
+          for (const step of branch.steps) {
+            if (step.type === "tool") {
+              const demoBound = step.tool && (step.tool.registryToolId === "demo" || step.tool.protocol === "demo");
+              if (!step.tool || step.tool.unresolved === true || !demoBound) unsupported.push(`${node.title} / ${branch.label} / ${step.title}`);
+            }
+            if (step.type === "knowledge" && !step.knowledge?.space) unsupported.push(`${node.title} / ${branch.label} / ${step.title}`);
+          }
+        }
+      }
+    }
     if (unsupported.length > 0) {
-      const names = [...new Set(unsupported.map((node) => node.title))].join("、");
+      const names = [...new Set(unsupported)].join("、");
       return { ok: false, error: `以下步骤暂不支持自动执行：${names}，请调整流程后再运行` };
     }
     const [run] = await db

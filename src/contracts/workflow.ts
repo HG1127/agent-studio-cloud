@@ -25,6 +25,13 @@ export const ConditionBranch = z.object({
   rules: z.array(z.object({ source: z.string(), operator: z.string(), value: z.unknown().optional() })).optional(),
   mode: z.string().optional(),
 });
+export const ParallelBranch = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  inputs: z.array(z.string()).default([]),
+  outputs: z.array(z.string()).default([]),
+  steps: z.array(z.record(z.string(), z.unknown())).min(1),
+});
 export const WorkflowNode = z.object({
   id: z.string(), title: z.string(), type: WorkflowNodeType,
   agent: z.object({ id: z.string(), name: z.string(), role: z.string() }).optional(),
@@ -54,7 +61,7 @@ export const WorkflowNode = z.object({
     checkToolReceipts: z.boolean().default(false), checkHumanBoundary: z.boolean().default(false),
   }).optional(),
   loop: z.object({ collectionPath: z.string(), itemKey: z.string(), maxIterations: z.number().int().min(1).max(100), bodyNext: z.string().nullable(), exitNext: z.string().nullable() }).optional(),
-  parallel: z.object({ strategy: z.enum(["all", "any", "all_settled"]), failurePolicy: z.enum(["fail_fast", "continue"]), branches: z.array(z.unknown()) }).optional(),
+  parallel: z.object({ strategy: z.enum(["all", "any", "all_settled"]), failurePolicy: z.enum(["fail_fast", "continue"]), branches: z.array(ParallelBranch) }).optional(),
   wait: z.object({ mode: z.enum(["delay", "until", "event"]), durationMs: z.number().default(0), until: z.string().nullable().default(null), eventKey: z.string(), eventLabel: z.string().optional(), payloadSchema: z.record(z.string(), z.unknown()).default({ type: "object" }), timeoutMs: z.number().default(0), onTimeoutNext: z.string().nullable().default(null) }).optional(),
   memory: z.object({ mode: z.string(), query: z.string().optional(), limit: z.number().optional(), contentFrom: z.string().optional() }).optional(),
   subflow: z.object({ name: z.string(), steps: z.array(z.unknown()).default([]), inputs: z.array(z.string()).default([]), outputs: z.array(z.string()).default([]), failurePolicy: z.string().optional() }).optional(),
@@ -84,3 +91,4 @@ export const WorkflowDraft = z.object({
 export type WorkflowNodeType = z.infer<typeof WorkflowNodeType>;
 export type WorkflowNode = z.infer<typeof WorkflowNode>;
 export type WorkflowDraft = z.infer<typeof WorkflowDraft>;
+export type ParallelBranch = z.infer<typeof ParallelBranch>;
