@@ -8,7 +8,8 @@ vi.mock("@/server/queries/runs", () => ({
   getRunView: async () => RunView.parse({
     id: "00000000-0000-4000-8000-000000000001",
     agentId: "00000000-0000-4000-8000-000000000002",
-    agentName: "业务助手", status: "completed", input: {}, result: { ok: true },
+    agentName: "业务助手", status: "completed", sourceType: "agent_call",
+    parentRunId: "00000000-0000-4000-8000-000000000003", input: {}, result: { ok: true },
     error: null, startedAt: null, finishedAt: null,
   }),
   listRunSteps: mocks.steps,
@@ -34,6 +35,10 @@ describe("运行详情步骤数据", () => {
     expect(screen.getByRole("link", { name: "下载运行报告" })).toHaveAttribute(
       "href",
       "/api/runs/00000000-0000-4000-8000-000000000001/export",
+    );
+    expect(screen.getByRole("link", { name: "查看上级运行" })).toHaveAttribute(
+      "href",
+      "/runs/00000000-0000-4000-8000-000000000003",
     );
   });
 

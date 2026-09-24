@@ -67,6 +67,11 @@ export async function RunDetail({ runId }: { runId: string }) {
         <Link href={`/agents/${run.agentId}`} className="w-fit text-sm text-gray-500 hover:text-gray-700">
           查看这个助手
         </Link>
+        {run.parentRunId ? (
+          <Link href={`/runs/${run.parentRunId}`} className="w-fit text-sm text-blue-700 hover:underline">
+            查看上级运行
+          </Link>
+        ) : null}
         <a
           href={`/api/runs/${runId}/export`}
           download

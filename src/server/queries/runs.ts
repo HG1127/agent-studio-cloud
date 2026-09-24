@@ -99,6 +99,9 @@ export async function getRunView(runId: string, workspaceId: string): Promise<Ru
     .where(and(eq(runs.id, runId), eq(runs.workspaceId, workspaceId)))
     .limit(1);
   if (!row) return null;
+  const parentRunId = ["agent_call", "handoff"].includes(row.run.sourceType)
+    ? /^(?:agent-call|handoff):([0-9a-f-]{36}):/i.exec(row.run.sourceKey ?? "")?.[1] ?? null
+    : null;
   // 读取再 safeParse 一次，坏数据降级为 404 而不是让页面崩掉
   const parsed = RunView.safeParse({
     id: row.run.id,
@@ -106,6 +109,7 @@ export async function getRunView(runId: string, workspaceId: string): Promise<Ru
     agentName: row.agentName,
     status: row.run.status,
     sourceType: row.run.sourceType,
+    parentRunId,
     input: row.run.input,
     result: row.run.result ?? null,
     error: row.run.error ?? null,
