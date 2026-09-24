@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import type { VersionSummary } from "@/contracts/version";
 import type { ModelConnectionView } from "@/contracts/connections";
 import { publishVersionAction } from "@/server/actions/publish-version";
@@ -14,11 +15,22 @@ function formatTime(iso: string): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-export function VersionPanel({ agentId, versions, connections, defaultModelLabel }: {
+export function VersionPanel({
+  agentId,
+  versions,
+  connections,
+  defaultModelLabel,
+  currentVersionId = null,
+  versionPage = 1,
+  hasMoreVersions = false,
+}: {
   agentId: string;
   versions: VersionSummary[];
   connections: ModelConnectionView[];
   defaultModelLabel: string;
+  currentVersionId?: string | null;
+  versionPage?: number;
+  hasMoreVersions?: boolean;
 }) {
   const router = useRouter();
   const [optimisticVersions, setOptimisticVersions] = useState<VersionSummary[]>([]);
@@ -57,7 +69,7 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
             : version.status,
       })),
   ], versions);
-  const currentVersion = displayedVersions.find((version) => version.status === "production");
+  const effectiveCurrentVersionId = displayedVersions.find((version) => version.status === "production")?.id ?? currentVersionId;
 
   async function handlePublish() {
     if (hasUnsavedDraft) {
@@ -115,7 +127,7 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
   }
 
   return (
-    <section className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4">
+    <section id="versions" className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-sm font-semibold">版本历史</h2>
         <div className="flex flex-wrap items-center gap-3">
@@ -186,8 +198,8 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
               <span className="text-gray-500">{formatTime(version.createdAt)}</span>
               <a href={`/api/agents/${agentId}/versions/${version.id}/export`} download
                 className="text-xs text-blue-700 hover:underline">下载此版本</a>
-              {currentVersion && currentVersion.id !== version.id ? (
-                <a href={`/agents/${agentId}/versions/compare?from=${version.id}&to=${currentVersion.id}`}
+              {effectiveCurrentVersionId && effectiveCurrentVersionId !== version.id ? (
+                <a href={`/agents/${agentId}/versions/compare?from=${version.id}&to=${effectiveCurrentVersionId}`}
                   className="text-xs text-blue-700 hover:underline">与当前版本对比</a>
               ) : null}
               {version.status === "retired" ? (
@@ -206,6 +218,13 @@ export function VersionPanel({ agentId, versions, connections, defaultModelLabel
       ) : (
         <p className="text-sm text-gray-500">还没有发布过版本，完善流程后点「发布新版本」。</p>
       )}
+      {versionPage > 1 || hasMoreVersions ? (
+        <nav aria-label="版本翻页" className="flex items-center justify-between border-t border-gray-100 pt-3 text-sm">
+          {versionPage > 1 ? <Link href={`?versionsPage=${versionPage - 1}#versions`} className="text-blue-700 hover:underline">上一页</Link> : <span />}
+          <span className="text-xs text-gray-500">第 {versionPage} 页</span>
+          {hasMoreVersions ? <Link href={`?versionsPage=${versionPage + 1}#versions`} className="text-blue-700 hover:underline">下一页</Link> : <span />}
+        </nav>
+      ) : null}
     </section>
   );
 }

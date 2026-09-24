@@ -66,6 +66,24 @@ describe("VersionPanel", () => {
     expect(screen.queryByText("当前版本")).not.toBeInTheDocument();
   });
 
+  it("版本历史支持翻页并能与跨页当前版本对比", () => {
+    render(<VersionPanel
+      agentId={AGENT_ID}
+      versions={[VERSIONS[1]]}
+      connections={[]}
+      defaultModelLabel="演示模式"
+      currentVersionId={VERSIONS[0].id}
+      versionPage={2}
+      hasMoreVersions
+    />);
+    expect(screen.getByRole("link", { name: "上一页" })).toHaveAttribute("href", "?versionsPage=1#versions");
+    expect(screen.getByRole("link", { name: "下一页" })).toHaveAttribute("href", "?versionsPage=3#versions");
+    expect(screen.getByRole("link", { name: "与当前版本对比" })).toHaveAttribute(
+      "href",
+      `/agents/${AGENT_ID}/versions/compare?from=${VERSIONS[1].id}&to=${VERSIONS[0].id}`,
+    );
+  });
+
   it("流程有未保存修改时阻止发布旧草稿", async () => {
     renderPanel();
     act(() => window.dispatchEvent(new CustomEvent(DRAFT_STATE_EVENT, { detail: { agentId: AGENT_ID, dirty: true } })));

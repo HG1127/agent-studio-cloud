@@ -4,8 +4,10 @@ import { VersionSummary } from "@/contracts/version";
 import { agents, agentVersions } from "@/db/schema";
 import { db } from "@/lib/db";
 
-export async function listVersions(agentId: string): Promise<VersionSummary[]> {
+export async function listVersions(agentId: string, pagination: { limit?: number; offset?: number } = {}): Promise<VersionSummary[]> {
   if (!z.string().uuid().safeParse(agentId).success) return [];
+  const limit = Math.min(101, Math.max(1, pagination.limit ?? 100));
+  const offset = Math.max(0, pagination.offset ?? 0);
   const rows = await db
     .select({
       id: agentVersions.id,
@@ -15,7 +17,9 @@ export async function listVersions(agentId: string): Promise<VersionSummary[]> {
     })
     .from(agentVersions)
     .where(eq(agentVersions.agentId, agentId))
-    .orderBy(desc(agentVersions.version));
+    .orderBy(desc(agentVersions.version))
+    .limit(limit)
+    .offset(offset);
   return rows.map((row) =>
     VersionSummary.parse({
       id: row.id,

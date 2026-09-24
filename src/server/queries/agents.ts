@@ -60,7 +60,7 @@ export async function listArchivedAgents(workspaceId: string, options?: { query?
 export interface AgentDetail {
   agent: typeof agents.$inferSelect;
   draft: WorkflowDraft | null;
-  versions: Array<typeof agentVersions.$inferSelect>;
+  currentVersion: typeof agentVersions.$inferSelect | null;
 }
 
 export async function getAgentDetail(agentId: string, workspaceId: string): Promise<AgentDetail | null> {
@@ -77,14 +77,19 @@ export async function getAgentDetail(agentId: string, workspaceId: string): Prom
     .where(eq(workflowDefinitions.agentId, agentId))
     .orderBy(desc(workflowDefinitions.createdAt))
     .limit(1);
-  const versions = await db
+  const [currentVersion] = await db
     .select()
     .from(agentVersions)
-    .where(eq(agentVersions.agentId, agentId))
-    .orderBy(desc(agentVersions.version));
+    .where(and(
+      eq(agentVersions.agentId, agentId),
+      eq(agentVersions.workspaceId, workspaceId),
+      eq(agentVersions.status, "production"),
+    ))
+    .orderBy(desc(agentVersions.version))
+    .limit(1);
   // 草稿写入时已过契约校验；读取再 safeParse 一次，坏数据降级为空草稿而不是让页面崩掉
   const parsed = definition ? WorkflowDraft.safeParse(definition.draft) : null;
-  return { agent, draft: parsed?.success ? parsed.data : null, versions };
+  return { agent, draft: parsed?.success ? parsed.data : null, currentVersion: currentVersion ?? null };
 }
 
 export async function listAgentTargets(workspaceId: string, excludeAgentId: string): Promise<AgentTargetOptionType[]> {

@@ -30,15 +30,20 @@ function auditStatusLine(audit: DesignAuditResult | null): string {
 
 export default async function AgentDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ agentId: string }>;
+  searchParams: Promise<{ versionsPage?: string }>;
 }) {
   const { agentId } = await params;
+  const rawVersionPage = Number((await searchParams).versionsPage ?? "1");
+  const versionPage = Number.isInteger(rawVersionPage) && rawVersionPage > 0 ? rawVersionPage : 1;
+  const versionPageSize = 50;
   const detail = await getAgentDetail(agentId, DEMO_WORKSPACE_ID);
   if (!detail) notFound();
   const audit = detail.draft ? auditWorkflow(detail.draft) : null;
   const [versions, connections, agentTargets, evaluationCases, archivedEvaluationCases, evaluationRuns] = await Promise.all([
-    listVersions(agentId),
+    listVersions(agentId, { limit: versionPageSize + 1, offset: (versionPage - 1) * versionPageSize }),
     listModelConnections(),
     listAgentTargets(DEMO_WORKSPACE_ID, agentId),
     listEvaluationCases(agentId, DEMO_WORKSPACE_ID),
@@ -46,7 +51,7 @@ export default async function AgentDetailPage({
     listEvaluationRuns(agentId, DEMO_WORKSPACE_ID),
   ]);
   const defaultModelLabel = process.env.MODEL_MOCK === "1" ? "演示模式" : process.env.MODEL_ID?.trim() ? "服务端默认模型" : "尚未配置默认模型";
-  const currentVersion = detail.versions.find((version) => version.status === "production");
+  const currentVersion = detail.currentVersion;
   const toolOptions = listToolRegistryOptions();
   const currentManifest = currentVersion ? AgentManifest.safeParse(currentVersion.manifest) : null;
   const inputFields = currentManifest?.success ? currentManifest.data.inputContract.fields : undefined;
@@ -74,7 +79,15 @@ export default async function AgentDetailPage({
         </section>
       )}
       {audit ? <DesignAuditPanel agentId={agentId} score={audit.score} issues={AuditIssueView.array().parse(audit.issues)} /> : null}
-      <VersionPanel agentId={agentId} versions={versions} connections={connections} defaultModelLabel={defaultModelLabel} />
+      <VersionPanel
+        agentId={agentId}
+        versions={versions.slice(0, versionPageSize)}
+        connections={connections}
+        defaultModelLabel={defaultModelLabel}
+        currentVersionId={currentVersion?.id ?? null}
+        versionPage={versionPage}
+        hasMoreVersions={versions.length > versionPageSize}
+      />
       <EvaluationPanel agentId={agentId} cases={evaluationCases} archivedCases={archivedEvaluationCases} runs={evaluationRuns} />
       <RunLauncher agentId={agentId} inputFields={inputFields} />
     </main>
