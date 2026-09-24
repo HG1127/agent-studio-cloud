@@ -72,23 +72,29 @@ export async function completeEvaluationForRun(
     : testCase && result
       ? evaluateExpectations(result, testCase.expectations)
       : { passed: false, errors: ["验收样例或运行结果不存在"] };
-  await db
+  const updated = await db
     .update(evaluationCaseResults)
     .set({ runId, status: outcome.passed ? "passed" : "failed", error: outcome.errors.join("；") || null, updatedAt: new Date() })
     .where(and(
       eq(evaluationCaseResults.evaluationRunId, evaluationRunId),
       eq(evaluationCaseResults.evaluationCaseId, evaluationCaseId),
-    ));
+      eq(evaluationCaseResults.status, "running"),
+    ))
+    .returning({ id: evaluationCaseResults.id });
+  if (updated.length === 0) return;
   await refreshEvaluationSummary(evaluationRunId);
 }
 
 export async function markEvaluationStartFailure(evaluationRunId: string, evaluationCaseId: string, error: string): Promise<void> {
-  await db
+  const updated = await db
     .update(evaluationCaseResults)
     .set({ status: "failed", error, updatedAt: new Date() })
     .where(and(
       eq(evaluationCaseResults.evaluationRunId, evaluationRunId),
       eq(evaluationCaseResults.evaluationCaseId, evaluationCaseId),
-    ));
+      eq(evaluationCaseResults.status, "running"),
+    ))
+    .returning({ id: evaluationCaseResults.id });
+  if (updated.length === 0) return;
   await refreshEvaluationSummary(evaluationRunId);
 }

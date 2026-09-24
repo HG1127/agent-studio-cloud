@@ -4,15 +4,17 @@ import { AgentManifest } from "@/contracts/manifest";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-import { agentVersions, agents, evaluationCaseResults, evaluationCases, evaluationRuns } from "@/db/schema";
+import { agentVersions, agents, evaluationCaseResults, evaluationCases, evaluationRuns, runs } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { createEvaluationCaseAction, setEvaluationCaseArchivedAction, updateEvaluationCaseAction } from "@/server/actions/evaluations";
+import { completeEvaluationForRun } from "@/server/services/evaluation-state";
 import { prepareEvaluationRun } from "@/server/services/evaluation-start";
 
 const AGENT_ID = "00000000-0000-4000-8000-0000000000a1";
 const VERSION_ID = "00000000-0000-4000-8000-0000000000a2";
 const CASE_ID = "00000000-0000-4000-8000-0000000000a3";
+const RUN_ID = "00000000-0000-4000-8000-0000000000a4";
 
 const manifest = AgentManifest.parse({
   schemaVersion: "4.0",
@@ -32,6 +34,7 @@ const manifest = AgentManifest.parse({
 });
 
 afterEach(async () => {
+  await db.delete(runs).where(eq(runs.id, RUN_ID));
   const evaluations = await db.select({ id: evaluationRuns.id }).from(evaluationRuns).where(eq(evaluationRuns.agentId, AGENT_ID));
   for (const evaluation of evaluations) {
     await db.delete(evaluationCaseResults).where(eq(evaluationCaseResults.evaluationRunId, evaluation.id));
@@ -87,5 +90,25 @@ describe("自动验收并发启动", () => {
     const cases = await db.select().from(evaluationCases).where(eq(evaluationCases.agentId, AGENT_ID));
     expect(cases).toHaveLength(1);
     expect(cases[0]).toMatchObject({ name: "基础样例", archivedAt: null });
+  });
+
+  it("重复完成回调不会覆盖已经落定的验收结果", async () => {
+    await insertFixture();
+    await db.update(evaluationCases).set({ expectations: [{ path: "answer", operator: "equals", value: "通过" }] }).where(eq(evaluationCases.id, CASE_ID));
+    const prepared = await prepareEvaluationRun(AGENT_ID);
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+    await db.insert(runs).values({
+      id: RUN_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID,
+      agentId: AGENT_ID, versionId: VERSION_ID, status: "completed", input: {}, result: { answer: "通过" },
+      sourceType: "evaluation", sourceKey: `evaluation:${prepared.evaluationId}:${CASE_ID}`,
+    });
+
+    await completeEvaluationForRun(RUN_ID, { answer: "通过" });
+    await db.update(evaluationCases).set({ expectations: [{ path: "answer", operator: "equals", value: "已修改" }] }).where(eq(evaluationCases.id, CASE_ID));
+    await completeEvaluationForRun(RUN_ID, null, "迟到的重复失败回调");
+
+    const [result] = await db.select().from(evaluationCaseResults).where(eq(evaluationCaseResults.evaluationRunId, prepared.evaluationId));
+    expect(result).toMatchObject({ status: "passed", error: null, runId: RUN_ID });
   });
 });
