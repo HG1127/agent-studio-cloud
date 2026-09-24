@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import type { AgentTargetOption } from "@/contracts/agent";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { NODE_TYPE_LABELS } from "./CustomNodes";
@@ -44,6 +45,53 @@ function changeInlineStep(
   value: string,
 ): Array<Record<string, unknown>> {
   return steps.map((step, stepIndex) => stepIndex === index ? { ...step, [field]: value } : step);
+}
+
+function WaitPayloadSchemaEditor({ node, onNodeChange }: {
+  node: WorkflowNode;
+  onNodeChange: (node: WorkflowNode) => void;
+}) {
+  const serialized = JSON.stringify(node.wait?.payloadSchema ?? { type: "object" }, null, 2);
+  const [value, setValue] = useState(serialized);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setValue(serialized);
+    setError(null);
+  }, [node.id, serialized]);
+
+  function apply() {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+      const schema = parsed as Record<string, unknown>;
+      if (schema.type && schema.type !== "object") {
+        setError("消息字段契约的根类型必须是 object");
+        return;
+      }
+      if (schema.required && (!Array.isArray(schema.required) || schema.required.some((field) => typeof field !== "string"))) {
+        setError("必填字段 required 必须是文字列表");
+        return;
+      }
+      if (schema.properties && (typeof schema.properties !== "object" || Array.isArray(schema.properties))) {
+        setError("字段 properties 必须是对象");
+        return;
+      }
+      setError(null);
+      onNodeChange({ ...node, wait: { ...node.wait!, payloadSchema: schema } });
+    } catch {
+      setError("字段契约不是有效的 JSON 对象");
+    }
+  }
+
+  return <div className="flex flex-col gap-1">
+    <label htmlFor="wait-payload-schema" className="text-sm font-medium">消息字段契约</label>
+    <textarea id="wait-payload-schema" rows={8} spellCheck={false} value={value}
+      onChange={(event) => setValue(event.target.value)}
+      className="rounded-md border border-gray-300 px-3 py-2 font-mono text-xs font-normal" />
+    <p className="text-xs text-gray-500">用 JSON 定义 properties 和 required；支持文字、数字、布尔、对象、列表与枚举。</p>
+    <button type="button" onClick={apply} className="w-fit text-xs text-blue-700">应用字段契约</button>
+    {error ? <p role="alert" className="text-xs text-red-600">{error}</p> : null}
+  </div>;
 }
 
 // M1 编辑范围：title/description，加 human 的负责人与确认事项；condition 的说明以「判断说明」呈现
@@ -283,6 +331,7 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
                 onChange={(event) => onNodeChange({ ...node, wait: { ...node.wait!, timeoutMs: Math.max(0, Number(event.target.value) || 0) * 60_000 } })}
                 className="rounded-md border border-gray-300 px-3 py-2 text-sm font-normal" />
             </label>
+            <WaitPayloadSchemaEditor node={node} onNodeChange={onNodeChange} />
           </> : null}
         </div>
       ) : null}

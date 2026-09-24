@@ -39,6 +39,10 @@ const WAIT_NODE = WorkflowNode.parse({
   id: "step_7", title: "等待回执", type: "wait",
   wait: { mode: "delay", durationMs: 60_000, eventKey: "", timeoutMs: 0 },
 });
+const EVENT_WAIT_NODE = WorkflowNode.parse({
+  id: "step_event", title: "等待客户资料", type: "wait",
+  wait: { mode: "event", durationMs: 0, eventKey: "customer.updated", timeoutMs: 0, payloadSchema: { type: "object" } },
+});
 const MEMORY_NODE = WorkflowNode.parse({
   id: "step_8", title: "参考经验", type: "memory", memory: { mode: "read", limit: 5 },
 });
@@ -113,6 +117,25 @@ describe("NodeInspector", () => {
     expect(screen.getByLabelText("最多参考条数")).toHaveValue(5);
     rerender(<NodeInspector node={LOOP_NODE} onNodeChange={vi.fn()} onNodeDelete={vi.fn()} />);
     expect(screen.getByLabelText("列表数据")).toHaveValue("input.items");
+  });
+
+  it("等待外部消息节点可以编辑并校验消息字段契约", async () => {
+    const onNodeChange = vi.fn();
+    const user = userEvent.setup();
+    render(<NodeInspector node={EVENT_WAIT_NODE} onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
+    const editor = screen.getByLabelText("消息字段契约");
+
+    fireEvent.change(editor, { target: { value: "[]" } });
+    await user.click(screen.getByRole("button", { name: "应用字段契约" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("字段契约不是有效的 JSON 对象");
+    expect(onNodeChange).not.toHaveBeenCalled();
+
+    const schema = { type: "object", required: ["customerId"], properties: { customerId: { type: "string" } } };
+    fireEvent.change(editor, { target: { value: JSON.stringify(schema) } });
+    await user.click(screen.getByRole("button", { name: "应用字段契约" }));
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      wait: expect.objectContaining({ payloadSchema: schema }),
+    }));
   });
 
   it("保存经验时从业务步骤选择内容来源", async () => {
