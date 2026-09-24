@@ -188,6 +188,31 @@ describe("NodeInspector", () => {
     expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({ parallel: expect.objectContaining({ branches: [expect.objectContaining({ steps: expect.arrayContaining([expect.objectContaining({ type: "ai" })]) }), expect.anything()] }) }));
   });
 
+  it("并行工作可以改为业务工具并绑定服务端工具", async () => {
+    const toolParallel = WorkflowNode.parse({
+      ...PARALLEL_NODE,
+      parallel: {
+        ...PARALLEL_NODE.parallel!,
+        branches: PARALLEL_NODE.parallel!.branches.map((branch, index) => index === 0 ? {
+          ...branch,
+          steps: [{ id: "step_1", title: "更新客户", type: "tool", tool: { connector: "demo", action: "demo", scope: "demo", registryToolId: "demo", protocol: "demo" } }],
+        } : branch),
+      },
+    });
+    const onNodeChange = vi.fn();
+    const user = userEvent.setup();
+    render(<NodeInspector node={toolParallel} toolOptions={[{
+      id: "crm.update", name: "客户系统", description: "", action: "update_customer", scope: "customer.write", risk: "medium",
+      inputSchema: { type: "object" }, outputSchema: { type: "object" },
+    }]} onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
+    await user.selectOptions(screen.getByLabelText("并行工作 1 步骤 1 业务工具"), "crm.update");
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      parallel: expect.objectContaining({ branches: [expect.objectContaining({
+        steps: [expect.objectContaining({ tool: expect.objectContaining({ registryToolId: "crm.update", protocol: "http-json" }) })],
+      }), expect.anything()] }),
+    }));
+  });
+
   it("顺序步骤组可以修改名称、输出和内部步骤", async () => {
     const onNodeChange = vi.fn();
     const user = userEvent.setup();
@@ -198,6 +223,16 @@ describe("NodeInspector", () => {
     expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({ subflow: expect.objectContaining({ outputs: ["合同", "报价"] }) }));
     await user.click(screen.getByRole("button", { name: "添加步骤" }));
     expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({ subflow: expect.objectContaining({ steps: expect.arrayContaining([expect.objectContaining({ title: "处理下一步" })]) }) }));
+  });
+
+  it("顺序步骤组可以创建资料和经验步骤", async () => {
+    const onNodeChange = vi.fn();
+    const user = userEvent.setup();
+    render(<NodeInspector node={SUBFLOW_NODE} onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
+    await user.selectOptions(screen.getByLabelText("步骤组步骤 1 类型"), "knowledge");
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      subflow: expect.objectContaining({ steps: [expect.objectContaining({ type: "knowledge", knowledge: { space: "业务资料库", query: "" } })] }),
+    }));
   });
 
   it("知识节点可以单独修改检索内容", () => {

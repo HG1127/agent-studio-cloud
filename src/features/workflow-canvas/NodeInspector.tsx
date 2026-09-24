@@ -55,6 +55,72 @@ function changeInlineStep(
   return steps.map((step, stepIndex) => stepIndex === index ? { ...step, [field]: value } : step);
 }
 
+const INLINE_STEP_TYPES = ["ai", "system", "tool", "knowledge", "memory"] as const;
+type InlineStepType = (typeof INLINE_STEP_TYPES)[number];
+
+function changeInlineStepType(steps: Array<Record<string, unknown>>, index: number, type: InlineStepType) {
+  return steps.map((step, stepIndex) => {
+    if (stepIndex !== index) return step;
+    if (type === "tool") return { ...step, type, tool: step.tool ?? { connector: "demo", action: "demo", scope: "demo", risk: "low", maxRetries: 1, registryToolId: "demo", protocol: "demo", inputSchema: { type: "object" }, outputSchema: { type: "object" } } };
+    if (type === "knowledge") return { ...step, type, knowledge: step.knowledge ?? { space: "业务资料库", query: "" } };
+    if (type === "memory") return { ...step, type, memory: step.memory ?? { mode: "read", limit: 5 } };
+    return { ...step, type };
+  });
+}
+
+function inlineToolSpec(toolId: string, currentAction: string, options: ToolRegistryOption[]) {
+  const selected = options.find((item) => item.id === toolId);
+  if (!selected) return {
+    connector: "demo", action: currentAction || "demo", scope: "demo", risk: "low" as const,
+    maxRetries: 1, registryToolId: "demo", protocol: "demo", unresolved: false,
+    inputSchema: { type: "object" }, outputSchema: { type: "object" },
+  };
+  return {
+    connector: selected.name, action: selected.action, scope: selected.scope, risk: selected.risk,
+    maxRetries: 3, registryToolId: selected.id, protocol: "http-json", unresolved: false,
+    operationKind: selected.risk === "low" ? "read" as const : "action" as const,
+    inputSchema: selected.inputSchema, outputSchema: selected.outputSchema,
+  };
+}
+
+function InlineStepEditor({ label, steps, index, toolOptions, removable, onChange, onDelete }: {
+  label: string;
+  steps: Array<Record<string, unknown>>;
+  index: number;
+  toolOptions: ToolRegistryOption[];
+  removable: boolean;
+  onChange: (steps: Array<Record<string, unknown>>) => void;
+  onDelete: () => void;
+}) {
+  const step = steps[index];
+  const type = INLINE_STEP_TYPES.includes(step.type as InlineStepType) ? step.type as InlineStepType : "ai";
+  const tool = step.tool && typeof step.tool === "object" ? step.tool as Record<string, unknown> : null;
+  return <div className="grid gap-1 rounded-md bg-gray-50 p-2 md:grid-cols-[110px_1fr_2fr_auto]">
+    <select aria-label={`${label} 类型`} value={type}
+      onChange={(event) => onChange(changeInlineStepType(steps, index, event.target.value as InlineStepType))}
+      className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs">
+      <option value="ai">智能处理</option><option value="system">自动记录</option><option value="tool">业务工具</option>
+      <option value="knowledge">读取资料</option><option value="memory">参考经验</option>
+    </select>
+    <input aria-label={`${label} 名称`} value={String(step.title ?? "")}
+      onChange={(event) => onChange(changeInlineStep(steps, index, "title", event.target.value))}
+      className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
+    <input aria-label={`${label} 说明`} value={String(step.description ?? "")}
+      onChange={(event) => onChange(changeInlineStep(steps, index, "description", event.target.value))}
+      className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
+    {removable ? <button type="button" aria-label={`删除${label}`} onClick={onDelete} className="text-xs text-red-600">删除</button> : <span />}
+    {type === "tool" ? <select aria-label={`${label} 业务工具`} value={String(tool?.registryToolId ?? "demo")}
+      onChange={(event) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
+        ...item,
+        tool: inlineToolSpec(event.target.value, String(tool?.action ?? "demo"), toolOptions),
+      } : item))}
+      className="rounded-md border border-gray-300 px-2 py-1.5 text-xs md:col-span-4">
+      <option value="demo">演示工具（不连接业务系统）</option>
+      {toolOptions.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
+    </select> : null}
+  </div>;
+}
+
 function WaitPayloadSchemaEditor({ node, onNodeChange }: {
   node: WorkflowNode;
   onNodeChange: (node: WorkflowNode) => void;
@@ -260,17 +326,11 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
               </div>
               <div className="mt-2 space-y-2">
                 {branch.steps.map((step, stepIndex) => (
-                  <div key={String(step.id ?? stepIndex)} className="grid gap-1 md:grid-cols-[1fr_2fr_auto]">
-                    <input aria-label={`并行工作 ${branchIndex + 1} 步骤 ${stepIndex + 1} 名称`} value={String(step.title ?? "")}
-                      onChange={(event) => onNodeChange({ ...node, parallel: { ...node.parallel!, branches: node.parallel!.branches.map((item, index) => index === branchIndex ? { ...item, steps: changeInlineStep(item.steps, stepIndex, "title", event.target.value) } : item) } })}
-                      className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
-                    <input aria-label={`并行工作 ${branchIndex + 1} 步骤 ${stepIndex + 1} 说明`} value={String(step.description ?? "")}
-                      onChange={(event) => onNodeChange({ ...node, parallel: { ...node.parallel!, branches: node.parallel!.branches.map((item, index) => index === branchIndex ? { ...item, steps: changeInlineStep(item.steps, stepIndex, "description", event.target.value) } : item) } })}
-                      className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
-                    {branch.steps.length > 1 ? <button type="button" aria-label={`删除并行工作 ${branchIndex + 1} 步骤 ${stepIndex + 1}`}
-                      onClick={() => onNodeChange({ ...node, parallel: { ...node.parallel!, branches: node.parallel!.branches.map((item, index) => index === branchIndex ? { ...item, steps: item.steps.filter((_, index2) => index2 !== stepIndex) } : item) } })}
-                      className="text-xs text-red-600">删除</button> : null}
-                  </div>
+                  <InlineStepEditor key={String(step.id ?? stepIndex)}
+                    label={`并行工作 ${branchIndex + 1} 步骤 ${stepIndex + 1}`}
+                    steps={branch.steps} index={stepIndex} toolOptions={toolOptions} removable={branch.steps.length > 1}
+                    onChange={(steps) => onNodeChange({ ...node, parallel: { ...node.parallel!, branches: node.parallel!.branches.map((item, index) => index === branchIndex ? { ...item, steps } : item) } })}
+                    onDelete={() => onNodeChange({ ...node, parallel: { ...node.parallel!, branches: node.parallel!.branches.map((item, index) => index === branchIndex ? { ...item, steps: item.steps.filter((_, index2) => index2 !== stepIndex) } : item) } })} />
                 ))}
               </div>
               <button type="button" disabled={branch.steps.length >= MAX_PARALLEL_STEPS} onClick={() => onNodeChange({ ...node, parallel: { ...node.parallel!, branches: node.parallel!.branches.map((item, index) => index === branchIndex ? { ...item, steps: [...item.steps, inlineStep(item.steps, `处理${item.label}的新步骤`)] } : item) } })}
@@ -310,17 +370,10 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
           </label>
           <div className="space-y-2">
             {node.subflow.steps.map((step, stepIndex) => (
-              <div key={String(step.id ?? stepIndex)} className="grid gap-1 md:grid-cols-[1fr_2fr_auto]">
-                <input aria-label={`步骤组步骤 ${stepIndex + 1} 名称`} value={String(step.title ?? "")}
-                  onChange={(event) => onNodeChange({ ...node, subflow: { ...node.subflow!, steps: changeInlineStep(node.subflow!.steps, stepIndex, "title", event.target.value) } })}
-                  className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
-                <input aria-label={`步骤组步骤 ${stepIndex + 1} 说明`} value={String(step.description ?? "")}
-                  onChange={(event) => onNodeChange({ ...node, subflow: { ...node.subflow!, steps: changeInlineStep(node.subflow!.steps, stepIndex, "description", event.target.value) } })}
-                  className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
-                {node.subflow!.steps.length > 1 ? <button type="button" aria-label={`删除步骤组步骤 ${stepIndex + 1}`}
-                  onClick={() => onNodeChange({ ...node, subflow: { ...node.subflow!, steps: node.subflow!.steps.filter((_, index) => index !== stepIndex) } })}
-                  className="text-xs text-red-600">删除</button> : null}
-              </div>
+              <InlineStepEditor key={String(step.id ?? stepIndex)} label={`步骤组步骤 ${stepIndex + 1}`}
+                steps={node.subflow!.steps} index={stepIndex} toolOptions={toolOptions} removable={node.subflow!.steps.length > 1}
+                onChange={(steps) => onNodeChange({ ...node, subflow: { ...node.subflow!, steps } })}
+                onDelete={() => onNodeChange({ ...node, subflow: { ...node.subflow!, steps: node.subflow!.steps.filter((_, index) => index !== stepIndex) } })} />
             ))}
           </div>
           <button type="button" disabled={node.subflow.steps.length >= MAX_SUBFLOW_STEPS} onClick={() => onNodeChange({ ...node, subflow: { ...node.subflow!, steps: [...node.subflow!.steps, inlineStep(node.subflow!.steps, "处理下一步")] } })}
