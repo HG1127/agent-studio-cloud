@@ -1,5 +1,5 @@
 "use step";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { FatalError } from "workflow";
 import { AgentManifest, type AgentManifest as AgentManifestType } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
@@ -42,23 +42,32 @@ export async function beginAgentCall(args: {
   const input = buildAgentCallInput({ node: args.node, targetManifest: parsedManifest.data, input: args.parentInput, outputs: args.outputs });
   await persistStep({ runId: args.runId, nodeId: args.node.id, nodeTitle: args.node.title, nodeType: args.node.type, status: "running" });
   const sourceKey = `agent-call:${args.runId}:${args.node.id}`;
-  const [inserted] = await db
-    .insert(runs)
-    .values({
-      workspaceId: parent.workspaceId,
-      createdBy: parent.createdBy,
-      agentId: call.targetAgentId,
-      versionId: call.versionId,
-      status: "queued",
-      input,
-      sourceType: "agent_call",
-      sourceKey,
-    })
-    .onConflictDoNothing()
-    .returning({ id: runs.id });
-  const childRunId = inserted?.id ?? (
-    await db.select({ id: runs.id }).from(runs).where(eq(runs.sourceKey, sourceKey)).limit(1)
-  )[0]?.id;
+  const childRunId = await db.transaction(async (tx) => {
+    const [lockedParent] = await tx
+      .select({ id: runs.id })
+      .from(runs)
+      .where(and(eq(runs.id, args.runId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])))
+      .for("update")
+      .limit(1);
+    if (!lockedParent) return null;
+    const [inserted] = await tx
+      .insert(runs)
+      .values({
+        workspaceId: parent.workspaceId,
+        createdBy: parent.createdBy,
+        agentId: call.targetAgentId,
+        versionId: call.versionId,
+        status: "queued",
+        input,
+        sourceType: "agent_call",
+        sourceKey,
+      })
+      .onConflictDoNothing()
+      .returning({ id: runs.id });
+    return inserted?.id ?? (
+      await tx.select({ id: runs.id }).from(runs).where(eq(runs.sourceKey, sourceKey)).limit(1)
+    )[0]?.id ?? null;
+  });
   if (!childRunId) throw new FatalError(`步骤「${args.node.title}」无法创建协作任务`);
   await appendTrace({ runId: args.runId, nodeId: args.node.id, kind: "agent_call.started", title: `「${args.node.title}」已交给「${target.name}」处理` });
   return { childRunId, targetName: target.name, manifest: parsedManifest.data, input };

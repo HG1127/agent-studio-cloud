@@ -1,5 +1,5 @@
 "use step";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { FatalError } from "workflow";
 import { AgentManifest, type AgentManifest as AgentManifestType } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
@@ -18,6 +18,7 @@ export async function beginHandoff(args: {
   "use step";
   const targetRef = args.node.toAgent;
   if (!targetRef?.id || !targetRef.versionId) throw new FatalError(`步骤「${args.node.title}」还没有选择接收助手`);
+  const targetVersionId = targetRef.versionId;
   const [parent] = await db
     .select({ workspaceId: runs.workspaceId, createdBy: runs.createdBy, agentId: runs.agentId })
     .from(runs)
@@ -30,7 +31,7 @@ export async function beginHandoff(args: {
     .from(agentVersions)
     .innerJoin(agents, eq(agents.id, agentVersions.agentId))
     .where(and(
-      eq(agentVersions.id, targetRef.versionId),
+      eq(agentVersions.id, targetVersionId),
       eq(agentVersions.agentId, targetRef.id),
       eq(agentVersions.workspaceId, parent.workspaceId),
       eq(agents.workspaceId, parent.workspaceId),
@@ -42,23 +43,32 @@ export async function beginHandoff(args: {
   const prepared = buildHandoffInput({ node: args.node, targetManifest: parsedManifest.data, input: args.parentInput, outputs: args.outputs });
   await persistStep({ runId: args.runId, nodeId: args.node.id, nodeTitle: args.node.title, nodeType: args.node.type, status: "running" });
   const sourceKey = `handoff:${args.runId}:${args.node.id}`;
-  const [inserted] = await db
-    .insert(runs)
-    .values({
-      workspaceId: parent.workspaceId,
-      createdBy: parent.createdBy,
-      agentId: targetRef.id,
-      versionId: targetRef.versionId,
-      status: "queued",
-      input: prepared.input,
-      sourceType: "handoff",
-      sourceKey,
-    })
-    .onConflictDoNothing()
-    .returning({ id: runs.id });
-  const childRunId = inserted?.id ?? (
-    await db.select({ id: runs.id }).from(runs).where(eq(runs.sourceKey, sourceKey)).limit(1)
-  )[0]?.id;
+  const childRunId = await db.transaction(async (tx) => {
+    const [lockedParent] = await tx
+      .select({ id: runs.id })
+      .from(runs)
+      .where(and(eq(runs.id, args.runId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])))
+      .for("update")
+      .limit(1);
+    if (!lockedParent) return null;
+    const [inserted] = await tx
+      .insert(runs)
+      .values({
+        workspaceId: parent.workspaceId,
+        createdBy: parent.createdBy,
+        agentId: targetRef.id,
+        versionId: targetVersionId,
+        status: "queued",
+        input: prepared.input,
+        sourceType: "handoff",
+        sourceKey,
+      })
+      .onConflictDoNothing()
+      .returning({ id: runs.id });
+    return inserted?.id ?? (
+      await tx.select({ id: runs.id }).from(runs).where(eq(runs.sourceKey, sourceKey)).limit(1)
+    )[0]?.id ?? null;
+  });
   if (!childRunId) throw new FatalError(`步骤「${args.node.title}」无法创建交接任务`);
   await appendTrace({
     runId: args.runId,
