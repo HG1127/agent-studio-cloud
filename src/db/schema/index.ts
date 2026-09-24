@@ -6,3 +6,4 @@ export * from "./approvals";
 export * from "./knowledge";
 export * from "./schedules";
 export * from "./connections";
+export * from "./memory";

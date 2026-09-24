@@ -24,6 +24,7 @@ const SUPPORTED_NODE_TYPES: ReadonlySet<string> = new Set([
   "loop",
   "parallel",
   "subflow",
+  "memory",
 ]);
 
 export async function startRunCore(args: {
@@ -100,6 +101,7 @@ export async function startRunCore(args: {
           if (step.type === "knowledge" && !step.knowledge?.space) unsupported.push(`${node.title} / ${step.title}`);
         }
       }
+      if (node.type === "memory" && !node.memory) unsupported.push(`${node.title}（经验设置不完整）`);
     }
     if (unsupported.length > 0) {
       const names = [...new Set(unsupported)].join("、");

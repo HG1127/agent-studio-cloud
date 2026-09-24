@@ -10,6 +10,7 @@ import { evaluateCondition } from "@/server/steps/condition-step";
 import { runInlineSystemStep } from "@/server/steps/inline-system-step";
 import { runKnowledgeStep } from "@/server/steps/knowledge-step";
 import { beginLoopIteration, completeLoop } from "@/server/steps/loop-step";
+import { runMemoryStep } from "@/server/steps/memory-step";
 import { runModelStep } from "@/server/steps/model-step";
 import { beginParallel, finishParallel } from "@/server/steps/parallel-step";
 import { failRun, finalizeRun, initializeRun, markRunRunning } from "@/server/steps/run-state";
@@ -146,6 +147,12 @@ export async function agentRunWorkflow(runId: string, manifest: AgentManifest, i
       if (node.type === "knowledge") {
         const r = await runKnowledgeStep({ runId, node, manifest, input });
         outputs[node.id] = r.receipt;
+        currentId = node.next;
+        continue;
+      }
+      if (node.type === "memory") {
+        const result = await runMemoryStep({ runId, node, input, outputs });
+        outputs[node.id] = result.output;
         currentId = node.next;
         continue;
       }

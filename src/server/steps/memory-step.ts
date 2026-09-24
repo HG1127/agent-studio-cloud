@@ -1,0 +1,82 @@
+"use step";
+import { and, desc, eq, isNull } from "drizzle-orm";
+import { FatalError } from "workflow";
+import type { WorkflowNode } from "@/contracts/workflow";
+import { agentMemories, runs } from "@/db/schema";
+import { db } from "@/lib/db";
+import { buildMemoryContent } from "@/server/domain/memory/memory-content";
+import { selectRelevantMemories } from "@/server/domain/memory/memory-search";
+import { persistStep } from "@/server/steps/run-state";
+import { appendTrace } from "@/server/steps/trace-step";
+
+export async function runMemoryStep(args: {
+  runId: string;
+  node: WorkflowNode;
+  input: Record<string, unknown>;
+  outputs: Record<string, unknown>;
+}): Promise<{ output: Record<string, unknown> }> {
+  "use step";
+  const memory = args.node.memory;
+  if (!memory) throw new FatalError(`步骤「${args.node.title}」的经验设置不完整`);
+  await persistStep({ runId: args.runId, nodeId: args.node.id, nodeTitle: args.node.title, nodeType: args.node.type, status: "running" });
+  const [run] = await db
+    .select({ workspaceId: runs.workspaceId, createdBy: runs.createdBy, agentId: runs.agentId })
+    .from(runs)
+    .where(eq(runs.id, args.runId))
+    .limit(1);
+  if (!run) throw new FatalError("找不到这次运行");
+
+  if (memory.mode === "read") {
+    const query = memory.query?.trim()
+      || (typeof args.input.question === "string" ? args.input.question.trim() : "")
+      || (typeof args.input.input === "string" ? args.input.input.trim() : "")
+      || JSON.stringify(args.input).slice(0, 500);
+    const rows = await db
+      .select({ content: agentMemories.content, createdAt: agentMemories.createdAt })
+      .from(agentMemories)
+      .where(and(
+        eq(agentMemories.workspaceId, run.workspaceId),
+        eq(agentMemories.agentId, run.agentId),
+        isNull(agentMemories.archivedAt),
+      ))
+      .orderBy(desc(agentMemories.createdAt))
+      .limit(100);
+    const selected = selectRelevantMemories(query, rows, memory.limit ?? 5);
+    const output = {
+      mode: "read",
+      query,
+      foundCount: selected.length,
+      memories: selected.map((item) => ({ content: item.content, savedAt: item.createdAt.toISOString() })),
+    };
+    await persistStep({ runId: args.runId, nodeId: args.node.id, nodeTitle: args.node.title, nodeType: args.node.type, status: "succeeded", output });
+    await appendTrace({
+      runId: args.runId,
+      nodeId: args.node.id,
+      kind: "memory.read",
+      title: selected.length > 0 ? `「${args.node.title}」找到 ${selected.length} 条可参考经验` : `「${args.node.title}」没有找到相关经验`,
+      data: { foundCount: selected.length },
+    });
+    return { output };
+  }
+
+  const content = buildMemoryContent({ contentFrom: memory.contentFrom, input: args.input, outputs: args.outputs });
+  await db
+    .insert(agentMemories)
+    .values({
+      workspaceId: run.workspaceId,
+      createdBy: run.createdBy,
+      agentId: run.agentId,
+      sourceRunId: args.runId,
+      sourceNodeId: args.node.id,
+      content,
+      metadata: { nodeTitle: args.node.title },
+    })
+    .onConflictDoUpdate({
+      target: [agentMemories.sourceRunId, agentMemories.sourceNodeId],
+      set: { content, metadata: { nodeTitle: args.node.title }, archivedAt: null, updatedAt: new Date() },
+    });
+  const output = { mode: "write", saved: true, contentLength: content.length };
+  await persistStep({ runId: args.runId, nodeId: args.node.id, nodeTitle: args.node.title, nodeType: args.node.type, status: "succeeded", output });
+  await appendTrace({ runId: args.runId, nodeId: args.node.id, kind: "memory.saved", title: `「${args.node.title}」已保存可复用经验`, data: output });
+  return { output };
+}
