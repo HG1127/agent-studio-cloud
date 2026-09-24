@@ -40,6 +40,17 @@ afterEach(() => {
 });
 
 describe("知识原文件上传", () => {
+  it("服务端拒绝空文件且不创建资料记录", async () => {
+    const form = new FormData();
+    form.set("file", new File([], "空资料.txt", { type: "text/plain" }));
+
+    const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ ok: false, error: "文件内容为空，请选择有效文件" });
+    expect(startMock).not.toHaveBeenCalled();
+  });
+
   it("服务端拒绝超过生产入口限制的文件", async () => {
     const form = new FormData();
     form.set("file", new File([new Uint8Array(4 * 1024 * 1024 + 1)], "超大资料.pdf", { type: "application/pdf" }));

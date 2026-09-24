@@ -46,6 +46,9 @@ export async function POST(req: Request) {
   if (!(file instanceof File)) {
     return Response.json({ ok: false, error: "请选择要上传的文件" }, { status: 400 });
   }
+  if (file.size === 0) {
+    return Response.json({ ok: false, error: "文件内容为空，请选择有效文件" }, { status: 400 });
+  }
   const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
   if (!ALLOWED_EXT.has(ext)) {
     return Response.json({ ok: false, error: "暂不支持这种文件类型，可上传：PDF、DOCX、TXT、MD、HTML、JSON、CSV、XML" }, { status: 400 });
