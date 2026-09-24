@@ -2,7 +2,7 @@
 // 审批步骤：requestApproval 落 approvals pending 行并把 run 置 waiting_approval；
 // recordDecision 把审批决定写回 approvals 行。token 为确定性格式，供 createHook/resumeHook 服务端配对，
 // 不下发给前端（前端只拿 approvalId）。
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { FatalError } from "workflow";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { ApprovalPayload } from "@/contracts/run";
@@ -32,31 +32,38 @@ export interface RecordDecisionInput {
 
 export async function requestApproval(args: RequestApprovalInput): Promise<ApprovalHandle> {
   "use step";
-  const [run] = await db
-    .select({ workspaceId: runs.workspaceId })
-    .from(runs)
-    .where(eq(runs.id, args.runId))
-    .limit(1);
-  if (!run) throw new FatalError("运行记录不存在，无法发起确认");
   const node = args.node;
   const role = node.approval?.role ?? "业务负责人";
   const reason = node.approval?.reason ?? `确认「${node.title}」后流程才会继续`;
   const payload = ApprovalPayload.parse({ review: selectApprovalReview(args.outputs, args.nodes) });
   const now = new Date();
-  const [row] = await db
-    .insert(approvals)
-    .values({
-      runId: args.runId,
-      workspaceId: run.workspaceId,
-      nodeId: node.id,
-      nodeTitle: node.title,
-      status: "pending",
-      role,
-      reason,
-      payload,
-    })
-    .returning({ id: approvals.id });
-  await db.update(runs).set({ status: "waiting_approval", updatedAt: now }).where(eq(runs.id, args.runId));
+  const row = await db.transaction(async (tx) => {
+    const [run] = await tx
+      .select({ workspaceId: runs.workspaceId, status: runs.status })
+      .from(runs)
+      .where(eq(runs.id, args.runId))
+      .for("update")
+      .limit(1);
+    if (!run) throw new FatalError("运行记录不存在，无法发起确认");
+    if (!["queued", "running", "waiting_approval", "waiting_event"].includes(run.status)) {
+      throw new FatalError("运行已经结束，不能再发起确认");
+    }
+    const [created] = await tx
+      .insert(approvals)
+      .values({
+        runId: args.runId,
+        workspaceId: run.workspaceId,
+        nodeId: node.id,
+        nodeTitle: node.title,
+        status: "pending",
+        role,
+        reason,
+        payload,
+      })
+      .returning({ id: approvals.id });
+    await tx.update(runs).set({ status: "waiting_approval", updatedAt: now }).where(eq(runs.id, args.runId));
+    return created;
+  });
   await appendTrace({
     runId: args.runId,
     nodeId: node.id,
@@ -71,15 +78,36 @@ export async function requestApproval(args: RequestApprovalInput): Promise<Appro
 export async function recordDecision(args: RecordDecisionInput): Promise<void> {
   "use step";
   const approved = args.decision.decision === "approved";
-  await db
-    .update(approvals)
-    .set({
-      status: approved ? "approved" : "rejected",
-      note: args.decision.note ?? null,
-      decidedAt: sql`now()`,
-      updatedAt: sql`now()`,
-    })
-    .where(eq(approvals.id, args.approvalId));
+  const decisionStatus = approved ? "approved" : "rejected";
+  await db.transaction(async (tx) => {
+    const [run] = await tx
+      .select({ status: runs.status })
+      .from(runs)
+      .where(eq(runs.id, args.runId))
+      .for("update")
+      .limit(1);
+    if (!run) throw new FatalError("运行记录不存在，无法记录确认结果");
+    if (!["queued", "running", "waiting_approval", "waiting_event"].includes(run.status)) {
+      throw new FatalError("运行已经结束，忽略迟到的确认结果");
+    }
+    const [approval] = await tx
+      .select({ status: approvals.status })
+      .from(approvals)
+      .where(and(eq(approvals.id, args.approvalId), eq(approvals.runId, args.runId)))
+      .limit(1);
+    if (!approval) throw new FatalError("确认记录不存在，无法记录结果");
+    if (approval.status === decisionStatus) return;
+    if (approval.status !== "pending") throw new FatalError("这条确认已经处理，忽略迟到的结果");
+    await tx
+      .update(approvals)
+      .set({
+        status: decisionStatus,
+        note: args.decision.note ?? null,
+        decidedAt: sql`now()`,
+        updatedAt: sql`now()`,
+      })
+      .where(and(eq(approvals.id, args.approvalId), eq(approvals.status, "pending")));
+  });
   await appendTrace({
     runId: args.runId,
     nodeId: args.node.id,

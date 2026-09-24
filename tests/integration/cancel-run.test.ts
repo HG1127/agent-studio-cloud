@@ -16,6 +16,7 @@ import { WorkflowDraft } from "@/contracts/workflow";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { cancelRunAction } from "@/server/actions/cancel-run";
+import { recordDecision } from "@/server/steps/approval-step";
 import { failRun, finalizeRun, initializeRun, persistStep } from "@/server/steps/run-state";
 
 const RUN_ID = "00000000-0000-4000-8000-0000000000c1";
@@ -24,7 +25,13 @@ const GRANDCHILD_RUN_ID = "00000000-0000-4000-8000-0000000000c5";
 const draft = WorkflowDraft.parse({
   id: "initialization-guard", versionId: null, startNodeId: "start",
   rootAgent: { id: "agent", name: "状态机测试", role: "owner" },
-  nodes: { start: { id: "start", title: "开始", type: "trigger", next: null } },
+  nodes: {
+    start: { id: "start", title: "开始", type: "trigger", next: null },
+    confirm: {
+      id: "confirm", title: "负责人确认", type: "human", next: null,
+      approval: { role: "负责人", reason: "确认是否继续" },
+    },
+  },
   variables: [], memoryPolicy: { taskContext: true, longTerm: false }, ui: { positions: {} },
 });
 
@@ -196,6 +203,26 @@ describe("取消运行", () => {
     })).rejects.toThrow("运行已经结束，忽略迟到的步骤结果");
 
     expect(await db.select().from(runSteps).where(eq(runSteps.runId, RUN_ID))).toHaveLength(0);
+    expect(appendTraceMock).not.toHaveBeenCalled();
+  });
+
+  it("运行取消后迟到的确认结果不能覆盖已关闭状态", async () => {
+    await insertWaitingRun();
+    const [approval] = await db.select().from(approvals).where(and(
+      eq(approvals.runId, RUN_ID), eq(approvals.nodeId, "approval_pending"),
+    ));
+    await db.update(runs).set({ status: "cancelled", error: "已由员工取消" }).where(eq(runs.id, RUN_ID));
+    await db.update(approvals).set({ status: "rejected", note: "运行已取消，确认未继续" }).where(eq(approvals.id, approval.id));
+
+    await expect(recordDecision({
+      runId: RUN_ID,
+      node: draft.nodes.confirm,
+      approvalId: approval.id,
+      decision: { decision: "approved", note: "迟到的同意" },
+    })).rejects.toThrow("运行已经结束，忽略迟到的确认结果");
+
+    const [unchanged] = await db.select().from(approvals).where(eq(approvals.id, approval.id));
+    expect(unchanged).toMatchObject({ status: "rejected", note: "运行已取消，确认未继续" });
     expect(appendTraceMock).not.toHaveBeenCalled();
   });
 });

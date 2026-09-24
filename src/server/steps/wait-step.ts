@@ -1,5 +1,5 @@
 "use step";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { FatalError } from "workflow";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { runs } from "@/db/schema";
@@ -25,7 +25,12 @@ export async function beginWait(args: { runId: string; node: WorkflowNode }): Pr
     nodeType: args.node.type,
     status: "running",
   });
-  await db.update(runs).set({ status: "waiting_event", updatedAt: new Date() }).where(eq(runs.id, args.runId));
+  const updated = await db
+    .update(runs)
+    .set({ status: "waiting_event", updatedAt: new Date() })
+    .where(and(eq(runs.id, args.runId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])))
+    .returning({ id: runs.id });
+  if (updated.length === 0) throw new FatalError("运行已经结束，不能再进入等待状态");
   await appendTrace({
     runId: args.runId,
     nodeId: args.node.id,
