@@ -68,6 +68,7 @@ class FakeEventSource {
 
 describe("TraceTimeline", () => {
   afterEach(() => {
+    vi.useRealTimers();
     delete (globalThis as { EventSource?: unknown }).EventSource;
     FakeEventSource.instances = [];
     refreshMock.mockReset();
@@ -159,6 +160,45 @@ describe("TraceTimeline", () => {
       expect(source.closed).toBe(true);
       expect(refreshMock).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it("浏览器没有事件流能力时降级为定时刷新", () => {
+    vi.useFakeTimers();
+    delete (globalThis as { EventSource?: unknown }).EventSource;
+    render(<TraceTimeline runId={RUN_ID} initialEvents={EVENTS} live />);
+
+    act(() => vi.advanceTimersByTime(5_000));
+
+    expect(refreshMock).toHaveBeenCalledTimes(1);
+    expect(FakeEventSource.instances).toHaveLength(0);
+  });
+
+  it("事件流断开时开始低频刷新，收到新轨迹后停止轮询", () => {
+    vi.useFakeTimers();
+    (globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
+    render(<TraceTimeline runId={RUN_ID} initialEvents={EVENTS} live />);
+    const source = FakeEventSource.instances[0];
+
+    act(() => {
+      source.emit("error", {});
+      vi.advanceTimersByTime(5_000);
+    });
+    expect(refreshMock).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      source.emit("trace", {
+        id: "b2c3d4e5-0000-4000-8000-0000000000b6",
+        seq: 6,
+        nodeId: "step_3",
+        kind: "step.started",
+        level: "info",
+        title: "开始「恢复后的步骤」",
+        detail: null,
+        at: "2026-09-21T08:30:10.000Z",
+      });
+      vi.advanceTimersByTime(10_000);
+    });
+    expect(refreshMock).toHaveBeenCalledTimes(1);
   });
 
   it("轨迹为空时显示空态提示", () => {
