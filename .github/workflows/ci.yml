@@ -65,6 +65,9 @@ jobs:
           MODEL_ENCRYPTION_KEY=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')
           echo "::add-mask::$MODEL_ENCRYPTION_KEY"
           echo "MODEL_ENCRYPTION_KEY=$MODEL_ENCRYPTION_KEY" >> "$GITHUB_ENV"
+          CRON_SECRET=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')
+          echo "::add-mask::$CRON_SECRET"
+          echo "CRON_SECRET=$CRON_SECRET" >> "$GITHUB_ENV"
       - name: 迁移 + 集成测试 + E2E
         env:
           DATABASE_URL: ${{ env.BRANCH_URL }}
