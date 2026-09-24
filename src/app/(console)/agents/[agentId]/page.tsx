@@ -10,6 +10,7 @@ import { getAgentDetail, listAgentTargets } from "@/server/queries/agents";
 import { listVersions } from "@/server/queries/versions";
 import { listModelConnections } from "@/server/queries/model-connections";
 import { listEvaluationCases, listEvaluationRuns } from "@/server/queries/evaluations";
+import { AgentManifest } from "@/contracts/manifest";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +41,9 @@ export default async function AgentDetailPage({
     listEvaluationRuns(agentId, DEMO_WORKSPACE_ID),
   ]);
   const defaultModelLabel = process.env.MODEL_MOCK === "1" ? "演示模式" : process.env.MODEL_ID?.trim() ? "服务端默认模型" : "尚未配置默认模型";
+  const currentVersion = detail.versions.find((version) => version.status === "production");
+  const currentManifest = currentVersion ? AgentManifest.safeParse(currentVersion.manifest) : null;
+  const inputFields = currentManifest?.success ? currentManifest.data.inputContract.fields : undefined;
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-6 p-8">
       <Link href="/agents" className="w-fit text-sm text-gray-500 hover:text-gray-700">
@@ -64,7 +68,7 @@ export default async function AgentDetailPage({
       )}
       <VersionPanel agentId={agentId} versions={versions} connections={connections} defaultModelLabel={defaultModelLabel} />
       <EvaluationPanel agentId={agentId} cases={evaluationCases} runs={evaluationRuns} />
-      <RunLauncher agentId={agentId} />
+      <RunLauncher agentId={agentId} inputFields={inputFields} />
     </main>
   );
 }

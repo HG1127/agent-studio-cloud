@@ -9,6 +9,7 @@ import { prepareParallelBranches } from "@/server/domain/runtime/parallel-runtim
 import { prepareSubflow } from "@/server/domain/runtime/subflow-runtime";
 import { validateAgentCallNode } from "@/server/domain/runtime/agent-call-runtime";
 import { validateHandoffNode } from "@/server/domain/runtime/handoff-runtime";
+import { validateRunInput } from "@/server/domain/runtime/run-input";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
 
 // M1 运行引擎支持的节点类型：其余编排类节点后续任务扩展
@@ -100,6 +101,8 @@ export async function startRunCore(args: {
       return { ok: false, error: "这个助手的版本信息不完整，请重新发布后再运行" };
     }
     const manifest = manifestParsed.data;
+    const inputError = validateRunInput(runInput, manifest.inputContract.fields);
+    if (inputError) return { ok: false, error: inputError };
     // 启动前置校验：不支持的节点类型 / 未绑定工具 / 未绑定知识来源 → 列出步骤名，不创建 run
     const unsupported: string[] = [];
     for (const node of Object.values(manifest.workflowSnapshot.nodes)) {

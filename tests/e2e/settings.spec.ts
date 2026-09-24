@@ -94,6 +94,7 @@ test("连接增改测删与发布选模可贯通，运行保留模型名和用�
     await page.getByRole("button", { name: "发布新版本", exact: true }).click();
     await expect(page.getByText("当前版本", { exact: true })).toBeVisible({ timeout: 30_000 });
     requests.length = 0;
+    await page.getByLabel("业务输入（必填）").fill("验证已选择的模型连接");
     await page.getByRole("button", { name: "运行此助手", exact: true }).click();
     await page.waitForURL(/\/runs\/[0-9a-f-]+$/, { timeout: 60_000 });
     await expect(page.locator("header").getByText("已完成", { exact: true })).toBeVisible({ timeout: 90_000 });

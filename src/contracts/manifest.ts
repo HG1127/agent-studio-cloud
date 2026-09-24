@@ -15,3 +15,4 @@ export const AgentManifest = z.object({
   knowledgeSnapshot: z.array(z.string().uuid()).default([]),
 });
 export type AgentManifest = z.infer<typeof AgentManifest>;
+export type AgentInputField = AgentManifest["inputContract"]["fields"][number];

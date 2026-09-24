@@ -74,4 +74,23 @@ describe("RunLauncher", () => {
     expect(alert).toHaveTextContent("这个助手还没有发布版本，请先发布后再运行");
     expect(pushMock).not.toHaveBeenCalled();
   });
+
+  it("按版本输入契约生成字段并在提交前校验必填项", async () => {
+    startRunMock.mockResolvedValue({ ok: true, runId: RUN_ID });
+    const user = userEvent.setup();
+    render(<RunLauncher agentId={AGENT_ID} inputFields={[
+      { name: "brief", label: "任务说明", required: true, type: "string" },
+      { name: "count", label: "数量", required: false, type: "number" },
+    ]} />);
+    await user.click(screen.getByRole("button", { name: "运行此助手" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("请填写任务说明");
+    expect(startRunMock).not.toHaveBeenCalled();
+    await user.type(screen.getByLabelText("任务说明（必填）"), "生成续约方案");
+    await user.type(screen.getByLabelText("数量（选填）"), "2");
+    await user.click(screen.getByRole("button", { name: "运行此助手" }));
+    await waitFor(() => expect(startRunMock).toHaveBeenCalledWith({
+      agentId: AGENT_ID,
+      input: { brief: "生成续约方案", count: 2 },
+    }));
+  });
 });

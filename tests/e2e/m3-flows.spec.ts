@@ -37,6 +37,7 @@ test("上传知识文档到已就绪并跑通知识检索全链路", async ({ pa
   await page.getByRole("button", { name: "发布新版本" }).click();
   await expect(page.getByText("当前版本", { exact: true })).toBeVisible({ timeout: 30_000 });
 
+  await page.getByLabel("业务输入（必填）").fill(query);
   await page.getByRole("button", { name: "运行此助手" }).click();
   await page.waitForURL(/\/runs\/[0-9a-f-]+$/, { timeout: 60_000 });
   await expect(page.locator("header").getByText("等待确认", { exact: true })).toBeVisible({ timeout: 90_000 });

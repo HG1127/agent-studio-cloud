@@ -25,6 +25,7 @@ test("创建助手到审批完成的完整闭环", async ({ page }) => {
   await expect(page.getByText("当前版本", { exact: true })).toBeVisible({ timeout: 30_000 });
 
   // ③ 运行：跳转 run 详情，挂起在人工节点——等待确认徽标与审批面板经 SSE 自动出现（实测约 35-40 秒）
+  await page.getByLabel("业务输入（必填）").fill("请生成一份客户回复方案");
   await page.getByRole("button", { name: "运行此助手" }).click();
   await page.waitForURL(/\/runs\/[0-9a-f-]+$/, { timeout: 60_000 });
   await expect(page.locator("header").getByText("等待确认", { exact: true })).toBeVisible({
