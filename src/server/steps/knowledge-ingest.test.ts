@@ -3,6 +3,7 @@ import { MAX_KNOWLEDGE_FILE_BYTES, MAX_KNOWLEDGE_PDF_PAGES } from "@/server/doma
 
 const mocks = vi.hoisted(() => ({
   extractText: vi.fn(),
+  extractRawText: vi.fn(),
   getDocumentProxy: vi.fn(),
 }));
 
@@ -10,7 +11,7 @@ vi.mock("unpdf", () => ({
   extractText: mocks.extractText,
   getDocumentProxy: mocks.getDocumentProxy,
 }));
-vi.mock("mammoth", () => ({ default: { extractRawText: vi.fn() } }));
+vi.mock("mammoth", () => ({ default: { extractRawText: mocks.extractRawText } }));
 vi.mock("@/lib/db", () => ({ db: {} }));
 
 import { parseKnowledgeFile, readKnowledgeFile } from "@/server/steps/knowledge-ingest";
@@ -47,5 +48,15 @@ describe("知识文件解析防线", () => {
     })).rejects.toThrow(`PDF 超过 ${MAX_KNOWLEDGE_PDF_PAGES} 页限制`);
     expect(mocks.extractText).not.toHaveBeenCalled();
     expect(cleanup).toHaveBeenCalledOnce();
+  });
+
+  it("在调用解析器前拒绝结构异常的 DOCX", async () => {
+    await expect(parseKnowledgeFile({
+      sourceId: "source-1",
+      filename: "异常资料.docx",
+      mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      content: new Blob(["not-a-zip"]).stream(),
+    })).rejects.toThrow("DOCX 文件结构不完整");
+    expect(mocks.extractRawText).not.toHaveBeenCalled();
   });
 });

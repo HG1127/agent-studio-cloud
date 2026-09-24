@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { knowledgeChunks, knowledgeSources } from "@/db/schema";
 import { db } from "@/lib/db";
 import { chunkText } from "@/server/domain/knowledge/chunker";
+import { validateDocxArchive } from "@/server/domain/knowledge/docx-limits";
 import {
   MAX_KNOWLEDGE_FILE_BYTES,
   MAX_KNOWLEDGE_PDF_PAGES,
@@ -59,6 +60,8 @@ export async function parseKnowledgeFile(args: ParseArgs): Promise<{ text: strin
       await pdf.cleanup();
     }
   } else if (ext === "docx") {
+    const archiveError = validateDocxArchive(buffer);
+    if (archiveError) throw new FatalError(archiveError);
     const result = await mammoth.extractRawText({ buffer });
     text = result.value;
   } else if (["txt", "md", "html", "json", "csv", "xml"].includes(ext)) {
