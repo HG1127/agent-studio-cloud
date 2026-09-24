@@ -4,6 +4,7 @@ export interface LoopCollection {
   items: unknown[];
   sourceCount: number;
   limited: boolean;
+  sourceMissing: boolean;
 }
 
 export function workflowExecutionLimit(nodes: Record<string, { type: string; loop?: { maxIterations?: number } }>): number {
@@ -29,12 +30,14 @@ export function resolveLoopCollection(args: {
   }
   if (!items) {
     const count = Math.max(0, Math.min(Number(args.input.repeatCount ?? 0), 100));
-    items = count > 0 ? Array.from({ length: count }, (_, index) => index + 1) : [];
+    if (count > 0) items = Array.from({ length: count }, (_, index) => index + 1);
   }
   const max = Math.max(1, Math.min(Math.trunc(args.maxIterations), 100));
+  if (!items) return { items: [], sourceCount: 0, limited: false, sourceMissing: true };
   return {
     items: items.slice(0, max),
     sourceCount: items.length,
     limited: items.length > max,
+    sourceMissing: false,
   };
 }

@@ -154,6 +154,7 @@ export async function agentRunWorkflow(
     items: unknown[];
     sourceCount: number;
     limited: boolean;
+    sourceMissing: boolean;
     index: number;
     iterations: Array<{ iteration: number; item: unknown; bodyOutput: unknown }>;
   }> = {};
@@ -362,6 +363,9 @@ export async function agentRunWorkflow(
             input,
             outputs,
           });
+          if (collection.sourceMissing) {
+            throw new FatalError(`步骤「${node.title}」没有在“${loop.collectionPath}”找到可逐项处理的列表`);
+          }
           return (loopStates[node.id] = { ...collection, index: 0, iterations: [] });
         })();
         const active = activeLoops.at(-1);

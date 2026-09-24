@@ -46,7 +46,9 @@ export async function completeLoop(args: {
     nodeId: args.node.id,
     kind: "loop.completed",
     title: `「${args.node.title}」逐项处理完成`,
-    detail: `共处理 ${String(args.output.processedCount ?? 0)} 项`,
+    detail: args.output.limited
+      ? `来源共有 ${String(args.output.sourceCount ?? 0)} 项，按安全上限处理了 ${String(args.output.processedCount ?? 0)} 项`
+      : `共处理 ${String(args.output.processedCount ?? 0)} 项`,
     data: args.output,
   });
 }

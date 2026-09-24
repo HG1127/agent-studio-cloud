@@ -8,7 +8,7 @@ describe("resolveLoopCollection", () => {
       maxIterations: 2,
       input: { items: [{ id: 1 }, { id: 2 }, { id: 3 }] },
       outputs: {},
-    })).toEqual({ items: [{ id: 1 }, { id: 2 }], sourceCount: 3, limited: true });
+    })).toEqual({ items: [{ id: 1 }, { id: 2 }], sourceCount: 3, limited: true, sourceMissing: false });
   });
 
   it("读取上游步骤输出中的集合", () => {
@@ -17,7 +17,7 @@ describe("resolveLoopCollection", () => {
       maxIterations: 10,
       input: {},
       outputs: { fetch: { records: ["A", "B"] } },
-    })).toEqual({ items: ["A", "B"], sourceCount: 2, limited: false });
+    })).toEqual({ items: ["A", "B"], sourceCount: 2, limited: false, sourceMissing: false });
   });
 
   it("没有集合时用 repeatCount 形成受控次数", () => {
@@ -26,7 +26,22 @@ describe("resolveLoopCollection", () => {
       maxIterations: 10,
       input: { repeatCount: 3 },
       outputs: {},
-    })).toEqual({ items: [1, 2, 3], sourceCount: 3, limited: false });
+    })).toEqual({ items: [1, 2, 3], sourceCount: 3, limited: false, sourceMissing: false });
+  });
+
+  it("区分真实空列表和不存在的数据路径", () => {
+    expect(resolveLoopCollection({
+      collectionPath: "input.items",
+      maxIterations: 10,
+      input: { items: [] },
+      outputs: {},
+    }).sourceMissing).toBe(false);
+    expect(resolveLoopCollection({
+      collectionPath: "input.items",
+      maxIterations: 10,
+      input: {},
+      outputs: {},
+    })).toEqual({ items: [], sourceCount: 0, limited: false, sourceMissing: true });
   });
 });
 
