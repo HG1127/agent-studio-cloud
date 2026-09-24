@@ -11,6 +11,7 @@ export const dynamic = "force-dynamic";
 
 const ALLOWED_EXT = new Set(["pdf", "docx", "txt", "md", "html", "json", "csv", "xml"]);
 const MAX_BYTES = 4 * 1024 * 1024;
+const MAX_MULTIPART_BYTES = 5 * 1024 * 1024;
 const STALE_PARSING_MS = 5 * 60 * 1000;
 
 function toView(row: typeof knowledgeSources.$inferSelect) {
@@ -70,6 +71,10 @@ async function reconcileDuplicateSource(sourceId: string, suppliedBlobPathname: 
 }
 
 export async function POST(req: Request) {
+  const declaredLength = Number(req.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_MULTIPART_BYTES) {
+    return Response.json({ ok: false, error: "上传请求过大，文件请保持在 4MB 以内" }, { status: 413 });
+  }
   let form: FormData;
   try {
     form = await req.formData();

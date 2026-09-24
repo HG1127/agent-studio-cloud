@@ -46,6 +46,20 @@ afterEach(() => {
 });
 
 describe("知识原文件上传", () => {
+  it("根据请求声明大小在解析表单前拒绝明显超限的上传", async () => {
+    const request = new Request("http://localhost/api/knowledge/sources", {
+      method: "POST",
+      headers: { "content-type": "multipart/form-data; boundary=test", "content-length": String(6 * 1024 * 1024) },
+      body: "--test--",
+    });
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ ok: false, error: "上传请求过大，文件请保持在 4MB 以内" });
+    expect(startMock).not.toHaveBeenCalled();
+  });
+
   it("服务端拒绝空文件且不创建资料记录", async () => {
     const form = new FormData();
     form.set("file", new File([], "空资料.txt", { type: "text/plain" }));
