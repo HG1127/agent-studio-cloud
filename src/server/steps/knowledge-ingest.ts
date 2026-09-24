@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { knowledgeChunks, knowledgeSources } from "@/db/schema";
 import { db } from "@/lib/db";
 import { chunkText } from "@/server/domain/knowledge/chunker";
+import { validateExtractedKnowledgeText } from "@/server/domain/knowledge/text-limits";
 import { processedKnowledgeStatus } from "@/server/domain/knowledge/source-state";
 
 interface ParseArgs {
@@ -33,6 +34,8 @@ export async function parseKnowledgeFile(args: ParseArgs): Promise<{ text: strin
   } else {
     throw new FatalError(`暂不支持解析「${ext || args.filename}」格式的文件`);
   }
+  const textError = validateExtractedKnowledgeText(text);
+  if (textError) throw new FatalError(textError);
   return { text };
 }
 
