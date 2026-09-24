@@ -51,6 +51,18 @@ describe("知识库列表", () => {
     expect(screen.getByText(/重新上传同一文件即可重试/)).toBeInTheDocument();
   });
 
+  it("已保存原文件时提供下载入口，未保存时明确说明", () => {
+    const source = {
+      id: "00000000-0000-4000-8000-0000000000f3", name: "售后手册.txt", mime: "text/plain",
+      sizeBytes: 2048, status: "indexed" as const, chunkCount: 3, charCount: 1200, error: null,
+      createdAt: "2026-09-23T00:00:00.000Z",
+    };
+    const { rerender } = render(<KnowledgeList initial={[{ ...source, hasOriginal: true }]} />);
+    expect(screen.getByRole("link", { name: "下载原文件" })).toHaveAttribute("href", `/api/knowledge/sources/${source.id}/file`);
+    rerender(<KnowledgeList initial={[source]} />);
+    expect(screen.getByText("未保留原文件")).toBeInTheDocument();
+  });
+
   it("未保存原文件时明确提示存储缺失", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       json: async () => ({

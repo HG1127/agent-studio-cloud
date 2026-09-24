@@ -17,6 +17,7 @@ export async function listKnowledgeSources(archived = false): Promise<KnowledgeS
     id: row.id, name: row.name, mime: row.mime, sizeBytes: row.sizeBytes,
     status: (archived ? "archived" : row.status) as KnowledgeSourceView["status"],
     chunkCount: row.chunkCount, charCount: row.charCount, error: row.error,
+    hasOriginal: Boolean(row.blobPathname),
     createdAt: row.createdAt.toISOString(),
   }));
 }

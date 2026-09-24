@@ -94,21 +94,25 @@ export function KnowledgeList({ initial, archived = false }: { initial: Knowledg
               {source.status === "failed" && source.error ? ` · ${source.error} · 重新上传同一文件即可重试` : ""}
               </p>
             </div>
-            <button
-              type="button"
-              disabled={pending}
-              className="text-xs text-gray-500 hover:text-gray-900 disabled:opacity-50"
-              onClick={() => {
-                setError(null);
-                startTransition(async () => {
-                  const result = await setKnowledgeSourceArchivedAction({ sourceId: source.id, archived: !archived });
-                  if (!result.ok) setError(result.error);
-                  else router.refresh();
-                });
-              }}
-            >
-              {archived ? "恢复" : "归档"}
-            </button>
+            <span className="flex shrink-0 items-center gap-3">
+              {source.hasOriginal ? <a href={`/api/knowledge/sources/${source.id}/file`} download className="text-xs text-blue-700 hover:underline">下载原文件</a>
+                : <span className="text-xs text-gray-400">未保留原文件</span>}
+              <button
+                type="button"
+                disabled={pending}
+                className="text-xs text-gray-500 hover:text-gray-900 disabled:opacity-50"
+                onClick={() => {
+                  setError(null);
+                  startTransition(async () => {
+                    const result = await setKnowledgeSourceArchivedAction({ sourceId: source.id, archived: !archived });
+                    if (!result.ok) setError(result.error);
+                    else router.refresh();
+                  });
+                }}
+              >
+                {archived ? "恢复" : "归档"}
+              </button>
+            </span>
           </li>
         ))}
       </ul>

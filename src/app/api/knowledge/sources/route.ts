@@ -17,6 +17,7 @@ function toView(row: typeof knowledgeSources.$inferSelect) {
     id: row.id, name: row.name, mime: row.mime, sizeBytes: row.sizeBytes,
     status: row.status as "parsing" | "indexed" | "failed" | "archived",
     chunkCount: row.chunkCount, charCount: row.charCount, error: row.error,
+    hasOriginal: Boolean(row.blobPathname),
     createdAt: row.createdAt.toISOString(),
   };
 }
