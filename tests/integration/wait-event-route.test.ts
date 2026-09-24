@@ -98,4 +98,19 @@ describe("外部消息恢复接口", () => {
     expect(response.status).toBe(409);
     expect(resumeHookMock).not.toHaveBeenCalled();
   });
+
+  it("拒绝超过限制的外部消息且不读取运行状态", async () => {
+    const response = await POST(
+      new Request(`http://localhost/api/runs/${RUN_ID}/events/customer.profile.updated`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content: "大".repeat(90_000) }),
+      }),
+      { params: Promise.resolve({ runId: RUN_ID, eventKey: "customer.profile.updated" }) },
+    );
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ ok: false, error: "消息内容超过 256KB 限制" });
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
 });

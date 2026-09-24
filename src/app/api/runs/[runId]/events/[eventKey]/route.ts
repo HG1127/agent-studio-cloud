@@ -14,15 +14,29 @@ const Params = z.object({
   runId: z.string().uuid(),
   eventKey: z.string().min(1).max(120).regex(/^[a-zA-Z0-9._:-]+$/),
 });
+const MAX_PAYLOAD_BYTES = 256 * 1024;
 
 export async function POST(req: Request, { params }: { params: Promise<{ runId: string; eventKey: string }> }) {
   const parsedParams = Params.safeParse(await params);
   if (!parsedParams.success) {
     return Response.json({ ok: false, error: "消息参数不正确" }, { status: 400 });
   }
+  const declaredLength = Number(req.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_PAYLOAD_BYTES) {
+    return Response.json({ ok: false, error: "消息内容超过 256KB 限制" }, { status: 413 });
+  }
+  let body: string;
+  try {
+    body = await req.text();
+  } catch {
+    return Response.json({ ok: false, error: "消息内容必须是 JSON 对象" }, { status: 400 });
+  }
+  if (new TextEncoder().encode(body).byteLength > MAX_PAYLOAD_BYTES) {
+    return Response.json({ ok: false, error: "消息内容超过 256KB 限制" }, { status: 413 });
+  }
   let raw: unknown;
   try {
-    raw = await req.json();
+    raw = JSON.parse(body);
   } catch {
     return Response.json({ ok: false, error: "消息内容必须是 JSON 对象" }, { status: 400 });
   }
