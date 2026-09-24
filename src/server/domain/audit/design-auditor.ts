@@ -3,7 +3,8 @@ import { isConversationalOrMeta } from "@/server/domain/intent";
 import { forbiddenActionMatch, type PolicyNode } from "@/server/domain/grounding/business-policy";
 
 // 旧系统 server/designAuditor.mjs 的逐行移植（设计审计 auditWorkflow，minified 展开为可读 TS）。
-// 移植边界按引用可达性逐个核实：proposeAuditFixes 不移植（M2 债务：自动修复），仅被它调用的
+// 移植边界按引用可达性逐个核实：旧版 proposeAuditFixes 不直接移植，仅保留检查逻辑；
+// 新系统的白名单安全修复在 safe-audit-fixes.ts，避免伪造业务证据、工具或协作目标。
 // clone(:165)/uniq(:609)/firstEnd(:165,583,599)/breakCycleEdge(:386,592)/insertBefore(:170,344,404,488)/
 // defaultSchema(:204,205) 一并跳过；safeStr(:7)/hasPathToHuman(:29) 全文件零引用（死代码）不移植。
 // coverageFor 仅被 proposeAuditFixes 引用（旧 :259/:293/:543），auditWorkflow 只读
@@ -790,4 +791,3 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
     schema: "design-audit/v5.7",
   };
 }
-

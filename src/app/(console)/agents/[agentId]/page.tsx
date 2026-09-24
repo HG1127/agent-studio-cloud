@@ -4,6 +4,8 @@ import { RunLauncher } from "@/features/agents/RunLauncher";
 import { VersionPanel } from "@/features/agents/VersionPanel";
 import { EvaluationPanel } from "@/features/agents/EvaluationPanel";
 import { AgentMetadataEditor } from "@/features/agents/AgentMetadataEditor";
+import { DesignAuditPanel } from "@/features/agents/DesignAuditPanel";
+import { AuditIssueView } from "@/contracts/audit";
 import { FlowCanvas } from "@/features/workflow-canvas/FlowCanvas";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { auditWorkflow, type DesignAuditResult } from "@/server/domain/audit";
@@ -68,6 +70,7 @@ export default async function AgentDetailPage({
           这个助手还没有流程草稿
         </section>
       )}
+      {audit ? <DesignAuditPanel agentId={agentId} score={audit.score} issues={AuditIssueView.array().parse(audit.issues)} /> : null}
       <VersionPanel agentId={agentId} versions={versions} connections={connections} defaultModelLabel={defaultModelLabel} />
       <EvaluationPanel agentId={agentId} cases={evaluationCases} runs={evaluationRuns} />
       <RunLauncher agentId={agentId} inputFields={inputFields} />
