@@ -58,6 +58,9 @@ export function RunList({ runs }: { runs: RunSummary[] }) {
                 {run.sourceType === "schedule" && (
                   <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-xs text-indigo-700">定时</span>
                 )}
+                {run.sourceType === "unknown" && (
+                  <span className="rounded bg-amber-50 px-1.5 py-0.5 text-xs text-amber-700">来源待核实</span>
+                )}
                 <RunStatusBadge status={run.status} />
               </span>
             </div>
