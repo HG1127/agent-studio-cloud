@@ -26,7 +26,8 @@ describe("模型密钥加解密", () => {
   it("篡改密文或用错密钥解密必须抛错", () => {
     const payload = encryptApiKey("sk-a", key);
     const [iv, tag, data] = payload.split(":");
-    const tampered = `${iv}:${tag}:${data!.slice(0, -2)}ff`;
+    const tamperedTag = `${tag!.startsWith("0") ? "1" : "0"}${tag!.slice(1)}`;
+    const tampered = `${iv}:${tamperedTag}:${data}`;
     expect(() => decryptApiKey(tampered, key)).toThrow();
     expect(() => decryptApiKey(payload, resolveEncryptionKey(generateModelEncryptionKey()) as Buffer)).toThrow();
   });
