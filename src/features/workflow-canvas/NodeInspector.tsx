@@ -13,6 +13,7 @@ interface NodeInspectorProps {
 export function NodeInspector({ node, onNodeChange, onNodeDelete }: NodeInspectorProps) {
   const isHuman = node.type === "human";
   const isCondition = node.type === "condition";
+  const knowledge = node.knowledge;
   const deletable = node.type !== "trigger" && node.type !== "end";
   return (
     <aside aria-label="节点详情" className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4">
@@ -45,6 +46,18 @@ export function NodeInspector({ node, onNodeChange, onNodeDelete }: NodeInspecto
           className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
         />
       </div>
+      {node.type === "knowledge" && knowledge ? (
+        <div className="flex flex-col gap-1">
+          <label htmlFor="node-query" className="text-sm font-medium">检索内容</label>
+          <input
+            id="node-query"
+            value={knowledge.query ?? ""}
+            maxLength={200}
+            onChange={(event) => onNodeChange({ ...node, knowledge: { ...knowledge, query: event.target.value } })}
+            className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
+          />
+        </div>
+      ) : null}
       {isHuman ? (
         <>
           <div className="flex flex-col gap-1">
