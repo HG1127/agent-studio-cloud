@@ -21,7 +21,8 @@ test("上传知识文档到已就绪并跑通知识检索全链路", async ({ pa
   await page.getByRole("button", { name: "上传文档" }).click();
   const response = await uploaded;
   expect(response.ok()).toBe(true);
-  expect(await response.json()).toMatchObject({ ok: true, deduped: false, source: { name: filename } });
+  expect(await response.json()).toMatchObject({ ok: true, deduped: false, blobStored: false, source: { name: filename } });
+  await expect(page.getByRole("status")).toContainText("原文件尚未保存");
   const source = page.getByRole("listitem").filter({ has: page.getByText(filename, { exact: true }) });
   await expect(source).toContainText("已就绪", { timeout: 60_000 });
   await expect(source).toHaveCount(1);
