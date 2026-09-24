@@ -83,7 +83,7 @@ jobs:
       - name: 删除临时分支
         if: always() && env.NEON_API_KEY != '' && vars.NEON_PROJECT_ID != ''
         # neonctl v5 删除分支无交互确认（源码直连 API），没有 --force 选项
-        # 守卫不看 BRANCH_URL：分支名由 run_id 确定，create 成功但取 URL 失败时同样要能清理
+        # 守卫不看 BRANCH_URL：分支名由 run_id 与 run_attempt 确定，create 成功但取 URL 失败时同样要能清理
         run: |
           # 容忍分支不存在（create 被跳过或取 URL 前已失败），清理失败不应挂红 job
           CI_BRANCH="ci-${{ github.run_id }}-${{ github.run_attempt }}"
