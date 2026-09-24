@@ -11,10 +11,14 @@ const dbState = vi.hoisted(() => ({
 
 vi.mock("@vercel/blob", () => ({ put }));
 vi.mock("@/lib/db", () => ({
-  db: {
+  db: (() => {
+    const client = {
     select: () => ({
       from: () => ({
-        where: () => ({ limit: async () => dbState.selectQueue.shift() ?? dbState.rows }),
+        where: () => ({
+          limit: async () => dbState.selectQueue.shift() ?? dbState.rows,
+          for: () => ({ limit: async () => dbState.selectQueue.shift() ?? dbState.rows }),
+        }),
       }),
     }),
     insert: () => ({
@@ -23,7 +27,9 @@ vi.mock("@/lib/db", () => ({
       }),
     }),
     update: () => ({ set: () => ({ where: dbState.update }) }),
-  },
+    };
+    return { ...client, transaction: async (run: (tx: typeof client) => unknown) => run(client) };
+  })(),
 }));
 vi.mock("workflow/api", () => ({ start: startMock }));
 
@@ -151,6 +157,25 @@ describe("知识原文件上传", () => {
     expect(await response.json()).toMatchObject({ ok: true, deduped: true, source: { status: "parsing" } });
     expect(startMock).toHaveBeenCalledOnce();
     expect(dbState.update).toHaveBeenCalledOnce();
+  });
+
+  it("锁内发现另一请求已取得重试资格时不重复启动解析", async () => {
+    const failed = {
+      id: "00000000-0000-4000-8000-0000000000f3", name: "售后手册.txt", mime: "text/plain",
+      sizeBytes: 12, status: "failed", chunkCount: 0, charCount: 0, error: "上次解析超时",
+      createdAt: new Date("2026-09-24T00:00:00Z"), updatedAt: new Date("2026-09-24T00:00:00Z"),
+      blobPathname: null, archivedAt: null,
+    };
+    dbState.selectQueue = [[failed], [{ ...failed, status: "parsing", error: null, updatedAt: new Date() }]];
+    const form = new FormData();
+    form.set("file", new File(["退货说明"], "售后手册.txt", { type: "text/plain" }));
+
+    const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, deduped: true, source: { status: "parsing" } });
+    expect(startMock).not.toHaveBeenCalled();
+    expect(dbState.update).not.toHaveBeenCalled();
   });
 
   it("并发上传同一份新资料时复用已抢先创建的记录", async () => {

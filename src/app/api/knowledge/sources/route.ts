@@ -36,6 +36,38 @@ function storageUnavailable() {
   return Response.json({ ok: false, error: "私有文件存储暂不可用，请检查配置后重试" }, { status: 503 });
 }
 
+async function reconcileDuplicateSource(sourceId: string, suppliedBlobPathname: string | null) {
+  return db.transaction(async (tx) => {
+    // 重新锁定并读取，避免两个失败重传请求都基于锁外的旧状态启动解析任务。
+    const [current] = await tx
+      .select()
+      .from(knowledgeSources)
+      .where(and(eq(knowledgeSources.id, sourceId), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)))
+      .for("update")
+      .limit(1);
+    if (!current) return null;
+    const lastUpdatedAt = current.updatedAt ?? current.createdAt;
+    const staleParsing = current.status === "parsing" && lastUpdatedAt.getTime() < Date.now() - STALE_PARSING_MS;
+    const retrying = current.status === "failed" || staleParsing
+      || (current.status === "archived" && current.chunkCount === 0 && Boolean(current.error));
+    const status = retrying
+      ? "parsing"
+      : current.status === "archived"
+        ? (current.chunkCount > 0 ? "indexed" : "parsing")
+        : current.status;
+    const error = retrying ? null : current.error;
+    const blobPathname = current.blobPathname ?? suppliedBlobPathname;
+    const shouldUpdate = Boolean(current.archivedAt) || retrying || blobPathname !== current.blobPathname;
+    if (shouldUpdate) {
+      await tx
+        .update(knowledgeSources)
+        .set({ archivedAt: null, status, error, blobPathname, updatedAt: new Date() })
+        .where(and(eq(knowledgeSources.id, current.id), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)));
+    }
+    return { row: { ...current, archivedAt: null, status, error, blobPathname }, retrying };
+  });
+}
+
 export async function POST(req: Request) {
   let form: FormData;
   try {
@@ -74,20 +106,11 @@ export async function POST(req: Request) {
         return storageUnavailable();
       }
     }
-    const lastUpdatedAt = duplicate.updatedAt ?? duplicate.createdAt;
-    const staleParsing = duplicate.status === "parsing" && lastUpdatedAt.getTime() < Date.now() - STALE_PARSING_MS;
-    const retrying = duplicate.status === "failed" || staleParsing
-      || (duplicate.status === "archived" && duplicate.chunkCount === 0 && Boolean(duplicate.error));
-    const status = retrying
-      ? "parsing"
-      : duplicate.status === "archived"
-        ? (duplicate.chunkCount > 0 ? "indexed" : "parsing")
-        : duplicate.status;
-    const error = retrying ? null : duplicate.error;
-    if (duplicate.archivedAt || retrying || blobPathname !== duplicate.blobPathname) {
-      await db.update(knowledgeSources).set({ archivedAt: null, status, error, blobPathname, updatedAt: new Date() }).where(eq(knowledgeSources.id, duplicate.id));
+    const reconciled = await reconcileDuplicateSource(duplicate.id, blobPathname);
+    if (!reconciled) {
+      return Response.json({ ok: false, error: "资料记录已经不存在，请重新上传" }, { status: 409 });
     }
-    if (retrying) {
+    if (reconciled.retrying) {
       try {
         await start(knowledgeIngestWorkflow, [{
           sourceId: duplicate.id,
@@ -104,8 +127,8 @@ export async function POST(req: Request) {
     return Response.json({
       ok: true,
       deduped: true,
-      blobStored: Boolean(blobPathname),
-      source: toView({ ...duplicate, archivedAt: null, status, error, blobPathname }),
+      blobStored: Boolean(reconciled.row.blobPathname),
+      source: toView(reconciled.row),
     });
   }
   let blobPathname: string | null = null;
