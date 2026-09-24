@@ -16,7 +16,7 @@ import { WorkflowDraft } from "@/contracts/workflow";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { cancelRunAction } from "@/server/actions/cancel-run";
-import { recordDecision } from "@/server/steps/approval-step";
+import { recordDecision, requestApproval } from "@/server/steps/approval-step";
 import { failRun, finalizeRun, initializeRun, persistStep } from "@/server/steps/run-state";
 
 const RUN_ID = "00000000-0000-4000-8000-0000000000c1";
@@ -224,5 +224,20 @@ describe("取消运行", () => {
     const [unchanged] = await db.select().from(approvals).where(eq(approvals.id, approval.id));
     expect(unchanged).toMatchObject({ status: "rejected", note: "运行已取消，确认未继续" });
     expect(appendTraceMock).not.toHaveBeenCalled();
+  });
+
+  it("确认步骤重试时复用已有记录而不重复通知", async () => {
+    await insertWaitingRun();
+    const args = { runId: RUN_ID, node: draft.nodes.confirm, outputs: {}, nodes: draft.nodes };
+
+    const first = await requestApproval(args);
+    const second = await requestApproval(args);
+
+    expect(second.approvalId).toBe(first.approvalId);
+    const rows = await db.select().from(approvals).where(and(
+      eq(approvals.runId, RUN_ID), eq(approvals.nodeId, "confirm"),
+    ));
+    expect(rows).toHaveLength(1);
+    expect(appendTraceMock).toHaveBeenCalledOnce();
   });
 });
