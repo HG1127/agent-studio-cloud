@@ -12,34 +12,40 @@ export async function updateAgentAction(input: unknown): Promise<AgentUpdateResu
   const parsed = AgentUpdateInput.safeParse(input);
   if (!parsed.success) return { ok: false, error: "名称或说明填写不正确" };
   try {
-    const [agent] = await db
-      .select({ id: agents.id })
-      .from(agents)
-      .where(and(eq(agents.id, parsed.data.agentId), eq(agents.workspaceId, DEMO_WORKSPACE_ID), isNull(agents.archivedAt)))
-      .limit(1);
-    if (!agent) return { ok: false, error: "找不到这个助手，请刷新页面后重试" };
-    const [definition] = await db
-      .select({ id: workflowDefinitions.id, draft: workflowDefinitions.draft })
-      .from(workflowDefinitions)
-      .where(and(eq(workflowDefinitions.agentId, agent.id), eq(workflowDefinitions.workspaceId, DEMO_WORKSPACE_ID)))
-      .orderBy(desc(workflowDefinitions.createdAt))
-      .limit(1);
-    if (!definition) return { ok: false, error: "找不到这个助手的流程草稿" };
-    const draft = WorkflowDraft.safeParse(definition.draft);
-    if (!draft.success) return { ok: false, error: "流程草稿格式不完整，暂时无法修改名称" };
-    const now = new Date();
-    await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
+      // 与流程保存共用同一把助手行锁，避免名称与整份草稿并发写入时互相覆盖。
+      const [agent] = await tx
+        .select({ id: agents.id })
+        .from(agents)
+        .where(and(eq(agents.id, parsed.data.agentId), eq(agents.workspaceId, DEMO_WORKSPACE_ID), isNull(agents.archivedAt)))
+        .for("update")
+        .limit(1);
+      if (!agent) return { kind: "agent-missing" as const };
+      const [definition] = await tx
+        .select({ id: workflowDefinitions.id, draft: workflowDefinitions.draft })
+        .from(workflowDefinitions)
+        .where(and(eq(workflowDefinitions.agentId, agent.id), eq(workflowDefinitions.workspaceId, DEMO_WORKSPACE_ID)))
+        .orderBy(desc(workflowDefinitions.createdAt))
+        .limit(1);
+      if (!definition) return { kind: "definition-missing" as const };
+      const draft = WorkflowDraft.safeParse(definition.draft);
+      if (!draft.success) return { kind: "definition-invalid" as const };
+      const now = new Date();
       await tx
         .update(agents)
         .set({ name: parsed.data.name, description: parsed.data.description || null, updatedAt: now })
-        .where(eq(agents.id, agent.id));
+        .where(and(eq(agents.id, agent.id), eq(agents.workspaceId, DEMO_WORKSPACE_ID)));
       await tx
         .update(workflowDefinitions)
         .set({ draft: { ...draft.data, rootAgent: { ...draft.data.rootAgent, name: parsed.data.name } }, updatedAt: now })
-        .where(eq(workflowDefinitions.id, definition.id));
+        .where(and(eq(workflowDefinitions.id, definition.id), eq(workflowDefinitions.workspaceId, DEMO_WORKSPACE_ID)));
+      return { kind: "updated" as const, agentId: agent.id };
     });
+    if (result.kind === "agent-missing") return { ok: false, error: "找不到这个助手，请刷新页面后重试" };
+    if (result.kind === "definition-missing") return { ok: false, error: "找不到这个助手的流程草稿" };
+    if (result.kind === "definition-invalid") return { ok: false, error: "流程草稿格式不完整，暂时无法修改名称" };
     revalidatePath("/agents");
-    revalidatePath(`/agents/${agent.id}`);
+    revalidatePath(`/agents/${result.agentId}`);
     revalidatePath("/runs");
     revalidatePath("/schedules");
     return { ok: true };
