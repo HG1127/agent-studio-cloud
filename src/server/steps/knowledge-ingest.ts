@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { knowledgeChunks, knowledgeSources } from "@/db/schema";
 import { db } from "@/lib/db";
 import { chunkText } from "@/server/domain/knowledge/chunker";
+import { processedKnowledgeStatus } from "@/server/domain/knowledge/source-state";
 
 interface ParseArgs {
   sourceId: string;
@@ -37,15 +38,16 @@ export async function parseKnowledgeFile(args: ParseArgs): Promise<{ text: strin
 
 export async function indexKnowledgeChunks(args: { sourceId: string; text: string }): Promise<{ chunkCount: number }> {
   "use step";
-  const [source] = await db
-    .select({ workspaceId: knowledgeSources.workspaceId })
-    .from(knowledgeSources)
-    .where(eq(knowledgeSources.id, args.sourceId))
-    .limit(1);
-  if (!source) throw new FatalError("找不到要入库的知识来源");
   const chunks = chunkText(args.text);
   const charCount = chunks.reduce((sum, chunk) => sum + chunk.content.length, 0);
   await db.transaction(async (tx) => {
+    const [source] = await tx
+      .select({ workspaceId: knowledgeSources.workspaceId, archivedAt: knowledgeSources.archivedAt })
+      .from(knowledgeSources)
+      .where(eq(knowledgeSources.id, args.sourceId))
+      .for("update")
+      .limit(1);
+    if (!source) throw new FatalError("找不到要入库的知识来源");
     // 失败后重新上传会复用同一来源；事务保证旧分片不会被半套新数据覆盖。
     await tx.delete(knowledgeChunks).where(eq(knowledgeChunks.sourceId, args.sourceId));
     for (let i = 0; i < chunks.length; i += 200) {
@@ -63,7 +65,7 @@ export async function indexKnowledgeChunks(args: { sourceId: string; text: strin
     }
     await tx
       .update(knowledgeSources)
-      .set({ status: "indexed", chunkCount: chunks.length, charCount, parseEngine: "builtin", error: null, updatedAt: new Date() })
+      .set({ status: processedKnowledgeStatus(source.archivedAt, "indexed"), chunkCount: chunks.length, charCount, parseEngine: "builtin", error: null, updatedAt: new Date() })
       .where(eq(knowledgeSources.id, args.sourceId));
   });
   return { chunkCount: chunks.length };
@@ -71,8 +73,17 @@ export async function indexKnowledgeChunks(args: { sourceId: string; text: strin
 
 export async function markKnowledgeFailed(args: { sourceId: string; error: string }): Promise<void> {
   "use step";
-  await db
-    .update(knowledgeSources)
-    .set({ status: "failed", error: args.error, updatedAt: new Date() })
-    .where(eq(knowledgeSources.id, args.sourceId));
+  await db.transaction(async (tx) => {
+    const [source] = await tx
+      .select({ archivedAt: knowledgeSources.archivedAt })
+      .from(knowledgeSources)
+      .where(eq(knowledgeSources.id, args.sourceId))
+      .for("update")
+      .limit(1);
+    if (!source) return;
+    await tx
+      .update(knowledgeSources)
+      .set({ status: processedKnowledgeStatus(source.archivedAt, "failed"), error: args.error, updatedAt: new Date() })
+      .where(eq(knowledgeSources.id, args.sourceId));
+  });
 }

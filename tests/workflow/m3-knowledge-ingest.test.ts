@@ -8,8 +8,27 @@ import { knowledgeIngestWorkflow } from "@/server/workflows/knowledge-ingest";
 
 const SOURCE_ID = "00000000-0000-4000-8000-0000000000f1";
 const SOURCE_ID_FAIL = "00000000-0000-4000-8000-0000000000f2";
+const SOURCE_ID_ARCHIVED = "00000000-0000-4000-8000-0000000000f3";
 
 describe("知识入库工作流", () => {
+  it("归档期间完成的迟到解析不会重新启用资料", async () => {
+    await db.insert(knowledgeSources).values({
+      id: SOURCE_ID_ARCHIVED, workspaceId: DEMO_WORKSPACE_ID, name: "归档资料.txt", mime: "text/plain",
+      sizeBytes: 10, sha256: `m3-${SOURCE_ID_ARCHIVED}`, status: "archived", archivedAt: new Date(), createdBy: DEMO_USER_ID,
+    });
+    try {
+      const handle = await start(knowledgeIngestWorkflow, [
+        { sourceId: SOURCE_ID_ARCHIVED, filename: "归档资料.txt", mime: "text/plain", content: new Blob(["已归档但解析完成的内容"]).stream() },
+      ]);
+      const result = await handle.returnValue;
+      const [source] = await db.select().from(knowledgeSources).where(eq(knowledgeSources.id, SOURCE_ID_ARCHIVED)).limit(1);
+      expect(source).toMatchObject({ status: "archived", archivedAt: expect.any(Date), chunkCount: result.chunkCount });
+    } finally {
+      await db.delete(knowledgeChunks).where(eq(knowledgeChunks.sourceId, SOURCE_ID_ARCHIVED));
+      await db.delete(knowledgeSources).where(eq(knowledgeSources.id, SOURCE_ID_ARCHIVED));
+    }
+  }, 240_000);
+
   it("文本文件解析切分入库后来源转 indexed", async () => {
     await db.insert(knowledgeSources).values({
       id: SOURCE_ID, workspaceId: DEMO_WORKSPACE_ID, name: "售后手册.txt", mime: "text/plain",

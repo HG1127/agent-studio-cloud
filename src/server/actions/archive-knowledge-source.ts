@@ -5,12 +5,7 @@ import { KnowledgeArchiveInput, type KnowledgeArchiveResult } from "@/contracts/
 import { knowledgeSources } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
-
-function restoredStatus(source: { status: string; chunkCount: number; error: string | null }): string {
-  if (source.status !== "archived") return source.status;
-  if (source.chunkCount > 0) return "indexed";
-  return source.error ? "failed" : "parsing";
-}
+import { restoredKnowledgeStatus } from "@/server/domain/knowledge/source-state";
 
 export async function setKnowledgeSourceArchivedAction(input: unknown): Promise<KnowledgeArchiveResult> {
   const parsed = KnowledgeArchiveInput.safeParse(input);
@@ -34,7 +29,7 @@ export async function setKnowledgeSourceArchivedAction(input: unknown): Promise<
       .update(knowledgeSources)
       .set({
         archivedAt: parsed.data.archived ? now : null,
-        status: parsed.data.archived ? source.status : restoredStatus(source),
+        status: parsed.data.archived ? "archived" : restoredKnowledgeStatus(source),
         updatedAt: now,
       })
       .where(and(
