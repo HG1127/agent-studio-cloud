@@ -63,7 +63,7 @@ export async function agentRunWorkflow(runId: string, manifest: AgentManifest, i
         continue;
       }
       if (node.type === "human") {
-        const { approvalId, token } = await requestApproval({ runId, node });
+        const { approvalId, token } = await requestApproval({ runId, node, outputs, nodes: draft.nodes });
         const hook = createHook<{ decision: "approved" | "rejected"; note?: string }>({ token });
         const decision = await hook;
         await recordDecision({ runId, node, approvalId, decision });

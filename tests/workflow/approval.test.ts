@@ -63,6 +63,29 @@ async function insertRun(): Promise<string> {
 }
 
 describe("人工审批暂停与恢复", () => {
+  it("发起确认时保存上游回复草稿快照", async () => {
+    const withDraft = AgentManifest.parse({
+      ...manifest,
+      workflowSnapshot: {
+        ...manifest.workflowSnapshot,
+        nodes: {
+          ...manifest.workflowSnapshot.nodes,
+          start: { ...manifest.workflowSnapshot.nodes.start, next: "draft" },
+          draft: { id: "draft", title: "生成回复草稿", type: "ai", next: "confirm", requirementIds: [] },
+        },
+      },
+    });
+    const runId = await insertRun();
+    const handle = await start(agentRunWorkflow, [runId, withDraft, {}]);
+    await waitForHook(handle, { token: `approval:${runId}:confirm`, timeout: 90_000 });
+    const [pending] = await db.select().from(approvals).where(eq(approvals.runId, runId)).limit(1);
+    expect(pending?.payload).toMatchObject({
+      review: { sourceNodeId: "draft", sourceTitle: "生成回复草稿", content: expect.stringContaining("[模拟输出]") },
+    });
+    await resumeHook(`approval:${runId}:confirm`, { decision: "approved" });
+    expect(await handle.returnValue).toEqual({ status: "completed" });
+  }, 240_000);
+
   it("批准：run 挂起在 waiting_approval 且 approvals 有 pending 行，恢复后 completed", async () => {
     const runId = await insertRun();
     const handle = await start(agentRunWorkflow, [runId, manifest, {}]);

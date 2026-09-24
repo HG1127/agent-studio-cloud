@@ -61,6 +61,16 @@ export const TraceEventView = z.object({
 });
 export type TraceEventView = z.infer<typeof TraceEventView>;
 
+export const ApprovalReview = z.object({
+  sourceNodeId: z.string(),
+  sourceTitle: z.string(),
+  content: z.string().min(1),
+});
+export type ApprovalReview = z.infer<typeof ApprovalReview>;
+
+export const ApprovalPayload = z.object({ review: ApprovalReview.nullable() });
+export type ApprovalPayload = z.infer<typeof ApprovalPayload>;
+
 export const ApprovalView = z.object({
   id: z.string().uuid(),
   runId: z.string().uuid(),
@@ -69,6 +79,7 @@ export const ApprovalView = z.object({
   status: z.enum(["pending", "approved", "rejected"]),
   role: z.string(),
   reason: z.string(),
+  review: ApprovalReview.nullable(),
   note: z.string().nullable(),
   decidedAt: z.string().nullable(),
 });
