@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { importAgentAction } from "@/server/actions/import-agent";
 
+const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
+
 export function ImportAgentForm() {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -11,10 +13,21 @@ export function ImportAgentForm() {
 
   async function importFile(file: File | undefined) {
     if (!file) return;
+    if (file.size > MAX_IMPORT_BYTES) {
+      setError("助手定义文件不能超过 5MB");
+      return;
+    }
     setPending(true);
     setError(null);
+    let payload: unknown;
     try {
-      const payload = JSON.parse(await file.text()) as unknown;
+      payload = JSON.parse(await file.text()) as unknown;
+    } catch {
+      setError("无法读取这个 JSON 文件，请检查文件内容");
+      setPending(false);
+      return;
+    }
+    try {
       const result = await importAgentAction(payload);
       if (result.ok) {
         router.push(`/agents/${result.agentId}`);
@@ -22,7 +35,7 @@ export function ImportAgentForm() {
       }
       setError(result.error);
     } catch {
-      setError("无法读取这个 JSON 文件，请检查文件内容");
+      setError("导入请求失败，请检查网络后重试");
     } finally {
       setPending(false);
     }
