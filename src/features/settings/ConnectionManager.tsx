@@ -112,7 +112,7 @@ export function ConnectionManager({ initial }: { initial: ModelConnectionView[] 
                   required={!editingId} minLength={8} aria-describedby={editingId ? "key-help" : undefined}
                   className="rounded-md border border-gray-300 px-3 py-2" />
               </label>
-              {editingId ? <p id="key-help" className="mt-1 text-xs text-gray-500">留空则保留原密钥；填写新密钥会替换原密钥。</p> : null}
+              {editingId ? <p id="key-help" className="mt-1 text-xs text-gray-500">留空则保留原密钥；更改服务地址时必须填写新密钥。</p> : null}
             </div>
             <label className="flex flex-col gap-1 text-sm">
               模型列表

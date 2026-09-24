@@ -101,6 +101,26 @@ describe("模型连接管理", () => {
     expect(decryptApiKey(row.apiKeyCiphertext, Buffer.from("9".repeat(64), "hex"))).toBe("sk-replacement-1234");
   });
 
+  it("更换服务地址必须同时提供新密钥", async () => {
+    const id = await save();
+    const original = await getRow(id);
+    const rejected = await saveModelConnectionAction({ ...input, id, baseUrl: "https://other.example.com/v1", apiKey: "" });
+    expect(rejected).toEqual({ ok: false, error: "更改服务地址时，请重新填写密钥" });
+    expect(await getRow(id)).toMatchObject({ baseUrl: original.baseUrl, apiKeyCiphertext: original.apiKeyCiphertext });
+    await save({ id, baseUrl: "https://other.example.com/v1", apiKey: "sk-new-endpoint-1234" });
+    expect((await getRow(id)).baseUrl).toBe("https://other.example.com/v1");
+  });
+
+  it("生产未开放真实模型时拒绝连接操作", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("REAL_MODELS_ENABLED", "");
+    expect(await saveModelConnectionAction(input)).toEqual({ ok: false, error: "真实模型功能尚未开放" });
+    expect(await listModelConnections()).toEqual([]);
+    expect(await testModelConnectionAction(crypto.randomUUID())).toEqual({ ok: false, error: "真实模型功能尚未开放" });
+    expect(await deleteModelConnectionAction(crypto.randomUUID())).toEqual({ ok: false, error: "真实模型功能尚未开放" });
+    expect(fixture.generateText).not.toHaveBeenCalled();
+  });
+
   it("列表只返回视图字段，不返回明文或密文", async () => {
     const id = await save();
     const view = (await listModelConnections()).find((item) => item.id === id);

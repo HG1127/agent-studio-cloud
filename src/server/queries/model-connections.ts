@@ -3,8 +3,10 @@ import { ModelConnectionView } from "@/contracts/connections";
 import { modelConnections } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
+import { realModelsEnabled } from "@/lib/model";
 
 export async function listModelConnections(): Promise<ModelConnectionView[]> {
+  if (!realModelsEnabled()) return [];
   const rows = await db.select({
     id: modelConnections.id,
     name: modelConnections.name,

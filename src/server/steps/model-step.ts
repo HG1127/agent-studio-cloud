@@ -9,7 +9,7 @@ import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { modelConnections } from "@/db/schema";
 import { db } from "@/lib/db";
-import { isTransientModelError } from "@/lib/model";
+import { isTransientModelError, realModelsEnabled } from "@/lib/model";
 import { resolveEncryptionKey } from "@/server/domain/crypto";
 import { resolveModelTarget } from "@/server/domain/model-target";
 import { buildStepPrompt } from "@/server/domain/runtime/step-prompt";
@@ -58,6 +58,7 @@ export async function runModelStep(args: RunModelStepInput): Promise<{ output: s
   }
   let target;
   try {
+    if (!realModelsEnabled()) throw new Error("真实模型功能尚未开放");
     const connection = manifestModel.connectionId
       ? (
           await db

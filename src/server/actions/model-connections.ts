@@ -9,10 +9,13 @@ import { ModelConnectionSaveInput } from "@/contracts/connections";
 import { modelConnections } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
-import { isTransientModelError } from "@/lib/model";
+import { isTransientModelError, realModelsEnabled } from "@/lib/model";
 import { apiKeyHint, decryptApiKey, encryptApiKey, resolveEncryptionKey } from "@/server/domain/crypto";
 
+class EndpointKeyRequiredError extends Error {}
+
 export async function saveModelConnectionAction(input: unknown): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  if (!realModelsEnabled()) return { ok: false, error: "真实模型功能尚未开放" };
   const parsed = ModelConnectionSaveInput.safeParse(input);
   if (!parsed.success) return { ok: false, error: "请检查连接名称、服务地址、密钥与模型列表的填写" };
   const key = resolveEncryptionKey(process.env.MODEL_ENCRYPTION_KEY);
@@ -24,10 +27,11 @@ export async function saveModelConnectionAction(input: unknown): Promise<{ ok: t
       // 先清后设本身不能防住并发插入，按工作区串行化默认标记修改。
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${DEMO_WORKSPACE_ID}))`);
       if (connectionId) {
-        const [existing] = await tx.select({ id: modelConnections.id }).from(modelConnections)
+        const [existing] = await tx.select({ id: modelConnections.id, baseUrl: modelConnections.baseUrl }).from(modelConnections)
           .where(and(eq(modelConnections.id, connectionId), eq(modelConnections.workspaceId, DEMO_WORKSPACE_ID), isNull(modelConnections.archivedAt)))
           .limit(1);
         if (!existing) return null;
+        if (existing.baseUrl !== baseUrl && !apiKey) throw new EndpointKeyRequiredError();
       }
       if (isDefaultCompile) {
         await tx.update(modelConnections).set({ isDefaultCompile: false, updatedAt: new Date() })
@@ -50,12 +54,14 @@ export async function saveModelConnectionAction(input: unknown): Promise<{ ok: t
     if (!id) return { ok: false, error: "连接不存在或已删除，请刷新页面后重试" };
     revalidatePath("/settings");
     return { ok: true, id };
-  } catch {
+  } catch (error) {
+    if (error instanceof EndpointKeyRequiredError) return { ok: false, error: "更改服务地址时，请重新填写密钥" };
     return { ok: false, error: "保存连接失败，请稍后重试" };
   }
 }
 
 export async function deleteModelConnectionAction(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!realModelsEnabled()) return { ok: false, error: "真实模型功能尚未开放" };
   if (!z.string().uuid().safeParse(id).success) return { ok: false, error: "连接标识不正确，请刷新页面后重试" };
   try {
     const [removed] = await db.update(modelConnections)
@@ -71,6 +77,7 @@ export async function deleteModelConnectionAction(id: string): Promise<{ ok: tru
 }
 
 export async function testModelConnectionAction(id: string): Promise<{ ok: true; reply: string } | { ok: false; error: string }> {
+  if (!realModelsEnabled()) return { ok: false, error: "真实模型功能尚未开放" };
   if (!z.string().uuid().safeParse(id).success) return { ok: false, error: "连接标识不正确，请刷新页面后重试" };
   try {
     const [connection] = await db.select().from(modelConnections)

@@ -8,6 +8,7 @@ import { AgentCreateInput, type CreateAgentResult } from "@/contracts/agent";
 import { WorkflowDraft } from "@/contracts/workflow";
 import { agents, modelConnections, workflowDefinitions } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
+import { realModelsEnabled } from "@/lib/model";
 import { buildAgentDraft, finalizeAgentDraft } from "@/server/domain/pipeline";
 import { decryptApiKey, resolveEncryptionKey } from "@/server/domain/crypto";
 import { CompileStepListSchema, buildCompilePrompt, extractJsonObject, shouldUseLlmCompile, stepListToWorkflowDraft } from "@/server/domain/intent/llm-compile";
@@ -42,7 +43,7 @@ export async function createAgentAction(input: AgentCreateInput): Promise<Create
   }
   const { name, intentText } = parsedInput.data;
   let built = buildAgentDraft({ name, intentText });
-  if (shouldUseLlmCompile({ llmCompile: process.env.LLM_COMPILE })) {
+  if (realModelsEnabled() && shouldUseLlmCompile({ llmCompile: process.env.LLM_COMPILE })) {
     try {
       const compileModel = await resolveCompileModel();
       if (compileModel) {

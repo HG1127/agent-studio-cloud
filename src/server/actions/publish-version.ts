@@ -8,7 +8,7 @@ import { PublishModelSelection } from "@/contracts/connections";
 import { WorkflowDraft } from "@/contracts/workflow";
 import { agentVersions, agents, knowledgeSources, modelConnections, workflowDefinitions } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
-import { resolvePublishModel } from "@/lib/model";
+import { realModelsEnabled, resolvePublishModel } from "@/lib/model";
 import { db } from "@/lib/db";
 import { auditWorkflow } from "@/server/domain/audit";
 import { buildManifest, filterPublishBlockers } from "@/server/domain/pipeline";
@@ -54,6 +54,7 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
     // 发布时冻结运行模型：显式选择了连接就校验后用连接；未选择时维持环境变量守卫
     let manifestModel: { modelId: string; mock: boolean; connectionId: string | null };
     if (modelSelection) {
+      if (!realModelsEnabled()) return { ok: false, error: "真实模型功能尚未开放", issues: [] };
       const selection = PublishModelSelection.safeParse(modelSelection);
       if (!selection.success) {
         return { ok: false, error: "所选运行模型无效，请重新选择后再发布", issues: [] };
@@ -83,6 +84,9 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
         return { ok: false, error: resolved.error, issues: [] };
       }
       manifestModel = { modelId: resolved.modelId, mock: resolved.mock, connectionId: null };
+    }
+    if (!manifestModel.mock && !realModelsEnabled()) {
+      return { ok: false, error: "真实模型功能尚未开放", issues: [] };
     }
     const snapshotRows = await db
       .select({ id: knowledgeSources.id })

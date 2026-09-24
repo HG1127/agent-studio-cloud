@@ -23,6 +23,16 @@ const manifest = AgentManifest.parse({
 afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks(); vi.restoreAllMocks(); });
 
 describe("运行模型错误脱敏", () => {
+  it("生产未开放真实模型时不向供应商发送请求", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("REAL_MODELS_ENABLED", "");
+    await expect(runModelStep({
+      runId: "00000000-0000-4000-8000-000000000001", node, manifest, outputs: {}, input: {},
+    })).rejects.toThrow("真实模型功能尚未开放");
+    expect(mocks.generateText).not.toHaveBeenCalled();
+    expect(mocks.persistStep.mock.calls.map(([value]) => value)).toContainEqual(expect.objectContaining({ status: "failed", error: "真实模型功能尚未开放" }));
+  });
+
   it("读取连接失败时不把数据库诊断写入日志和运行错误", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     mocks.select.mockReturnValue({ from: () => ({ where: () => ({
