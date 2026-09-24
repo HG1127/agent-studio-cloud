@@ -72,6 +72,13 @@ export async function RunDetail({ runId }: { runId: string }) {
         <Link href={`/agents/${run.agentId}`} className="w-fit text-sm text-gray-500 hover:text-gray-700">
           查看这个助手
         </Link>
+        <a
+          href={`/api/runs/${runId}/export`}
+          download
+          className="w-fit rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:border-gray-500"
+        >
+          下载运行报告
+        </a>
         {live ? <CancelRunButton runId={runId} /> : null}
         {!live ? <RetryRunButton runId={runId} /> : null}
       </header>

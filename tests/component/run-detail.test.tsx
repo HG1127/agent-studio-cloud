@@ -26,6 +26,15 @@ import { RunDetail } from "@/features/runs/RunDetail";
 afterEach(() => vi.clearAllMocks());
 
 describe("运行详情步骤数据", () => {
+  it("提供完整运行报告下载入口", async () => {
+    mocks.steps.mockResolvedValue([]);
+    render(await RunDetail({ runId: "00000000-0000-4000-8000-000000000001" }));
+    expect(screen.getByRole("link", { name: "下载运行报告" })).toHaveAttribute(
+      "href",
+      "/api/runs/00000000-0000-4000-8000-000000000001/export",
+    );
+  });
+
   it("可展开步骤的持久化输出和模型用量，不依赖最终结果包含用量", async () => {
     mocks.steps.mockResolvedValue([{
       id: "step-id", nodeId: "analyze", nodeTitle: "分析客户反馈", status: "succeeded",

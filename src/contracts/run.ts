@@ -108,4 +108,29 @@ export const ApprovalDecisionResult = z.discriminatedUnion("ok", [
 ]);
 export type ApprovalDecisionResult = z.infer<typeof ApprovalDecisionResult>;
 
+export const RunStepReport = z.object({
+  nodeId: z.string(),
+  nodeTitle: z.string().nullable(),
+  nodeType: z.string(),
+  status: z.string(),
+  attempt: z.number().int().nullable(),
+  output: z.unknown().nullable(),
+  error: z.string().nullable(),
+  startedAt: z.string().nullable(),
+  finishedAt: z.string().nullable(),
+});
+export type RunStepReport = z.infer<typeof RunStepReport>;
+
+export const RunReportFile = z.object({
+  format: z.literal("agent-studio-cloud-run"),
+  formatVersion: z.literal(1),
+  exportedAt: z.iso.datetime(),
+  run: RunView,
+  context: z.record(z.string(), z.unknown()).nullable(),
+  steps: z.array(RunStepReport),
+  trace: z.array(TraceEventView),
+  approvals: z.array(ApprovalView),
+});
+export type RunReportFile = z.infer<typeof RunReportFile>;
+
 export type SaveWorkflowResult = { ok: true } | { ok: false; error: string };
