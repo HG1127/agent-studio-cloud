@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { WorkflowDraft } from "@/contracts/workflow";
-import { applyConnection, clearEdge, outgoingSpecs, removeNode } from "@/features/workflow-canvas/flow-edges";
+import { applyConnection, clearEdge, outgoingSpecs, removeNode, supportsErrorRoute } from "@/features/workflow-canvas/flow-edges";
 
 function draft() {
   return WorkflowDraft.parse({
@@ -24,6 +24,13 @@ function draft() {
 }
 
 describe("画布等待超时连线", () => {
+  it("为运行时支持备用处理的步骤开放未完成句柄", () => {
+    for (const type of ["ai", "tool", "agent_call", "handoff", "parallel", "subflow"] as const) {
+      expect(supportsErrorRoute({ type }), type).toBe(true);
+    }
+    expect(supportsErrorRoute({ type: "wait" })).toBe(false);
+  });
+
   it("连接、展示和删除超时路径", () => {
     const connected = applyConnection(draft(), {
       source: "wait",

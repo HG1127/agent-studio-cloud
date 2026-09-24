@@ -11,6 +11,12 @@ export interface EdgeSpec {
   label?: string;
 }
 
+const ERROR_ROUTE_TYPES = new Set(["ai", "tool", "agent_call", "handoff", "parallel", "subflow"]);
+
+export function supportsErrorRoute(node: Pick<WorkflowNode, "type">) {
+  return ERROR_ROUTE_TYPES.has(node.type);
+}
+
 export function outgoingSpecs(node: WorkflowNode): EdgeSpec[] {
   const specs: EdgeSpec[] = [];
   if (node.rejectNext) specs.push({ handle: "reject", target: node.rejectNext, kind: "reject", label: "不通过" });

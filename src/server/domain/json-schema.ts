@@ -24,6 +24,10 @@ const SUPPORTED_SCHEMA_KEYS = new Set([
   "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
   "minItems", "maxItems", "minProperties", "maxProperties", "additionalProperties",
 ]);
+const MAX_SCHEMA_FIELDS = 100;
+const MAX_SCHEMA_CHOICES = 100;
+const MAX_PATTERN_LENGTH = 200;
+const MAX_PATTERN_INPUT_LENGTH = 4096;
 
 function nonnegativeIntegerRule(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
@@ -53,11 +57,24 @@ function validateSchemaRule(schema: unknown, path: string, depth: number): strin
   if (rule.pattern !== undefined) {
     if (typeof rule.pattern !== "string") return `${path}的 pattern 必须是文字`;
     try { new RegExp(rule.pattern); } catch { return `${path}的 pattern 不是有效正则表达式`; }
+    if (rule.pattern.length > MAX_PATTERN_LENGTH) return `${path}的 pattern 不能超过 ${MAX_PATTERN_LENGTH} 个字符`;
+    const unescaped = rule.pattern.replace(/\\./g, "");
+    if (/[()|]/.test(unescaped) || /\\[1-9]/.test(rule.pattern)) {
+      return `${path}的 pattern 只能使用简单文字、字符范围和数量规则`;
+    }
+    if (!nonnegativeIntegerRule(rule.maxLength) || rule.maxLength > MAX_PATTERN_INPUT_LENGTH) {
+      return `${path}使用 pattern 时必须设置不超过 ${MAX_PATTERN_INPUT_LENGTH} 的 maxLength`;
+    }
   }
-  if (rule.required !== undefined && (!Array.isArray(rule.required) || rule.required.some((item) => typeof item !== "string"))) {
-    return `${path}的 required 必须是字段名列表`;
+  if (rule.required !== undefined) {
+    if (!Array.isArray(rule.required) || rule.required.some((item) => typeof item !== "string")) return `${path}的 required 必须是字段名列表`;
+    if (rule.required.length > MAX_SCHEMA_FIELDS) return `${path}的 required 不能超过 ${MAX_SCHEMA_FIELDS} 项`;
+    if (new Set(rule.required).size !== rule.required.length) return `${path}的 required 不能包含重复字段`;
   }
-  if (rule.enum !== undefined && (!Array.isArray(rule.enum) || rule.enum.length === 0)) return `${path}的 enum 不能为空`;
+  if (rule.enum !== undefined) {
+    if (!Array.isArray(rule.enum) || rule.enum.length === 0) return `${path}的 enum 不能为空`;
+    if (rule.enum.length > MAX_SCHEMA_CHOICES) return `${path}的 enum 不能超过 ${MAX_SCHEMA_CHOICES} 项`;
+  }
   if (rule.additionalProperties !== undefined && typeof rule.additionalProperties !== "boolean" && (!rule.additionalProperties || typeof rule.additionalProperties !== "object" || Array.isArray(rule.additionalProperties))) {
     return `${path}的 additionalProperties 必须是布尔值或字段规则`;
   }
@@ -71,7 +88,9 @@ function validateSchemaRule(schema: unknown, path: string, depth: number): strin
   }
   if (rule.properties !== undefined) {
     if (!rule.properties || typeof rule.properties !== "object" || Array.isArray(rule.properties)) return `${path}的 properties 必须是对象`;
-    for (const [key, child] of Object.entries(rule.properties as Record<string, unknown>)) {
+    const entries = Object.entries(rule.properties as Record<string, unknown>);
+    if (entries.length > MAX_SCHEMA_FIELDS) return `${path}的 properties 不能超过 ${MAX_SCHEMA_FIELDS} 个字段`;
+    for (const [key, child] of entries) {
       const error = validateSchemaRule(child, `${path}.properties.${key}`, depth + 1);
       if (error) return error;
     }

@@ -2,6 +2,7 @@
 
 import { Handle, Position, type Node, type NodeProps, type NodeTypes } from "@xyflow/react";
 import type { WorkflowNode, WorkflowNodeType } from "@/contracts/workflow";
+import { supportsErrorRoute } from "./flow-edges";
 
 // 中文标签沿用旧系统画布的叫法，用户看到的类型名与旧版一致
 export const NODE_TYPE_LABELS: Record<WorkflowNodeType, string> = {
@@ -80,7 +81,7 @@ export function WorkflowNodeView(props: NodeProps) {
       {node.type === "human" ? (
         <Handle id="reject" type="source" position={Position.Right} style={{ ...HANDLE_STYLE, top: "78%" }} title="不通过" />
       ) : null}
-      {node.type === "ai" || node.type === "tool" ? (
+      {supportsErrorRoute(node) ? (
         <Handle id="error" type="source" position={Position.Right} style={{ ...HANDLE_STYLE, top: "78%" }} title="未完成时" />
       ) : null}
       {isCondition

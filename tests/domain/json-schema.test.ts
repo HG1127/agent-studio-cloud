@@ -61,4 +61,19 @@ describe("外部消息字段校验", () => {
     expect(validateJsonObjectSchema({}, { type: "object", properties: { code: { type: "string", pattern: "[" } } })).toContain("不是有效正则表达式");
     expect(validateJsonObjectSchema({}, { type: "object", maxProperties: -1 })).toContain("必须是非负整数");
   });
+
+  it("限制外部消息正则和字段契约复杂度", () => {
+    expect(validateJsonObjectSchema({}, {
+      type: "object",
+      properties: { code: { type: "string", pattern: "(a+)+$", maxLength: 100 } },
+    })).toContain("只能使用简单文字");
+    expect(validateJsonObjectSchema({}, {
+      type: "object",
+      properties: { code: { type: "string", pattern: "^[A-Z]+$" } },
+    })).toContain("必须设置不超过 4096 的 maxLength");
+    expect(validateJsonObjectSchema({}, {
+      type: "object",
+      properties: Object.fromEntries(Array.from({ length: 101 }, (_, index) => [`field_${index}`, { type: "string" }])),
+    })).toContain("不能超过 100 个字段");
+  });
 });
