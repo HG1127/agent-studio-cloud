@@ -62,10 +62,11 @@ export function buildHandoffInput(args: {
     },
   });
   const fields = args.targetManifest.inputContract.fields;
-  const input = fields.length === 0 ? { brief: context } : Object.fromEntries(fields.map((field) => [
-    field.name,
-    sourceInput[field.name] ?? sourceOutputs[field.name] ?? context,
-  ]));
+  const input = fields.length === 0 ? { brief: context } : Object.fromEntries(fields.flatMap((field) => {
+    const value = sourceInput[field.name] ?? sourceOutputs[field.name];
+    if (value !== undefined && value !== null) return [[field.name, value]];
+    return field.type === "string" ? [[field.name, context]] : [];
+  }));
   return { input, redactedPaths: [...sanitizedInput.redactedPaths, ...sanitizedOutputs.redactedPaths] };
 }
 

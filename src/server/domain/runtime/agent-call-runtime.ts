@@ -14,10 +14,11 @@ export function buildAgentCallInput(args: {
   });
   const fields = args.targetManifest.inputContract.fields;
   if (fields.length === 0) return { context };
-  return Object.fromEntries(fields.map((field) => [
-    field.name,
-    args.input[field.name] ?? args.outputs[field.name] ?? context,
-  ]));
+  return Object.fromEntries(fields.flatMap((field) => {
+    const value = args.input[field.name] ?? args.outputs[field.name];
+    if (value !== undefined && value !== null) return [[field.name, value]];
+    return field.type === "string" ? [[field.name, context]] : [];
+  }));
 }
 
 export function validateAgentCallNode(node: WorkflowNode, currentAgentId?: string): string | null {

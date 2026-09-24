@@ -67,6 +67,22 @@ describe("助手交接运行逻辑", () => {
     expect(validateHandoffNode(handoffNode(), "target")).toContain("不能交接");
   });
 
+  it("交接时不以文字上下文冒充缺失的非文字字段", () => {
+    const typedManifest = AgentManifest.parse({
+      ...targetManifest,
+      inputContract: { fields: [
+        { name: "brief", type: "string", required: true },
+        { name: "count", type: "number", required: false },
+        { name: "confirmed", type: "boolean", required: false },
+      ] },
+    });
+    const missing = buildHandoffInput({ node: handoffNode(), targetManifest: typedManifest, input: {}, outputs: {} });
+    expect(missing.input).toMatchObject({ brief: expect.any(String) });
+    expect(missing.input).not.toHaveProperty("count");
+    const provided = buildHandoffInput({ node: handoffNode(), targetManifest: typedManifest, input: { count: 2, confirmed: false }, outputs: {} });
+    expect(provided.input).toMatchObject({ count: 2, confirmed: false });
+  });
+
   it("模型流程编译器保留交接节点供画布完成绑定", () => {
     const result = compileModelWorkflowPlan({
       intent: {

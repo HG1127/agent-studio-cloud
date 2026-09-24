@@ -41,6 +41,20 @@ describe("助手调用运行逻辑", () => {
     expect(String(input.context)).toContain("续约");
   });
 
+  it("缺失的可选非文字字段不使用文字上下文冒充", () => {
+    const typedManifest = AgentManifest.parse({
+      ...targetManifest,
+      inputContract: { fields: [
+        { name: "brief", type: "string", required: true },
+        { name: "count", type: "number", required: false },
+        { name: "confirmed", type: "boolean", required: false },
+      ] },
+    });
+    const node = WorkflowNode.parse({ id: "call", title: "调用助手", type: "agent_call", agentCall: { targetAgentId: "target", versionId: "version" } });
+    expect(buildAgentCallInput({ node, targetManifest: typedManifest, input: {}, outputs: {} })).toMatchObject({ brief: expect.any(String) });
+    expect(buildAgentCallInput({ node, targetManifest: typedManifest, input: { count: 3, confirmed: false }, outputs: {} })).toMatchObject({ count: 3, confirmed: false });
+  });
+
   it("模型流程编译器保留助手调用节点供画布绑定", () => {
     const result = compileModelWorkflowPlan({
       intent: {
