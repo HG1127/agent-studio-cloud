@@ -5,7 +5,7 @@ import { VersionPanel } from "@/features/agents/VersionPanel";
 import { FlowCanvas } from "@/features/workflow-canvas/FlowCanvas";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { auditWorkflow, type DesignAuditResult } from "@/server/domain/audit";
-import { getAgentDetail } from "@/server/queries/agents";
+import { getAgentDetail, listAgentTargets } from "@/server/queries/agents";
 import { listVersions } from "@/server/queries/versions";
 import { listModelConnections } from "@/server/queries/model-connections";
 
@@ -30,7 +30,11 @@ export default async function AgentDetailPage({
   const detail = await getAgentDetail(agentId, DEMO_WORKSPACE_ID);
   if (!detail) notFound();
   const audit = detail.draft ? auditWorkflow(detail.draft) : null;
-  const [versions, connections] = await Promise.all([listVersions(agentId), listModelConnections()]);
+  const [versions, connections, agentTargets] = await Promise.all([
+    listVersions(agentId),
+    listModelConnections(),
+    listAgentTargets(DEMO_WORKSPACE_ID, agentId),
+  ]);
   const defaultModelLabel = process.env.MODEL_MOCK === "1" ? "演示模式" : process.env.MODEL_ID?.trim() ? "服务端默认模型" : "尚未配置默认模型";
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-6 p-8">
@@ -45,7 +49,7 @@ export default async function AgentDetailPage({
         <p className="text-sm text-gray-500">{auditStatusLine(audit)}</p>
       </header>
       {detail.draft ? (
-        <FlowCanvas agentId={agentId} draft={detail.draft} />
+        <FlowCanvas agentId={agentId} draft={detail.draft} agentTargets={agentTargets} />
       ) : (
         <section className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">
           这个助手还没有流程草稿

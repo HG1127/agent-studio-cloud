@@ -12,6 +12,7 @@ import {
   type NodeChange,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import type { AgentTargetOption } from "@/contracts/agent";
 import type { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
 import { saveWorkflowAction } from "@/server/actions/save-workflow";
 import { workflowNodeTypes, type WorkflowFlowNode } from "./CustomNodes";
@@ -22,6 +23,7 @@ import { updateWorkflowNode } from "./update-workflow-node";
 interface FlowCanvasProps {
   agentId: string;
   draft: WorkflowDraft;
+  agentTargets: AgentTargetOption[];
 }
 
 type EdgeKind = "next" | "reject" | "error" | "branch" | "body";
@@ -180,7 +182,7 @@ function clearEdge(draft: WorkflowDraft, edgeId: string): WorkflowDraft {
   return node.next === target ? patchNode(draft, source, { ...node, next: null }) : draft;
 }
 
-export function FlowCanvas({ agentId, draft: initialDraft }: FlowCanvasProps) {
+export function FlowCanvas({ agentId, draft: initialDraft, agentTargets }: FlowCanvasProps) {
   const router = useRouter();
   const [draft, setDraft] = useState(initialDraft);
   const [showControlNodes, setShowControlNodes] = useState(false);
@@ -337,7 +339,7 @@ export function FlowCanvas({ agentId, draft: initialDraft }: FlowCanvasProps) {
         </div>
         {selectedNode ? (
           <div className="w-72 shrink-0">
-            <NodeInspector node={selectedNode} onNodeChange={handleNodeChange} onNodeDelete={handleNodeDelete} />
+            <NodeInspector node={selectedNode} agentTargets={agentTargets} onNodeChange={handleNodeChange} onNodeDelete={handleNodeDelete} />
           </div>
         ) : null}
       </div>

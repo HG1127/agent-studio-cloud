@@ -23,6 +23,12 @@ const KNOWLEDGE_NODE = WorkflowNode.parse({
   type: "knowledge",
   knowledge: { space: "业务资料库", query: "退货规则" },
 });
+const AGENT_CALL_NODE = WorkflowNode.parse({
+  id: "step_5",
+  title: "请研究助手分析",
+  type: "agent_call",
+  agentCall: { targetAgentId: "", versionId: "" },
+});
 
 describe("NodeInspector", () => {
   it("修改节点名称时回调携带新值", () => {
@@ -62,6 +68,32 @@ describe("NodeInspector", () => {
     fireEvent.change(screen.getByLabelText("检索内容"), { target: { value: "海蓝灯塔二四" } });
     expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
       knowledge: { space: "业务资料库", query: "海蓝灯塔二四" },
+    }));
+  });
+
+  it("助手调用节点可选择已发布助手并冻结版本契约", async () => {
+    const onNodeChange = vi.fn();
+    const user = userEvent.setup();
+    render(<NodeInspector
+      node={AGENT_CALL_NODE}
+      agentTargets={[{
+        agentId: "00000000-0000-4000-8000-000000000011",
+        agentName: "研究助手",
+        versionId: "00000000-0000-4000-8000-000000000012",
+        version: 3,
+        inputContract: { fields: [{ name: "brief" }] },
+        outputContract: { fields: [{ path: "result" }] },
+      }]}
+      onNodeChange={onNodeChange}
+      onNodeDelete={vi.fn()}
+    />);
+    await user.selectOptions(screen.getByLabelText("协作助手"), "00000000-0000-4000-8000-000000000012");
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      agentCall: expect.objectContaining({
+        targetAgentName: "研究助手",
+        versionId: "00000000-0000-4000-8000-000000000012",
+        inputContract: { fields: [{ name: "brief" }] },
+      }),
     }));
   });
 

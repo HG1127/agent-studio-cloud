@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
-import { AgentSummary } from "@/contracts/agent";
+import { AgentSummary, AgentTargetOption, type AgentTargetOption as AgentTargetOptionType } from "@/contracts/agent";
+import { AgentManifest } from "@/contracts/manifest";
 import { WorkflowDraft } from "@/contracts/workflow";
 import { db } from "@/lib/db";
 import { agentVersions, agents, workflowDefinitions } from "@/db/schema";
@@ -61,4 +62,26 @@ export async function getAgentDetail(agentId: string, workspaceId: string): Prom
   // 草稿写入时已过契约校验；读取再 safeParse 一次，坏数据降级为空草稿而不是让页面崩掉
   const parsed = definition ? WorkflowDraft.safeParse(definition.draft) : null;
   return { agent, draft: parsed?.success ? parsed.data : null, versions };
+}
+
+export async function listAgentTargets(workspaceId: string, excludeAgentId: string): Promise<AgentTargetOptionType[]> {
+  const rows = await db
+    .select({ agentId: agents.id, agentName: agents.name, versionId: agentVersions.id, version: agentVersions.version, manifest: agentVersions.manifest })
+    .from(agentVersions)
+    .innerJoin(agents, eq(agents.id, agentVersions.agentId))
+    .where(and(eq(agentVersions.workspaceId, workspaceId), eq(agentVersions.status, "production"), isNull(agents.archivedAt)))
+    .orderBy(desc(agentVersions.version));
+  return rows.flatMap((row) => {
+    if (row.agentId === excludeAgentId) return [];
+    const manifest = AgentManifest.safeParse(row.manifest);
+    if (!manifest.success) return [];
+    return [AgentTargetOption.parse({
+      agentId: row.agentId,
+      agentName: row.agentName,
+      versionId: row.versionId,
+      version: row.version,
+      inputContract: manifest.data.inputContract,
+      outputContract: manifest.data.outputContract ?? { fields: [] },
+    })];
+  });
 }

@@ -7,6 +7,7 @@ import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { prepareParallelBranches } from "@/server/domain/runtime/parallel-runtime";
 import { prepareSubflow } from "@/server/domain/runtime/subflow-runtime";
+import { validateAgentCallNode } from "@/server/domain/runtime/agent-call-runtime";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
 
 // M1 运行引擎支持的节点类型：其余编排类节点后续任务扩展
@@ -25,6 +26,7 @@ const SUPPORTED_NODE_TYPES: ReadonlySet<string> = new Set([
   "parallel",
   "subflow",
   "memory",
+  "agent_call",
 ]);
 
 export async function startRunCore(args: {
@@ -102,6 +104,25 @@ export async function startRunCore(args: {
         }
       }
       if (node.type === "memory" && !node.memory) unsupported.push(`${node.title}（经验设置不完整）`);
+      if (node.type === "agent_call") {
+        const error = validateAgentCallNode(node, agent.id);
+        if (error) {
+          unsupported.push(`${node.title}（${error}）`);
+          continue;
+        }
+        const [target] = await db
+          .select({ id: agentVersions.id })
+          .from(agentVersions)
+          .innerJoin(agents, eq(agents.id, agentVersions.agentId))
+          .where(and(
+            eq(agentVersions.id, node.agentCall!.versionId),
+            eq(agentVersions.agentId, node.agentCall!.targetAgentId),
+            eq(agentVersions.workspaceId, agent.workspaceId),
+            isNull(agents.archivedAt),
+          ))
+          .limit(1);
+        if (!target) unsupported.push(`${node.title}（所选协作助手版本不可用）`);
+      }
     }
     if (unsupported.length > 0) {
       const names = [...new Set(unsupported)].join("、");

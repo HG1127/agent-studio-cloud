@@ -1,16 +1,18 @@
 "use client";
 
+import type { AgentTargetOption } from "@/contracts/agent";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { NODE_TYPE_LABELS } from "./CustomNodes";
 
 interface NodeInspectorProps {
   node: WorkflowNode;
+  agentTargets?: AgentTargetOption[];
   onNodeChange: (node: WorkflowNode) => void;
   onNodeDelete: (nodeId: string) => void;
 }
 
 // M1 编辑范围：title/description，加 human 的负责人与确认事项；condition 的说明以「判断说明」呈现
-export function NodeInspector({ node, onNodeChange, onNodeDelete }: NodeInspectorProps) {
+export function NodeInspector({ node, agentTargets = [], onNodeChange, onNodeDelete }: NodeInspectorProps) {
   const isHuman = node.type === "human";
   const isCondition = node.type === "condition";
   const knowledge = node.knowledge;
@@ -95,6 +97,37 @@ export function NodeInspector({ node, onNodeChange, onNodeDelete }: NodeInspecto
             />
           </div>
         </>
+      ) : null}
+      {node.type === "agent_call" ? (
+        <div className="flex flex-col gap-1">
+          <label htmlFor="node-agent-target" className="text-sm font-medium">协作助手</label>
+          <select
+            id="node-agent-target"
+            value={node.agentCall?.versionId ?? ""}
+            onChange={(event) => {
+              const target = agentTargets.find((item) => item.versionId === event.target.value);
+              onNodeChange({
+                ...node,
+                agentCall: target ? {
+                  targetAgentId: target.agentId,
+                  targetAgentName: target.agentName,
+                  versionId: target.versionId,
+                  workflowId: target.versionId,
+                  memoryAccess: { mode: "none" },
+                  inputContract: target.inputContract,
+                  outputContract: target.outputContract,
+                } : { targetAgentId: "", versionId: "" },
+              });
+            }}
+            className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
+          >
+            <option value="">请选择已发布助手</option>
+            {agentTargets.map((target) => (
+              <option key={target.versionId} value={target.versionId}>{target.agentName}（版本 {target.version}）</option>
+            ))}
+          </select>
+          {agentTargets.length === 0 ? <p className="text-xs text-gray-500">还没有其他已发布助手可供选择</p> : null}
+        </div>
       ) : null}
       {deletable ? (
         <button

@@ -7,6 +7,7 @@ import { resolveLoopCollection, workflowExecutionLimit } from "@/server/domain/r
 import { prepareParallelBranches, type PreparedParallelBranch } from "@/server/domain/runtime/parallel-runtime";
 import { prepareSubflow, type PreparedSubflow } from "@/server/domain/runtime/subflow-runtime";
 import { evaluateCondition } from "@/server/steps/condition-step";
+import { beginAgentCall, finishAgentCall } from "@/server/steps/agent-call-step";
 import { runInlineSystemStep } from "@/server/steps/inline-system-step";
 import { runKnowledgeStep } from "@/server/steps/knowledge-step";
 import { beginLoopIteration, completeLoop } from "@/server/steps/loop-step";
@@ -102,7 +103,12 @@ async function executeSubflow(args: {
   return steps;
 }
 
-export async function agentRunWorkflow(runId: string, manifest: AgentManifest, input: Record<string, unknown>) {
+export async function agentRunWorkflow(
+  runId: string,
+  manifest: AgentManifest,
+  input: Record<string, unknown>,
+  executionContext: { depth: number } = { depth: 0 },
+) {
   "use workflow";
   const draft = manifest.workflowSnapshot;
   await initializeRun(runId, draft);
@@ -155,6 +161,36 @@ export async function agentRunWorkflow(runId: string, manifest: AgentManifest, i
         outputs[node.id] = result.output;
         currentId = node.next;
         continue;
+      }
+      if (node.type === "agent_call") {
+        if (executionContext.depth >= 3) throw new FatalError(`步骤「${node.title}」超过助手协作层级上限`);
+        const preparedCall = await beginAgentCall({ runId, node, parentInput: input, outputs });
+        const [settled] = await Promise.allSettled([
+          agentRunWorkflow(preparedCall.childRunId, preparedCall.manifest, preparedCall.input, { depth: executionContext.depth + 1 }),
+        ]);
+        if (settled.status === "fulfilled") {
+          const result = await finishAgentCall({ runId, childRunId: preparedCall.childRunId, node, targetName: preparedCall.targetName });
+          outputs[node.id] = result.output;
+          currentId = node.next;
+          continue;
+        }
+        const reason = executionFailureReason(settled.reason, `协作助手「${preparedCall.targetName}」执行失败`);
+        const handled = Boolean(node.onErrorNext);
+        const result = await finishAgentCall({
+          runId,
+          childRunId: preparedCall.childRunId,
+          node,
+          targetName: preparedCall.targetName,
+          failed: true,
+          handled,
+          error: reason,
+        });
+        outputs[node.id] = result.output;
+        if (node.onErrorNext) {
+          currentId = node.onErrorNext;
+          continue;
+        }
+        throw new FatalError(`步骤「${node.title}」未能完成`);
       }
       if (node.type === "condition") {
         currentId = await evaluateCondition({ runId, node, outputs, input, currentItem: activeLoops.at(-1)?.item });

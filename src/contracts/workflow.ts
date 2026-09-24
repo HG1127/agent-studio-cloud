@@ -65,7 +65,7 @@ export const WorkflowNode = z.object({
   wait: z.object({ mode: z.enum(["delay", "until", "event"]), durationMs: z.number().default(0), until: z.string().nullable().default(null), eventKey: z.string(), eventLabel: z.string().optional(), payloadSchema: z.record(z.string(), z.unknown()).default({ type: "object" }), timeoutMs: z.number().default(0), onTimeoutNext: z.string().nullable().default(null) }).optional(),
   memory: z.object({ mode: z.enum(["read", "write"]), query: z.string().optional(), limit: z.number().int().min(1).max(20).optional(), contentFrom: z.string().optional() }).optional(),
   subflow: z.object({ name: z.string(), steps: z.array(z.record(z.string(), z.unknown())).default([]), inputs: z.array(z.string()).default([]), outputs: z.array(z.string()).default([]), failurePolicy: z.string().optional() }).optional(),
-  agentCall: z.object({ targetAgentId: z.string(), versionId: z.string(), targetAgentName: z.string().optional(), inputContract: z.record(z.string(), z.unknown()).optional(), outputContract: z.record(z.string(), z.unknown()).optional() }).optional(),
+  agentCall: z.object({ targetAgentId: z.string(), versionId: z.string(), targetAgentName: z.string().optional(), workflowId: z.string().optional(), memoryAccess: z.object({ mode: z.enum(["self", "team", "none"]) }).optional(), inputContract: z.record(z.string(), z.unknown()).optional(), outputContract: z.record(z.string(), z.unknown()).optional() }).optional(),
   toAgent: z.object({ id: z.string() }).optional(),
   businessSpec: z.record(z.string(), z.unknown()).nullable().default(null),
 });
