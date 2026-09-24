@@ -5,7 +5,7 @@ import type { ScheduleView } from "@/contracts/schedule";
 import { updateScheduleStatusAction } from "@/server/actions/update-schedule-status";
 
 const STATUS_LABELS: Record<ScheduleView["status"], string> = {
-  active: "运行中",
+  active: "已启用",
   paused: "已暂停",
   error: "出错",
   archived: "已归档",
@@ -50,7 +50,7 @@ export function ScheduleList({ initial }: { initial: ScheduleView[] }) {
             <p className="text-sm font-medium text-gray-900">{schedule.agentName}</p>
             <p className="mt-0.5 text-xs text-gray-500">
               {specSummary(schedule.spec)}
-              {schedule.nextRunAt ? ` · 下次运行 ${new Date(schedule.nextRunAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })}` : ""}
+              {schedule.nextRunAt ? ` · 下次计划时间 ${new Date(schedule.nextRunAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })}` : ""}
             </p>
             {schedule.lastError && <p className="mt-0.5 text-xs text-red-600">最近一次失败：{schedule.lastError}</p>}
           </div>
