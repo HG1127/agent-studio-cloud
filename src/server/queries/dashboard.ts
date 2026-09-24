@@ -30,9 +30,11 @@ export async function getDashboardSummary() {
       eq(runs.workspaceId, DEMO_WORKSPACE_ID),
       inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"]),
     )),
-    db.select({ count: countValue }).from(approvals).where(and(
+    db.select({ count: countValue }).from(approvals).innerJoin(runs, eq(runs.id, approvals.runId)).where(and(
       eq(approvals.workspaceId, DEMO_WORKSPACE_ID),
+      eq(runs.workspaceId, DEMO_WORKSPACE_ID),
       eq(approvals.status, "pending"),
+      eq(runs.status, "waiting_approval"),
     )),
     db.select({
       total: countValue,

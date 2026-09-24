@@ -1,23 +1,27 @@
 import { and, eq } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { cancelMock, getRunMock, revalidatePathMock } = vi.hoisted(() => ({
+const { appendTraceMock, cancelMock, getRunMock, revalidatePathMock } = vi.hoisted(() => ({
+  appendTraceMock: vi.fn(),
   cancelMock: vi.fn(),
   getRunMock: vi.fn(),
   revalidatePathMock: vi.fn(),
 }));
 vi.mock("workflow/api", () => ({ getRun: getRunMock }));
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
+vi.mock("@/server/steps/trace-step", () => ({ appendTrace: appendTraceMock }));
 
 import { approvals, runs } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { cancelRunAction } from "@/server/actions/cancel-run";
+import { failRun } from "@/server/steps/run-state";
 
 const RUN_ID = "00000000-0000-4000-8000-0000000000c1";
 
 afterEach(async () => {
   cancelMock.mockReset();
+  appendTraceMock.mockReset();
   getRunMock.mockReset();
   revalidatePathMock.mockReset();
   await db.delete(approvals).where(eq(approvals.runId, RUN_ID));
@@ -84,5 +88,23 @@ describe("取消运行", () => {
       status: "approved",
       note: "已同意",
     });
+  });
+
+  it("等待确认的运行失败时同步关闭尚未处理的确认", async () => {
+    await insertWaitingRun();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await failRun(RUN_ID, "执行引擎异常");
+
+    errorSpy.mockRestore();
+    const [run] = await db.select().from(runs).where(eq(runs.id, RUN_ID));
+    expect(run).toMatchObject({ status: "failed", error: "执行引擎异常" });
+    const approvalRows = await db.select().from(approvals).where(eq(approvals.runId, RUN_ID));
+    expect(approvalRows.find((row) => row.nodeId === "approval_pending")).toMatchObject({
+      status: "rejected",
+      note: "运行失败，确认未继续",
+      decidedAt: expect.any(Date),
+    });
+    expect(approvalRows.find((row) => row.nodeId === "approval_completed")?.status).toBe("approved");
   });
 });

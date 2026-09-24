@@ -5,7 +5,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { FatalError } from "workflow";
 import type { WorkflowDraft } from "@/contracts/workflow";
 import { db } from "@/lib/db";
-import { runSteps, runs } from "@/db/schema";
+import { approvals, runSteps, runs } from "@/db/schema";
 import { appendTrace } from "@/server/steps/trace-step";
 import { completeEvaluationForRun } from "@/server/services/evaluation-state";
 
@@ -127,12 +127,21 @@ export async function failRun(runId: string, error: string): Promise<void> {
   "use step";
   console.error(`运行 ${runId} 失败：${error}`);
   const now = new Date();
-  const updated = await db
-    .update(runs)
-    .set({ status: "failed", error, finishedAt: now, updatedAt: now })
-    // 等待态也在守卫内：恢复链路抛错时必须能落失败终态，而不是永久卡住
-    .where(and(eq(runs.id, runId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])))
-    .returning({ id: runs.id });
+  const updated = await db.transaction(async (tx) => {
+    const rows = await tx
+      .update(runs)
+      .set({ status: "failed", error, finishedAt: now, updatedAt: now })
+      // 等待态也在守卫内：恢复链路抛错时必须能落失败终态，而不是永久卡住
+      .where(and(eq(runs.id, runId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])))
+      .returning({ id: runs.id });
+    if (rows.length > 0) {
+      await tx
+        .update(approvals)
+        .set({ status: "rejected", note: "运行失败，确认未继续", decidedAt: now, updatedAt: now })
+        .where(and(eq(approvals.runId, runId), eq(approvals.status, "pending")));
+    }
+    return rows;
+  });
   if (updated.length === 0) return; // 已是终态（含终审修复的兜底重入），幂等
   await appendTrace({ runId, kind: "run.failed", level: "error", title: "流程执行失败", detail: error });
   await completeEvaluationForRun(runId, null, error);
