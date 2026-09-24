@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import type { EvaluationCaseView, EvaluationRunView } from "@/contracts/evaluation";
 import { archiveEvaluationCaseAction, createEvaluationCaseAction, startEvaluationAction } from "@/server/actions/evaluations";
 
@@ -120,12 +121,29 @@ export function EvaluationPanel({ agentId, cases, runs }: {
         <div className="flex flex-col gap-2 border-t border-gray-100 pt-3">
           <h3 className="text-xs font-medium text-gray-600">最近验收</h3>
           {runs.map((run) => (
-            <div key={run.id} className="flex flex-wrap items-center gap-2 text-sm">
-              <span>版本 {run.version}</span>
-              <span className={run.status === "running" ? "text-blue-600" : run.failedCount > 0 ? "text-red-600" : "text-emerald-600"}>
-                {run.status === "running" ? "运行中" : run.failedCount > 0 ? "未通过" : "已通过"}
-              </span>
-              <span className="text-xs text-gray-500">通过 {run.passedCount} / 失败 {run.failedCount} / 共 {run.totalCount}</span>
+            <div key={run.id} className="rounded-md border border-gray-100 p-2 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <span>版本 {run.version}</span>
+                <span className={run.status === "running" ? "text-blue-600" : run.failedCount > 0 ? "text-red-600" : "text-emerald-600"}>
+                  {run.status === "running" ? "运行中" : run.failedCount > 0 ? "未通过" : "已通过"}
+                </span>
+                <span className="text-xs text-gray-500">通过 {run.passedCount} / 失败 {run.failedCount} / 共 {run.totalCount}</span>
+              </div>
+              {run.results.length > 0 ? (
+                <ul className="mt-2 space-y-1 border-t border-gray-100 pt-2">
+                  {run.results.map((result) => (
+                    <li key={result.caseId} className="flex flex-wrap items-start justify-between gap-2 text-xs">
+                      <div>
+                        <span className={result.status === "failed" ? "text-red-700" : result.status === "passed" ? "text-emerald-700" : "text-blue-700"}>
+                          {result.caseName}：{result.status === "failed" ? "未通过" : result.status === "passed" ? "通过" : "运行中"}
+                        </span>
+                        {result.error ? <p className="mt-0.5 text-red-600">{result.error}</p> : null}
+                      </div>
+                      {result.runId ? <Link href={`/runs/${result.runId}`} className="text-blue-700 hover:underline">查看运行</Link> : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
           ))}
         </div>

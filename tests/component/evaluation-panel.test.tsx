@@ -73,9 +73,19 @@ describe("EvaluationPanel", () => {
       failedCount: 1,
       startedAt: "2026-09-24T00:00:00.000Z",
       finishedAt: "2026-09-24T00:01:00.000Z",
+      results: [{
+        caseId: CASES[0].id,
+        caseName: "客户续约",
+        status: "failed",
+        error: "结果未包含“续约”",
+        runId: "00000000-0000-4000-8000-000000000034",
+      }],
     }]} />);
     expect(screen.getByText("未通过")).toBeInTheDocument();
     expect(screen.getByText("通过 1 / 失败 1 / 共 2")).toBeInTheDocument();
+    expect(screen.getByText("客户续约：未通过")).toBeInTheDocument();
+    expect(screen.getByText("结果未包含“续约”")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "查看运行" })).toHaveAttribute("href", "/runs/00000000-0000-4000-8000-000000000034");
     await user.click(screen.getByRole("button", { name: "运行全部样例" }));
     await waitFor(() => expect(startMock).toHaveBeenCalledWith(AGENT_ID));
   });

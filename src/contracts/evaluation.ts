@@ -24,6 +24,15 @@ export const EvaluationCaseView = z.object({
 });
 export type EvaluationCaseView = z.infer<typeof EvaluationCaseView>;
 
+export const EvaluationCaseResultView = z.object({
+  caseId: z.string().uuid(),
+  caseName: z.string(),
+  status: z.enum(["running", "passed", "failed"]),
+  error: z.string().nullable(),
+  runId: z.string().uuid().nullable(),
+});
+export type EvaluationCaseResultView = z.infer<typeof EvaluationCaseResultView>;
+
 export const EvaluationRunView = z.object({
   id: z.string().uuid(),
   version: z.number().int().positive(),
@@ -33,6 +42,7 @@ export const EvaluationRunView = z.object({
   failedCount: z.number().int().nonnegative(),
   startedAt: z.string(),
   finishedAt: z.string().nullable(),
+  results: z.array(EvaluationCaseResultView).default([]),
 });
 export type EvaluationRunView = z.infer<typeof EvaluationRunView>;
 
