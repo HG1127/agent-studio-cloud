@@ -2,13 +2,15 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { KnowledgeList, UploadSourceForm } from "@/features/knowledge/KnowledgeList";
+import { setKnowledgeSourceArchivedAction } from "@/server/actions/archive-knowledge-source";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => undefined }) }));
-vi.mock("@/server/actions/archive-knowledge-source", () => ({ archiveKnowledgeSourceAction: async () => ({ ok: true as const }) }));
+const refresh = vi.fn();
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
+vi.mock("@/server/actions/archive-knowledge-source", () => ({ setKnowledgeSourceArchivedAction: vi.fn(async () => ({ ok: true as const })) }));
 afterEach(() => vi.unstubAllGlobals());
 
 describe("知识库列表", () => {
-  it("空列表显示引导文案，非空列表渲染状态与删除入口", () => {
+  it("空列表显示引导文案，非空列表渲染状态与归档入口", () => {
     render(<KnowledgeList initial={[]} />);
     expect(screen.getByText(/还没有上传过文档/)).toBeInTheDocument();
     render(
@@ -22,7 +24,22 @@ describe("知识库列表", () => {
     );
     expect(screen.getByText("售后手册.txt")).toBeInTheDocument();
     expect(screen.getByText(/已就绪/)).toBeInTheDocument();
-    expect(screen.getByText("删除")).toBeInTheDocument();
+    expect(screen.getByText("归档")).toBeInTheDocument();
+  });
+
+  it("可以归档和恢复资料", async () => {
+    const source = {
+      id: "00000000-0000-4000-8000-0000000000f3", name: "售后手册.txt", mime: "text/plain",
+      sizeBytes: 2048, status: "indexed" as const, chunkCount: 3, charCount: 1200, error: null,
+      createdAt: "2026-09-23T00:00:00.000Z",
+    };
+    const { rerender } = render(<KnowledgeList initial={[source]} />);
+    await userEvent.click(screen.getByRole("button", { name: "归档" }));
+    expect(setKnowledgeSourceArchivedAction).toHaveBeenCalledWith({ sourceId: source.id, archived: true });
+
+    rerender(<KnowledgeList initial={[{ ...source, status: "archived" }]} archived />);
+    await userEvent.click(screen.getByRole("button", { name: "恢复" }));
+    expect(setKnowledgeSourceArchivedAction).toHaveBeenLastCalledWith({ sourceId: source.id, archived: false });
   });
 
   it("未保存原文件时明确提示存储缺失", async () => {

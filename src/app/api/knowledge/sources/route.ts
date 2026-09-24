@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { put } from "@vercel/blob";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { start } from "workflow/api";
 import { knowledgeSources } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
@@ -58,19 +58,29 @@ export async function POST(req: Request) {
   const [duplicate] = await db
     .select()
     .from(knowledgeSources)
-    .where(and(eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID), eq(knowledgeSources.sha256, sha256), isNull(knowledgeSources.archivedAt)))
+    .where(and(eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID), eq(knowledgeSources.sha256, sha256)))
     .limit(1);
   if (duplicate) {
+    let blobPathname = duplicate.blobPathname;
     if (!duplicate.blobPathname && blobToken) {
       try {
-        const blobPathname = await storeOriginal(bytes, file.name, sha256, blobToken);
-        await db.update(knowledgeSources).set({ blobPathname, updatedAt: new Date() }).where(eq(knowledgeSources.id, duplicate.id));
-        return Response.json({ ok: true, deduped: true, blobStored: true, source: toView(duplicate) });
+        blobPathname = await storeOriginal(bytes, file.name, sha256, blobToken);
       } catch {
         return storageUnavailable();
       }
     }
-    return Response.json({ ok: true, deduped: true, blobStored: Boolean(duplicate.blobPathname), source: toView(duplicate) });
+    const status = duplicate.status === "archived"
+      ? (duplicate.chunkCount > 0 ? "indexed" : duplicate.error ? "failed" : "parsing")
+      : duplicate.status;
+    if (duplicate.archivedAt || blobPathname !== duplicate.blobPathname) {
+      await db.update(knowledgeSources).set({ archivedAt: null, status, blobPathname, updatedAt: new Date() }).where(eq(knowledgeSources.id, duplicate.id));
+    }
+    return Response.json({
+      ok: true,
+      deduped: true,
+      blobStored: Boolean(blobPathname),
+      source: toView({ ...duplicate, archivedAt: null, status, blobPathname }),
+    });
   }
   let blobPathname: string | null = null;
   if (blobToken) {

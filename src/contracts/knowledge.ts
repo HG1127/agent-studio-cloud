@@ -20,3 +20,15 @@ export const KnowledgeUploadResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true), deduped: z.boolean(), blobStored: z.boolean(), source: KnowledgeSourceView }),
   z.object({ ok: z.literal(false), error: z.string() }),
 ]);
+
+export const KnowledgeArchiveInput = z.object({
+  sourceId: z.string().uuid(),
+  archived: z.boolean(),
+});
+export type KnowledgeArchiveInput = z.infer<typeof KnowledgeArchiveInput>;
+
+export const KnowledgeArchiveResult = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true) }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+export type KnowledgeArchiveResult = z.infer<typeof KnowledgeArchiveResult>;

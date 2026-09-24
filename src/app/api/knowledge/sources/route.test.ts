@@ -45,6 +45,7 @@ describe("知识原文件上传", () => {
       id: "00000000-0000-4000-8000-0000000000f3", name: "售后手册.txt", mime: "text/plain",
       sizeBytes: 12, status: "indexed", chunkCount: 1, charCount: 4, error: null,
       createdAt: new Date("2026-09-24T00:00:00Z"), blobPathname: null,
+      archivedAt: null,
     }];
     put.mockResolvedValue({ pathname: "knowledge/private-original.txt" });
     const form = new FormData();
@@ -57,6 +58,23 @@ describe("知识原文件上传", () => {
     expect(put).toHaveBeenCalledWith(expect.stringContaining("售后手册.txt"), expect.any(Buffer), {
       access: "private", addRandomSuffix: true, token: "test-token",
     });
+    expect(dbState.update).toHaveBeenCalledOnce();
+  });
+
+  it("重复上传已归档资料时直接恢复原记录", async () => {
+    dbState.rows = [{
+      id: "00000000-0000-4000-8000-0000000000f3", name: "售后手册.txt", mime: "text/plain",
+      sizeBytes: 12, status: "archived", chunkCount: 1, charCount: 4, error: null,
+      createdAt: new Date("2026-09-24T00:00:00Z"), blobPathname: null,
+      archivedAt: new Date("2026-09-24T01:00:00Z"),
+    }];
+    const form = new FormData();
+    form.set("file", new File(["退货说明"], "售后手册.txt", { type: "text/plain" }));
+
+    const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, deduped: true, source: { status: "indexed" } });
     expect(dbState.update).toHaveBeenCalledOnce();
   });
 });

@@ -2,7 +2,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import { KnowledgeUploadResult, type KnowledgeSourceView } from "@/contracts/knowledge";
-import { archiveKnowledgeSourceAction } from "@/server/actions/archive-knowledge-source";
+import { setKnowledgeSourceArchivedAction } from "@/server/actions/archive-knowledge-source";
 
 const STATUS_LABELS: Record<KnowledgeSourceView["status"], string> = {
   parsing: "解析中",
@@ -68,9 +68,10 @@ export function UploadSourceForm() {
   );
 }
 
-export function KnowledgeList({ initial }: { initial: KnowledgeSourceView[] }) {
+export function KnowledgeList({ initial, archived = false }: { initial: KnowledgeSourceView[]; archived?: boolean }) {
   const router = useRouter();
-  const [, startTransition] = useTransition();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
   const hasParsing = initial.some((source) => source.status === "parsing");
   useEffect(() => {
     if (!hasParsing) return;
@@ -79,31 +80,39 @@ export function KnowledgeList({ initial }: { initial: KnowledgeSourceView[] }) {
   }, [hasParsing, router]);
 
   if (initial.length === 0) {
-    return <p className="text-sm text-gray-600">还没有上传过文档，上传第一份业务资料后，助手的「读取资料」步骤就能真正查到内容。</p>;
+    return <p className="text-sm text-gray-600">{archived ? "没有已归档的资料" : "还没有上传过文档，上传第一份业务资料后，助手的「读取资料」步骤就能真正查到内容。"}</p>;
   }
   return (
-    <ul className="space-y-2">
-      {initial.map((source) => (
-        <li key={source.id} className="flex items-center justify-between rounded-lg border bg-white p-3">
-          <div>
-            <p className="text-sm font-medium text-gray-900">{source.name}</p>
-            <p className="mt-0.5 text-xs text-gray-500">
-              {STATUS_LABELS[source.status]} · {(source.sizeBytes / 1024).toFixed(1)} KB · {source.chunkCount} 段 · 上传于 {source.createdAt.slice(0, 10)}
-              {source.status === "failed" && source.error ? ` · ${source.error}` : ""}
-            </p>
-          </div>
-          <button
-            type="button"
-            className="text-xs text-gray-500 hover:text-gray-900"
-            onClick={async () => {
-              await archiveKnowledgeSourceAction(source.id);
-              router.refresh();
-            }}
-          >
-            删除
-          </button>
-        </li>
-      ))}
-    </ul>
+    <>
+      <ul className="space-y-2">
+        {initial.map((source) => (
+          <li key={source.id} className="flex items-center justify-between rounded-lg border bg-white p-3">
+            <div>
+              <p className="text-sm font-medium text-gray-900">{source.name}</p>
+              <p className="mt-0.5 text-xs text-gray-500">
+                {STATUS_LABELS[source.status]} · {(source.sizeBytes / 1024).toFixed(1)} KB · {source.chunkCount} 段 · 上传于 {source.createdAt.slice(0, 10)}
+                {source.status === "failed" && source.error ? ` · ${source.error}` : ""}
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={pending}
+              className="text-xs text-gray-500 hover:text-gray-900 disabled:opacity-50"
+              onClick={() => {
+                setError(null);
+                startTransition(async () => {
+                  const result = await setKnowledgeSourceArchivedAction({ sourceId: source.id, archived: !archived });
+                  if (!result.ok) setError(result.error);
+                  else router.refresh();
+                });
+              }}
+            >
+              {archived ? "恢复" : "归档"}
+            </button>
+          </li>
+        ))}
+      </ul>
+      {error ? <p role="alert" className="mt-2 text-sm text-red-600">{error}</p> : null}
+    </>
   );
 }
