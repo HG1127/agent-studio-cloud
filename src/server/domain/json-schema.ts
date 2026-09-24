@@ -142,8 +142,12 @@ function validateValue(value: unknown, schema: unknown, path: string, depth: num
   return null;
 }
 
+export function validateJsonSchemaDefinition(schema: Record<string, unknown>): string | null {
+  return validateSchemaRule(schema, "消息契约", 0);
+}
+
 export function validateJsonObjectSchema(payload: Record<string, unknown>, schema: Record<string, unknown>): string | null {
-  const schemaError = validateSchemaRule(schema, "消息契约", 0);
+  const schemaError = validateJsonSchemaDefinition(schema);
   if (schemaError) return schemaError;
   return validateValue(payload, schema, "消息", 0);
 }
