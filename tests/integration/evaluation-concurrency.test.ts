@@ -1,14 +1,18 @@
 import { eq } from "drizzle-orm";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentManifest } from "@/contracts/manifest";
+
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import { agentVersions, agents, evaluationCaseResults, evaluationCases, evaluationRuns } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
+import { createEvaluationCaseAction, setEvaluationCaseArchivedAction, updateEvaluationCaseAction } from "@/server/actions/evaluations";
 import { prepareEvaluationRun } from "@/server/services/evaluation-start";
 
 const AGENT_ID = "00000000-0000-4000-8000-0000000000a1";
 const VERSION_ID = "00000000-0000-4000-8000-0000000000a2";
+const CASE_ID = "00000000-0000-4000-8000-0000000000a3";
 
 const manifest = AgentManifest.parse({
   schemaVersion: "4.0",
@@ -48,7 +52,7 @@ async function insertFixture() {
     version: 1, status: "candidate", manifest,
   });
   await db.insert(evaluationCases).values({
-    workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, agentId: AGENT_ID,
+    id: CASE_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, agentId: AGENT_ID,
     name: "基础样例", input: {}, expectations: [],
   });
 }
@@ -65,5 +69,23 @@ describe("自动验收并发启动", () => {
     });
     const active = await db.select().from(evaluationRuns).where(eq(evaluationRuns.agentId, AGENT_ID));
     expect(active).toHaveLength(1);
+  });
+
+  it("验收运行期间拒绝新增编辑和停用样例", async () => {
+    await insertFixture();
+    expect((await prepareEvaluationRun(AGENT_ID)).ok).toBe(true);
+
+    const [created, updated, archived] = await Promise.all([
+      createEvaluationCaseAction({ agentId: AGENT_ID, name: "新增样例", input: {}, expectations: [] }),
+      updateEvaluationCaseAction({ caseId: CASE_ID, agentId: AGENT_ID, name: "被修改", input: {}, expectations: [] }),
+      setEvaluationCaseArchivedAction({ caseId: CASE_ID, agentId: AGENT_ID, archived: true }),
+    ]);
+
+    expect(created).toEqual({ ok: false, error: "自动验收运行期间不能修改验收样例" });
+    expect(updated).toEqual({ ok: false, error: "自动验收运行期间不能修改验收样例" });
+    expect(archived).toEqual({ ok: false, error: "自动验收运行期间不能修改验收样例" });
+    const cases = await db.select().from(evaluationCases).where(eq(evaluationCases.agentId, AGENT_ID));
+    expect(cases).toHaveLength(1);
+    expect(cases[0]).toMatchObject({ name: "基础样例", archivedAt: null });
   });
 });
