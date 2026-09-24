@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { AgentSummary, AgentTargetOption, type AgentTargetOption as AgentTargetOptionType } from "@/contracts/agent";
 import { AgentManifest } from "@/contracts/manifest";
@@ -6,13 +6,14 @@ import { WorkflowDraft } from "@/contracts/workflow";
 import { db } from "@/lib/db";
 import { agentVersions, agents, workflowDefinitions } from "@/db/schema";
 
-export async function listAgents(workspaceId: string): Promise<AgentSummary[]> {
+async function listAgentsByArchivedState(workspaceId: string, archived: boolean): Promise<AgentSummary[]> {
   const rows = await db
     .select({
       id: agents.id,
       name: agents.name,
       description: agents.description,
       status: agents.status,
+      archivedAt: agents.archivedAt,
       updatedAt: agents.updatedAt,
       versionCount:
         sql<number>`(select count(*) from ${agentVersions} where ${agentVersions.agentId} = ${agents.id})`.mapWith(
@@ -20,7 +21,7 @@ export async function listAgents(workspaceId: string): Promise<AgentSummary[]> {
         ),
     })
     .from(agents)
-    .where(and(eq(agents.workspaceId, workspaceId), isNull(agents.archivedAt)))
+    .where(and(eq(agents.workspaceId, workspaceId), archived ? isNotNull(agents.archivedAt) : isNull(agents.archivedAt)))
     .orderBy(desc(agents.updatedAt));
   return rows.map((row) =>
     AgentSummary.parse({
@@ -29,9 +30,18 @@ export async function listAgents(workspaceId: string): Promise<AgentSummary[]> {
       description: row.description,
       status: row.status ?? "draft",
       versionCount: row.versionCount,
+      archivedAt: row.archivedAt?.toISOString() ?? null,
       updatedAt: row.updatedAt.toISOString(),
     }),
   );
+}
+
+export async function listAgents(workspaceId: string): Promise<AgentSummary[]> {
+  return listAgentsByArchivedState(workspaceId, false);
+}
+
+export async function listArchivedAgents(workspaceId: string): Promise<AgentSummary[]> {
+  return listAgentsByArchivedState(workspaceId, true);
 }
 
 export interface AgentDetail {

@@ -13,9 +13,22 @@ export const AgentSummary = z.object({
   description: z.string().nullable(),
   status: z.string(),
   versionCount: z.number().int(),
+  archivedAt: z.string().nullable(),
   updatedAt: z.string(),
 });
 export type AgentSummary = z.infer<typeof AgentSummary>;
+
+export const AgentArchiveInput = z.object({
+  agentId: z.string().uuid(),
+  archived: z.boolean(),
+});
+export type AgentArchiveInput = z.infer<typeof AgentArchiveInput>;
+
+export const AgentArchiveResult = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true) }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+export type AgentArchiveResult = z.infer<typeof AgentArchiveResult>;
 
 export const AgentTargetOption = z.object({
   agentId: z.string().uuid(),
