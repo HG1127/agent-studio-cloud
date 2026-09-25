@@ -12,7 +12,7 @@ vi.mock("@/server/queries/runs", () => ({
   getRunContext: async () => ({ outputs: { analyze: { output: "分析完成" } } }),
   getPendingWait: async () => null,
 }));
-vi.mock("@/server/queries/trace", () => ({ listTrace: async () => [] }));
+vi.mock("@/server/queries/trace", () => ({ listRecentTrace: async () => [] }));
 vi.mock("@/features/runs/TraceTimeline", () => ({ TraceTimeline: () => null }));
 vi.mock("@/features/runs/ApprovalPanel", () => ({ ApprovalPanel: () => null }));
 vi.mock("@/features/runs/CancelRunButton", () => ({ CancelRunButton: () => null }));

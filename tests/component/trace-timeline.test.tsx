@@ -2,7 +2,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TraceTimeline } from "@/features/runs/TraceTimeline";
-import type { TraceEventView } from "@/contracts/run";
+import { MAX_VISIBLE_TRACE_EVENTS, type TraceEventView } from "@/contracts/run";
 
 const { refreshMock } = vi.hoisted(() => ({ refreshMock: vi.fn() }));
 
@@ -204,5 +204,15 @@ describe("TraceTimeline", () => {
   it("轨迹为空时显示空态提示", () => {
     render(<TraceTimeline runId={RUN_ID} initialEvents={[]} live={false} />);
     expect(screen.getByText("暂无执行轨迹")).toBeInTheDocument();
+  });
+
+  it("轨迹达到页面上限时提示下载完整报告", () => {
+    const events = Array.from({ length: MAX_VISIBLE_TRACE_EVENTS }, (_, index) => makeEvent({
+      seq: index + 1,
+      title: `轨迹 ${index + 1}`,
+    }));
+    render(<TraceTimeline runId={RUN_ID} initialEvents={events} live={false} />);
+    expect(screen.getByText(`轨迹较多，页面仅显示最近 ${MAX_VISIBLE_TRACE_EVENTS} 条；下载运行报告可查看完整记录。`)).toBeInTheDocument();
+    expect(screen.getAllByTestId("trace-row")).toHaveLength(MAX_VISIBLE_TRACE_EVENTS);
   });
 });

@@ -10,7 +10,7 @@ import { CopyResultButton } from "@/features/runs/CopyResultButton";
 import type { RunStatus } from "@/contracts/run";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { getPendingWait, getRunView, listApprovals, listChildRuns, listRunSteps } from "@/server/queries/runs";
-import { listTrace } from "@/server/queries/trace";
+import { listRecentTrace } from "@/server/queries/trace";
 
 const LIVE_STATUSES: ReadonlySet<RunStatus> = new Set(["queued", "running", "waiting_approval", "waiting_event"]);
 
@@ -40,7 +40,7 @@ export async function RunDetail({ runId }: { runId: string }) {
   const [steps, approvals, trace, pendingWait, childRuns] = await Promise.all([
     listRunSteps(runId, DEMO_WORKSPACE_ID),
     listApprovals(runId, DEMO_WORKSPACE_ID),
-    listTrace(runId, DEMO_WORKSPACE_ID),
+    listRecentTrace(runId, DEMO_WORKSPACE_ID),
     getPendingWait(runId, DEMO_WORKSPACE_ID),
     listChildRuns(runId, DEMO_WORKSPACE_ID),
   ]);

@@ -1,6 +1,6 @@
 "use client";
 
-import { TraceEventView } from "@/contracts/run";
+import { MAX_VISIBLE_TRACE_EVENTS, TraceEventView } from "@/contracts/run";
 import { useRunStream } from "@/features/runs/use-run-stream";
 
 // 轨迹时间线：kind 用图标 + 中文 title（写入侧已产出中文标题），SSE 增量上屏。
@@ -72,19 +72,26 @@ export function TraceTimeline({
     return <p className="text-sm text-gray-500">暂无执行轨迹</p>;
   }
   return (
-    <ol className="flex flex-col divide-y divide-gray-100" aria-label="执行轨迹">
-      {events.map((event) => (
-        <li key={event.seq} className="flex gap-3 py-2" data-testid="trace-row">
-          <KindIcon kind={event.kind} level={event.level} />
-          <div className="flex min-w-0 flex-col gap-0.5">
-            <p className="text-sm text-gray-800">{event.title}</p>
-            {event.detail ? (
-              <p className="whitespace-pre-wrap break-words text-sm text-gray-500">{event.detail}</p>
-            ) : null}
-            <p className="text-xs text-gray-400">{formatTime(event.at)}</p>
-          </div>
-        </li>
-      ))}
-    </ol>
+    <>
+      {events.length >= MAX_VISIBLE_TRACE_EVENTS ? (
+        <p className="rounded-md bg-amber-50 p-2 text-xs text-amber-700">
+          轨迹较多，页面仅显示最近 {MAX_VISIBLE_TRACE_EVENTS} 条；下载运行报告可查看完整记录。
+        </p>
+      ) : null}
+      <ol className="flex flex-col divide-y divide-gray-100" aria-label="执行轨迹">
+        {events.map((event) => (
+          <li key={event.seq} className="flex gap-3 py-2" data-testid="trace-row">
+            <KindIcon kind={event.kind} level={event.level} />
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <p className="text-sm text-gray-800">{event.title}</p>
+              {event.detail ? (
+                <p className="whitespace-pre-wrap break-words text-sm text-gray-500">{event.detail}</p>
+              ) : null}
+              <p className="text-xs text-gray-400">{formatTime(event.at)}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </>
   );
 }

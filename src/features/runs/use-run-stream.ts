@@ -3,14 +3,14 @@
 // SSE 不可用或断流时降级为低频刷新，恢复连接后自动停止轮询。
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { TraceEventView } from "@/contracts/run";
+import { MAX_VISIBLE_TRACE_EVENTS, TraceEventView } from "@/contracts/run";
 
 function mergeEvents(groups: ReadonlyArray<ReadonlyArray<TraceEventView>>): TraceEventView[] {
   const bySeq = new Map<number, TraceEventView>();
   for (const group of groups) {
     for (const event of group) bySeq.set(event.seq, event);
   }
-  return [...bySeq.values()].sort((a, b) => a.seq - b.seq);
+  return [...bySeq.values()].sort((a, b) => a.seq - b.seq).slice(-MAX_VISIBLE_TRACE_EVENTS);
 }
 
 export function useRunStream(runId: string, initialEvents: TraceEventView[], live: boolean): TraceEventView[] {

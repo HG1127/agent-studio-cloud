@@ -159,6 +159,8 @@ export type RunSummary = z.infer<typeof RunSummary>;
 export const RunAgentOption = z.object({ id: z.string().uuid(), name: z.string() });
 export type RunAgentOption = z.infer<typeof RunAgentOption>;
 
+export const MAX_VISIBLE_TRACE_EVENTS = 500;
+
 export const TraceEventView = z.object({
   id: z.string().uuid(),
   seq: z.number().int(),

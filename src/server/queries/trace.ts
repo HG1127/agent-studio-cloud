@@ -1,10 +1,11 @@
-import { and, asc, eq, gt } from "drizzle-orm";
+import { and, asc, desc, eq, gt } from "drizzle-orm";
 import { z } from "zod";
-import { TraceEventView } from "@/contracts/run";
+import { MAX_VISIBLE_TRACE_EVENTS, TraceEventView } from "@/contracts/run";
 import { traceEvents, type TraceEvent } from "@/db/schema";
 import { db } from "@/lib/db";
 
 const RUN_ID = z.string().uuid();
+const TRACE_STREAM_BATCH_SIZE = 200;
 
 const TRACE_VIEW_COLUMNS = {
   id: traceEvents.id,
@@ -43,6 +44,17 @@ export async function listTrace(runId: string, workspaceId: string): Promise<Tra
   return rows.map(parseTraceEvent).filter((event): event is TraceEventView => event !== null);
 }
 
+export async function listRecentTrace(runId: string, workspaceId: string): Promise<TraceEventView[]> {
+  if (!RUN_ID.safeParse(runId).success) return [];
+  const rows = await db
+    .select(TRACE_VIEW_COLUMNS)
+    .from(traceEvents)
+    .where(and(eq(traceEvents.runId, runId), eq(traceEvents.workspaceId, workspaceId)))
+    .orderBy(desc(traceEvents.seq))
+    .limit(MAX_VISIBLE_TRACE_EVENTS);
+  return rows.reverse().map(parseTraceEvent).filter((event): event is TraceEventView => event !== null);
+}
+
 // SSE 增量读：只取 seq 大于游标的事件（T11 裁定——SSE 走 DB 增量轮询，不消费 workflow 流）
 export async function listTraceSince(
   runId: string,
@@ -54,6 +66,7 @@ export async function listTraceSince(
     .select(TRACE_VIEW_COLUMNS)
     .from(traceEvents)
     .where(and(eq(traceEvents.runId, runId), eq(traceEvents.workspaceId, workspaceId), gt(traceEvents.seq, cursor)))
-    .orderBy(asc(traceEvents.seq));
+    .orderBy(asc(traceEvents.seq))
+    .limit(TRACE_STREAM_BATCH_SIZE);
   return rows.map(parseTraceEvent).filter((event): event is TraceEventView => event !== null);
 }
