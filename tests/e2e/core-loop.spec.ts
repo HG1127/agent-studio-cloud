@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-// 关键用户路径：创建 → 画布 → 发布 → 运行 → 审批 → 结果。
+// 关键用户路径：创建 → 画布 → 发布 → 运行 → 审批 → 结果 → 反馈 → 回归验收。
 // 固定走 mock 模型与规则编排（webServer env），断言确定性中文文案；
 // 运行数据残留可接受，助手名带时间戳后缀防重。
 test("创建助手到审批完成的完整闭环", async ({ page }) => {
@@ -40,4 +40,14 @@ test("创建助手到审批完成的完整闭环", async ({ page }) => {
   });
   await expect(page.getByText("流程执行完成")).toBeVisible({ timeout: 90_000 });
   await expect(page.getByText(/步骤「[^」]+」完成/).first()).toBeVisible({ timeout: 90_000 });
+
+  // ⑤ 改进闭环：提交具体差评，把本次真实输入加入验收样例，再回到助手页继续编辑检查条件
+  await page.getByLabel("结果反馈说明").fill("结果需要补充客户回复依据");
+  await page.getByRole("button", { name: "需要改进", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("已记录改进意见");
+  await page.getByRole("button", { name: "加入验收样例", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("已加入验收样例");
+  await page.getByRole("link", { name: "前往补充结果检查" }).click();
+  await expect(page).toHaveURL(/\/agents\/[0-9a-f-]+$/);
+  await expect(page.getByText(`改进回归：${agentName}`)).toBeVisible({ timeout: 30_000 });
 });
