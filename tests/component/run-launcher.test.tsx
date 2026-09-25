@@ -2,7 +2,7 @@
 // 启动失败展示动作返回的中文错误。
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RunLauncher } from "@/features/agents/RunLauncher";
 
 const { startRunMock, pushMock } = vi.hoisted(() => ({
@@ -15,6 +15,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: pushMock }) }));
 
 const AGENT_ID = "5a1b2c3d-4e5f-4a6b-8c9d-0e1f2a3b4c5d";
 const RUN_ID = "3f0d2c9e-8a7b-4c1d-9e2f-1a2b3c4d5e6f";
+const REQUEST_ID = "00000000-0000-4000-8000-000000000099";
 
 // JSON 文本含 {}[] 等按键修饰符，改用 change 事件直接设值
 function fillInput(value: string) {
@@ -22,9 +23,14 @@ function fillInput(value: string) {
 }
 
 describe("RunLauncher", () => {
+  beforeEach(() => {
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(REQUEST_ID);
+  });
+
   afterEach(() => {
     startRunMock.mockReset();
     pushMock.mockReset();
+    vi.restoreAllMocks();
   });
 
   it("渲染运行入口，输入默认为空对象", () => {
@@ -43,6 +49,7 @@ describe("RunLauncher", () => {
     await waitFor(() => expect(startRunMock).toHaveBeenCalledWith({
       agentId: AGENT_ID,
       input: { question: "请生成本周报告" },
+      requestId: REQUEST_ID,
     }));
   });
 
@@ -71,7 +78,11 @@ describe("RunLauncher", () => {
     fillInput('{"question":"物流几天到"}');
     await user.click(screen.getByRole("button", { name: "运行此助手" }));
     await waitFor(() => {
-      expect(startRunMock).toHaveBeenCalledWith({ agentId: AGENT_ID, input: { question: "物流几天到" } });
+      expect(startRunMock).toHaveBeenCalledWith({
+        agentId: AGENT_ID,
+        input: { question: "物流几天到" },
+        requestId: REQUEST_ID,
+      });
     });
     await waitFor(() => {
       expect(pushMock).toHaveBeenCalledWith(`/runs/${RUN_ID}`);
@@ -97,6 +108,31 @@ describe("RunLauncher", () => {
     expect(screen.getByRole("button", { name: "运行此助手" })).toBeEnabled();
   });
 
+  it("网络中断后重试复用请求标识", async () => {
+    startRunMock.mockRejectedValueOnce(new Error("response lost")).mockResolvedValueOnce({ ok: true, runId: RUN_ID });
+    const user = userEvent.setup();
+    render(<RunLauncher agentId={AGENT_ID} />);
+
+    await user.click(screen.getByRole("button", { name: "运行此助手" }));
+    await screen.findByRole("alert");
+    await user.click(screen.getByRole("button", { name: "运行此助手" }));
+
+    await waitFor(() => expect(startRunMock).toHaveBeenCalledTimes(2));
+    expect(startRunMock.mock.calls[0]?.[0].requestId).toBe(REQUEST_ID);
+    expect(startRunMock.mock.calls[1]?.[0].requestId).toBe(REQUEST_ID);
+  });
+
+  it("连续点击只发起一次运行", async () => {
+    startRunMock.mockImplementation(() => new Promise(() => undefined));
+    render(<RunLauncher agentId={AGENT_ID} />);
+    const button = screen.getByRole("button", { name: "运行此助手" });
+
+    fireEvent.click(button);
+    fireEvent.click(button);
+
+    await waitFor(() => expect(startRunMock).toHaveBeenCalledOnce());
+  });
+
   it("按版本输入契约生成字段并在提交前校验必填项", async () => {
     startRunMock.mockResolvedValue({ ok: true, runId: RUN_ID });
     const user = userEvent.setup();
@@ -113,6 +149,7 @@ describe("RunLauncher", () => {
     await waitFor(() => expect(startRunMock).toHaveBeenCalledWith({
       agentId: AGENT_ID,
       input: { brief: "生成续约方案", count: 2 },
+      requestId: REQUEST_ID,
     }));
   });
 });

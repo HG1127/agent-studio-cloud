@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { AgentInputField } from "@/contracts/manifest";
 import { startRunAction } from "@/server/actions/start-run";
 
@@ -12,6 +12,8 @@ export function RunLauncher({ agentId, inputFields }: { agentId: string; inputFi
   const [inputText, setInputText] = useState("{}");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const runningRef = useRef(false);
+  const requestIdRef = useRef<string | null>(null);
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const usesFieldForm = Boolean(inputFields?.length);
 
@@ -60,20 +62,26 @@ export function RunLauncher({ agentId, inputFields }: { agentId: string; inputFi
   }
 
   async function handleRun() {
+    if (runningRef.current) return;
     setError(null);
     const input = parseInput();
     if (!input) {
       if (!usesFieldForm) setError("请输入正确的 JSON 格式");
       return;
     }
+    runningRef.current = true;
+    const requestId = requestIdRef.current ?? crypto.randomUUID();
+    requestIdRef.current = requestId;
     setPending(true);
     try {
-      const result = await startRunAction({ agentId, input });
+      const result = await startRunAction({ agentId, input, requestId });
+      requestIdRef.current = null;
       if (result.ok) router.push(`/runs/${result.runId}`);
       else setError(result.error);
     } catch {
       setError("启动失败，请检查网络后重试");
     } finally {
+      runningRef.current = false;
       setPending(false);
     }
   }

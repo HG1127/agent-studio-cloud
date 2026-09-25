@@ -67,6 +67,7 @@ export type RunInputPayload = z.infer<typeof RunInputPayload>;
 export const RunStartInput = z.object({
   agentId: z.string().uuid(),
   input: RunInputPayload.default({}),
+  requestId: z.string().uuid().optional(),
 });
 export type RunStartInput = z.infer<typeof RunStartInput>;
 

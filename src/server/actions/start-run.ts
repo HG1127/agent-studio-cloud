@@ -9,7 +9,12 @@ export async function startRunAction(input: RunStartInput): Promise<StartRunResu
   if (!parsedInput.success) {
     return { ok: false, error: validationMessage(parsedInput.error, "启动参数不正确，请刷新页面后重试") };
   }
-  const result = await startRunCore({ agentId: parsedInput.data.agentId, input: parsedInput.data.input });
+  const result = await startRunCore({
+    agentId: parsedInput.data.agentId,
+    input: parsedInput.data.input,
+    sourceType: "manual",
+    sourceKey: parsedInput.data.requestId ? `manual:${parsedInput.data.requestId}` : null,
+  });
   if (result.ok) {
     revalidatePath(`/agents/${parsedInput.data.agentId}`);
     revalidatePath("/agents");
