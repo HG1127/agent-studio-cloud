@@ -2,7 +2,6 @@
 
 import { and, eq, inArray, like, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { getRun } from "workflow/api";
 import { z } from "zod";
 import type { CancelRunResult } from "@/contracts/run";
 import { approvals, runs } from "@/db/schema";
@@ -11,6 +10,7 @@ import { db } from "@/lib/db";
 import { completeEvaluationForRun, reconcileTerminalEvaluationRun } from "@/server/services/evaluation-state";
 import { MAX_COLLABORATION_DEPTH, parseCollaborationParentId } from "@/server/domain/runtime/collaboration-chain";
 import { isRunStartLeaseExpired, RUN_START_LEASE_KEY } from "@/server/services/run-start-lease";
+import { cancelWorkflowRunIfPresent } from "@/server/services/cancel-workflow-run";
 
 const LIVE_STATUSES = ["queued", "running", "waiting_approval", "waiting_event"];
 
@@ -65,7 +65,7 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
       && isRunStartLeaseExpired(root.stepStates, root.updatedAt);
     if (!root.workflowRunId && !orphanedWorkflow) return { ok: false, error: "运行尚未完成启动，请稍后再试" };
 
-    if (root.workflowRunId) await getRun(root.workflowRunId).cancel();
+    if (root.workflowRunId) await cancelWorkflowRunIfPresent(root.workflowRunId);
     const now = new Date();
     const updated = await db.transaction(async (tx) => {
       const rows = await tx
