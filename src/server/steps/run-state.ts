@@ -7,7 +7,7 @@ import type { WorkflowDraft } from "@/contracts/workflow";
 import { db } from "@/lib/db";
 import { approvals, runSteps, runs } from "@/db/schema";
 import { appendTrace } from "@/server/steps/trace-step";
-import { completeEvaluationForRun } from "@/server/services/evaluation-state";
+import { completeEvaluationForRun, reconcileTerminalEvaluationRun } from "@/server/services/evaluation-state";
 import { readRunStartLease, RUN_START_LEASE_KEY } from "@/server/services/run-start-lease";
 import {
   jsonStorageIssue,
@@ -188,7 +188,11 @@ export async function finalizeRun(
     .set({ status: "completed", result, context: { outputs: contextOutputs }, finishedAt: now, updatedAt: now })
     .where(and(eq(runs.id, runId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])))
     .returning({ id: runs.id });
-  if (updated.length === 0) return;
+  if (updated.length === 0) {
+    // 终态写入后若验收汇总瞬时失败，Workflow 会重试本步骤；重入时仍需完成对账。
+    await reconcileTerminalEvaluationRun(runId);
+    return;
+  }
   await appendTrace({
     runId,
     kind: "run.completed",
@@ -217,7 +221,11 @@ export async function failRun(runId: string, error: string): Promise<void> {
     }
     return rows;
   });
-  if (updated.length === 0) return; // 已是终态（含终审修复的兜底重入），幂等
+  if (updated.length === 0) {
+    // 已是终态时不改写运行结果，但要修复上一次可能未完成的验收汇总。
+    await reconcileTerminalEvaluationRun(runId);
+    return;
+  }
   await appendTrace({ runId, kind: "run.failed", level: "error", title: "流程执行失败", detail: error });
   await completeEvaluationForRun(runId, null, error);
 }
