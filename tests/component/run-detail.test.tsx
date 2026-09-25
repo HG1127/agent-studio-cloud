@@ -93,6 +93,34 @@ describe("运行详情步骤数据", () => {
     expect(screen.queryByText("步骤结果")).not.toBeInTheDocument();
   });
 
+  it("按该次运行的冻结输入契约展示业务名称", async () => {
+    mocks.steps.mockResolvedValue([]);
+    mocks.runView.mockResolvedValue(RunView.parse({
+      id: "00000000-0000-4000-8000-000000000001",
+      agentId: "00000000-0000-4000-8000-000000000002",
+      agentName: "售后助手",
+      status: "completed",
+      input: { input_1: "物流延误", input_2: "重要客户" },
+      inputContract: { fields: [
+        { name: "input_1", label: "工单内容", required: true, type: "string" },
+        { name: "input_2", label: "客户等级", required: true, type: "string" },
+      ] },
+      result: {},
+      error: null,
+      startedAt: null,
+      finishedAt: null,
+    }));
+
+    render(await RunDetail({ runId: "00000000-0000-4000-8000-000000000001" }));
+
+    expect(screen.getByText("工单内容")).toBeVisible();
+    expect(screen.getByText("物流延误")).toBeVisible();
+    expect(screen.getByText("客户等级")).toBeVisible();
+    expect(screen.getByText("重要客户")).toBeVisible();
+    expect(screen.queryByText("input_1")).not.toBeInTheDocument();
+    expect(screen.getByText("查看输入数据（开发者数据）")).toBeVisible();
+  });
+
   it("父运行展示可进入的协作与交接子任务", async () => {
     mocks.steps.mockResolvedValue([]);
     mocks.childRuns.mockResolvedValue([

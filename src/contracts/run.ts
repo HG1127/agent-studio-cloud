@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AgentInputContract } from "./manifest";
 import { WorkflowDraft } from "./workflow";
 
 export const MAX_RUN_INPUT_BYTES = 100 * 1024;
@@ -138,6 +139,7 @@ export const RunView = z.object({
   sourceType: RunSourceType.default("manual"),
   parentRunId: z.string().uuid().nullable().default(null),
   input: z.record(z.string(), z.unknown()),
+  inputContract: AgentInputContract.default({ fields: [] }),
   result: z.unknown().nullable(),
   outputContract: WorkflowDraft.shape.outputContract.default({ fields: [] }),
   error: z.string().nullable(),

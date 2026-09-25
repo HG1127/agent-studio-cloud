@@ -200,6 +200,7 @@ export async function getRunView(runId: string, workspaceId: string): Promise<Ru
     sourceType: row.run.sourceType,
     parentRunId,
     input: row.run.input,
+    inputContract: manifest.success ? manifest.data.inputContract : { fields: [] },
     result: row.run.result ?? null,
     outputContract: manifest.success ? manifest.data.outputContract : { fields: [] },
     error: row.run.error ?? null,

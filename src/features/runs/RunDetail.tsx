@@ -44,6 +44,10 @@ function readResultPath(result: Record<string, unknown>, path: string): unknown 
   }, result);
 }
 
+function displayValue(value: unknown): string {
+  return typeof value === "string" ? value : JSON.stringify(value, null, 2) ?? "";
+}
+
 export async function RunDetail({ runId }: { runId: string }) {
   const run = await getRunView(runId, DEMO_WORKSPACE_ID);
   if (!run) notFound();
@@ -59,6 +63,9 @@ export async function RunDetail({ runId }: { runId: string }) {
   const pendingApprovals = live ? approvals.filter((approval) => approval.status === "pending") : [];
   const decidedApprovals = approvals.filter((approval) => approval.status !== "pending");
   const stepTitleByNode = new Map(steps.map((step) => [step.nodeId, step.nodeTitle]));
+  const contractedInputs = run.inputContract.fields
+    .filter((field) => Object.prototype.hasOwnProperty.call(run.input, field.name))
+    .map((field) => ({ name: field.name, label: field.label ?? field.name, value: run.input[field.name] }));
   const resultRecord = run.result && typeof run.result === "object" && !Array.isArray(run.result)
     ? run.result as Record<string, unknown>
     : {};
@@ -154,9 +161,24 @@ export async function RunDetail({ runId }: { runId: string }) {
 
       <section className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-4">
         <h2 className="text-sm font-semibold">运行输入</h2>
-        <pre className="overflow-auto rounded-md bg-gray-50 p-3 text-xs">
-          {JSON.stringify(run.input, null, 2)}
-        </pre>
+        {contractedInputs.length > 0 ? (
+          <ul className="flex flex-col gap-3">
+            {contractedInputs.map((field) => (
+              <li key={field.name} className="flex flex-col gap-1">
+                <p className="text-sm font-medium text-gray-700">{field.label}</p>
+                <p className="whitespace-pre-wrap break-words text-sm text-gray-700">{displayValue(field.value)}</p>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <pre className="overflow-auto rounded-md bg-gray-50 p-3 text-xs">{JSON.stringify(run.input, null, 2)}</pre>
+        )}
+        {contractedInputs.length > 0 ? (
+          <details>
+            <summary className="cursor-pointer text-sm text-gray-500">查看输入数据（开发者数据）</summary>
+            <pre className="mt-2 max-h-80 overflow-auto rounded-md bg-gray-50 p-3 text-xs">{JSON.stringify(run.input, null, 2)}</pre>
+          </details>
+        ) : null}
       </section>
 
       {run.result ? (
@@ -173,7 +195,7 @@ export async function RunDetail({ runId }: { runId: string }) {
                     {label}
                   </p>
                   <p className="whitespace-pre-wrap break-words text-sm text-gray-700">
-                    {typeof output === "string" ? output : JSON.stringify(output, null, 2)}
+                    {displayValue(output)}
                   </p>
                 </li>
               ))}
