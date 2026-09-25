@@ -254,7 +254,15 @@ export async function agentRunWorkflow(
       }
       if (node.type === "agent_call") {
         if (executionContext.depth >= MAX_COLLABORATION_DEPTH) throw new FatalError(`步骤「${node.title}」超过助手协作层级上限`);
-        const preparedCall = await beginAgentCall({ runId, node, parentInput: input, outputs });
+        let preparedCall: Awaited<ReturnType<typeof beginAgentCall>>;
+        try {
+          preparedCall = await beginAgentCall({ runId, node, parentInput: input, outputs });
+        } catch (error) {
+          const handled = await recordHandledNodeFailure({ runId, node, error, fallback: `步骤「${node.title}」无法发起助手协作` });
+          outputs[node.id] = handled.output;
+          currentId = handled.next;
+          continue;
+        }
         const [settled] = await Promise.allSettled([
           agentRunWorkflow(preparedCall.childRunId, preparedCall.manifest, preparedCall.input, { depth: executionContext.depth + 1 }),
         ]);
@@ -284,7 +292,15 @@ export async function agentRunWorkflow(
       }
       if (node.type === "handoff") {
         if (executionContext.depth >= MAX_COLLABORATION_DEPTH) throw new FatalError(`步骤「${node.title}」超过助手交接层级上限`);
-        const preparedHandoff = await beginHandoff({ runId, node, parentInput: input, outputs });
+        let preparedHandoff: Awaited<ReturnType<typeof beginHandoff>>;
+        try {
+          preparedHandoff = await beginHandoff({ runId, node, parentInput: input, outputs });
+        } catch (error) {
+          const handled = await recordHandledNodeFailure({ runId, node, error, fallback: `步骤「${node.title}」无法发起助手交接` });
+          outputs[node.id] = handled.output;
+          currentId = handled.next;
+          continue;
+        }
         const [settled] = await Promise.allSettled([
           agentRunWorkflow(preparedHandoff.childRunId, preparedHandoff.manifest, preparedHandoff.input, { depth: executionContext.depth + 1 }),
         ]);

@@ -347,4 +347,68 @@ describe("助手协作运行", () => {
       await cleanup(parentRunId);
     }
   }, 240_000);
+
+  it("协作或交接输入无法满足目标契约时进入备用路径", async () => {
+    const parentRunIds: string[] = [];
+    await cleanup();
+    try {
+      await insertTarget();
+      const strictTarget = AgentManifest.parse({
+        ...targetManifest,
+        inputContract: { fields: [{ name: "count", type: "number", required: true }] },
+      });
+      await db.update(agentVersions).set({ manifest: strictTarget }).where(eq(agentVersions.id, TARGET_VERSION_ID));
+      const manifests = [
+        AgentManifest.parse({
+          ...parentManifest,
+          workflowSnapshot: {
+            ...parentManifest.workflowSnapshot,
+            nodes: {
+              ...parentManifest.workflowSnapshot.nodes,
+              research: { ...parentManifest.workflowSnapshot.nodes.research, onErrorNext: "fallback" },
+              fallback: { id: "fallback", title: "转员工补充协作输入", type: "system", next: "done" },
+            },
+          },
+        }),
+        AgentManifest.parse({
+          ...handoffManifest,
+          workflowSnapshot: {
+            ...handoffManifest.workflowSnapshot,
+            nodes: {
+              ...handoffManifest.workflowSnapshot.nodes,
+              handoff: { ...handoffManifest.workflowSnapshot.nodes.handoff, onErrorNext: "fallback" },
+              fallback: { id: "fallback", title: "转员工补充交接输入", type: "system", next: "done" },
+            },
+          },
+        }),
+      ];
+
+      for (const [index, preparedManifest] of manifests.entries()) {
+        const [parent] = await db.insert(runs).values({
+          workspaceId: DEMO_WORKSPACE_ID,
+          createdBy: DEMO_USER_ID,
+          agentId: PARENT_AGENT_ID,
+          versionId: PARENT_VERSION_ID,
+          status: "queued",
+          input: { topic: "缺少数量" },
+        }).returning({ id: runs.id });
+        parentRunIds.push(parent.id);
+        const handle = await start(agentRunWorkflow, [parent.id, preparedManifest, { topic: "缺少数量" }]);
+        await expect(handle.returnValue).resolves.toEqual({ status: "completed" });
+        const [finished] = await db.select().from(runs).where(eq(runs.id, parent.id)).limit(1);
+        const nodeId = index === 0 ? "research" : "handoff";
+        expect(finished?.result).toMatchObject({
+          [nodeId]: { status: "failed", error: expect.stringContaining("输入") },
+          fallback: { summary: expect.stringContaining("补充") },
+        });
+        expect(await db.select().from(runs).where(or(
+          like(runs.sourceKey, `agent-call:${parent.id}:%`),
+          like(runs.sourceKey, `handoff:${parent.id}:%`),
+        ))).toHaveLength(0);
+      }
+    } finally {
+      for (const parentRunId of parentRunIds) await cleanup(parentRunId);
+      if (parentRunIds.length === 0) await cleanup();
+    }
+  }, 240_000);
 });
