@@ -4,6 +4,22 @@ import { hasMeaningfulResult } from "@/server/domain/runtime/result-content";
 
 type OutputField = NonNullable<WorkflowDraft["outputContract"]>["fields"][number];
 
+export function rejectedWorkflowResult(outputs: Record<string, unknown>): Record<string, unknown> | null {
+  const rejected = Object.values(outputs).reverse().find((output) => (
+    output
+    && typeof output === "object"
+    && !Array.isArray(output)
+    && (output as Record<string, unknown>).decision === "rejected"
+  ));
+  if (!rejected || typeof rejected !== "object" || Array.isArray(rejected)) return null;
+  const note = (rejected as Record<string, unknown>).note;
+  return {
+    处理状态: "未获确认",
+    说明: "负责人未批准，本次运行已安全停止，后续交付没有执行",
+    ...(typeof note === "string" && note.trim() ? { 确认备注: note.trim() } : {}),
+  };
+}
+
 export function validateOutputFieldPaths(fields: OutputField[]): string | null {
   const paths = fields.map((field) => field.path.trim());
   if (paths.some((path) => !safeDataPathSegments(path))) return "最终交付字段位置不能使用保留名称";

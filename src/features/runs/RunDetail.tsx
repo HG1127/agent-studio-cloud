@@ -48,6 +48,10 @@ function displayValue(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value, null, 2) ?? "";
 }
 
+function fallbackResultLabel(key: string, stepTitleByNode: ReadonlyMap<string, string | null>): string {
+  return stepTitleByNode.get(key) ?? (/\p{Script=Han}/u.test(key) ? key : "步骤结果");
+}
+
 export async function RunDetail({ runId }: { runId: string }) {
   const run = await getRunView(runId, DEMO_WORKSPACE_ID);
   if (!run) notFound();
@@ -74,7 +78,7 @@ export async function RunDetail({ runId }: { runId: string }) {
     .filter((field) => field.output !== undefined);
   const outputs = contractedOutputs.length > 0
     ? contractedOutputs
-    : Object.entries(resultRecord).map(([key, output]) => ({ key, label: stepTitleByNode.get(key) ?? "步骤结果", output }));
+    : Object.entries(resultRecord).map(([key, output]) => ({ key, label: fallbackResultLabel(key, stepTitleByNode), output }));
   const copyText = contractedOutputs.length > 0
     ? contractedOutputs.map((field) => `${field.label}\n${displayValue(field.output)}`).join("\n\n")
     : undefined;

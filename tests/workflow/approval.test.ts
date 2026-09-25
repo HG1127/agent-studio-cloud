@@ -181,6 +181,9 @@ describe("人工审批暂停与恢复", () => {
     // 拒绝后 send 步骤不执行，requiredOutputTitles 里的交付物无法形成——门禁应按未获确认语义放行
     const rejectManifest = AgentManifest.parse({
       ...manifest,
+      outputContract: {
+        fields: [{ path: "reply", label: "回复邮件", required: true, sourceNodeId: "send" }],
+      },
       workflowSnapshot: {
         ...manifest.workflowSnapshot,
         nodes: {
@@ -206,6 +209,10 @@ describe("人工审批暂停与恢复", () => {
 
     const [runAfter] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
     expect(runAfter?.status).toBe("completed");
+    expect(runAfter?.result).toEqual({
+      处理状态: "未获确认",
+      说明: "负责人未批准，本次运行已安全停止，后续交付没有执行",
+    });
     const traces = await db.select().from(traceEvents).where(eq(traceEvents.runId, runId));
     const passed = traces.find((t) => t.kind === "quality.passed");
     expect(passed?.title).toContain("未获确认");

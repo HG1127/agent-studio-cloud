@@ -93,6 +93,35 @@ describe("运行详情步骤数据", () => {
     expect(screen.queryByText("步骤结果")).not.toBeInTheDocument();
   });
 
+  it("人工拒绝后展示受控终态而不是缺失的交付字段", async () => {
+    mocks.steps.mockResolvedValue([]);
+    mocks.runView.mockResolvedValue(RunView.parse({
+      id: "00000000-0000-4000-8000-000000000001",
+      agentId: "00000000-0000-4000-8000-000000000002",
+      agentName: "合同助手",
+      status: "completed",
+      input: {},
+      result: {
+        处理状态: "未获确认",
+        说明: "负责人未批准，本次运行已安全停止，后续交付没有执行",
+        确认备注: "需要补充依据",
+      },
+      outputContract: { fields: [{ path: "contract", label: "正式合同", required: true, sourceNodeId: "deliver" }] },
+      error: null,
+      startedAt: null,
+      finishedAt: null,
+    }));
+
+    render(await RunDetail({ runId: "00000000-0000-4000-8000-000000000001" }));
+
+    expect(screen.getByText("处理状态")).toBeVisible();
+    expect(screen.getByText("未获确认")).toBeVisible();
+    expect(screen.getByText("确认备注")).toBeVisible();
+    expect(screen.getByText("需要补充依据")).toBeVisible();
+    expect(screen.queryByText("正式合同")).not.toBeInTheDocument();
+    expect(screen.queryByText("步骤结果")).not.toBeInTheDocument();
+  });
+
   it("按该次运行的冻结输入契约展示业务名称", async () => {
     mocks.steps.mockResolvedValue([]);
     mocks.runView.mockResolvedValue(RunView.parse({

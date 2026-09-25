@@ -1,11 +1,28 @@
 import { describe, expect, it } from "vitest";
 import { WorkflowDraft } from "@/contracts/workflow";
-import { projectWorkflowResult, validateOutputContract, validateOutputFieldPaths } from "@/server/domain/runtime/output-contract";
+import {
+  projectWorkflowResult,
+  rejectedWorkflowResult,
+  validateOutputContract,
+  validateOutputFieldPaths,
+} from "@/server/domain/runtime/output-contract";
 
 describe("最终交付结果", () => {
   it("没有交付契约时保留全部步骤结果", () => {
     const outputs = { analyze: { text: "分析" }, draft: { text: "方案" } };
     expect(projectWorkflowResult(outputs, [])).toEqual({ ok: true, result: outputs });
+  });
+
+  it("把人工拒绝转换为不泄露内部标识的受控终态", () => {
+    expect(rejectedWorkflowResult({ confirm: { decision: "approved", note: "可以" } })).toBeNull();
+    expect(rejectedWorkflowResult({
+      draft: { text: "尚未批准的草稿" },
+      confirm: { approvalId: "internal-id", decision: "rejected", note: "  需要补充依据  " },
+    })).toEqual({
+      处理状态: "未获确认",
+      说明: "负责人未批准，本次运行已安全停止，后续交付没有执行",
+      确认备注: "需要补充依据",
+    });
   });
 
   it("只投影声明的步骤结果，并支持嵌套交付路径", () => {
