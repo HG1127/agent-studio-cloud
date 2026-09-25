@@ -1,6 +1,6 @@
 "use server";
 
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { VersionSummary, type PublishVersionResult } from "@/contracts/version";
@@ -151,6 +151,21 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
           if (!lockedDefinition || lockedDefinition.updatedAt.getTime() !== definition.updatedAt.getTime()) {
             return { kind: "stale" as const };
           }
+          if (knowledgeSnapshot.sourceIds.length > 0) {
+            const lockedSources = await tx
+              .select({ id: knowledgeSources.id })
+              .from(knowledgeSources)
+              .where(and(
+                inArray(knowledgeSources.id, knowledgeSnapshot.sourceIds),
+                eq(knowledgeSources.workspaceId, agent.workspaceId),
+                eq(knowledgeSources.status, "indexed"),
+                isNull(knowledgeSources.archivedAt),
+              ))
+              .for("share");
+            if (lockedSources.length !== knowledgeSnapshot.sourceIds.length) {
+              return { kind: "knowledge_changed" as const };
+            }
+          }
           const now = new Date();
           await tx
             .update(agentVersions)
@@ -203,6 +218,9 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
         });
         if (publishOutcome.kind === "stale") {
           return { ok: false, error: "助手或流程刚刚发生变化，请重新发布", issues: [] };
+        }
+        if (publishOutcome.kind === "knowledge_changed") {
+          return { ok: false, error: "所选知识资料刚刚发生变化，请重新选择后发布", issues: [] };
         }
         revalidatePath(`/agents/${agentId}`);
         return { ok: true, release, version: publishOutcome.version, exempted: exempted.map((issue) => ({ title: issue.title })) };
