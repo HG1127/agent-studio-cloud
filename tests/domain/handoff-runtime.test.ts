@@ -47,6 +47,14 @@ describe("助手交接运行逻辑", () => {
     expect(sanitized.redactedPaths).toEqual(expect.arrayContaining(["apiKey", "nested.token", "nested.访问令牌", "nested.内部备注"]));
   });
 
+  it("交接清洗不会复制外部结果中的保留字段", () => {
+    const value = JSON.parse('{"safe":"保留","__proto__":{"polluted":true},"nested":{"constructor":"危险"}}');
+    const sanitized = sanitizeHandoffValue(value, []);
+    expect(sanitized.value).toEqual({ safe: "保留", nested: {} });
+    expect(sanitized.redactedPaths).toEqual(expect.arrayContaining(["__proto__", "nested.constructor"]));
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
   it("按目标契约生成不含敏感信息的交接输入", () => {
     const prepared = buildHandoffInput({
       node: handoffNode(),
@@ -89,6 +97,13 @@ describe("助手交接运行逻辑", () => {
     typed.contract!.outputSchema = [{ name: "result.score", label: "评分", type: "number", required: true }];
     expect(validateHandoffOutput(typed, { result: { score: "高" } })).toBe("交接结果“评分”的格式不正确");
     expect(validateHandoffOutput(typed, { result: { score: 95 } })).toBeNull();
+  });
+
+  it("交接契约拒绝保留字段路径", () => {
+    expect(WorkflowNode.safeParse({
+      ...handoffNode(),
+      contract: { ...handoffNode().contract!, outputSchema: [{ name: "__proto__.polluted", type: "any" }] },
+    }).success).toBe(false);
   });
 
   it("模型流程编译器保留交接节点供画布完成绑定", () => {

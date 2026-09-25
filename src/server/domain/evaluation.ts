@@ -1,10 +1,13 @@
 import type { EvaluationExpectation } from "@/contracts/evaluation";
 import { jsonValuesEqual } from "@/server/domain/json-value";
+import { safeDataPathSegments } from "@/server/domain/runtime/data-path";
 
 function readPath(value: unknown, path: string): unknown {
   if (!path.trim()) return value;
-  return path.split(".").reduce<unknown>((current, key) => {
-    if (!current || typeof current !== "object" || Array.isArray(current)) return undefined;
+  const segments = safeDataPathSegments(path);
+  if (!segments) return undefined;
+  return segments.reduce<unknown>((current, key) => {
+    if (!current || typeof current !== "object" || Array.isArray(current) || !Object.prototype.hasOwnProperty.call(current, key)) return undefined;
     return (current as Record<string, unknown>)[key];
   }, value);
 }

@@ -1,6 +1,7 @@
 import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { buildBoundedCollaborationContext } from "@/server/domain/runtime/collaboration-input";
+import { isSafeDataPathSegment, safeDataPathSegments } from "@/server/domain/runtime/data-path";
 
 const SECRET_KEY = /password|passcode|secret|token|api[_-]?key|credential|cookie|authorization|private[_-]?key|密码|密钥|令牌|凭证|授权|私钥/i;
 
@@ -28,6 +29,10 @@ export function sanitizeHandoffValue(
     const redactedPaths: string[] = [];
     for (const [key, child] of Object.entries(current as Record<string, unknown>)) {
       const keyPath = currentPath ? `${currentPath}.${key}` : key;
+      if (!isSafeDataPathSegment(key)) {
+        redactedPaths.push(keyPath);
+        continue;
+      }
       const normalizedKey = key.toLowerCase().replace(/[\s_-]/g, "");
       if (SECRET_KEY.test(key) || terms.some((term) => normalizedKey.includes(term) || (normalizedKey.length >= 2 && term.includes(normalizedKey)))) {
         redactedPaths.push(keyPath);
@@ -88,8 +93,10 @@ export function validateHandoffNode(node: WorkflowNode, currentAgentId?: string)
 }
 
 function readHandoffPath(value: Record<string, unknown>, path: string): unknown {
-  return path.split(".").filter(Boolean).reduce<unknown>((current, segment) => {
-    if (!current || typeof current !== "object" || Array.isArray(current)) return undefined;
+  const segments = safeDataPathSegments(path);
+  if (!segments) return undefined;
+  return segments.reduce<unknown>((current, segment) => {
+    if (!current || typeof current !== "object" || Array.isArray(current) || !Object.prototype.hasOwnProperty.call(current, segment)) return undefined;
     return (current as Record<string, unknown>)[segment];
   }, value);
 }

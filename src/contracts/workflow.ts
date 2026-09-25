@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+const RESERVED_FIELD_NAMES: ReadonlySet<string> = new Set(["__proto__", "prototype", "constructor"]);
+const safeFieldPath = (value: string) => value.split(".").every((segment) => segment.length > 0 && !RESERVED_FIELD_NAMES.has(segment));
+
 export const MAX_WORKFLOW_NODES = 200;
 export const MAX_WORKFLOW_BYTES = 1024 * 1024;
 export const MAX_CONDITION_BRANCHES = 20;
@@ -41,7 +44,7 @@ export const ParallelBranch = z.object({
   steps: z.array(z.record(z.string(), z.unknown())).min(1).max(MAX_PARALLEL_STEPS),
 });
 export const HandoffField = z.object({
-  name: z.string().min(1),
+  name: z.string().min(1).max(200).refine(safeFieldPath, "交接字段名不能使用保留名称"),
   label: z.string().optional(),
   type: z.enum(["string", "number", "boolean", "object", "array", "any"]).default("any"),
   required: z.boolean().default(true),
@@ -58,7 +61,7 @@ export const HandoffContract = z.object({
   }).optional(),
 });
 export const WorkflowVariable = z.object({
-  name: z.string(),
+  name: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).refine((name) => !RESERVED_FIELD_NAMES.has(name), "运行输入字段名不能使用保留名称"),
   label: z.string().optional(),
   type: z.string().default("string"),
   scope: z.string().default("run"),

@@ -40,5 +40,6 @@ describe("评估断言", () => {
     expect(EvaluationExpectation.safeParse({ path: "result", operator: "contains", value: " " }).success).toBe(false);
     expect(EvaluationExpectation.safeParse({ path: "result", operator: "equals" }).success).toBe(false);
     expect(EvaluationExpectation.safeParse({ path: "result", operator: "exists" }).success).toBe(true);
+    expect(EvaluationExpectation.safeParse({ path: "__proto__.polluted", operator: "exists" }).success).toBe(false);
   });
 });
