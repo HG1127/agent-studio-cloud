@@ -5,10 +5,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function bindNodeAgent(node: Record<string, unknown>, agent: { id: string; name: string }): Record<string, unknown> {
-  const rebound: Record<string, unknown> = {
+  return {
     ...node,
     ...(isRecord(node.agent) ? { agent: { ...node.agent, id: agent.id, name: agent.name } } : {}),
   };
+}
+
+function bindTopLevelNodeAgent(node: Record<string, unknown>, agent: { id: string; name: string }): Record<string, unknown> {
+  const rebound = bindNodeAgent(node, agent);
   if (isRecord(node.subflow) && Array.isArray(node.subflow.steps)) {
     rebound.subflow = {
       ...node.subflow,
@@ -34,7 +38,7 @@ export function bindWorkflowRootAgent(
     ...draft,
     rootAgent: { ...draft.rootAgent, id: agent.id, name: agent.name },
     nodes: Object.fromEntries(Object.entries(draft.nodes).map(
-      ([id, node]) => [id, bindNodeAgent(node, agent)],
+      ([id, node]) => [id, bindTopLevelNodeAgent(node, agent)],
     )) as WorkflowDraft["nodes"],
   };
 }

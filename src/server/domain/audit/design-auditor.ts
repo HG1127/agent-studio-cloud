@@ -431,18 +431,25 @@ function cycleIssues(wf: AuditWorkflow): string[][] {
 
 function hasTypeRecursive(wf: AuditWorkflow | null | undefined, types: Set<string> | string | string[]): boolean {
   const wanted = types instanceof Set ? types : new Set(Array.isArray(types) ? types : [types]);
-  for (const n of Object.values(wf?.nodes || {})) {
-    if (wanted.has(n?.type ?? "")) return true;
-    if (n?.type === "subflow" && n.subflow?.workflow && hasTypeRecursive(n.subflow.workflow, wanted)) return true;
-    const children =
-      n?.type === "parallel"
-        ? ((n.parallel?.branches as AuditParallelBranch[] | undefined) || []).flatMap((branch) => (branch.steps as AuditSubflowStep[] | undefined) || [])
-        : n?.type === "subflow" && Array.isArray(n.subflow?.steps)
-          ? (n.subflow.steps as AuditSubflowStep[])
-          : [];
-    for (const step of children) {
-      if (wanted.has(step?.type ?? "")) return true;
-      if (step?.type === "subflow" && step.subflow?.workflow && hasTypeRecursive(step.subflow.workflow, wanted)) return true;
+  const pending = wf ? [wf] : [];
+  const visited = new Set<AuditWorkflow>();
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    for (const n of Object.values(current.nodes || {})) {
+      if (wanted.has(n?.type ?? "")) return true;
+      if (n?.type === "subflow" && n.subflow?.workflow) pending.push(n.subflow.workflow);
+      const children =
+        n?.type === "parallel"
+          ? ((n.parallel?.branches as AuditParallelBranch[] | undefined) || []).flatMap((branch) => (branch.steps as AuditSubflowStep[] | undefined) || [])
+          : n?.type === "subflow" && Array.isArray(n.subflow?.steps)
+            ? (n.subflow.steps as AuditSubflowStep[])
+            : [];
+      for (const step of children) {
+        if (wanted.has(step?.type ?? "")) return true;
+        if (step?.type === "subflow" && step.subflow?.workflow) pending.push(step.subflow.workflow);
+      }
     }
   }
   return false;

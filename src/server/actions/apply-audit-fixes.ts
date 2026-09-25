@@ -11,6 +11,7 @@ import { db } from "@/lib/db";
 import { applySafeAuditFixes } from "@/server/domain/audit/safe-audit-fixes";
 import { auditEventValues } from "@/server/audit/event-values";
 import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
+import { validateInlineWorkflows } from "@/server/domain/runtime/inline-workflow";
 
 export async function applyAuditFixesAction(agentId: string): Promise<AuditFixActionResult> {
   if (!z.string().uuid().safeParse(agentId).success) return { ok: false, error: "助手信息不正确，请刷新页面后重试" };
@@ -30,6 +31,8 @@ export async function applyAuditFixesAction(agentId: string): Promise<AuditFixAc
       if (!definition) return { kind: "definition-missing" as const };
       const draft = WorkflowDraft.safeParse(definition.draft);
       if (!draft.success) return { kind: "definition-invalid" as const };
+      const inlineError = validateInlineWorkflows(draft.data);
+      if (inlineError) return { kind: "inline-invalid" as const, error: inlineError };
       const result = applySafeAuditFixes(draft.data);
       if (result.applied.length === 0) return { kind: "nothing-fixable" as const };
       await tx
@@ -54,6 +57,7 @@ export async function applyAuditFixesAction(agentId: string): Promise<AuditFixAc
     if (outcome.kind === "agent-missing") return { ok: false, error: "找不到这个助手，请刷新页面后重试" };
     if (outcome.kind === "definition-missing") return { ok: false, error: "找不到这个助手的流程草稿" };
     if (outcome.kind === "definition-invalid") return { ok: false, error: "流程草稿格式不完整，无法自动修复" };
+    if (outcome.kind === "inline-invalid") return { ok: false, error: `流程草稿无法执行：${outcome.error}` };
     if (outcome.kind === "nothing-fixable") return { ok: false, error: "没有可安全自动修复的问题，其余问题需要人工判断" };
     revalidatePath(`/agents/${outcome.agentId}`);
     return {

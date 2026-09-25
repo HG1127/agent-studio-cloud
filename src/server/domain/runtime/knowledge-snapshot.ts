@@ -6,7 +6,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 type KnowledgeScope = { title: string; sourceIds: string[] };
 
-function collectKnowledgeScopes(node: Record<string, unknown>, scopes: KnowledgeScope[]): void {
+function collectKnowledgeScope(node: Record<string, unknown>, scopes: KnowledgeScope[]): void {
   if (node.type === "knowledge") {
     const knowledge = asRecord(node.knowledge);
     scopes.push({
@@ -16,29 +16,32 @@ function collectKnowledgeScopes(node: Record<string, unknown>, scopes: Knowledge
         : [],
     });
   }
+}
+
+function directNestedSteps(node: Record<string, unknown>): Record<string, unknown>[] {
   const subflow = asRecord(node.subflow);
-  if (Array.isArray(subflow?.steps)) {
-    for (const step of subflow.steps) {
-      const record = asRecord(step);
-      if (record) collectKnowledgeScopes(record, scopes);
-    }
-  }
+  const subflowSteps = Array.isArray(subflow?.steps) ? subflow.steps.map(asRecord).filter((step) => step !== null) : [];
   const parallel = asRecord(node.parallel);
-  if (Array.isArray(parallel?.branches)) {
-    for (const branch of parallel.branches) {
-      const record = asRecord(branch);
-      if (!Array.isArray(record?.steps)) continue;
-      for (const step of record.steps) {
-        const child = asRecord(step);
-        if (child) collectKnowledgeScopes(child, scopes);
-      }
-    }
+  const parallelSteps = Array.isArray(parallel?.branches)
+    ? parallel.branches.flatMap((branch) => {
+        const record = asRecord(branch);
+        return Array.isArray(record?.steps) ? record.steps.map(asRecord).filter((step) => step !== null) : [];
+      })
+    : [];
+  return [...subflowSteps, ...parallelSteps];
+}
+
+function collectWorkflowKnowledgeScopes(nodes: Record<string, WorkflowNode>): KnowledgeScope[] {
+  const scopes: KnowledgeScope[] = [];
+  for (const node of Object.values(nodes)) {
+    collectKnowledgeScope(node, scopes);
+    for (const step of directNestedSteps(node)) collectKnowledgeScope(step, scopes);
   }
+  return scopes;
 }
 
 export function knowledgeStepTitles(nodes: Record<string, WorkflowNode>): string[] {
-  const scopes: KnowledgeScope[] = [];
-  for (const node of Object.values(nodes)) collectKnowledgeScopes(node, scopes);
+  const scopes = collectWorkflowKnowledgeScopes(nodes);
   return [...new Set(scopes.map((scope) => scope.title))];
 }
 
@@ -46,8 +49,7 @@ export function prepareKnowledgeSnapshot(
   nodes: Record<string, WorkflowNode>,
   sourceIds: string[],
 ): { ok: true; sourceIds: string[] } | { ok: false; error: string } {
-  const scopes: KnowledgeScope[] = [];
-  for (const node of Object.values(nodes)) collectKnowledgeScopes(node, scopes);
+  const scopes = collectWorkflowKnowledgeScopes(nodes);
   if (scopes.length === 0) return { ok: true, sourceIds: [] };
   const available = new Set(sourceIds);
   const requested = [...new Set(scopes.flatMap((scope) => scope.sourceIds))];
