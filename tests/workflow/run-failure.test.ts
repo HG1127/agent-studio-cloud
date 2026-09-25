@@ -98,6 +98,32 @@ const loopFallbackManifest = AgentManifest.parse({
   },
 });
 
+const ruleFallbackManifest = AgentManifest.parse({
+  schemaVersion: "4.0",
+  workflowFingerprint: "r".repeat(64),
+  inputContract: { fields: [] },
+  resourceSelection: { model: { modelId: "mock", mock: true } },
+  designAudit: { status: "passed", issueCount: 0, criticalCount: 0 },
+  workflowSnapshot: {
+    id: "draft-rule-fallback",
+    startNodeId: "start",
+    rootAgent: { id: "agt_failure_test", name: "规则备用路径助手", role: "通用业务助手" },
+    memoryPolicy: { taskContext: true, longTerm: false },
+    nodes: {
+      start: { id: "start", title: "收到任务", type: "trigger", next: "verify" },
+      verify: {
+        id: "verify",
+        title: "核对业务回执",
+        type: "rule",
+        onErrorNext: "fallback",
+        rule: { kind: "tool_result", sourceNodeId: "missing_tool" },
+      },
+      fallback: { id: "fallback", title: "转员工核对回执", type: "system", next: "done" },
+      done: { id: "done", title: "流程结束", type: "end", next: null },
+    },
+  },
+});
+
 async function insertRun(): Promise<string> {
   const [row] = await db
     .insert(runs)
@@ -136,6 +162,23 @@ describe("运行失败兜底", () => {
     });
     const trace = await db.select().from(traceEvents).where(eq(traceEvents.runId, runId));
     expect(trace.some((event) => event.kind === "step.failed_handled" && event.nodeId === "loop")).toBe(true);
+  }, 240_000);
+
+  it("规则检查未通过时按未完成路径继续而不提前结束运行", async () => {
+    const runId = await insertRun();
+    const handle = await start(agentRunWorkflow, [runId, ruleFallbackManifest, {}]);
+
+    await expect(handle.returnValue).resolves.toEqual({ status: "completed" });
+    const [runAfter] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(runAfter).toMatchObject({
+      status: "completed",
+      result: {
+        verify: { status: "failed", error: expect.stringContaining("未取得来源步骤的系统回执") },
+        fallback: { summary: "转员工核对回执已完成" },
+      },
+    });
+    const trace = await db.select().from(traceEvents).where(eq(traceEvents.runId, runId));
+    expect(trace.some((event) => event.kind === "step.failed_handled" && event.nodeId === "verify")).toBe(true);
   }, 240_000);
 
   it("步骤抛错时 runs 写入失败终态与中文原因，SDK 侧 run 同步失败", async () => {

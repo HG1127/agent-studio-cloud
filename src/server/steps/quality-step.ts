@@ -6,7 +6,7 @@ import { FatalError } from "workflow";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { db } from "@/lib/db";
 import { approvals } from "@/db/schema";
-import { failRun, persistStep } from "@/server/steps/run-state";
+import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 import { selectQualityRepair, type QualityRepairPlan } from "@/server/domain/runtime/quality-repair";
 
@@ -57,7 +57,6 @@ export async function runQualityGate(args: RunQualityGateInput): Promise<Quality
       title: `「${node.title}」未通过`,
       detail: reason,
     });
-    await failRun(args.runId, reason);
     throw new FatalError(reason);
   };
   await appendTrace({
