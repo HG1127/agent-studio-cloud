@@ -15,7 +15,7 @@ function waitDescription(node: WorkflowNode): string {
   return wait.eventLabel ? `等待消息：${wait.eventLabel}` : `等待消息：${wait.eventKey}`;
 }
 
-export async function beginWait(args: { runId: string; node: WorkflowNode }): Promise<void> {
+export async function beginWait(args: { runId: string; node: WorkflowNode; hookToken?: string }): Promise<void> {
   "use step";
   if (!args.node.wait) throw new FatalError(`步骤「${args.node.title}」的等待设置不完整`);
   await persistStep({
@@ -38,7 +38,7 @@ export async function beginWait(args: { runId: string; node: WorkflowNode }): Pr
     title: `「${args.node.title}」正在等待`,
     detail: waitDescription(args.node),
     data: args.node.wait.mode === "event"
-      ? { eventKey: args.node.wait.eventKey, payloadSchema: args.node.wait.payloadSchema }
+      ? { eventKey: args.node.wait.eventKey, payloadSchema: args.node.wait.payloadSchema, hookToken: args.hookToken }
       : null,
   });
 }

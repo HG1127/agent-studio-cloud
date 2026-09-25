@@ -125,6 +125,35 @@ export async function getPendingWait(runId: string, workspaceId: string): Promis
   return parsed.success ? parsed.data : null;
 }
 
+export async function getPendingWaitHook(runId: string, workspaceId: string): Promise<{
+  eventKey: string;
+  payloadSchema: Record<string, unknown>;
+  hookToken: string;
+} | null> {
+  if (!RUN_ID.safeParse(runId).success) return null;
+  const [row] = await db
+    .select({ data: traceEvents.data })
+    .from(traceEvents)
+    .innerJoin(runs, eq(runs.id, traceEvents.runId))
+    .where(and(
+      eq(traceEvents.runId, runId),
+      eq(traceEvents.workspaceId, workspaceId),
+      eq(traceEvents.kind, "wait.started"),
+      eq(runs.status, "waiting_event"),
+    ))
+    .orderBy(desc(traceEvents.seq))
+    .limit(1);
+  const view = PendingWaitView.safeParse({
+    eventKey: row?.data?.eventKey,
+    title: "等待外部消息",
+    payloadSchema: row?.data?.payloadSchema ?? { type: "object" },
+  });
+  const hookToken = row?.data?.hookToken;
+  return view.success && typeof hookToken === "string" && hookToken.length > 0
+    ? { eventKey: view.data.eventKey, payloadSchema: view.data.payloadSchema, hookToken }
+    : null;
+}
+
 export async function getRunView(runId: string, workspaceId: string): Promise<RunView | null> {
   if (!RUN_ID.safeParse(runId).success) return null;
   const [row] = await db

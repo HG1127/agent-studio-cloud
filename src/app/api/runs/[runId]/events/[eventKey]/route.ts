@@ -6,7 +6,7 @@ import { runs } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { validateJsonObjectSchema } from "@/server/domain/json-schema";
-import { getPendingWait } from "@/server/queries/runs";
+import { getPendingWait, getPendingWaitHook } from "@/server/queries/runs";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +47,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ runId: 
   const { runId, eventKey } = parsedParams.data;
   let run: { status: string } | undefined;
   let pendingWait: Awaited<ReturnType<typeof getPendingWait>>;
+  let pendingHook: Awaited<ReturnType<typeof getPendingWaitHook>>;
   try {
     [run] = await db
       .select({ status: runs.status })
@@ -54,6 +55,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ runId: 
       .where(and(eq(runs.id, runId), eq(runs.workspaceId, DEMO_WORKSPACE_ID)))
       .limit(1);
     pendingWait = run?.status === "waiting_event" ? await getPendingWait(runId, DEMO_WORKSPACE_ID) : null;
+    pendingHook = run?.status === "waiting_event" ? await getPendingWaitHook(runId, DEMO_WORKSPACE_ID) : null;
   } catch (error) {
     console.error("读取等待消息状态失败", error);
     return Response.json({ ok: false, error: "暂时无法读取等待状态，请稍后重试" }, { status: 500 });
@@ -70,7 +72,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ runId: 
     return Response.json({ ok: false, error: payloadError }, { status: 400 });
   }
   try {
-    await resumeHook(`wait:${runId}:${eventKey}`, payload.data);
+    await resumeHook(pendingHook?.hookToken ?? `wait:${runId}:${eventKey}`, payload.data);
     return Response.json({ ok: true });
   } catch (error) {
     console.error("恢复等待中的运行失败", error);

@@ -329,7 +329,8 @@ export async function agentRunWorkflow(
       if (node.type === "wait") {
         const wait = node.wait;
         if (!wait) throw new FatalError(`步骤「${node.title}」的等待设置不完整`);
-        await beginWait({ runId, node });
+        const hookToken = wait.mode === "event" ? `wait:${runId}:${node.id}:${guard}` : undefined;
+        await beginWait({ runId, node, hookToken });
         if (wait.mode === "delay") {
           if (wait.durationMs > 0) await sleep(wait.durationMs);
           const output = { resumedBy: "delay", durationMs: wait.durationMs };
@@ -349,7 +350,7 @@ export async function agentRunWorkflow(
           continue;
         }
         if (!wait.eventKey.trim()) throw new FatalError(`步骤「${node.title}」缺少消息匹配标识`);
-        const hook = createHook<Record<string, unknown>>({ token: `wait:${runId}:${wait.eventKey}` });
+        const hook = createHook<Record<string, unknown>>({ token: hookToken! });
         const resumed = wait.timeoutMs > 0
           ? await Promise.race([
               hook.then((payload) => ({ kind: "event" as const, payload })),

@@ -17,7 +17,7 @@ afterEach(async () => {
   await db.delete(runs).where(eq(runs.id, RUN_ID));
 });
 
-async function insertWaitingRun(payloadSchema: Record<string, unknown> = { type: "object" }) {
+async function insertWaitingRun(payloadSchema: Record<string, unknown> = { type: "object" }, hookToken: string | null = `wait:${RUN_ID}:wait_customer:7`) {
   await db.insert(runs).values({
     id: RUN_ID,
     workspaceId: DEMO_WORKSPACE_ID,
@@ -34,8 +34,9 @@ async function insertWaitingRun(payloadSchema: Record<string, unknown> = { type:
     nodeId: "wait_customer",
     kind: "wait.started",
     title: "等待客户补充资料",
-    data: { eventKey: "customer.profile.updated", payloadSchema },
+    data: { eventKey: "customer.profile.updated", payloadSchema, ...(hookToken ? { hookToken } : {}) },
   });
+
 }
 
 describe("外部消息恢复接口", () => {
@@ -53,7 +54,23 @@ describe("外部消息恢复接口", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
-    expect(resumeHookMock).toHaveBeenCalledWith(`wait:${RUN_ID}:customer.profile.updated`, { customerId: "C-100" });
+    expect(resumeHookMock).toHaveBeenCalledWith(`wait:${RUN_ID}:wait_customer:7`, { customerId: "C-100" });
+  });
+
+  it("仍可恢复升级前已经挂起的旧格式等待", async () => {
+    resumeHookMock.mockResolvedValue(undefined);
+    await insertWaitingRun({ type: "object" }, null);
+    const response = await POST(
+      new Request(`http://localhost/api/runs/${RUN_ID}/events/customer.profile.updated`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      }),
+      { params: Promise.resolve({ runId: RUN_ID, eventKey: "customer.profile.updated" }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(resumeHookMock).toHaveBeenCalledWith(`wait:${RUN_ID}:customer.profile.updated`, {});
   });
 
   it("消息不满足等待步骤字段结构时不会恢复", async () => {
