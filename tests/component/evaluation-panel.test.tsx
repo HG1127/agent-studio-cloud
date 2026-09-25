@@ -203,6 +203,37 @@ describe("EvaluationPanel", () => {
     expect(createMock).not.toHaveBeenCalled();
   });
 
+  it("字段路径不合法时展示具体错误且不调用保存", async () => {
+    const user = userEvent.setup();
+    render(<EvaluationPanel agentId={AGENT_ID} cases={[]} runs={[]} />);
+    await user.type(screen.getByLabelText("样例名称"), "危险路径样例");
+    await user.click(screen.getByText("字段检查（0）"));
+    await user.click(screen.getByRole("button", { name: "添加字段检查" }));
+    await user.type(screen.getByLabelText("字段检查 1 路径"), "result.constructor.value");
+    await user.click(screen.getByRole("button", { name: "添加样例" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("验收字段位置格式不正确或使用了保留名称");
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it("未使用常用检查时允许配置二十项字段检查", async () => {
+    const expectations = Array.from({ length: 20 }, (_, index) => ({
+      path: `outputs.field${index}`,
+      operator: "exists" as const,
+    }));
+    const user = userEvent.setup();
+    render(<EvaluationPanel agentId={AGENT_ID} cases={[{ ...CASES[0], expectations }]} runs={[]} />);
+    await user.click(screen.getByRole("button", { name: "编辑" }));
+
+    expect(screen.getByText("字段检查（20）")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "添加字段检查" })).toBeDisabled();
+    await user.type(screen.getByLabelText("结果应包含"), "完成");
+    await user.click(screen.getByRole("button", { name: "保存修改" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("每个样例最多可以设置 20 项结果检查");
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
   it("可以归档并恢复验收样例", async () => {
     archiveMock.mockResolvedValue({ ok: true });
     const user = userEvent.setup();

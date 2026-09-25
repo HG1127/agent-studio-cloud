@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { EvaluationExpectation as EvaluationExpectationSchema, MAX_EVALUATION_CASES, type EvaluationCaseView, type EvaluationExpectation, type EvaluationRunView } from "@/contracts/evaluation";
+import { EvaluationExpectation as EvaluationExpectationSchema, MAX_EVALUATION_CASES, MAX_EVALUATION_EXPECTATIONS, type EvaluationCaseView, type EvaluationExpectation, type EvaluationRunView } from "@/contracts/evaluation";
 import {
   createEvaluationCaseAction,
   generateEvaluationCasesAction,
@@ -36,12 +36,12 @@ function advancedDraft(expectation: EvaluationExpectation): AdvancedExpectationD
   };
 }
 
-function expectationFromDraft(draft: AdvancedExpectationDraft): EvaluationExpectation {
+function expectationFromDraft(draft: AdvancedExpectationDraft): unknown {
   if (draft.operator === "exists") return { path: draft.path.trim(), operator: "exists" };
   if (draft.operator === "contains") return { path: draft.path.trim(), operator: "contains", value: draft.valueText };
   let value: unknown = draft.valueText;
   try { value = JSON.parse(draft.valueText) as unknown; } catch { /* 普通文字按字符串比较 */ }
-  return EvaluationExpectationSchema.parse({ path: draft.path.trim(), operator: "equals", value });
+  return { path: draft.path.trim(), operator: "equals", value };
 }
 
 function expectationLabel(expectation: EvaluationExpectation): string {
@@ -128,13 +128,27 @@ export function EvaluationPanel({
       setError("包含检查必须填写预期文字");
       return;
     }
+    const parsedExpectations = advancedExpectations.map((expectation) => EvaluationExpectationSchema.safeParse(expectationFromDraft(expectation)));
+    const invalidExpectation = parsedExpectations.find((result) => !result.success);
+    if (invalidExpectation && !invalidExpectation.success) {
+      setError(invalidExpectation.error.issues[0]?.message ?? "字段检查填写不正确");
+      return;
+    }
+    const expectations = mergeCommonExpectation(
+      parsedExpectations.flatMap((result) => result.success ? [result.data] : []),
+      expectedText,
+    );
+    if (expectations.length > MAX_EVALUATION_EXPECTATIONS) {
+      setError(`每个样例最多可以设置 ${MAX_EVALUATION_EXPECTATIONS} 项结果检查`);
+      return;
+    }
     setPending(true);
     try {
       const payload = {
         agentId,
         name,
         input,
-        expectations: mergeCommonExpectation(advancedExpectations.map(expectationFromDraft), expectedText),
+        expectations,
       };
       const result = editingId
         ? await updateEvaluationCaseAction({ ...payload, caseId: editingId, expectedUpdatedAt: editingUpdatedAt })
@@ -253,7 +267,7 @@ export function EvaluationPanel({
               className="text-xs text-red-600 hover:underline">删除检查</button>
           </div>
         ))}
-        <button type="button" disabled={pending || evaluationRunning || advancedExpectations.length >= 19}
+        <button type="button" disabled={pending || evaluationRunning || advancedExpectations.length >= MAX_EVALUATION_EXPECTATIONS - (expectedText.trim() ? 1 : 0)}
           onClick={() => setAdvancedExpectations((current) => [...current, { path: "", operator: "exists", valueText: "" }])}
           className="mt-3 rounded-md border border-gray-300 px-2.5 py-1.5 text-xs disabled:text-gray-400">添加字段检查</button>
       </details>

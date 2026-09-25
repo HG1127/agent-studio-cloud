@@ -4,6 +4,7 @@ import { RunInputPayload } from "@/contracts/run";
 const RESERVED_PATH_SEGMENTS: ReadonlySet<string> = new Set(["__proto__", "prototype", "constructor"]);
 
 export const MAX_EVALUATION_CASES = 100;
+export const MAX_EVALUATION_EXPECTATIONS = 20;
 const MAX_EVALUATION_CASE_BYTES = 128 * 1024;
 
 function evaluationCaseSizeIssue(value: unknown): string | null {
@@ -17,7 +18,7 @@ function evaluationCaseSizeIssue(value: unknown): string | null {
 }
 
 export const EvaluationExpectation = z.object({
-  path: z.string().max(200).refine((path) => !path || path.split(".").every((segment) => segment && !RESERVED_PATH_SEGMENTS.has(segment)), "验收字段位置不能使用保留名称").default(""),
+  path: z.string().max(200, "验收字段位置不能超过 200 个字符").refine((path) => !path || path.split(".").every((segment) => segment && !RESERVED_PATH_SEGMENTS.has(segment)), "验收字段位置格式不正确或使用了保留名称").default(""),
   operator: z.enum(["equals", "contains", "exists"]),
   value: z.json().optional(),
 }).superRefine((expectation, context) => {
@@ -34,7 +35,7 @@ const EvaluationCaseFields = z.object({
   agentId: z.string().uuid(),
   name: z.string().trim().min(1).max(80),
   input: RunInputPayload,
-  expectations: z.array(EvaluationExpectation).max(20).default([]),
+  expectations: z.array(EvaluationExpectation).max(MAX_EVALUATION_EXPECTATIONS).default([]),
 });
 export const EvaluationCaseCreateInput = EvaluationCaseFields.superRefine((value, ctx) => {
   const issue = evaluationCaseSizeIssue(value);
