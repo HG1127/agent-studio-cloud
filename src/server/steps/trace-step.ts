@@ -32,6 +32,12 @@ function boundedText(value: string | null | undefined, maxLength: number): strin
   return value.length <= maxLength ? value : `${value.slice(0, maxLength - 1)}…`;
 }
 
+function observableTraceData(data: Record<string, unknown> | null): Record<string, unknown> | null {
+  if (!data) return null;
+  const visible = Object.fromEntries(Object.entries(data).filter(([key]) => key !== "_dedupeKey"));
+  return Object.keys(visible).length > 0 ? visible : null;
+}
+
 export async function appendTrace(event: AppendTraceInput): Promise<void> {
   "use step";
   const at = new Date();
@@ -90,7 +96,7 @@ export async function appendTrace(event: AppendTraceInput): Promise<void> {
     return inserted.seq;
   }), "运行轨迹暂时无法保存，请稍后重试");
   if (seq === null) return;
-  const payload = { seq, ...base, at: at.toISOString() };
+  const payload = { seq, ...base, data: observableTraceData(base.data), at: at.toISOString() };
   const observablePayload = redactSensitiveData(payload);
   await writeTraceStreamBestEffort(async () => {
     const writer = getWritable({ namespace: "trace" }).getWriter();

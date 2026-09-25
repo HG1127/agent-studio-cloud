@@ -59,6 +59,7 @@ describe("终态轨迹幂等写入", () => {
   it("数据库保留内部恢复数据但观测流只写脱敏副本", async () => {
     mocks.selectResults.push(
       [{ workspaceId: "workspace-1", createdBy: "user-1", status: "waiting_event" }],
+      [],
       [{ max: 0 }],
     );
 
@@ -68,18 +69,24 @@ describe("终态轨迹幂等写入", () => {
       title: "等待 authorization: Bearer private-trace-token",
       detail: "联系 person@example.com",
       data: { hookToken: "private-hook-token", customer: "person@example.com" },
+      dedupeKey: "internal-resume-token-private",
     });
 
     expect(mocks.insertValues).toHaveBeenCalledWith(expect.objectContaining({
       title: "等待 [已隐藏敏感信息]",
       detail: "联系 [已隐藏敏感信息]",
-      data: { hookToken: "private-hook-token", customer: "person@example.com" },
+      data: {
+        hookToken: "private-hook-token",
+        customer: "person@example.com",
+        _dedupeKey: "internal-resume-token-private",
+      },
     }));
     const streamed = String(mocks.writerWrite.mock.calls[0]?.[0]);
     expect(streamed).toContain("[已隐藏敏感信息]");
     expect(streamed).not.toContain("private-hook-token");
     expect(streamed).not.toContain("private-trace-token");
     expect(streamed).not.toContain("person@example.com");
+    expect(streamed).not.toContain("internal-resume-token-private");
   });
 
   it("同一种终态轨迹已经存在时不再插入或写实时流", async () => {
