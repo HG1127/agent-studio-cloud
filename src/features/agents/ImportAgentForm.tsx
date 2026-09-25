@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { importAgentAction } from "@/server/actions/import-agent";
 
-const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
+const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
 
 export function ImportAgentForm() {
   const router = useRouter();
@@ -14,7 +14,7 @@ export function ImportAgentForm() {
   async function importFile(file: File | undefined) {
     if (!file) return;
     if (file.size > MAX_IMPORT_BYTES) {
-      setError("导入文件不能超过 5MB");
+      setError("导入文件不能超过 2MB");
       return;
     }
     setPending(true);

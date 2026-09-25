@@ -48,12 +48,12 @@ describe("ImportAgentForm", () => {
     expect(screen.getByText("选择 JSON 文件")).toBeInTheDocument();
   });
 
-  it("拒绝超过 5MB 的定义文件", async () => {
+  it("拒绝超过 2MB 的定义文件", async () => {
     const user = userEvent.setup();
     render(<ImportAgentForm />);
-    const file = new File([new Uint8Array(5 * 1024 * 1024 + 1)], "large.json", { type: "application/json" });
+    const file = new File([new Uint8Array(2 * 1024 * 1024 + 1)], "large.json", { type: "application/json" });
     await user.upload(screen.getByLabelText("选择助手定义文件"), file);
-    expect(await screen.findByRole("alert")).toHaveTextContent("不能超过 5MB");
+    expect(await screen.findByRole("alert")).toHaveTextContent("不能超过 2MB");
     expect(importMock).not.toHaveBeenCalled();
   });
 });

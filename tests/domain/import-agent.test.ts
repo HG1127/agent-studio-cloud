@@ -4,6 +4,7 @@ import { WorkflowDraft } from "@/contracts/workflow";
 import {
   agentImportSizeIssue,
   importedCollaborationKeys,
+  importedWorkflowIssue,
   MAX_AGENT_IMPORT_BYTES,
   normalizeAgentImport,
   rebindImportedWorkflow,
@@ -22,7 +23,7 @@ const workflow = WorkflowDraft.parse({
 
 describe("助手导入格式归一化", () => {
   it("服务端拒绝超大或无法序列化的导入内容", () => {
-    expect(agentImportSizeIssue({ text: "x".repeat(MAX_AGENT_IMPORT_BYTES) })).toBe("导入文件不能超过 5MB");
+    expect(agentImportSizeIssue({ text: "x".repeat(MAX_AGENT_IMPORT_BYTES) })).toBe("导入文件不能超过 2MB");
     const circular: Record<string, unknown> = {};
     circular.self = circular;
     expect(agentImportSizeIssue(circular)).toBe("导入内容不是有效的 JSON");
@@ -69,6 +70,25 @@ describe("助手导入格式归一化", () => {
 
   it("拒绝未知文件格式", () => {
     expect(normalizeAgentImport({ format: "unknown", formatVersion: 1 })).toBeNull();
+  });
+
+  it("拒绝断链或包含不安全步骤标识的流程", () => {
+    expect(importedWorkflowIssue(WorkflowDraft.parse({
+      ...workflow,
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "missing" },
+        done: { id: "done", title: "结束", type: "end", next: null },
+      },
+    }))).toBe("步骤“开始”的正常路径指向了不存在的步骤");
+
+    expect(importedWorkflowIssue(WorkflowDraft.parse({
+      ...workflow,
+      startNodeId: "unsafe.node",
+      nodes: {
+        "unsafe.node": { id: "unsafe.node", title: "开始", type: "trigger", next: "done" },
+        done: { id: "done", title: "结束", type: "end", next: null },
+      },
+    }))).toBe("步骤“开始”的标识包含不安全字符");
   });
 
   it("导入副本重绑定根助手并清理当前工作区不存在的协作引用", () => {

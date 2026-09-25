@@ -1,19 +1,28 @@
 import { AgentImportFile } from "@/contracts/agent";
 import type { WorkflowDraft } from "@/contracts/workflow";
+import { validateOutputContract } from "@/server/domain/runtime/output-contract";
+import { validateWaitContracts } from "@/server/domain/runtime/wait-contract";
+import { validateWorkflowRoutes } from "@/server/domain/runtime/workflow-routes";
 import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
 
-export const MAX_AGENT_IMPORT_BYTES = 5 * 1024 * 1024;
+export const MAX_AGENT_IMPORT_BYTES = 2 * 1024 * 1024;
 
 export function agentImportSizeIssue(input: unknown): string | null {
   try {
     const serialized = JSON.stringify(input);
     if (serialized === undefined) return "导入内容不是有效的 JSON";
     return new TextEncoder().encode(serialized).byteLength > MAX_AGENT_IMPORT_BYTES
-      ? "导入文件不能超过 5MB"
+      ? "导入文件不能超过 2MB"
       : null;
   } catch {
     return "导入内容不是有效的 JSON";
   }
+}
+
+export function importedWorkflowIssue(workflow: WorkflowDraft): string | null {
+  return validateWorkflowRoutes(workflow)
+    ?? validateOutputContract(workflow.outputContract?.fields ?? [], workflow.nodes)
+    ?? validateWaitContracts(workflow.nodes);
 }
 
 export interface NormalizedAgentImport {
