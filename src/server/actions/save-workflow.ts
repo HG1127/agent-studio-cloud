@@ -13,6 +13,7 @@ import { validateOutputContract } from "@/server/domain/runtime/output-contract"
 import { validateWaitContracts } from "@/server/domain/runtime/wait-contract";
 import { validateWorkflowRoutes } from "@/server/domain/runtime/workflow-routes";
 import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
+import { validationMessage } from "@/server/domain/validation-message";
 
 export async function saveWorkflowAction(agentId: string, draft: WorkflowDraft): Promise<SaveWorkflowResult> {
   if (!z.string().uuid().safeParse(agentId).success) {
@@ -20,7 +21,10 @@ export async function saveWorkflowAction(agentId: string, draft: WorkflowDraft):
   }
   const parsed = WorkflowDraft.safeParse(draft);
   if (!parsed.success) {
-    return { ok: false, error: "流程草稿没有通过保存校验，请检查各步骤内容后重试" };
+    return {
+      ok: false,
+      error: validationMessage(parsed.error, "流程草稿没有通过保存校验，请检查各步骤内容后重试"),
+    };
   }
   const outputError = validateOutputContract(parsed.data.outputContract?.fields ?? [], parsed.data.nodes);
   if (outputError) return { ok: false, error: outputError };

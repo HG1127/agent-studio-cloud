@@ -17,12 +17,15 @@ import { markEvaluationStartFailure, reconcileTerminalEvaluationRun } from "@/se
 import { prepareEvaluationRun } from "@/server/services/evaluation-start";
 import { startRunCore } from "@/server/services/start-run-core";
 import { runBounded } from "@/server/domain/run-bounded";
+import { validationMessage } from "@/server/domain/validation-message";
 
 const EVALUATION_START_CONCURRENCY = 5;
 
 export async function createEvaluationCaseAction(input: unknown): Promise<EvaluationActionResult> {
   const parsed = EvaluationCaseCreateInput.safeParse(input);
-  if (!parsed.success) return { ok: false, error: "验收样例填写不完整，请检查后重试" };
+  if (!parsed.success) {
+    return { ok: false, error: validationMessage(parsed.error, "验收样例填写不完整，请检查后重试") };
+  }
   try {
     const result = await db.transaction(async (tx) => {
       const [agent] = await tx.select({ id: agents.id }).from(agents).where(and(
@@ -60,7 +63,9 @@ export async function createEvaluationCaseAction(input: unknown): Promise<Evalua
 
 export async function updateEvaluationCaseAction(input: unknown): Promise<EvaluationActionResult> {
   const parsed = EvaluationCaseUpdateInput.safeParse(input);
-  if (!parsed.success) return { ok: false, error: "验收样例填写不完整，请检查后重试" };
+  if (!parsed.success) {
+    return { ok: false, error: validationMessage(parsed.error, "验收样例填写不完整，请检查后重试") };
+  }
   try {
     const rows = await db.transaction(async (tx) => {
       const [agent] = await tx.select({ id: agents.id }).from(agents).where(and(
