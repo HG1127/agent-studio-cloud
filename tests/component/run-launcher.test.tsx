@@ -33,6 +33,19 @@ describe("RunLauncher", () => {
     expect(screen.getByLabelText("运行输入（JSON）")).toHaveValue("{}");
   });
 
+  it("已发布版本没有声明字段时仍提供通用输入入口", async () => {
+    startRunMock.mockResolvedValue({ ok: true, runId: RUN_ID });
+    const user = userEvent.setup();
+    render(<RunLauncher agentId={AGENT_ID} inputFields={[]} />);
+    expect(screen.getByLabelText("运行输入（JSON）")).toHaveValue("{}");
+    fillInput('{"question":"请生成本周报告"}');
+    await user.click(screen.getByRole("button", { name: "运行此助手" }));
+    await waitFor(() => expect(startRunMock).toHaveBeenCalledWith({
+      agentId: AGENT_ID,
+      input: { question: "请生成本周报告" },
+    }));
+  });
+
   it("非法 JSON 提示中文错误且不发请求", async () => {
     const user = userEvent.setup();
     render(<RunLauncher agentId={AGENT_ID} />);

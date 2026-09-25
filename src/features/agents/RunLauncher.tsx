@@ -13,9 +13,10 @@ export function RunLauncher({ agentId, inputFields }: { agentId: string; inputFi
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
+  const usesFieldForm = Boolean(inputFields?.length);
 
   function parseInput(): Record<string, unknown> | null {
-    if (inputFields) {
+    if (usesFieldForm && inputFields) {
       const input: Record<string, unknown> = {};
       for (const field of inputFields) {
         const raw = fieldValues[field.name] ?? "";
@@ -62,7 +63,7 @@ export function RunLauncher({ agentId, inputFields }: { agentId: string; inputFi
     setError(null);
     const input = parseInput();
     if (!input) {
-      if (!inputFields) setError("请输入正确的 JSON 格式");
+      if (!usesFieldForm) setError("请输入正确的 JSON 格式");
       return;
     }
     setPending(true);
@@ -79,7 +80,7 @@ export function RunLauncher({ agentId, inputFields }: { agentId: string; inputFi
 
   return (
     <section className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4">
-      {inputFields ? inputFields.map((field) => (
+      {usesFieldForm ? inputFields!.map((field) => (
         <label key={field.name} className="flex flex-col gap-1 text-sm text-gray-700">
           {field.label ?? field.name}{field.required ? "（必填）" : "（选填）"}
           {field.type === "boolean" ? (
