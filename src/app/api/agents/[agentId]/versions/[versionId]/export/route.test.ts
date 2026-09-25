@@ -54,4 +54,21 @@ describe("冻结版本导出", () => {
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({ ok: false, error: "找不到可导出的版本" });
   });
+
+  it("历史版本的助手名称不符合当前格式时不抛出 500", async () => {
+    getSource.mockResolvedValueOnce({
+      ...(await getSource()),
+      agentName: " ",
+    });
+
+    const response = await GET(new Request("http://localhost"), {
+      params: Promise.resolve({ agentId: AGENT_ID, versionId: VERSION_ID }),
+    });
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "版本资料不符合当前导出格式，请先检查助手名称",
+    });
+  });
 });

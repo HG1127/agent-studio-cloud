@@ -16,7 +16,7 @@ export async function GET(_request: Request, context: { params: Promise<{ agentI
   if (!source || !manifest?.success) {
     return Response.json({ ok: false, error: "找不到可导出的版本" }, { status: 404 });
   }
-  const payload = VersionExportFile.parse({
+  const payload = VersionExportFile.safeParse({
     format: "agent-studio-cloud-version",
     formatVersion: 1,
     exportedAt: new Date().toISOString(),
@@ -24,8 +24,14 @@ export async function GET(_request: Request, context: { params: Promise<{ agentI
     version: { number: source.version, status: source.status, createdAt: source.createdAt.toISOString() },
     manifest: manifest.data,
   });
+  if (!payload.success) {
+    return Response.json(
+      { ok: false, error: "版本资料不符合当前导出格式，请先检查助手名称" },
+      { status: 422 },
+    );
+  }
   const filename = `${safeFilename(source.agentName)}-版本-${source.version}.json`;
-  return new Response(JSON.stringify(payload, null, 2), {
+  return new Response(JSON.stringify(payload.data, null, 2), {
     headers: {
       "content-type": "application/json; charset=utf-8",
       "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,

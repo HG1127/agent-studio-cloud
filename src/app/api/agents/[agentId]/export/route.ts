@@ -8,7 +8,7 @@ export async function GET(_request: Request, context: { params: Promise<{ agentI
   const { agentId } = await context.params;
   const detail = await getAgentDetail(agentId, DEMO_WORKSPACE_ID);
   if (!detail?.draft) return Response.json({ ok: false, error: "找不到可导出的助手流程" }, { status: 404 });
-  const payload = AgentExportFile.parse({
+  const payload = AgentExportFile.safeParse({
     format: "agent-studio-cloud",
     formatVersion: 1,
     exportedAt: new Date().toISOString(),
@@ -19,8 +19,14 @@ export async function GET(_request: Request, context: { params: Promise<{ agentI
     },
     workflow: detail.draft,
   });
+  if (!payload.success) {
+    return Response.json(
+      { ok: false, error: "助手资料不符合当前导出格式，请先检查名称、说明和业务目标" },
+      { status: 422 },
+    );
+  }
   const filename = `${detail.agent.name.replace(/[^\p{L}\p{N}._-]+/gu, "-").slice(0, 50) || "agent"}.json`;
-  return new Response(JSON.stringify(payload, null, 2), {
+  return new Response(JSON.stringify(payload.data, null, 2), {
     headers: {
       "content-type": "application/json; charset=utf-8",
       "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
