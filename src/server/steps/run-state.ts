@@ -2,7 +2,7 @@
 // 运行状态机步骤：initializeRun / persistStep / persistContext / finalizeRun / failRun。
 // 全部落在 runs / run_steps 两张表，状态机为 queued→running→completed|failed，中间可暂停等待确认或外部消息。
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
-import { FatalError } from "workflow";
+import { FatalError, getStepMetadata } from "workflow";
 import type { WorkflowDraft } from "@/contracts/workflow";
 import { db } from "@/lib/db";
 import { approvals, runSteps, runs } from "@/db/schema";
@@ -236,14 +236,32 @@ export async function failRun(runId: string, error: string): Promise<void> {
 // 等待结束后把 run 拉回 running 并留下持久轨迹（瞬态状态不可断言，轨迹可）
 export async function markRunRunning(runId: string): Promise<boolean> {
   "use step";
+  let workflowStepId = "direct-call";
+  try {
+    workflowStepId = getStepMetadata().stepId;
+  } catch {
+    // 集成测试和运维直调不在 Workflow 上下文中，仍需得到稳定标识。
+  }
   const now = new Date();
   const updated = await db
     .update(runs)
     .set({ status: "running", updatedAt: now })
     .where(and(eq(runs.id, runId), inArray(runs.status, ["waiting_approval", "waiting_event"])))
     .returning({ id: runs.id });
-  // 早退在轨迹前：挂起期间 run 已被置终态（手工 DB 路径可达）时不得翻回 running，终态行也不留 run.resumed
-  if (updated.length === 0) return false;
-  await appendTrace({ runId, kind: "run.resumed", title: "流程继续执行" });
+  if (updated.length === 0) {
+    const [current] = await db
+      .select({ status: runs.status })
+      .from(runs)
+      .where(eq(runs.id, runId))
+      .limit(1);
+    // 状态已由本步骤的上一次尝试切换成功时，继续补齐轨迹；终态仍严格拒绝恢复。
+    if (current?.status !== "running") return false;
+  }
+  await appendTrace({
+    runId,
+    kind: "run.resumed",
+    title: "流程继续执行",
+    dedupeKey: `run-resumed:${workflowStepId}`,
+  });
   return true;
 }

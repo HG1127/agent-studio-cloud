@@ -28,7 +28,7 @@ vi.mock("@/server/services/evaluation-state", () => ({
   reconcileTerminalEvaluationRun: mocks.reconcileTerminalEvaluationRun,
 }));
 
-import { finalizeRun, persistContext } from "@/server/steps/run-state";
+import { finalizeRun, markRunRunning, persistContext } from "@/server/steps/run-state";
 
 describe("运行终态步骤", () => {
   beforeEach(() => {
@@ -68,5 +68,21 @@ describe("运行终态步骤", () => {
 
     await expect(persistContext("run-1", { answer: "late" }))
       .rejects.toThrow("运行已经结束，忽略迟到的上下文");
+  });
+
+  it("恢复状态已提交但轨迹失败时允许重入补齐轨迹", async () => {
+    mocks.returning
+      .mockResolvedValueOnce([{ id: "run-1" }])
+      .mockResolvedValueOnce([]);
+    mocks.selectRows.mockResolvedValueOnce([{ status: "running" }]);
+    mocks.appendTrace.mockRejectedValueOnce(new Error("轨迹存储暂时不可用"));
+
+    await expect(markRunRunning("run-1")).rejects.toThrow("轨迹存储暂时不可用");
+    await expect(markRunRunning("run-1")).resolves.toBe(true);
+
+    const resumed = mocks.appendTrace.mock.calls.filter(([event]) => event.kind === "run.resumed");
+    expect(resumed).toHaveLength(2);
+    expect(resumed[0][0].dedupeKey).toBe("run-resumed:direct-call");
+    expect(resumed[1][0].dedupeKey).toBe(resumed[0][0].dedupeKey);
   });
 });

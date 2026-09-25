@@ -1,6 +1,6 @@
 "use step";
 import { and, eq, inArray } from "drizzle-orm";
-import { FatalError } from "workflow";
+import { FatalError, getStepMetadata } from "workflow";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { runs } from "@/db/schema";
 import { db } from "@/lib/db";
@@ -16,8 +16,17 @@ function waitDescription(node: WorkflowNode): string {
   return wait.eventLabel ? `等待消息：${wait.eventLabel}` : `等待消息：${wait.eventKey}`;
 }
 
+function workflowStepId(): string {
+  try {
+    return getStepMetadata().stepId;
+  } catch {
+    return "direct-call";
+  }
+}
+
 export async function beginWait(args: { runId: string; node: WorkflowNode; hookToken?: string }): Promise<void> {
   "use step";
+  const stepId = workflowStepId();
   if (!args.node.wait) throw new FatalError(`步骤「${args.node.title}」的等待设置不完整`);
   await persistStep({
     runId: args.runId,
@@ -47,6 +56,7 @@ export async function beginWait(args: { runId: string; node: WorkflowNode; hookT
           submissionToken,
         }
       : null,
+    dedupeKey: `wait-started:${stepId}`,
   });
 }
 
@@ -57,6 +67,7 @@ export async function completeWait(args: {
   timedOut?: boolean;
 }): Promise<void> {
   "use step";
+  const stepId = workflowStepId();
   await persistStep({
     runId: args.runId,
     nodeId: args.node.id,
@@ -73,5 +84,6 @@ export async function completeWait(args: {
     kind: args.timedOut ? "wait.timed_out" : "wait.resumed",
     level: args.timedOut ? "warn" : "info",
     title: args.timedOut ? `「${args.node.title}」等待超时` : `「${args.node.title}」已继续`,
+    dedupeKey: `wait-completed:${stepId}`,
   });
 }
