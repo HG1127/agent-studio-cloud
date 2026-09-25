@@ -41,6 +41,26 @@ export async function decideApprovalAction(
     if (run.status !== "waiting_approval") {
       return { ok: false, error: "这次运行已不再等待确认，请刷新页面查看最新状态" };
     }
+    if (parsedInput.data.resumeOnly) {
+      if (row.status === "pending" || row.status !== parsedInput.data.decision) {
+        return { ok: false, error: "确认记录与继续请求不一致，请刷新页面后重试" };
+      }
+      try {
+        await resumeHook(`approval:${row.id}`, {
+          decision: row.status,
+          note: row.note ?? undefined,
+        });
+      } catch (error) {
+        console.error("继续已确认的工作流失败", error);
+        return { ok: false, error: "确认已保留，但运行暂时无法继续，请稍后重试" };
+      }
+      revalidatePath(`/runs/${runId}`);
+      revalidatePath("/runs");
+      revalidatePath("/");
+      revalidatePath(`/agents/${run.agentId}`);
+      revalidatePath("/agents");
+      return { ok: true };
+    }
     const approved = parsedInput.data.decision === "approved";
     const note = parsedInput.data.note?.trim() ? parsedInput.data.note.trim() : null;
     const now = new Date();

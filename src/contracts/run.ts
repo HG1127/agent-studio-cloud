@@ -206,6 +206,7 @@ export type ApprovalView = z.infer<typeof ApprovalView>;
 export const ApprovalDecisionInput = z.object({
   decision: z.enum(["approved", "rejected"]),
   note: z.string().max(500).optional(),
+  resumeOnly: z.boolean().optional(),
 });
 export type ApprovalDecisionInput = z.infer<typeof ApprovalDecisionInput>;
 

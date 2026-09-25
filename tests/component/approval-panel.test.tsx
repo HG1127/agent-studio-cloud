@@ -134,4 +134,22 @@ describe("ApprovalPanel", () => {
     expect(screen.getByText("未获确认")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "批准" })).not.toBeInTheDocument();
   });
+
+  it("确认已记录但运行未继续时可以恢复", async () => {
+    actionMock.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    render(<ApprovalPanel runId={RUN_ID} approval={DECIDED} recoverable />);
+
+    expect(screen.getByText("确认结果已保存，但运行还没有继续。")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "继续运行" }));
+
+    await waitFor(() => {
+      expect(actionMock).toHaveBeenCalledWith(RUN_ID, DECIDED.id, {
+        decision: "approved",
+        note: "同意执行",
+        resumeOnly: true,
+      });
+    });
+    expect(refreshMock).toHaveBeenCalledTimes(1);
+  });
 });

@@ -6,12 +6,39 @@ import type { ApprovalReview, ApprovalView } from "@/contracts/run";
 import { decideApprovalAction } from "@/server/actions/decide-approval";
 
 // 审批面板：runs 详情页（Task 13）挂载。界面只显示业务信息，不出现内部标识。
-export function ApprovalPanel({ runId, approval }: { runId: string; approval: ApprovalView }) {
+export function ApprovalPanel({
+  runId,
+  approval,
+  recoverable = false,
+}: {
+  runId: string;
+  approval: ApprovalView;
+  recoverable?: boolean;
+}) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState<"approved" | "rejected" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   if (approval.status !== "pending") {
+    const decidedStatus = approval.status;
+    async function handleResume() {
+      setSubmitting(decidedStatus);
+      setError(null);
+      try {
+        const result = await decideApprovalAction(runId, approval.id, {
+          decision: decidedStatus,
+          note: approval.note ?? undefined,
+          resumeOnly: true,
+        });
+        if (result.ok) router.refresh();
+        else setError(result.error);
+      } catch {
+        setError("继续运行失败，请检查网络后重试");
+      } finally {
+        setSubmitting(null);
+      }
+    }
+
     return (
       <section className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-4">
         <h2 className="text-sm font-semibold">{approval.status === "approved" ? "已确认" : "未获确认"}</h2>
@@ -23,6 +50,20 @@ export function ApprovalPanel({ runId, approval }: { runId: string; approval: Ap
           <p className="text-sm text-gray-500">
             备注：<span>{approval.note}</span>
           </p>
+        ) : null}
+        {recoverable ? (
+          <div className="flex flex-col gap-2 rounded-md border border-amber-200 bg-amber-50 p-3">
+            <p className="text-sm text-amber-900">确认结果已保存，但运行还没有继续。</p>
+            {error ? <p role="alert" className="text-sm text-red-700">{error}</p> : null}
+            <button
+              type="button"
+              disabled={submitting !== null}
+              onClick={handleResume}
+              className="w-fit rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:bg-gray-400"
+            >
+              {submitting ? "正在继续…" : "继续运行"}
+            </button>
+          </div>
         ) : null}
       </section>
     );

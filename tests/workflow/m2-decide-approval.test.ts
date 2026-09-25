@@ -77,4 +77,25 @@ describe("审批决定的原子性", () => {
     const [approval] = await db.select().from(approvals).where(eq(approvals.id, APPROVAL_ID)).limit(1);
     expect(approval.status).toBe("approved");
   });
+
+  it("确认已保存但工作流未恢复时可以按原决定继续", async () => {
+    await insertPendingApproval();
+    await db.update(approvals).set({
+      status: "approved",
+      note: "同意执行",
+      decidedAt: new Date(),
+    }).where(eq(approvals.id, APPROVAL_ID));
+    resumeHookMock.mockResolvedValue(undefined);
+
+    const result = await decideApprovalAction(RUN_ID, APPROVAL_ID, {
+      decision: "approved",
+      resumeOnly: true,
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(resumeHookMock).toHaveBeenCalledWith(`approval:${APPROVAL_ID}`, {
+      decision: "approved",
+      note: "同意执行",
+    });
+  });
 });

@@ -66,6 +66,9 @@ export async function RunDetail({ runId }: { runId: string }) {
   // 待确认的置顶，已决定的按时间在后
   const pendingApprovals = live ? approvals.filter((approval) => approval.status === "pending") : [];
   const decidedApprovals = approvals.filter((approval) => approval.status !== "pending");
+  const recoverableApprovalId = run.status === "waiting_approval" && pendingApprovals.length === 0
+    ? decidedApprovals.at(-1)?.id ?? null
+    : null;
   const stepTitleByNode = new Map(steps.map((step) => [step.nodeId, step.nodeTitle]));
   const contractedInputs = run.inputContract.fields
     .filter((field) => Object.prototype.hasOwnProperty.call(run.input, field.name))
@@ -256,7 +259,12 @@ export async function RunDetail({ runId }: { runId: string }) {
           {/* 普通区块标签：面板自身已带「已确认/未获确认」标题，避免标题嵌套重复 */}
           <p className="text-sm font-semibold">确认记录</p>
           {decidedApprovals.map((approval) => (
-            <ApprovalPanel key={approval.id} runId={runId} approval={approval} />
+            <ApprovalPanel
+              key={approval.id}
+              runId={runId}
+              approval={approval}
+              recoverable={approval.id === recoverableApprovalId}
+            />
           ))}
         </section>
       ) : null}
