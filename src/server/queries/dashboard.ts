@@ -18,6 +18,7 @@ export async function getDashboardSummary() {
       .innerJoin(agents, eq(agents.id, agentVersions.agentId))
       .where(and(
         eq(agentVersions.workspaceId, DEMO_WORKSPACE_ID),
+        eq(agents.workspaceId, DEMO_WORKSPACE_ID),
         eq(agentVersions.status, "production"),
         isNull(agents.archivedAt),
       )),

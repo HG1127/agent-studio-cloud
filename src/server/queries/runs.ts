@@ -37,6 +37,7 @@ export async function listRuns(
     .innerJoin(agents, eq(agents.id, runs.agentId))
     .where(and(
       eq(runs.workspaceId, workspaceId),
+      eq(agents.workspaceId, workspaceId),
       filters.status ? eq(runs.status, filters.status) : undefined,
       filters.sourceType ? eq(runs.sourceType, filters.sourceType) : undefined,
       filters.agentId ? eq(runs.agentId, filters.agentId) : undefined,
@@ -63,7 +64,7 @@ export async function listRunAgentOptions(workspaceId: string): Promise<RunAgent
     .selectDistinct({ id: agents.id, name: agents.name })
     .from(agents)
     .innerJoin(runs, eq(runs.agentId, agents.id))
-    .where(eq(runs.workspaceId, workspaceId))
+    .where(and(eq(runs.workspaceId, workspaceId), eq(agents.workspaceId, workspaceId)))
     .orderBy(asc(agents.name));
   return rows.map((row) => RunAgentOption.parse(row));
 }
@@ -85,6 +86,7 @@ export async function listChildRuns(parentRunId: string, workspaceId: string): P
     .innerJoin(agents, eq(agents.id, runs.agentId))
     .where(and(
       eq(runs.workspaceId, workspaceId),
+      eq(agents.workspaceId, workspaceId),
       or(
         like(runs.sourceKey, `agent-call:${parentRunId}:%`),
         like(runs.sourceKey, `handoff:${parentRunId}:%`),
@@ -112,6 +114,7 @@ export async function getPendingWait(runId: string, workspaceId: string): Promis
     .where(and(
       eq(traceEvents.runId, runId),
       eq(traceEvents.workspaceId, workspaceId),
+      eq(runs.workspaceId, workspaceId),
       eq(traceEvents.kind, "wait.started"),
       eq(runs.status, "waiting_event"),
     ))
@@ -138,6 +141,7 @@ export async function getPendingWaitHook(runId: string, workspaceId: string): Pr
     .where(and(
       eq(traceEvents.runId, runId),
       eq(traceEvents.workspaceId, workspaceId),
+      eq(runs.workspaceId, workspaceId),
       eq(traceEvents.kind, "wait.started"),
       eq(runs.status, "waiting_event"),
     ))
@@ -160,7 +164,7 @@ export async function getRunView(runId: string, workspaceId: string): Promise<Ru
     .select({ run: runs, agentName: agents.name, agentArchivedAt: agents.archivedAt })
     .from(runs)
     .innerJoin(agents, eq(agents.id, runs.agentId))
-    .where(and(eq(runs.id, runId), eq(runs.workspaceId, workspaceId)))
+    .where(and(eq(runs.id, runId), eq(runs.workspaceId, workspaceId), eq(agents.workspaceId, workspaceId)))
     .limit(1);
   if (!row) return null;
   const parentRunId = ["agent_call", "handoff"].includes(row.run.sourceType)
