@@ -47,7 +47,7 @@ function countOccurrences(haystack: string, needle: string): number {
   return count;
 }
 
-function hanTrigrams(token: string): string[] {
+export function hanTrigrams(token: string): string[] {
   const grams = new Set<string>();
   for (const match of token.matchAll(/\p{Script=Han}{3,}/gu)) {
     const chars = Array.from(match[0]);

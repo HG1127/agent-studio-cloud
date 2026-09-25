@@ -1,4 +1,4 @@
-import { tokenize } from "@/server/domain/knowledge/search";
+import { hanTrigrams, tokenize } from "@/server/domain/knowledge/search";
 
 export interface MemoryCandidate {
   content: string;
@@ -23,7 +23,11 @@ export function selectRelevantMemories<T extends MemoryCandidate>(query: string,
   return newestFirst
     .map((memory) => {
       const text = memory.content.toLowerCase();
-      const score = tokens.reduce((sum, token) => sum + occurrences(text, token), 0);
+      const score = tokens.reduce((sum, token) => {
+        const exact = occurrences(text, token);
+        if (exact > 0) return sum + exact * 3;
+        return sum + hanTrigrams(token).reduce((subtotal, gram) => subtotal + occurrences(text, gram), 0);
+      }, 0);
       return { memory, score };
     })
     .filter((item) => item.score > 0)

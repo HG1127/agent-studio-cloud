@@ -36,6 +36,13 @@ describe("长期经验运行逻辑", () => {
     expect(selectRelevantMemories("", [older, newer], 1)).toEqual([newer]);
   });
 
+  it("中文任务句包含额外指令词时仍能找到中间的经验主题", () => {
+    const renewal = { content: "客户续约需要提前三十天沟通", createdAt: new Date("2026-01-01") };
+    const approval = { content: "采购审批需要负责人确认", createdAt: new Date("2026-02-01") };
+
+    expect(selectRelevantMemories("请参考客户续约的历史经验", [approval, renewal], 5)).toEqual([renewal]);
+  });
+
   it("显式内容来源不存在时不回退保存全部运行数据", () => {
     expect(buildMemoryContent({
       contentFrom: "missing_node",
