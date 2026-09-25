@@ -17,8 +17,17 @@ import {
   MAX_STEP_OUTPUT_BYTES,
 } from "@/server/domain/runtime/json-storage";
 
+function workflowStepId(): string {
+  try {
+    return getStepMetadata().stepId;
+  } catch {
+    return "direct-call";
+  }
+}
+
 export async function initializeRun(runId: string, draft: WorkflowDraft, startToken?: string): Promise<void> {
   "use step";
+  const stepId = workflowStepId();
   const [run] = await db
     .select({ id: runs.id, workspaceId: runs.workspaceId, status: runs.status, stepStates: runs.stepStates })
     .from(runs)
@@ -51,7 +60,17 @@ export async function initializeRun(runId: string, draft: WorkflowDraft, startTo
     if (current?.status === "running" && (
       (startToken && currentLease?.token === startToken)
       || (!startToken && !currentLease)
-    )) return;
+    )) {
+      await appendTrace({
+        runId,
+        nodeId: draft.startNodeId,
+        kind: "run.started",
+        title: "流程开始执行",
+        data: { agentName: draft.rootAgent.name },
+        dedupeKey: `run-started:${startToken ?? stepId}`,
+      });
+      return;
+    }
     throw new FatalError("运行已经结束，不能重新启动");
   }
   await appendTrace({
@@ -60,6 +79,7 @@ export async function initializeRun(runId: string, draft: WorkflowDraft, startTo
     kind: "run.started",
     title: "流程开始执行",
     data: { agentName: draft.rootAgent.name },
+    dedupeKey: `run-started:${startToken ?? stepId}`,
   });
 }
 
@@ -236,12 +256,7 @@ export async function failRun(runId: string, error: string): Promise<void> {
 // 等待结束后把 run 拉回 running 并留下持久轨迹（瞬态状态不可断言，轨迹可）
 export async function markRunRunning(runId: string): Promise<boolean> {
   "use step";
-  let workflowStepId = "direct-call";
-  try {
-    workflowStepId = getStepMetadata().stepId;
-  } catch {
-    // 集成测试和运维直调不在 Workflow 上下文中，仍需得到稳定标识。
-  }
+  const stepId = workflowStepId();
   const now = new Date();
   const updated = await db
     .update(runs)
@@ -261,7 +276,7 @@ export async function markRunRunning(runId: string): Promise<boolean> {
     runId,
     kind: "run.resumed",
     title: "流程继续执行",
-    dedupeKey: `run-resumed:${workflowStepId}`,
+    dedupeKey: `run-resumed:${stepId}`,
   });
   return true;
 }

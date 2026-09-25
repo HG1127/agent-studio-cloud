@@ -28,7 +28,13 @@ vi.mock("@/server/services/evaluation-state", () => ({
   reconcileTerminalEvaluationRun: mocks.reconcileTerminalEvaluationRun,
 }));
 
-import { finalizeRun, markRunRunning, persistContext } from "@/server/steps/run-state";
+import type { WorkflowDraft } from "@/contracts/workflow";
+import { finalizeRun, initializeRun, markRunRunning, persistContext } from "@/server/steps/run-state";
+
+const draft = {
+  startNodeId: "start",
+  rootAgent: { id: "agent-1", name: "客户助手", role: "服务客户" },
+} as WorkflowDraft;
 
 describe("运行终态步骤", () => {
   beforeEach(() => {
@@ -60,6 +66,21 @@ describe("运行终态步骤", () => {
     }));
     expect(mocks.completeEvaluationForRun).toHaveBeenCalledWith("run-1", { answer: "done" });
     expect(mocks.reconcileTerminalEvaluationRun).not.toHaveBeenCalled();
+  });
+
+  it("启动状态已提交后重入时补齐启动轨迹", async () => {
+    mocks.returning.mockResolvedValue([]);
+    mocks.selectRows
+      .mockResolvedValueOnce([{ id: "run-1", workspaceId: "workspace-1", status: "running", stepStates: {} }])
+      .mockResolvedValueOnce([{ status: "running", stepStates: {} }]);
+
+    await initializeRun("run-1", draft);
+
+    expect(mocks.appendTrace).toHaveBeenCalledWith(expect.objectContaining({
+      runId: "run-1",
+      kind: "run.started",
+      dedupeKey: "run-started:direct-call",
+    }));
   });
 
   it("运行已结束时拒绝迟到的上下文并立即停止后续执行", async () => {
