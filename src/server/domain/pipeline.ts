@@ -326,7 +326,15 @@ function inputContractFor(draft: WorkflowDraft): AgentManifest["inputContract"] 
         addInputSource(rule.source, ruleType);
       }
     }
-    if (node.type === "loop") addInputSource(node.loop?.collectionPath, "array");
+    if (node.type === "loop") {
+      const collectionPath = node.loop?.collectionPath;
+      const fallbackInputPath = collectionPath?.startsWith("context.")
+        && !collectionPath.startsWith("context.outputs.")
+        && !collectionPath.startsWith("context.currentItem.")
+        ? `input.${collectionPath.slice("context.".length)}`
+        : collectionPath;
+      addInputSource(fallbackInputPath, "array");
+    }
   }
   if (fields.length === 0) {
     fields.push({ name: "input", label: "业务输入", required: true, type: "string" });

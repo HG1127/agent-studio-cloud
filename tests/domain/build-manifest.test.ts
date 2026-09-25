@@ -125,6 +125,10 @@ describe("buildManifest", () => {
           id: "item_loop", title: "逐项处理订单", type: "loop", next: null,
           loop: { collectionPath: "input.orders", itemKey: "order", maxIterations: 20, bodyNext: "done", exitNext: "done" },
         },
+        legacy_loop: {
+          id: "legacy_loop", title: "逐项处理记录", type: "loop", next: null,
+          loop: { collectionPath: "context.records", itemKey: "record", maxIterations: 20, bodyNext: "done", exitNext: "done" },
+        },
         variable_condition: {
           id: "variable_condition", title: "判断地区", type: "condition", next: null,
           condition: {
@@ -140,6 +144,7 @@ describe("buildManifest", () => {
       { name: "approved", required: true, type: "boolean" },
       { name: "amount", required: true, type: "number" },
       { name: "orders", required: true, type: "array" },
+      { name: "records", required: true, type: "array" },
       { name: "region", required: true, type: "string" },
     ]));
     expect(buildManifest(configured, options).inputContract.fields.some((field) => field.name === "input")).toBe(false);
