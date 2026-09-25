@@ -1,3 +1,4 @@
+import { FatalError, RetryableError } from "workflow";
 import { indexKnowledgeChunks, markKnowledgeFailed, parseKnowledgeFile } from "@/server/steps/knowledge-ingest";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { safeWorkflowFailureReason } from "@/server/security/workflow-error";
@@ -23,6 +24,8 @@ export async function knowledgeIngestWorkflow(args: KnowledgeIngestArgs): Promis
     } catch (failErr) {
       console.error(`知识来源 ${args.sourceId} 写失败状态时出错：`, safeErrorForLog(failErr));
     }
-    throw err;
+    if (err instanceof FatalError || err instanceof RetryableError) throw err;
+    console.error(`知识来源 ${args.sourceId} 解析发生未知异常：`, safeErrorForLog(err));
+    throw new FatalError(reason);
   }
 }
