@@ -10,6 +10,11 @@ function typeMatches(value: unknown, type: string): boolean {
 }
 
 export function validateRunInput(input: Record<string, unknown>, fields: AgentInputField[]): string | null {
+  if (fields.length > 0) {
+    const declared = new Set(fields.map((field) => field.name));
+    const unexpected = Object.keys(input).find((key) => !declared.has(key));
+    if (unexpected) return `运行输入包含未声明字段“${unexpected}”`;
+  }
   for (const field of fields) {
     const value = input[field.name];
     const missing = !Object.prototype.hasOwnProperty.call(input, field.name) || value === null || value === undefined || (typeof value === "string" && !value.trim());
