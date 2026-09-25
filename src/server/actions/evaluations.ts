@@ -24,6 +24,7 @@ import { auditEventValues } from "@/server/audit/event-values";
 import { generateEvaluationCases } from "@/server/domain/evaluation-cases";
 import { redactCredentialData } from "@/server/domain/security/redact-sensitive";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { jsonValuesEqual } from "@/server/domain/json-value";
 
 const EVALUATION_START_CONCURRENCY = 5;
 
@@ -89,6 +90,8 @@ export async function createEvaluationCaseAction(input: unknown): Promise<Evalua
   if (!parsed.success) {
     return { ok: false, error: validationMessage(parsed.error, "验收样例填写不完整，请检查后重试") };
   }
+  const storedInput = redactCredentialData(parsed.data.input) as Record<string, unknown>;
+  const storedExpectations = redactCredentialData(parsed.data.expectations) as typeof parsed.data.expectations;
   try {
     const result = await db.transaction(async (tx) => {
       const [agent] = await tx.select({ id: agents.id, name: agents.name }).from(agents).where(and(
@@ -101,6 +104,20 @@ export async function createEvaluationCaseAction(input: unknown): Promise<Evalua
         eq(evaluationRuns.status, "running"),
       )).limit(1);
       if (running) return { ok: false as const, error: "自动验收运行期间不能修改验收样例" };
+      const duplicates = await tx
+        .select({ input: evaluationCases.input, expectations: evaluationCases.expectations })
+        .from(evaluationCases)
+        .where(and(
+          eq(evaluationCases.agentId, parsed.data.agentId),
+          eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID),
+          eq(evaluationCases.name, parsed.data.name),
+          isNull(evaluationCases.archivedAt),
+        ));
+      if (duplicates.some((testCase) =>
+        jsonValuesEqual(testCase.input, storedInput)
+        && jsonValuesEqual(testCase.expectations, storedExpectations))) {
+        return { ok: true as const };
+      }
       const [active] = await tx.select({ count: count() }).from(evaluationCases).where(and(
         eq(evaluationCases.agentId, parsed.data.agentId),
         eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID),
@@ -112,8 +129,8 @@ export async function createEvaluationCaseAction(input: unknown): Promise<Evalua
       const [created] = await tx.insert(evaluationCases).values({
         workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, agentId: parsed.data.agentId,
         name: parsed.data.name,
-        input: redactCredentialData(parsed.data.input) as Record<string, unknown>,
-        expectations: redactCredentialData(parsed.data.expectations) as typeof parsed.data.expectations,
+        input: storedInput,
+        expectations: storedExpectations,
       }).returning({ id: evaluationCases.id });
       await tx.insert(auditEvents).values(auditEventValues({
         workspaceId: DEMO_WORKSPACE_ID,

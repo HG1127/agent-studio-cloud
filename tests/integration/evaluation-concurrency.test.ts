@@ -67,6 +67,21 @@ async function insertFixture() {
 }
 
 describe("自动验收并发启动", () => {
+  it("重复保存完全相同的验收样例时复用已有记录", async () => {
+    await insertFixture();
+
+    const result = await createEvaluationCaseAction({
+      agentId: AGENT_ID,
+      name: "基础样例",
+      input: {},
+      expectations: [],
+    });
+
+    expect(result).toEqual({ ok: true });
+    const cases = await db.select().from(evaluationCases).where(eq(evaluationCases.agentId, AGENT_ID));
+    expect(cases).toHaveLength(1);
+  });
+
   it("保存和执行验收样例前隐藏凭据但保留业务信息", async () => {
     await insertFixture();
     expect(await createEvaluationCaseAction({
