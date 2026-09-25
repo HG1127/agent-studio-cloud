@@ -176,12 +176,12 @@ describe("取消运行", () => {
       {
         id: CHILD_RUN_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID,
         agentId: "00000000-0000-4000-8000-0000000000c6", versionId: "00000000-0000-4000-8000-0000000000c7",
-        status: "running", input: {}, sourceType: "agent_call", sourceKey: `agent-call:${RUN_ID}:research`,
+        workflowRunId: "workflow-child-test", status: "running", input: {}, sourceType: "agent_call", sourceKey: `agent-call:${RUN_ID}:research`,
       },
       {
         id: GRANDCHILD_RUN_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID,
         agentId: "00000000-0000-4000-8000-0000000000c8", versionId: "00000000-0000-4000-8000-0000000000c9",
-        status: "waiting_approval", input: {}, sourceType: "handoff", sourceKey: `handoff:${CHILD_RUN_ID}:delivery`,
+        workflowRunId: "workflow-grandchild-test", status: "waiting_approval", input: {}, sourceType: "handoff", sourceKey: `handoff:${CHILD_RUN_ID}:delivery`,
       },
     ]);
     await db.insert(approvals).values({
@@ -192,7 +192,12 @@ describe("取消运行", () => {
     getRunMock.mockReturnValue({ cancel: cancelMock });
 
     expect(await cancelRunAction(CHILD_RUN_ID)).toEqual({ ok: true });
-    expect(getRunMock).toHaveBeenCalledWith("workflow-cancel-test");
+    expect(getRunMock.mock.calls.map(([id]) => id)).toEqual(expect.arrayContaining([
+      "workflow-cancel-test",
+      "workflow-child-test",
+      "workflow-grandchild-test",
+    ]));
+    expect(cancelMock).toHaveBeenCalledTimes(3);
 
     const children = await db.select().from(runs).where(inArray(runs.id, [CHILD_RUN_ID, GRANDCHILD_RUN_ID]));
     expect(children).toHaveLength(2);

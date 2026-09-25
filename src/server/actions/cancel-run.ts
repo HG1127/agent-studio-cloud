@@ -15,6 +15,33 @@ import { appendTrace } from "@/server/steps/trace-step";
 
 const LIVE_STATUSES = ["queued", "running", "waiting_approval", "waiting_event"];
 
+async function listCollaborationDescendants(rootRunId: string): Promise<Array<{ id: string; workflowRunId: string | null; status: string }>> {
+  const descendants: Array<{ id: string; workflowRunId: string | null; status: string }> = [];
+  const seen = new Set([rootRunId]);
+  let parents = [rootRunId];
+  for (let depth = 0; depth < MAX_COLLABORATION_DEPTH && parents.length > 0; depth += 1) {
+    const children = await db
+      .select({ id: runs.id, workflowRunId: runs.workflowRunId, status: runs.status })
+      .from(runs)
+      .where(and(
+        eq(runs.workspaceId, DEMO_WORKSPACE_ID),
+        or(...parents.flatMap((parentId) => [
+          like(runs.sourceKey, `agent-call:${parentId}:%`),
+          like(runs.sourceKey, `handoff:${parentId}:%`),
+        ])),
+      ));
+    const fresh = children.filter((child) => !seen.has(child.id));
+    fresh.forEach((child) => seen.add(child.id));
+    descendants.push(...fresh);
+    parents = fresh.map((child) => child.id);
+  }
+  return descendants;
+}
+
+async function cancelWorkflowRuns(workflowRunIds: ReadonlyArray<string>): Promise<void> {
+  await Promise.all([...new Set(workflowRunIds)].map(cancelWorkflowRunIfPresent));
+}
+
 export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
   if (!z.string().uuid().safeParse(runId).success) return { ok: false, error: "运行信息不正确，请刷新页面后重试" };
   try {
@@ -42,7 +69,7 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
     if (!LIVE_STATUSES.includes(run.status)) return { ok: false, error: "这次运行已经结束，无法取消" };
     let rootRunId = runId;
     let root = run;
-    for (let depth = 0; depth < MAX_COLLABORATION_DEPTH && !root.workflowRunId; depth += 1) {
+    for (let depth = 0; depth < MAX_COLLABORATION_DEPTH; depth += 1) {
       if (!root.sourceKey || !["agent_call", "handoff"].includes(root.sourceType)) break;
       const parentId = parseCollaborationParentId(root);
       if (!parentId) break;
@@ -67,9 +94,16 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
       && isRunStartLeaseExpired(root.stepStates, root.updatedAt);
     if (!root.workflowRunId && !orphanedWorkflow) return { ok: false, error: "运行尚未完成启动，请稍后再试" };
 
-    if (root.workflowRunId) await cancelWorkflowRunIfPresent(root.workflowRunId);
+    const descendantsBeforeCancel = await listCollaborationDescendants(rootRunId);
+    const cancelledWorkflowIds = [
+      root.workflowRunId,
+      ...descendantsBeforeCancel
+        .filter((descendant) => LIVE_STATUSES.includes(descendant.status))
+        .map((descendant) => descendant.workflowRunId),
+    ].filter((id): id is string => Boolean(id));
+    await cancelWorkflowRuns(cancelledWorkflowIds);
     const now = new Date();
-    const updated = await db.transaction(async (tx) => {
+    const outcome = await db.transaction(async (tx) => {
       const rows = await tx
         .update(runs)
         .set({
@@ -87,10 +121,12 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
         .returning({ id: runs.id });
       if (rows.length > 0) {
         const descendantIds: string[] = [];
+        const descendantWorkflowRunIds: string[] = [];
+        const seen = new Set([rootRunId]);
         let parents = [rootRunId];
         for (let depth = 0; depth < MAX_COLLABORATION_DEPTH && parents.length > 0; depth += 1) {
           const children = await tx
-            .select({ id: runs.id })
+            .select({ id: runs.id, workflowRunId: runs.workflowRunId, status: runs.status })
             .from(runs)
             .where(and(
               eq(runs.workspaceId, DEMO_WORKSPACE_ID),
@@ -99,8 +135,14 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
                 like(runs.sourceKey, `handoff:${parentId}:%`),
               ])),
             ));
-          parents = children.map((child) => child.id).filter((id) => !descendantIds.includes(id));
-          descendantIds.push(...parents);
+          const fresh = children.filter((child) => !seen.has(child.id));
+          fresh.forEach((child) => seen.add(child.id));
+          parents = fresh.map((child) => child.id);
+          descendantIds.push(...fresh.map((child) => child.id));
+          descendantWorkflowRunIds.push(...fresh
+            .filter((child) => LIVE_STATUSES.includes(child.status))
+            .map((child) => child.workflowRunId)
+            .filter((id): id is string => Boolean(id)));
         }
         if (descendantIds.length > 0) {
           await tx
@@ -122,10 +164,11 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
               eq(approvals.status, "pending"),
             ),
           );
+        return { rows, descendantWorkflowRunIds };
       }
-      return rows;
+      return { rows, descendantWorkflowRunIds: [] as string[] };
     });
-    if (updated.length === 0) {
+    if (outcome.rows.length === 0) {
       const [current] = await db
         .select({ status: runs.status })
         .from(runs)
@@ -138,6 +181,15 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
       if (rootRunId !== runId) revalidatePath(`/runs/${rootRunId}`);
       revalidatePath("/runs");
       return { ok: true };
+    }
+    const lateWorkflowRunIds = outcome.descendantWorkflowRunIds.filter((id) => !cancelledWorkflowIds.includes(id));
+    if (lateWorkflowRunIds.length > 0) {
+      try {
+        await cancelWorkflowRuns(lateWorkflowRunIds);
+      } catch (error) {
+        // 数据库终态已经阻止后续步骤落库；这里仍尽力停止事务锁定期间刚创建的极小竞态任务。
+        console.error("停止新发现的协作子任务失败：", error);
+      }
     }
     await appendCancellationTrace(rootRunId);
     await completeEvaluationForRun(rootRunId, null, "运行已取消");
