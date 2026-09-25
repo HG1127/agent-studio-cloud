@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RunInputPayload } from "./run";
 
 const TimeSlot = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "时间格式应为 HH:MM");
 const TimeSlots = z.array(TimeSlot).min(1).max(5);
@@ -15,7 +16,7 @@ export type ScheduleSpec = z.infer<typeof ScheduleSpec>;
 export const ScheduleCreateInput = z.object({
   agentId: z.string().uuid(),
   spec: ScheduleSpec,
-  input: z.record(z.string(), z.unknown()).default({}),
+  input: RunInputPayload.default({}),
 });
 export type ScheduleCreateInput = z.infer<typeof ScheduleCreateInput>;
 

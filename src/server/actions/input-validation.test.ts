@@ -6,6 +6,7 @@ vi.mock("@/lib/db", () => ({ db: {} }));
 vi.mock("@/server/services/start-run-core", () => ({ startRunCore: vi.fn() }));
 
 import { createEvaluationCaseAction } from "@/server/actions/evaluations";
+import { createScheduleAction } from "@/server/actions/create-schedule";
 import { saveWorkflowAction } from "@/server/actions/save-workflow";
 import { startRunAction } from "@/server/actions/start-run";
 
@@ -14,6 +15,15 @@ const AGENT_ID = "00000000-0000-4000-8000-000000000001";
 describe("写入动作校验提示", () => {
   it("运行输入过大时返回具体限制", async () => {
     const result = await startRunAction({ agentId: AGENT_ID, input: { content: "x".repeat(101 * 1024) } });
+    expect(result).toEqual({ ok: false, error: "运行输入不能超过 100 KB" });
+  });
+
+  it("定时运行输入沿用同一大小限制", async () => {
+    const result = await createScheduleAction({
+      agentId: AGENT_ID,
+      spec: { kind: "interval", minutes: 5 },
+      input: { content: "x".repeat(101 * 1024) },
+    });
     expect(result).toEqual({ ok: false, error: "运行输入不能超过 100 KB" });
   });
 
