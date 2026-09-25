@@ -4,7 +4,7 @@
 import { describe, expect, it, vi } from "vitest";
 import golden1 from "../fixtures/domain/intent-golden-1.json";
 import { WorkflowDraft } from "@/contracts/workflow";
-import { bindDemoCapabilities, buildAgentDraft } from "@/server/domain/pipeline";
+import { bindDemoCapabilities, buildAgentDraft, buildManifest } from "@/server/domain/pipeline";
 
 const mocks = vi.hoisted(() => ({ compileIntentWorkflow: vi.fn() }));
 
@@ -71,6 +71,37 @@ describe("创建助手管道 buildAgentDraft", () => {
     expect(result.issues).toEqual([]);
     expect(result.diagnostics.error).toBe("模拟解析失败");
     expect(result.diagnostics.audit).toBeUndefined();
+  });
+
+  it("业务蓝图中的资料清单会生成可填写的运行输入字段", () => {
+    const result = buildAgentDraft({
+      name: "售后助手",
+      intentText: [
+        "处理售后工单并给出回复建议",
+        "触发条件：收到新工单后",
+        "需要的业务输入：工单内容、客户等级、商品信息",
+        "最终交付：回复邮件和处理记录",
+        "必须遵守：发送前必须由负责人确认",
+      ].join("\n"),
+    });
+    expect(result.draft?.variables).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "input_1", label: "工单内容", type: "string", scope: "run", required: true }),
+      expect.objectContaining({ name: "input_2", label: "客户等级" }),
+      expect.objectContaining({ name: "input_3", label: "商品信息" }),
+    ]));
+    expect(result.draft?.outputContract?.fields.length).toBeGreaterThan(0);
+    expect(JSON.stringify(result.draft?.businessRequirements)).toContain("发送前必须由负责人确认");
+    const manifest = buildManifest(result.draft!, {
+      modelId: "mock",
+      mock: true,
+      connectionId: null,
+      knowledgeSnapshot: [],
+    });
+    expect(manifest.inputContract.fields).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "input_1", label: "工单内容", required: true }),
+      expect.objectContaining({ name: "input_2", label: "客户等级", required: true }),
+      expect.objectContaining({ name: "input_3", label: "商品信息", required: true }),
+    ]));
   });
 });
 

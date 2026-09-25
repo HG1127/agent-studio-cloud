@@ -1,6 +1,6 @@
 // 创建助手的纯 domain 管道：意图文本 → 编译 → 业务落地门禁 → 复杂意图契约 → 设计审计。
-// 只做纯计算，不碰数据库；Server Action 是薄封装。trigger/outputs 创建时尚无来源
-// （蓝图问答在后续任务），先传空值，门禁按意图文本自行抽取需求。
+// 只做纯计算，不碰数据库；Server Action 是薄封装。创建页业务蓝图写入意图文本，
+// 这里把资料清单转成运行输入，其余 trigger/outputs 仍由门禁按意图文本抽取需求。
 // 发布侧纯函数也在此文件：stableStringify / buildManifest（env 由 Server Action 读取后经参数传入）。
 import { createHash } from "node:crypto";
 import { AgentManifest } from "@/contracts/manifest";
@@ -27,6 +27,31 @@ export interface AgentPipelineResult {
   diagnostics: AgentDraftDiagnostics;
 }
 
+function applyBlueprintInputs(draft: WorkflowDraft, intentText: string): void {
+  const match = /(?:^|\n)需要的业务输入[：:]\s*([^\n。；;]+)/.exec(intentText);
+  if (!match) return;
+  const labels = [
+    ...new Set(
+      match[1]
+        .split(/[、,，/]+/)
+        .map((label) => label.trim().slice(0, 200))
+        .filter(Boolean),
+    ),
+  ].slice(0, 20);
+  if (labels.length === 0) return;
+  const names = new Set(draft.variables.map((variable) => variable.name));
+  for (const [index, label] of labels.entries()) {
+    let suffix = index + 1;
+    let name = `input_${suffix}`;
+    while (names.has(name)) {
+      suffix += 1;
+      name = `input_${suffix}`;
+    }
+    names.add(name);
+    draft.variables.push({ name, label, type: "string", scope: "run", required: true });
+  }
+}
+
 export function buildAgentDraft(options: { name: string; intentText: string; capabilities?: unknown[] }): AgentPipelineResult {
   const { name, intentText } = options;
   try {
@@ -46,6 +71,7 @@ export function finalizeAgentDraft(params: {
   const { intentText, workflow, orderedSteps } = params;
   try {
     bindDemoCapabilities(workflow);
+    applyBlueprintInputs(workflow, intentText);
     const intent = { orderedSteps, trigger: undefined, outputs: [] };
     const grounded = groundBusinessWorkflow(workflow, {
       sourceText: intentText,
