@@ -1,6 +1,6 @@
 // condition-eval 纯函数单测：resolvePath 三种路径来源 + compare 9 个 operator + 未知路径。
 import { describe, expect, it } from "vitest";
-import { compare, resolvePath, type RunEvalContext } from "@/server/domain/runtime/condition-eval";
+import { compare, matchConditionRules, resolvePath, type RunEvalContext } from "@/server/domain/runtime/condition-eval";
 
 const ctx: RunEvalContext = {
   input: { city: "杭州", severity: "high", count: 3, nested: { flag: true } },
@@ -96,5 +96,30 @@ describe("compare", () => {
   });
   it("未知 operator 返回 false", () => {
     expect(compare("a", "regex", "a")).toBe(false);
+  });
+});
+
+describe("matchConditionRules", () => {
+  const rules = [
+    { source: "input.severity", operator: "eq", value: "high" },
+    { source: "input.count", operator: "gte", value: 10 },
+  ];
+
+  it("全部模式要求每条规则都满足", () => {
+    expect(matchConditionRules(rules, "all", ctx)).toBe(false);
+    expect(matchConditionRules(rules.slice(0, 1), undefined, ctx)).toBe(true);
+  });
+
+  it("任一模式只需一条规则满足", () => {
+    expect(matchConditionRules(rules, "any", ctx)).toBe(true);
+    expect(matchConditionRules([
+      { source: "input.severity", operator: "eq", value: "low" },
+      { source: "input.count", operator: "gte", value: 10 },
+    ], "any", ctx)).toBe(false);
+  });
+
+  it("空规则集合不误判为满足", () => {
+    expect(matchConditionRules([], "all", ctx)).toBe(false);
+    expect(matchConditionRules([], "any", ctx)).toBe(false);
   });
 });

@@ -53,3 +53,14 @@ export function compare(actual: unknown, operator: string, expected: unknown): b
       return false;
   }
 }
+
+export function matchConditionRules(
+  rules: Array<{ source: string; operator: string; value?: unknown }>,
+  mode: "all" | "any" | undefined,
+  ctx: RunEvalContext,
+): boolean {
+  if (rules.length === 0) return false;
+  const matches = (rule: { source: string; operator: string; value?: unknown }) =>
+    compare(resolvePath(rule.source, ctx), rule.operator, rule.value);
+  return mode === "any" ? rules.some(matches) : rules.every(matches);
+}

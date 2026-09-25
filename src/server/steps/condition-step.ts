@@ -2,7 +2,7 @@
 // 条件步骤：消费 condition-eval 纯函数，按分支规则（或默认分支）决定下一节点 id。
 import { FatalError } from "workflow";
 import type { WorkflowNode } from "@/contracts/workflow";
-import { compare, resolvePath, type RunEvalContext } from "@/server/domain/runtime/condition-eval";
+import { compare, matchConditionRules, resolvePath, type RunEvalContext } from "@/server/domain/runtime/condition-eval";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 
@@ -62,7 +62,7 @@ export async function evaluateCondition(args: EvaluateConditionInput): Promise<s
     const rules = branch.rules ?? [];
     const hit =
       rules.length > 0
-        ? rules.every((rule) => compare(resolvePath(rule.source, ctx), rule.operator, rule.value))
+        ? matchConditionRules(rules, branch.mode, ctx)
         : compare(actual, condition.operator, branch.value);
     if (hit) {
       nextId = branch.next;

@@ -31,7 +31,7 @@ export const ToolSpec = z.object({
 export const ConditionBranch = z.object({
   label: z.string(), value: z.unknown().optional(), next: z.string().nullable(),
   rules: z.array(z.object({ source: z.string(), operator: z.string(), value: z.unknown().optional() })).optional(),
-  mode: z.string().optional(),
+  mode: z.enum(["all", "any"]).optional(),
 });
 export const ParallelBranch = z.object({
   id: z.string().min(1),
