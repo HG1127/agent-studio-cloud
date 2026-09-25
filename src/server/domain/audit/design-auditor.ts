@@ -410,7 +410,12 @@ function cycleIssues(wf: AuditWorkflow): string[][] {
       if (state.get(to) === 1) {
         const idx = stack.lastIndexOf(to);
         const cyc = stack.slice(idx).concat(to);
-        const allowed = cyc.some((x) => nodes[x]?.type === "loop");
+        const cycleEdges = cyc.slice(0, -1).map((from, index) =>
+          edges.filter((edge) => edge.from === from && edge.to === cyc[index + 1]));
+        const allowed = cycleEdges.some((matches, index) =>
+          nodes[cyc[index]]?.type === "loop" && matches.some((edge) => edge.kind === "loop-body"))
+          && !cycleEdges.some((matches, index) =>
+            nodes[cyc[index]]?.type === "loop" && matches.some((edge) => edge.kind === "loop-exit"));
         if (!allowed) found.push(cyc);
       } else if (!state.get(to)) {
         dfs(to);

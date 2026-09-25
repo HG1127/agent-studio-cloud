@@ -135,6 +135,29 @@ describe("直测：结构性检查", () => {
     expect(result.issues).toContainEqual(expect.objectContaining({ code: "tool_binding", severity: "critical" }));
   });
 
+  it("只允许逐项处理入口形成受控回边，结束出口回流仍阻止发布", () => {
+    const nodes = {
+      start: { id: "start", title: "开始", type: "trigger", next: "loop" },
+      loop: {
+        id: "loop", title: "逐项处理", type: "loop", next: null,
+        loop: { collectionPath: "input.items", itemKey: "item", maxIterations: 10, bodyNext: "work", exitNext: "after" },
+      },
+      work: { id: "work", title: "处理一项", type: "ai", next: "loop" },
+      after: { id: "after", title: "结束后处理", type: "ai", next: "done" },
+      done: { id: "done", title: "结束", type: "end", next: null },
+    };
+    const controlled = auditWorkflow({
+      startNodeId: "start", rootAgent: { id: "agent" }, memoryPolicy: { taskContext: true, longTerm: false }, nodes,
+    });
+    expect(controlled.issues.some((issue) => issue.code === "uncontrolled_cycle")).toBe(false);
+
+    const exitCycle = auditWorkflow({
+      startNodeId: "start", rootAgent: { id: "agent" }, memoryPolicy: { taskContext: true, longTerm: false },
+      nodes: { ...nodes, after: { ...nodes.after, next: "loop" } },
+    });
+    expect(exitCycle.issues).toContainEqual(expect.objectContaining({ code: "uncontrolled_cycle", severity: "critical" }));
+  });
+
   it("condition 无 defaultNext：condition_default warning，issue 全字段含稳定 id 精确断言", () => {
     const out = auditWorkflow(conditionDraft, {});
     const defaults = out.issues.filter((x) => x.code === "condition_default");
