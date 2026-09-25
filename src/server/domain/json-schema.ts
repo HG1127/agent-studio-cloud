@@ -1,4 +1,5 @@
 import { jsonValuesEqual } from "@/server/domain/json-value";
+import { isSafeDataPathSegment } from "@/server/domain/runtime/data-path";
 
 function valueType(value: unknown): string {
   if (value === null) return "null";
@@ -72,6 +73,8 @@ function validateSchemaRule(schema: unknown, path: string, depth: number): strin
     if (!Array.isArray(rule.required) || rule.required.some((item) => typeof item !== "string")) return `${path}的 required 必须是字段名列表`;
     if (rule.required.length > MAX_SCHEMA_FIELDS) return `${path}的 required 不能超过 ${MAX_SCHEMA_FIELDS} 项`;
     if (new Set(rule.required).size !== rule.required.length) return `${path}的 required 不能包含重复字段`;
+    const reserved = rule.required.find((item) => !isSafeDataPathSegment(item));
+    if (reserved) return `${path}的 required 不能使用保留字段名“${reserved}”`;
   }
   if (rule.enum !== undefined) {
     if (!Array.isArray(rule.enum) || rule.enum.length === 0) return `${path}的 enum 不能为空`;
@@ -93,6 +96,7 @@ function validateSchemaRule(schema: unknown, path: string, depth: number): strin
     const entries = Object.entries(rule.properties as Record<string, unknown>);
     if (entries.length > MAX_SCHEMA_FIELDS) return `${path}的 properties 不能超过 ${MAX_SCHEMA_FIELDS} 个字段`;
     for (const [key, child] of entries) {
+      if (!isSafeDataPathSegment(key)) return `${path}的 properties 不能使用保留字段名“${key}”`;
       const error = validateSchemaRule(child, `${path}.properties.${key}`, depth + 1);
       if (error) return error;
     }
@@ -139,7 +143,7 @@ function validateValue(value: unknown, schema: unknown, path: string, depth: num
     if (typeof rule.minProperties === "number" && keys.length < rule.minProperties) return `${path}至少需要 ${rule.minProperties} 个字段`;
     if (typeof rule.maxProperties === "number" && keys.length > rule.maxProperties) return `${path}最多允许 ${rule.maxProperties} 个字段`;
     const required = Array.isArray(rule.required) ? rule.required.filter((item): item is string => typeof item === "string") : [];
-    const missing = required.find((key) => !(key in object));
+    const missing = required.find((key) => !Object.prototype.hasOwnProperty.call(object, key));
     if (missing) return `${path}.${missing}为必填字段`;
     const properties = rule.properties;
     const declared = properties && typeof properties === "object" && !Array.isArray(properties)
@@ -147,12 +151,12 @@ function validateValue(value: unknown, schema: unknown, path: string, depth: num
       : {};
     if (Object.keys(declared).length > 0) {
       for (const [key, childSchema] of Object.entries(declared)) {
-        if (!(key in object)) continue;
+        if (!Object.prototype.hasOwnProperty.call(object, key)) continue;
         const error = validateValue(object[key], childSchema, `${path}.${key}`, depth + 1);
         if (error) return error;
       }
     }
-    for (const key of keys.filter((key) => !(key in declared))) {
+    for (const key of keys.filter((key) => !Object.prototype.hasOwnProperty.call(declared, key))) {
       if (rule.additionalProperties === false) return `${path}.${key}不是允许的字段`;
       if (rule.additionalProperties && typeof rule.additionalProperties === "object") {
         const error = validateValue(object[key], rule.additionalProperties, `${path}.${key}`, depth + 1);

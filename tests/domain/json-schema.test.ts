@@ -86,6 +86,24 @@ describe("外部消息字段校验", () => {
     expect(validateJsonObjectSchema({}, { type: "object", maxProperties: -1 })).toContain("必须是非负整数");
   });
 
+  it("继承属性不能冒充必填字段，契约也不能声明保留字段名", () => {
+    expect(validateJsonObjectSchema({}, {
+      type: "object",
+      required: ["toString"],
+      properties: { toString: { type: "string" } },
+    })).toBe("消息.toString为必填字段");
+    expect(validateJsonObjectSchema({}, {
+      type: "object",
+      required: ["constructor"],
+    })).toContain("保留字段名");
+    const inherited = Object.create({ code: "INHERITED" }) as Record<string, unknown>;
+    expect(validateJsonObjectSchema(inherited, {
+      type: "object",
+      required: ["code"],
+      properties: { code: { type: "string" } },
+    })).toBe("消息.code为必填字段");
+  });
+
   it("限制外部消息正则和字段契约复杂度", () => {
     expect(validateJsonObjectSchema({}, {
       type: "object",
