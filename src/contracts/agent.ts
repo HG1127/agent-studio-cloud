@@ -3,8 +3,8 @@ import { WorkflowDraft } from "./workflow";
 import { VersionExportFile } from "./version";
 
 export const AgentCreateInput = z.object({
-  name: z.string().min(1).max(60),
-  intentText: z.string().min(10).max(2000),
+  name: z.string().trim().min(1).max(60),
+  intentText: z.string().trim().min(10).max(2000),
 });
 export type AgentCreateInput = z.infer<typeof AgentCreateInput>;
 
@@ -59,9 +59,9 @@ export const AgentExportFile = z.object({
   formatVersion: z.literal(1),
   exportedAt: z.iso.datetime(),
   agent: z.object({
-    name: z.string().min(1).max(60),
-    description: z.string().nullable(),
-    intentText: z.string().min(1).max(10000),
+    name: z.string().trim().min(1).max(60),
+    description: z.string().trim().max(200).nullable(),
+    intentText: z.string().trim().min(10).max(2000),
   }),
   workflow: WorkflowDraft,
 });

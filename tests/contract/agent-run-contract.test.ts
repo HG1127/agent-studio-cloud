@@ -19,6 +19,18 @@ describe("AgentCreateInput", () => {
     });
     expect(result.success).toBe(false);
   });
+  it("拒绝全空白名称并清理字段首尾空格", () => {
+    expect(AgentCreateInput.safeParse({
+      name: "   ",
+      intentText: "一".repeat(10),
+    }).success).toBe(false);
+
+    const result = AgentCreateInput.parse({
+      name: "  周报助手  ",
+      intentText: `  ${"一".repeat(10)}  `,
+    });
+    expect(result).toEqual({ name: "周报助手", intentText: "一".repeat(10) });
+  });
   it("拒绝 9 字意图描述", () => {
     const result = AgentCreateInput.safeParse({
       name: "周报助手",

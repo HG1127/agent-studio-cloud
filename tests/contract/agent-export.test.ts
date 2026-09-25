@@ -26,6 +26,34 @@ describe("助手导出文件契约", () => {
     expect(AgentExportFile.safeParse({ format: "agent-studio-cloud", formatVersion: 2 }).success).toBe(false);
   });
 
+  it("拒绝空白名称和超长助手资料", () => {
+    const createFile = (agent: { name: string; description: string | null; intentText: string }) => ({
+      format: "agent-studio-cloud",
+      formatVersion: 1,
+      exportedAt: "2026-09-24T00:00:00.000Z",
+      agent,
+      workflow: {
+        id: "draft-export",
+        rootAgent: { id: "agent", name: "客户助手", role: "客服" },
+        memoryPolicy: { taskContext: true, longTerm: false },
+        nodes: {
+          start: { id: "start", title: "开始", type: "trigger", next: "done" },
+          done: { id: "done", title: "结束", type: "end", next: null },
+        },
+      },
+    });
+
+    expect(AgentExportFile.safeParse(createFile({
+      name: "   ", description: null, intentText: "一".repeat(10),
+    })).success).toBe(false);
+    expect(AgentExportFile.safeParse(createFile({
+      name: "客户助手", description: "一".repeat(201), intentText: "一".repeat(10),
+    })).success).toBe(false);
+    expect(AgentExportFile.safeParse(createFile({
+      name: "客户助手", description: null, intentText: "一".repeat(2001),
+    })).success).toBe(false);
+  });
+
   it("导入契约同时接受冻结版本文件", () => {
     const workflow = AgentExportFile.parse({
       format: "agent-studio-cloud",
