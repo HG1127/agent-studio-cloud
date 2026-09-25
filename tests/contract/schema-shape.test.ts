@@ -15,6 +15,7 @@ import {
   evaluationCases,
   evaluationRuns,
   evaluationCaseResults,
+  runFeedback,
 } from "@/db/schema";
 
 function cols(table: PgTable): Record<string, Column> {
@@ -244,5 +245,19 @@ describe("M1 schema 形状", () => {
     expect(expectColumn(evaluationRuns, "versionId", "version_id", "PgUUID").notNull).toBe(true);
     expect(expectColumn(evaluationCaseResults, "evaluationRunId", "evaluation_run_id", "PgUUID").notNull).toBe(true);
     expect(expectColumn(evaluationCaseResults, "evaluationCaseId", "evaluation_case_id", "PgUUID").notNull).toBe(true);
+  });
+
+  it("运行反馈表按工作区和运行去重并关联回归样例", () => {
+    for (const prop of ["workspaceId", "createdBy", "runId", "agentId"] as const) {
+      const dbName = prop.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+      expect(expectColumn(runFeedback, prop, dbName, "PgUUID").notNull).toBe(true);
+    }
+    expect(expectColumn(runFeedback, "rating", "rating", "PgText").notNull).toBe(true);
+    expectColumn(runFeedback, "note", "note", "PgText");
+    expectColumn(runFeedback, "evaluationCaseId", "evaluation_case_id", "PgUUID");
+    expect(expectColumn(runFeedback, "createdAt", "created_at", "PgTimestamp").notNull).toBe(true);
+    expect(expectColumn(runFeedback, "updatedAt", "updated_at", "PgTimestamp").notNull).toBe(true);
+    const unique = getTableConfig(runFeedback).indexes.find((index) => index.config.unique);
+    expect(indexColumnNames(unique as Index)).toEqual(["workspace_id", "run_id"]);
   });
 });

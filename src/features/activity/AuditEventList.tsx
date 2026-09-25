@@ -24,6 +24,8 @@ const ACTION_LABELS: Record<AuditEventAction, string> = {
   "evaluation.started": "启动自动验收",
   "evaluation.completed": "完成自动验收",
   "version.promoted": "验收通过上线",
+  "run.feedback_saved": "提交运行反馈",
+  "run.feedback_regression_created": "反馈加入验收",
 };
 
 function formatTime(iso: string): string {

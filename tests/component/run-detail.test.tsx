@@ -13,12 +13,14 @@ vi.mock("@/server/queries/runs", () => ({
   getPendingWait: async () => null,
 }));
 vi.mock("@/server/queries/trace", () => ({ listRecentTrace: async () => [] }));
+vi.mock("@/server/queries/run-feedback", () => ({ getRunFeedback: async () => null }));
 vi.mock("@/features/runs/TraceTimeline", () => ({ TraceTimeline: () => null }));
 vi.mock("@/features/runs/ApprovalPanel", () => ({ ApprovalPanel: () => null }));
 vi.mock("@/features/runs/CancelRunButton", () => ({ CancelRunButton: () => null }));
 vi.mock("@/features/runs/RetryRunButton", () => ({ RetryRunButton: () => <button type="button">重新运行</button> }));
 vi.mock("@/features/runs/ResumeRunStartButton", () => ({ ResumeRunStartButton: () => <button type="button">继续启动</button> }));
 vi.mock("@/features/runs/WaitEventPanel", () => ({ WaitEventPanel: () => null }));
+vi.mock("@/features/runs/RunFeedbackPanel", () => ({ RunFeedbackPanel: () => <div>运行反馈入口</div> }));
 
 import { RunDetail } from "@/features/runs/RunDetail";
 

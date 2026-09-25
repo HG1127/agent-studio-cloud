@@ -9,3 +9,4 @@ export * from "./connections";
 export * from "./memory";
 export * from "./evaluations";
 export * from "./audit-events";
+export * from "./run-feedback";

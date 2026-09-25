@@ -8,10 +8,12 @@ import { CancelRunButton } from "@/features/runs/CancelRunButton";
 import { RetryRunButton } from "@/features/runs/RetryRunButton";
 import { CopyResultButton } from "@/features/runs/CopyResultButton";
 import { ResumeRunStartButton } from "@/features/runs/ResumeRunStartButton";
+import { RunFeedbackPanel } from "@/features/runs/RunFeedbackPanel";
 import type { RunStatus } from "@/contracts/run";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { getPendingWait, getRunView, listApprovals, listChildRuns, listRunSteps } from "@/server/queries/runs";
 import { listRecentTrace } from "@/server/queries/trace";
+import { getRunFeedback } from "@/server/queries/run-feedback";
 
 const LIVE_STATUSES: ReadonlySet<RunStatus> = new Set(["queued", "running", "waiting_approval", "waiting_event"]);
 
@@ -55,12 +57,13 @@ function fallbackResultLabel(key: string, stepTitleByNode: ReadonlyMap<string, s
 export async function RunDetail({ runId }: { runId: string }) {
   const run = await getRunView(runId, DEMO_WORKSPACE_ID);
   if (!run) notFound();
-  const [steps, approvals, trace, pendingWait, childRuns] = await Promise.all([
+  const [steps, approvals, trace, pendingWait, childRuns, feedback] = await Promise.all([
     listRunSteps(runId, DEMO_WORKSPACE_ID),
     listApprovals(runId, DEMO_WORKSPACE_ID),
     listRecentTrace(runId, DEMO_WORKSPACE_ID),
     getPendingWait(runId, DEMO_WORKSPACE_ID),
     listChildRuns(runId, DEMO_WORKSPACE_ID),
+    getRunFeedback(runId, DEMO_WORKSPACE_ID),
   ]);
   const live = LIVE_STATUSES.has(run.status);
   // 待确认的置顶，已决定的按时间在后
@@ -220,6 +223,10 @@ export async function RunDetail({ runId }: { runId: string }) {
             </pre>
           </details>
         </section>
+      ) : null}
+
+      {run.status === "completed" ? (
+        <RunFeedbackPanel runId={runId} agentId={run.agentId} initialFeedback={feedback} />
       ) : null}
 
       {steps.length > 0 ? (
