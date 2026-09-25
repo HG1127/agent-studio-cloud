@@ -19,6 +19,7 @@ import { validateWaitContracts } from "@/server/domain/runtime/wait-contract";
 import { validateWorkflowRoutes } from "@/server/domain/runtime/workflow-routes";
 import { auditEventValues } from "@/server/audit/event-values";
 import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
+import { knowledgeStepTitles, prepareKnowledgeSnapshot } from "@/server/domain/runtime/knowledge-snapshot";
 
 export async function publishVersionAction(agentId: string, modelSelection?: PublishModelSelection): Promise<PublishVersionResult> {
   if (!z.string().uuid().safeParse(agentId).success) {
@@ -103,15 +104,19 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
     if (!manifestModel.mock && !realModelsEnabled()) {
       return { ok: false, error: "真实模型功能尚未开放", issues: [] };
     }
-    const snapshotRows = await db
-      .select({ id: knowledgeSources.id })
-      .from(knowledgeSources)
-      .where(and(eq(knowledgeSources.workspaceId, agent.workspaceId), eq(knowledgeSources.status, "indexed"), isNull(knowledgeSources.archivedAt)));
+    const snapshotRows = knowledgeStepTitles(draft.nodes).length > 0
+      ? await db
+          .select({ id: knowledgeSources.id })
+          .from(knowledgeSources)
+          .where(and(eq(knowledgeSources.workspaceId, agent.workspaceId), eq(knowledgeSources.status, "indexed"), isNull(knowledgeSources.archivedAt)))
+      : [];
+    const knowledgeSnapshot = prepareKnowledgeSnapshot(draft.nodes, snapshotRows.map((row) => row.id));
+    if (!knowledgeSnapshot.ok) return { ok: false, error: knowledgeSnapshot.error, issues: [] };
     const manifest = buildManifest(draft, {
       modelId: manifestModel.modelId,
       mock: manifestModel.mock,
       connectionId: manifestModel.connectionId,
-      knowledgeSnapshot: snapshotRows.map((row) => row.id),
+      knowledgeSnapshot: knowledgeSnapshot.sourceIds,
     });
     const [evaluationCaseSummary] = await db
       .select({ count: sql<number>`count(*)`.mapWith(Number) })

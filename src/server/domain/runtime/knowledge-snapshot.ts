@@ -32,6 +32,20 @@ export function knowledgeStepTitles(nodes: Record<string, WorkflowNode>): string
   return [...new Set(titles)];
 }
 
+export function prepareKnowledgeSnapshot(
+  nodes: Record<string, WorkflowNode>,
+  sourceIds: string[],
+): { ok: true; sourceIds: string[] } | { ok: false; error: string } {
+  const titles = knowledgeStepTitles(nodes);
+  if (titles.length === 0) return { ok: true, sourceIds: [] };
+  const selected = [...new Set(sourceIds)].sort();
+  if (selected.length > 0) return { ok: true, sourceIds: selected };
+  return {
+    ok: false,
+    error: `${titles.slice(0, 3).map((title) => `「${title}」`).join("、")}需要知识资料；请先上传并完成解析后再发布`,
+  };
+}
+
 export function validateKnowledgeSnapshot(args: {
   knowledgeTitles: string[];
   snapshotSourceIds: string[];
