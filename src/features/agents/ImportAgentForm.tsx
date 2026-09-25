@@ -52,7 +52,11 @@ export function ImportAgentForm() {
       <label className="w-fit cursor-pointer rounded-md border border-gray-300 px-3 py-2 text-sm hover:border-gray-500">
         {pending ? "正在导入…" : "选择 JSON 文件"}
         <input aria-label="选择助手定义文件" type="file" accept="application/json,.json" disabled={pending} className="sr-only"
-          onChange={(event) => importFile(event.target.files?.[0])} />
+          onChange={(event) => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = "";
+            void importFile(file);
+          }} />
       </label>
       {error ? <p role="alert" className="text-sm text-red-600">{error}</p> : null}
     </div>

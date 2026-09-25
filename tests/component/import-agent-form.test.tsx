@@ -40,12 +40,20 @@ describe("ImportAgentForm", () => {
   });
 
   it("导入请求中断时显示网络错误并允许重试", async () => {
-    importMock.mockRejectedValue(new Error("offline"));
+    importMock.mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce({
+      ok: true,
+      agentId: "00000000-0000-4000-8000-000000000042",
+    });
     const user = userEvent.setup();
     render(<ImportAgentForm />);
-    await user.upload(screen.getByLabelText("选择助手定义文件"), new File(["{}"], "assistant.json", { type: "application/json" }));
+    const input = screen.getByLabelText("选择助手定义文件");
+    const file = new File(["{}"], "assistant.json", { type: "application/json" });
+    await user.upload(input, file);
     expect(await screen.findByRole("alert")).toHaveTextContent("导入请求失败，请检查网络后重试");
     expect(screen.getByText("选择 JSON 文件")).toBeInTheDocument();
+    await user.upload(input, file);
+    await waitFor(() => expect(importMock).toHaveBeenCalledTimes(2));
+    expect(pushMock).toHaveBeenCalledWith("/agents/00000000-0000-4000-8000-000000000042");
   });
 
   it("连续选择同一文件时只导入一次", async () => {
