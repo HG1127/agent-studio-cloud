@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { runs, traceEvents } from "@/db/schema";
 import { writeTraceStreamBestEffort } from "@/server/domain/trace-stream";
 import { canAppendTraceToRun, isTerminalTraceKind } from "@/server/domain/trace-state";
+import { redactSensitiveData, redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 
 export type TraceLevel = "info" | "warn" | "error";
 
@@ -40,8 +41,8 @@ export async function appendTrace(event: AppendTraceInput): Promise<void> {
     nodeId: event.nodeId ?? null,
     kind: event.kind,
     level: event.level ?? "info",
-    title: boundedText(event.title, MAX_TRACE_TITLE_LENGTH)!,
-    detail: boundedText(event.detail, MAX_TRACE_DETAIL_LENGTH),
+    title: redactSensitiveText(boundedText(event.title, MAX_TRACE_TITLE_LENGTH)!),
+    detail: event.detail ? redactSensitiveText(boundedText(event.detail, MAX_TRACE_DETAIL_LENGTH)!) : null,
     data: dedupeKey
       ? { ...(event.data ?? {}), _dedupeKey: dedupeKey }
       : event.data ?? null,
@@ -89,9 +90,10 @@ export async function appendTrace(event: AppendTraceInput): Promise<void> {
   });
   if (seq === null) return;
   const payload = { seq, ...base, at: at.toISOString() };
+  const observablePayload = redactSensitiveData(payload);
   await writeTraceStreamBestEffort(async () => {
     const writer = getWritable({ namespace: "trace" }).getWriter();
-    await writer.write(JSON.stringify(payload));
+    await writer.write(JSON.stringify(observablePayload));
     await writer.close();
   });
 }
