@@ -4,6 +4,7 @@ import { MemoryAgentOption, MemoryView } from "@/contracts/memory";
 import { agentMemories, agents } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
+import { parseQueryRows } from "@/server/queries/parse-query-rows";
 
 export async function listMemories(filters: {
   agentId?: string;
@@ -30,16 +31,16 @@ export async function listMemories(filters: {
     .orderBy(desc(agentMemories.createdAt))
     .limit(limit)
     .offset(offset);
-  return rows.map(({ memory, agentName }) => MemoryView.parse({
+  return parseQueryRows("经验列表", MemoryView, rows.map(({ memory, agentName }) => ({
     id: memory.id,
     agentId: memory.agentId,
     agentName,
     sourceRunId: memory.sourceRunId,
-    sourceNodeTitle: typeof memory.metadata.nodeTitle === "string" ? memory.metadata.nodeTitle : "保存经验",
+    sourceNodeTitle: memory.metadata && typeof memory.metadata.nodeTitle === "string" ? memory.metadata.nodeTitle : "保存经验",
     content: memory.content,
     createdAt: memory.createdAt.toISOString(),
     archivedAt: memory.archivedAt?.toISOString() ?? null,
-  }));
+  })));
 }
 
 export async function listMemoryAgentOptions() {
@@ -49,5 +50,5 @@ export async function listMemoryAgentOptions() {
     .innerJoin(agents, eq(agents.id, agentMemories.agentId))
     .where(and(eq(agentMemories.workspaceId, DEMO_WORKSPACE_ID), eq(agents.workspaceId, DEMO_WORKSPACE_ID)))
     .orderBy(asc(agents.name));
-  return rows.map((row) => MemoryAgentOption.parse(row));
+  return parseQueryRows("经验助手选项", MemoryAgentOption, rows);
 }

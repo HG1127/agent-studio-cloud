@@ -3,6 +3,7 @@ import { z } from "zod";
 import { VersionSummary } from "@/contracts/version";
 import { agents, agentVersions } from "@/db/schema";
 import { db } from "@/lib/db";
+import { parseQueryRows } from "@/server/queries/parse-query-rows";
 
 export async function listVersions(agentId: string, workspaceId: string, pagination: { limit?: number; offset?: number } = {}): Promise<VersionSummary[]> {
   const uuid = z.string().uuid();
@@ -26,14 +27,12 @@ export async function listVersions(agentId: string, workspaceId: string, paginat
     .orderBy(desc(agentVersions.version))
     .limit(limit)
     .offset(offset);
-  return rows.map((row) =>
-    VersionSummary.parse({
+  return parseQueryRows("版本列表", VersionSummary, rows.map((row) => ({
       id: row.id,
       version: row.version,
       status: row.status,
       createdAt: row.createdAt.toISOString(),
-    }),
-  );
+    })));
 }
 
 export async function getVersionExportSource(agentId: string, versionId: string, workspaceId: string) {

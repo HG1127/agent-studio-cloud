@@ -12,6 +12,7 @@ import {
 } from "@/contracts/run";
 import { agents, approvals, runSteps, runs, traceEvents, type Run, type RunStep } from "@/db/schema";
 import { db } from "@/lib/db";
+import { parseQueryRows } from "@/server/queries/parse-query-rows";
 
 const RUN_ID = z.string().uuid();
 
@@ -45,8 +46,7 @@ export async function listRuns(
     .orderBy(desc(runs.createdAt))
     .limit(limit)
     .offset(offset);
-  return rows.map((row) =>
-    RunSummary.parse({
+  return parseQueryRows("运行列表", RunSummary, rows.map((row) => ({
       id: row.id,
       agentId: row.agentId,
       agentName: row.agentName,
@@ -55,8 +55,7 @@ export async function listRuns(
       agentArchived: row.agentArchivedAt !== null,
       startedAt: row.startedAt?.toISOString() ?? null,
       finishedAt: row.finishedAt?.toISOString() ?? null,
-    }),
-  );
+    })));
 }
 
 export async function listRunAgentOptions(workspaceId: string): Promise<RunAgentOption[]> {
@@ -66,7 +65,7 @@ export async function listRunAgentOptions(workspaceId: string): Promise<RunAgent
     .innerJoin(runs, eq(runs.agentId, agents.id))
     .where(and(eq(runs.workspaceId, workspaceId), eq(agents.workspaceId, workspaceId)))
     .orderBy(asc(agents.name));
-  return rows.map((row) => RunAgentOption.parse(row));
+  return parseQueryRows("运行助手选项", RunAgentOption, rows);
 }
 
 export async function listChildRuns(parentRunId: string, workspaceId: string): Promise<RunSummary[]> {
@@ -93,7 +92,7 @@ export async function listChildRuns(parentRunId: string, workspaceId: string): P
       ),
     ))
     .orderBy(asc(runs.createdAt));
-  return rows.map((row) => RunSummary.parse({
+  return parseQueryRows("协作运行列表", RunSummary, rows.map((row) => ({
     id: row.id,
     agentId: row.agentId,
     agentName: row.agentName,
@@ -102,7 +101,7 @@ export async function listChildRuns(parentRunId: string, workspaceId: string): P
     agentArchived: row.agentArchivedAt !== null,
     startedAt: row.startedAt?.toISOString() ?? null,
     finishedAt: row.finishedAt?.toISOString() ?? null,
-  }));
+  })));
 }
 
 export async function getPendingWait(runId: string, workspaceId: string): Promise<PendingWaitViewType | null> {
@@ -238,8 +237,7 @@ export async function listApprovals(runId: string, workspaceId: string): Promise
     .from(approvals)
     .where(and(eq(approvals.runId, runId), eq(approvals.workspaceId, workspaceId)))
     .orderBy(asc(approvals.createdAt));
-  return rows.map((row) =>
-    ApprovalView.parse({
+  return parseQueryRows("确认记录", ApprovalView, rows.map((row) => ({
       id: row.id,
       runId: row.runId,
       nodeId: row.nodeId,
@@ -250,6 +248,5 @@ export async function listApprovals(runId: string, workspaceId: string): Promise
       review: ApprovalPayload.safeParse(row.payload).data?.review ?? null,
       note: row.note,
       decidedAt: row.decidedAt?.toISOString() ?? null,
-    }),
-  );
+    })));
 }

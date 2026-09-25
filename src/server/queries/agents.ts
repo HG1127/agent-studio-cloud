@@ -5,6 +5,7 @@ import { AgentManifest } from "@/contracts/manifest";
 import { WorkflowDraft } from "@/contracts/workflow";
 import { db } from "@/lib/db";
 import { agentVersions, agents, workflowDefinitions } from "@/db/schema";
+import { parseQueryRows } from "@/server/queries/parse-query-rows";
 
 async function listAgentsByArchivedState(
   workspaceId: string,
@@ -38,8 +39,7 @@ async function listAgentsByArchivedState(
     .orderBy(desc(agents.updatedAt))
     .limit(limit)
     .offset(offset);
-  return rows.map((row) =>
-    AgentSummary.parse({
+  return parseQueryRows("助手列表", AgentSummary, rows.map((row) => ({
       id: row.id,
       name: row.name,
       description: row.description,
@@ -47,8 +47,7 @@ async function listAgentsByArchivedState(
       versionCount: row.versionCount,
       archivedAt: row.archivedAt?.toISOString() ?? null,
       updatedAt: row.updatedAt.toISOString(),
-    }),
-  );
+    })));
 }
 
 export async function listAgents(workspaceId: string, options?: { query?: string; limit?: number; offset?: number }): Promise<AgentSummary[]> {
@@ -110,13 +109,14 @@ export async function listAgentTargets(workspaceId: string, excludeAgentId: stri
     if (row.agentId === excludeAgentId) return [];
     const manifest = AgentManifest.safeParse(row.manifest);
     if (!manifest.success) return [];
-    return [AgentTargetOption.parse({
+    const option = AgentTargetOption.safeParse({
       agentId: row.agentId,
       agentName: row.agentName,
       versionId: row.versionId,
       version: row.version,
       inputContract: manifest.data.inputContract,
       outputContract: manifest.data.outputContract ?? { fields: [] },
-    })];
+    });
+    return option.success ? [option.data] : [];
   });
 }
