@@ -1,3 +1,5 @@
+import { jsonValuesEqual } from "@/server/domain/json-value";
+
 function valueType(value: unknown): string {
   if (value === null) return "null";
   if (Array.isArray(value)) return "array";
@@ -15,23 +17,6 @@ function typeMatches(value: unknown, expected: unknown): boolean {
     if (type === "null") return value === null;
     return typeof value === type;
   });
-}
-
-function jsonValueEquals(left: unknown, right: unknown, depth = 0): boolean {
-  if (Object.is(left, right)) return true;
-  if (depth > 8) return false;
-  if (Array.isArray(left) || Array.isArray(right)) {
-    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
-    return left.every((item, index) => jsonValueEquals(item, right[index], depth + 1));
-  }
-  if (!left || !right || typeof left !== "object" || typeof right !== "object") return false;
-  const leftObject = left as Record<string, unknown>;
-  const rightObject = right as Record<string, unknown>;
-  const leftKeys = Object.keys(leftObject);
-  const rightKeys = Object.keys(rightObject);
-  if (leftKeys.length !== rightKeys.length) return false;
-  return leftKeys.every((key) => Object.prototype.hasOwnProperty.call(rightObject, key)
-    && jsonValueEquals(leftObject[key], rightObject[key], depth + 1));
 }
 
 const SUPPORTED_SCHEMA_KEYS = new Set([
@@ -122,10 +107,10 @@ function validateValue(value: unknown, schema: unknown, path: string, depth: num
   if (rule.type && !typeMatches(value, rule.type)) {
     return `${path}类型不正确（收到 ${valueType(value)}）`;
   }
-  if (Array.isArray(rule.enum) && !rule.enum.some((candidate) => jsonValueEquals(candidate, value))) {
+  if (Array.isArray(rule.enum) && !rule.enum.some((candidate) => jsonValuesEqual(candidate, value))) {
     return `${path}不是允许的值`;
   }
-  if ("const" in rule && !jsonValueEquals(rule.const, value)) return `${path}不是约定的固定值`;
+  if ("const" in rule && !jsonValuesEqual(rule.const, value)) return `${path}不是约定的固定值`;
   if (typeof value === "string") {
     const length = Array.from(value).length;
     if (typeof rule.minLength === "number" && length < rule.minLength) return `${path}长度不能少于 ${rule.minLength} 个字符`;

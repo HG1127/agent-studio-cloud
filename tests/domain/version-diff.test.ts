@@ -58,4 +58,13 @@ describe("冻结版本差异", () => {
     reordered.resourceSelection.model.modelId = "new-model";
     expect(compareAgentVersions(before, reordered)).toMatchObject({ modelChanged: true, hasChanges: true });
   });
+
+  it("对象字段顺序变化不产生虚假的版本差异", () => {
+    const before = manifest();
+    before.workflowSnapshot.nodes.review.businessSpec = { limits: { daily: 10, enabled: true }, owner: "业务部" };
+    const after = structuredClone(before);
+    after.workflowSnapshot.nodes.review.businessSpec = { owner: "业务部", limits: { enabled: true, daily: 10 } };
+
+    expect(compareAgentVersions(before, after)).toMatchObject({ hasChanges: false });
+  });
 });

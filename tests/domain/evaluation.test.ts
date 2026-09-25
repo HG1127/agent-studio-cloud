@@ -12,6 +12,15 @@ describe("评估断言", () => {
     ])).toEqual({ passed: true, errors: [] });
   });
 
+  it("对象字段顺序不同但 JSON 结构一致时仍通过等值检查", () => {
+    expect(evaluateExpectations({ result: { tags: ["重点"], approved: true } }, [
+      { path: "result", operator: "equals", value: { approved: true, tags: ["重点"] } },
+    ])).toEqual({ passed: true, errors: [] });
+    expect(evaluateExpectations({ result: { approved: true, tags: ["普通"] } }, [
+      { path: "result", operator: "equals", value: { approved: true, tags: ["重点"] } },
+    ]).passed).toBe(false);
+  });
+
   it("返回面向用户的失败原因", () => {
     const outcome = evaluateExpectations({ summary: "已完成" }, [
       { path: "summary", operator: "contains", value: "已发送" },

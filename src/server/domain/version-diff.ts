@@ -1,4 +1,5 @@
 import type { AgentManifest } from "@/contracts/manifest";
+import { jsonValuesEqual } from "@/server/domain/json-value";
 
 type ChangeSet = { added: string[]; removed: string[]; changed: string[] };
 
@@ -12,7 +13,7 @@ export interface VersionDiff {
 }
 
 function same(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return jsonValuesEqual(left, right);
 }
 
 function compareNamed<T>(

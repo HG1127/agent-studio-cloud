@@ -1,4 +1,5 @@
 import type { EvaluationExpectation } from "@/contracts/evaluation";
+import { jsonValuesEqual } from "@/server/domain/json-value";
 
 function readPath(value: unknown, path: string): unknown {
   if (!path.trim()) return value;
@@ -20,7 +21,7 @@ export function evaluateExpectations(
       continue;
     }
     if (expectation.operator === "equals") {
-      if (JSON.stringify(actual) !== JSON.stringify(expectation.value)) errors.push(`${expectation.path || "结果"}与预期不一致`);
+      if (!jsonValuesEqual(actual, expectation.value)) errors.push(`${expectation.path || "结果"}与预期不一致`);
       continue;
     }
     const text = typeof actual === "string" ? actual : (JSON.stringify(actual) ?? "");
