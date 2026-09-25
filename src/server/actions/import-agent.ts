@@ -9,6 +9,7 @@ import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { agentImportSizeIssue, importedCollaborationKeys, importedWorkflowIssue, normalizeAgentImport, rebindImportedWorkflow } from "@/server/domain/import-agent";
 import { auditEventValues } from "@/server/audit/event-values";
+import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 export async function importAgentAction(input: unknown): Promise<ImportAgentResult> {
   const sizeIssue = agentImportSizeIssue(input);
@@ -69,7 +70,8 @@ export async function importAgentAction(input: unknown): Promise<ImportAgentResu
     });
     revalidatePath("/agents");
     return { ok: true, agentId };
-  } catch {
+  } catch (error) {
+    console.error("导入助手失败", safeErrorForLog(error));
     return { ok: false, error: "导入失败，请稍后重试" };
   }
 }

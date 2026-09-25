@@ -15,6 +15,7 @@ import { validateWorkflowRoutes } from "@/server/domain/runtime/workflow-routes"
 import { validateInlineWorkflows } from "@/server/domain/runtime/inline-workflow";
 import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
 import { validationMessage } from "@/server/domain/validation-message";
+import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 export async function saveWorkflowAction(
   agentId: string,
@@ -96,7 +97,8 @@ export async function saveWorkflowAction(
     }
     revalidatePath(`/agents/${agentId}`);
     return { ok: true, updatedAt: result.updatedAt };
-  } catch {
+  } catch (error) {
+    console.error("保存流程失败", safeErrorForLog(error));
     return { ok: false, error: "保存失败，请稍后重试" };
   }
 }
