@@ -22,6 +22,8 @@ describe("chunkText", () => {
     for (let i = 1; i < chunks.length; i += 1) {
       expect(chunks[i].charStart).toBeLessThan(chunks[i - 1].charEnd);
     }
+    expect(chunks.at(-1)?.charEnd).toBe(text.length);
+    expect(chunks.reduce((sum, chunk) => sum + chunk.content.length, 0)).toBeGreaterThan(text.length);
   });
 
   it("优先在换行或句号处对齐切分", () => {

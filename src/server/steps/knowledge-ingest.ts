@@ -77,7 +77,7 @@ export async function parseKnowledgeFile(args: ParseArgs): Promise<{ text: strin
 export async function indexKnowledgeChunks(args: { sourceId: string; text: string; ingestToken: string }): Promise<{ chunkCount: number }> {
   "use step";
   const chunks = chunkText(args.text);
-  const charCount = chunks.reduce((sum, chunk) => sum + chunk.content.length, 0);
+  const charCount = chunks.at(-1)?.charEnd ?? 0;
   await db.transaction(async (tx) => {
     const [source] = await tx
       .select({ workspaceId: knowledgeSources.workspaceId, archivedAt: knowledgeSources.archivedAt, parseEngine: knowledgeSources.parseEngine })
