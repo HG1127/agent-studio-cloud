@@ -178,7 +178,7 @@ export async function getRunView(runId: string, workspaceId: string): Promise<Ru
     .select({ run: runs, agentName: agents.name, agentArchivedAt: agents.archivedAt, manifest: agentVersions.manifest })
     .from(runs)
     .innerJoin(agents, eq(agents.id, runs.agentId))
-    .innerJoin(agentVersions, and(
+    .leftJoin(agentVersions, and(
       eq(agentVersions.id, runs.versionId),
       eq(agentVersions.agentId, runs.agentId),
       eq(agentVersions.workspaceId, runs.workspaceId),
