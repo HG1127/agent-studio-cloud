@@ -3,6 +3,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { KnowledgeUploadResult, type KnowledgeSourceView } from "@/contracts/knowledge";
 import { setKnowledgeSourceArchivedAction } from "@/server/actions/archive-knowledge-source";
+import { retryKnowledgeSourceAction } from "@/server/actions/retry-knowledge-source";
 
 const STATUS_LABELS: Record<KnowledgeSourceView["status"], string> = {
   parsing: "解析中",
@@ -130,10 +131,33 @@ export function KnowledgeList({ initial, archived = false, serverManaged = false
               <p className="text-sm font-medium text-gray-900">{source.name}</p>
               <p className="mt-0.5 text-xs text-gray-500">
                 {STATUS_LABELS[source.status]} · {(source.sizeBytes / 1024).toFixed(1)} KB · {source.chunkCount} 段 · 上传于 {source.createdAt.slice(0, 10)}
-              {source.status === "failed" && source.error ? ` · ${source.error} · 重新上传同一文件即可重试` : ""}
+              {source.status === "failed" && source.error
+                ? ` · ${source.error} · ${source.hasOriginal ? "可直接重新解析" : "重新上传同一文件即可重试"}`
+                : ""}
               </p>
             </div>
             <span className="flex shrink-0 items-center gap-3">
+              {!archived && source.status === "failed" && source.hasOriginal ? (
+                <button
+                  type="button"
+                  disabled={pending}
+                  className="text-xs text-blue-700 hover:underline disabled:opacity-50"
+                  onClick={() => {
+                    setError(null);
+                    startTransition(async () => {
+                      try {
+                        const result = await retryKnowledgeSourceAction(source.id);
+                        if (!result.ok) setError(result.error);
+                        else router.refresh();
+                      } catch {
+                        setError("重新解析失败，请检查网络后重试");
+                      }
+                    });
+                  }}
+                >
+                  重新解析
+                </button>
+              ) : null}
               {source.hasOriginal ? <a href={`/api/knowledge/sources/${source.id}/file`} download className="text-xs text-blue-700 hover:underline">下载原文件</a>
                 : <span className="text-xs text-gray-400">未保留原文件</span>}
               <button

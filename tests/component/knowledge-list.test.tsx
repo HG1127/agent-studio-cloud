@@ -3,10 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { KnowledgeList, UploadSourceForm } from "@/features/knowledge/KnowledgeList";
 import { setKnowledgeSourceArchivedAction } from "@/server/actions/archive-knowledge-source";
+import { retryKnowledgeSourceAction } from "@/server/actions/retry-knowledge-source";
 
 const refresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
 vi.mock("@/server/actions/archive-knowledge-source", () => ({ setKnowledgeSourceArchivedAction: vi.fn(async () => ({ ok: true as const })) }));
+vi.mock("@/server/actions/retry-knowledge-source", () => ({ retryKnowledgeSourceAction: vi.fn(async () => ({ ok: true as const })) }));
 afterEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
@@ -64,6 +66,22 @@ describe("知识库列表", () => {
       createdAt: "2026-09-23T00:00:00.000Z",
     }]} />);
     expect(screen.getByText(/重新上传同一文件即可重试/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重新解析" })).not.toBeInTheDocument();
+  });
+
+  it("保留原文件的失败资料可以直接重新解析", async () => {
+    const sourceId = "00000000-0000-4000-8000-0000000000f3";
+    render(<KnowledgeList initial={[{
+      id: sourceId, name: "损坏资料.txt", mime: "text/plain", hasOriginal: true,
+      sizeBytes: 100, status: "failed", chunkCount: 0, charCount: 0, error: "解析超时",
+      createdAt: "2026-09-23T00:00:00.000Z",
+    }]} />);
+
+    expect(screen.getByText(/可直接重新解析/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "重新解析" }));
+
+    expect(retryKnowledgeSourceAction).toHaveBeenCalledWith(sourceId);
+    expect(refresh).toHaveBeenCalled();
   });
 
   it("已保存原文件时提供下载入口，未保存时明确说明", () => {

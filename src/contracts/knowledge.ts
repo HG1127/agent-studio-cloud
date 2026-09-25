@@ -49,3 +49,9 @@ export const KnowledgeArchiveResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(false), error: z.string() }),
 ]);
 export type KnowledgeArchiveResult = z.infer<typeof KnowledgeArchiveResult>;
+
+export const KnowledgeRetryResult = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true) }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+export type KnowledgeRetryResult = z.infer<typeof KnowledgeRetryResult>;
