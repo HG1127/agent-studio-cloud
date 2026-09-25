@@ -1,4 +1,5 @@
 const SENSITIVE_KEY = /(?:password|passcode|secret|token|api[_-]?key|(?:private|access|secret)[_-]?key|authorization|cookie|credential|session[_-]?id|e-?mail|phone|mobile|ssn|social[_-]?security|credit[_-]?card|card[_-]?number|address|street|postal[_-]?code|密码|密钥|令牌|凭据|身份证|银行卡|手机号|邮箱|电话|住址|地址)/i;
+const CREDENTIAL_KEY = /(?:password|passcode|secret|token|api[_-]?key|(?:private|access|secret)[_-]?key|authorization|cookie|credential|session[_-]?id|密码|密钥|令牌|凭据)/i;
 const TOKEN_USAGE_KEY = /^(?:input|output|total|prompt|completion)[_-]?tokens?$/i;
 const REDACTED = "[已隐藏敏感信息]";
 const PRIVATE_KEY = /-----BEGIN [^-\r\n]{0,40}PRIVATE KEY-----[\s\S]*?-----END [^-\r\n]{0,40}PRIVATE KEY-----/g;
@@ -28,14 +29,18 @@ function luhnValid(value: string): boolean {
   return sum % 10 === 0;
 }
 
-export function redactSensitiveText(value: string): string {
-  const redacted = value
+export function redactCredentialText(value: string): string {
+  return value
     .replace(PRIVATE_KEY, REDACTED)
     .replace(JWT, REDACTED)
     .replace(BEARER, REDACTED)
     .replace(PROVIDER_KEY, REDACTED)
     .replace(LABELED_SECRET, REDACTED)
-    .replace(CHINESE_LABELED_SECRET, REDACTED)
+    .replace(CHINESE_LABELED_SECRET, REDACTED);
+}
+
+export function redactSensitiveText(value: string): string {
+  const redacted = redactCredentialText(value)
     .replace(EMAIL, REDACTED)
     .replace(CHINESE_PHONE, REDACTED)
     .replace(CHINESE_ID, REDACTED);
@@ -48,15 +53,23 @@ export function redactSensitiveText(value: string): string {
     ));
 }
 
-export function redactSensitiveData(value: unknown, depth = 0): unknown {
+function redactData(value: unknown, keyPattern: RegExp, redactText: (text: string) => string, depth = 0): unknown {
   if (depth > 12) return "[内容层级过深，已省略]";
-  if (typeof value === "string") return redactSensitiveText(value);
-  if (Array.isArray(value)) return value.map((item) => redactSensitiveData(item, depth + 1));
+  if (typeof value === "string") return redactText(value);
+  if (Array.isArray(value)) return value.map((item) => redactData(item, keyPattern, redactText, depth + 1));
   if (value && typeof value === "object") {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [
       key,
-      SENSITIVE_KEY.test(key) && !TOKEN_USAGE_KEY.test(key) ? REDACTED : redactSensitiveData(item, depth + 1),
+      keyPattern.test(key) && !TOKEN_USAGE_KEY.test(key) ? REDACTED : redactData(item, keyPattern, redactText, depth + 1),
     ]));
   }
   return value;
+}
+
+export function redactCredentialData(value: unknown): unknown {
+  return redactData(value, CREDENTIAL_KEY, redactCredentialText);
+}
+
+export function redactSensitiveData(value: unknown): unknown {
+  return redactData(value, SENSITIVE_KEY, redactSensitiveText);
 }

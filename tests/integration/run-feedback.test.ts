@@ -73,6 +73,7 @@ describe("运行反馈闭环", () => {
 
   it("差评只创建一个可编辑回归样例并复制真实输入", async () => {
     await insertFixture();
+    await db.update(runs).set({ input: { request: "检查合同", apiKey: "sk-feedback-secret-value" } }).where(eq(runs.id, RUN_ID));
     await saveRunFeedbackAction({ runId: RUN_ID, rating: "needs_improvement", note: "缺少条款依据" });
 
     const first = await createRegressionCaseFromRunFeedbackAction(RUN_ID);
@@ -82,7 +83,10 @@ describe("运行反馈闭环", () => {
     expect(second).toMatchObject({ ok: true, created: false });
     const cases = await db.select().from(evaluationCases).where(eq(evaluationCases.agentId, AGENT_ID));
     expect(cases).toHaveLength(1);
-    expect(cases[0]).toMatchObject({ input: { request: "检查合同" }, expectations: [] });
+    expect(cases[0]).toMatchObject({
+      input: { request: "检查合同", apiKey: "[已隐藏敏感信息]" },
+      expectations: [],
+    });
   });
 
   it("运行未完成时拒绝提交结果反馈", async () => {

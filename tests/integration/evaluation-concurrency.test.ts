@@ -67,6 +67,25 @@ async function insertFixture() {
 }
 
 describe("自动验收并发启动", () => {
+  it("保存和执行验收样例前隐藏凭据但保留业务信息", async () => {
+    await insertFixture();
+    expect(await createEvaluationCaseAction({
+      agentId: AGENT_ID,
+      name: "凭据边界",
+      input: { apiKey: "sk-evaluation-secret", email: "person@example.com" },
+      expectations: [{ path: "result", operator: "contains", value: "Bearer expected-secret-value" }],
+    })).toEqual({ ok: true });
+
+    const [stored] = await db.select().from(evaluationCases).where(eq(evaluationCases.name, "凭据边界"));
+    expect(stored.input).toEqual({ apiKey: "[已隐藏敏感信息]", email: "person@example.com" });
+    expect(stored.expectations).toEqual([{ path: "result", operator: "contains", value: "[已隐藏敏感信息]" }]);
+    const prepared = await prepareEvaluationRun(AGENT_ID);
+    expect(prepared.ok).toBe(true);
+    if (prepared.ok) {
+      expect(prepared.cases.find((testCase) => testCase.id === stored.id)?.input).toEqual(stored.input);
+    }
+  });
+
   it("旧页面不会覆盖其他页面刚保存的验收样例", async () => {
     await insertFixture();
     await db.update(evaluationCases)

@@ -15,6 +15,7 @@ import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { auditEventValues } from "@/server/audit/event-values";
 import { validationMessage } from "@/server/domain/validation-message";
+import { redactCredentialData } from "@/server/domain/security/redact-sensitive";
 
 export async function saveRunFeedbackAction(input: unknown): Promise<RunFeedbackSaveResult> {
   const parsed = RunFeedbackSaveInput.safeParse(input);
@@ -101,7 +102,12 @@ export async function createRegressionCaseFromRunFeedbackAction(runId: string): 
       ));
       if ((active?.count ?? 0) >= MAX_EVALUATION_CASES) return { kind: "limit" as const };
       const name = `改进回归：${agent.name}`.slice(0, 80);
-      const validCase = EvaluationCaseCreateInput.safeParse({ agentId: agent.id, name, input: run.input, expectations: [] });
+      const validCase = EvaluationCaseCreateInput.safeParse({
+        agentId: agent.id,
+        name,
+        input: redactCredentialData(run.input),
+        expectations: [],
+      });
       if (!validCase.success) return { kind: "input-invalid" as const };
       const [created] = await tx.insert(evaluationCases).values({
         workspaceId: DEMO_WORKSPACE_ID,

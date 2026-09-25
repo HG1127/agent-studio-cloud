@@ -42,6 +42,11 @@ describe("EvaluationPanel", () => {
     refreshMock.mockReset();
   });
 
+  it("明确提示验收输入不会保留凭据", () => {
+    render(<EvaluationPanel agentId={AGENT_ID} cases={[]} runs={[]} />);
+    expect(screen.getByText(/密钥、令牌和密码会自动隐藏/)).toBeVisible();
+  });
+
   it("保存 JSON 输入和结果包含断言", async () => {
     createMock.mockResolvedValue({ ok: true });
     const user = userEvent.setup();

@@ -243,6 +243,7 @@ export function EvaluationPanel({
         <button type="button" disabled={pending || evaluationRunning || !name.trim() || (!editingId && cases.length >= MAX_EVALUATION_CASES)} onClick={saveCase}
           className="rounded-md border border-gray-300 px-3 py-2 text-sm disabled:text-gray-400">{editingId ? "保存修改" : "添加样例"}</button>
       </div>
+      <p className="text-xs text-gray-500">请使用可重复的测试数据；输入中的密钥、令牌和密码会自动隐藏。</p>
       {cases.length >= MAX_EVALUATION_CASES ? <p className="text-xs text-amber-700">启用中的验收样例已达到 {MAX_EVALUATION_CASES} 条上限；归档不再使用的样例后可继续添加。</p> : null}
       <details className="rounded-md border border-gray-100 p-3">
         <summary className="cursor-pointer text-xs font-medium text-gray-600">字段检查（{advancedExpectations.length}）</summary>

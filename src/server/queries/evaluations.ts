@@ -3,6 +3,7 @@ import { EvaluationCaseView, EvaluationRunView, type EvaluationCaseView as Evalu
 import { agentVersions, evaluationCaseResults, evaluationCases, evaluationRuns } from "@/db/schema";
 import { db } from "@/lib/db";
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
+import { redactCredentialData, redactCredentialText } from "@/server/domain/security/redact-sensitive";
 
 export async function listEvaluationCases(
   agentId: string,
@@ -25,6 +26,8 @@ export async function listEvaluationCases(
     .offset(offset);
   return parseQueryRows("验收样例列表", EvaluationCaseView, rows.map((row) => ({
     ...row,
+    input: redactCredentialData(row.input),
+    expectations: redactCredentialData(row.expectations),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   })));
@@ -68,7 +71,7 @@ export async function listEvaluationRuns(agentId: string, workspaceId: string): 
       caseId: result.evaluationCaseId,
       caseName,
       status: result.status,
-      error: result.error,
+      error: result.error === null ? null : redactCredentialText(result.error),
       runId: result.runId,
     })),
   })));

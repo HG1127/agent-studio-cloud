@@ -98,7 +98,7 @@ export function RunFeedbackPanel({
           <p className="text-xs text-gray-600">助手已停用，无法再新增验收样例。</p>
         ) : (
           <div className="rounded-md bg-amber-50 p-3">
-            <p className="text-xs text-amber-800">可复制这次真实输入为验收样例，创建后再补充期望结果，防止同类问题再次出现。</p>
+            <p className="text-xs text-amber-800">可复制这次业务输入为验收样例；密钥、令牌和密码会自动隐藏。创建后再补充期望结果，防止同类问题再次出现。</p>
             <button type="button" disabled={pending} onClick={createRegressionCase}
               className="mt-2 rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs text-amber-800 disabled:text-gray-400">
               加入验收样例

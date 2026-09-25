@@ -22,6 +22,7 @@ import { runBounded } from "@/server/domain/run-bounded";
 import { validationMessage } from "@/server/domain/validation-message";
 import { auditEventValues } from "@/server/audit/event-values";
 import { generateEvaluationCases } from "@/server/domain/evaluation-cases";
+import { redactCredentialData } from "@/server/domain/security/redact-sensitive";
 
 const EVALUATION_START_CONCURRENCY = 5;
 
@@ -109,7 +110,9 @@ export async function createEvaluationCaseAction(input: unknown): Promise<Evalua
       }
       const [created] = await tx.insert(evaluationCases).values({
         workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, agentId: parsed.data.agentId,
-        name: parsed.data.name, input: parsed.data.input, expectations: parsed.data.expectations,
+        name: parsed.data.name,
+        input: redactCredentialData(parsed.data.input) as Record<string, unknown>,
+        expectations: redactCredentialData(parsed.data.expectations) as typeof parsed.data.expectations,
       }).returning({ id: evaluationCases.id });
       await tx.insert(auditEvents).values(auditEventValues({
         workspaceId: DEMO_WORKSPACE_ID,
@@ -149,8 +152,10 @@ export async function updateEvaluationCaseAction(input: unknown): Promise<Evalua
       )).limit(1);
       if (running) return "running" as const;
       const rows = await tx.update(evaluationCases).set({
-        name: parsed.data.name, input: parsed.data.input,
-        expectations: parsed.data.expectations, updatedAt: new Date(),
+        name: parsed.data.name,
+        input: redactCredentialData(parsed.data.input) as Record<string, unknown>,
+        expectations: redactCredentialData(parsed.data.expectations) as typeof parsed.data.expectations,
+        updatedAt: new Date(),
       }).where(and(
         eq(evaluationCases.id, parsed.data.caseId), eq(evaluationCases.agentId, parsed.data.agentId),
         eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID), isNull(evaluationCases.archivedAt),

@@ -4,6 +4,14 @@ import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { MAX_EVALUATION_CASES } from "@/contracts/evaluation";
 import { auditEventValues } from "@/server/audit/event-values";
+import { redactCredentialData } from "@/server/domain/security/redact-sensitive";
+
+function safeCases<T extends { input: unknown }>(cases: T[]): Array<Omit<T, "input"> & { input: Record<string, unknown> }> {
+  return cases.map((testCase) => ({
+    ...testCase,
+    input: redactCredentialData(testCase.input) as Record<string, unknown>,
+  }));
+}
 
 export async function prepareEvaluationRun(agentId: string) {
   return db.transaction(async (tx) => {
@@ -49,7 +57,7 @@ export async function prepareEvaluationRun(agentId: string) {
         ok: true as const,
         evaluationId: runningEvaluation.id,
         versionId: evaluation.versionId,
-        cases,
+        cases: safeCases(cases),
         resumed: true as const,
       };
     }
@@ -102,6 +110,6 @@ export async function prepareEvaluationRun(agentId: string) {
       summary: `启动助手「${lockedAgent.name}」的自动验收`,
       data: { caseCount: cases.length },
     }));
-    return { ok: true as const, evaluationId: evaluation.id, versionId: version.id, cases, resumed: false as const };
+    return { ok: true as const, evaluationId: evaluation.id, versionId: version.id, cases: safeCases(cases), resumed: false as const };
   });
 }
