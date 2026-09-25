@@ -1,7 +1,7 @@
-import { and, asc, desc, eq, ilike, isNotNull, isNull } from "drizzle-orm";
+import { and, desc, eq, ilike, isNotNull, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { MemoryAgentOption, MemoryView } from "@/contracts/memory";
-import { agentMemories, agents } from "@/db/schema";
+import { agentMemories, agents, runFeedback } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
@@ -45,11 +45,17 @@ export async function listMemories(filters: {
 }
 
 export async function listMemoryAgentOptions() {
-  const rows = await db
-    .selectDistinct({ id: agents.id, name: agents.name })
-    .from(agentMemories)
-    .innerJoin(agents, eq(agents.id, agentMemories.agentId))
-    .where(and(eq(agentMemories.workspaceId, DEMO_WORKSPACE_ID), eq(agents.workspaceId, DEMO_WORKSPACE_ID)))
-    .orderBy(asc(agents.name));
+  const [memoryRows, feedbackRows] = await Promise.all([
+    db.selectDistinct({ id: agents.id, name: agents.name })
+      .from(agentMemories)
+      .innerJoin(agents, eq(agents.id, agentMemories.agentId))
+      .where(and(eq(agentMemories.workspaceId, DEMO_WORKSPACE_ID), eq(agents.workspaceId, DEMO_WORKSPACE_ID))),
+    db.selectDistinct({ id: agents.id, name: agents.name })
+      .from(runFeedback)
+      .innerJoin(agents, eq(agents.id, runFeedback.agentId))
+      .where(and(eq(runFeedback.workspaceId, DEMO_WORKSPACE_ID), eq(agents.workspaceId, DEMO_WORKSPACE_ID))),
+  ]);
+  const rows = [...new Map([...memoryRows, ...feedbackRows].map((row) => [row.id, row])).values()]
+    .sort((left, right) => left.name.localeCompare(right.name, "zh-CN"));
   return parseQueryRows("经验助手选项", MemoryAgentOption, rows);
 }

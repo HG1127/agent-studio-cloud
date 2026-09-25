@@ -24,6 +24,17 @@ export const RunFeedbackView = z.object({
 });
 export type RunFeedbackView = z.infer<typeof RunFeedbackView>;
 
+export const RunImprovementFeedbackView = z.object({
+  id: z.string().uuid(),
+  runId: z.string().uuid(),
+  agentId: z.string().uuid(),
+  agentName: z.string(),
+  note: z.string(),
+  evaluationCaseId: z.string().uuid().nullable(),
+  updatedAt: z.string(),
+});
+export type RunImprovementFeedbackView = z.infer<typeof RunImprovementFeedbackView>;
+
 export const RunFeedbackSaveResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true), feedback: RunFeedbackView }),
   z.object({ ok: z.literal(false), error: z.string() }),

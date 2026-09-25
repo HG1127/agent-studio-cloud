@@ -8,6 +8,8 @@ import { agents, agentVersions, auditEvents, evaluationCases, runFeedback, runs 
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { createRegressionCaseFromRunFeedbackAction, saveRunFeedbackAction } from "@/server/actions/run-feedback";
+import { listImprovementFeedback } from "@/server/queries/run-feedback";
+import { listMemoryAgentOptions } from "@/server/queries/memory";
 
 const AGENT_ID = "00000000-0000-4000-8000-0000000000f1";
 const VERSION_ID = "00000000-0000-4000-8000-0000000000f2";
@@ -63,6 +65,10 @@ describe("运行反馈闭环", () => {
     const rows = await db.select().from(runFeedback).where(eq(runFeedback.runId, RUN_ID));
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ rating: "needs_improvement", note: "缺少条款依据" });
+    expect(await listImprovementFeedback({ agentId: AGENT_ID, query: "条款" })).toEqual([
+      expect.objectContaining({ runId: RUN_ID, agentName: "反馈助手", note: "缺少条款依据" }),
+    ]);
+    expect(await listMemoryAgentOptions()).toContainEqual({ id: AGENT_ID, name: "反馈助手" });
   });
 
   it("差评只创建一个可编辑回归样例并复制真实输入", async () => {

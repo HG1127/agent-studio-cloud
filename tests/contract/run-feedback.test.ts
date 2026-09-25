@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { RunFeedbackSaveInput, RunFeedbackView } from "@/contracts/run-feedback";
+import { RunFeedbackSaveInput, RunFeedbackView, RunImprovementFeedbackView } from "@/contracts/run-feedback";
 
 const RUN_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -25,6 +25,27 @@ describe("运行反馈契约", () => {
       rating: "needs_improvement",
       note: "缺少依据",
       evaluationCaseId: "not-a-uuid",
+      updatedAt: "2026-09-26T00:00:00.000Z",
+    }).success).toBe(false);
+  });
+
+  it("待改进列表要求保留来源运行、助手和具体说明", () => {
+    expect(RunImprovementFeedbackView.safeParse({
+      id: RUN_ID,
+      runId: RUN_ID,
+      agentId: RUN_ID,
+      agentName: "合同助手",
+      note: "缺少条款依据",
+      evaluationCaseId: null,
+      updatedAt: "2026-09-26T00:00:00.000Z",
+    }).success).toBe(true);
+    expect(RunImprovementFeedbackView.safeParse({
+      id: RUN_ID,
+      runId: RUN_ID,
+      agentId: RUN_ID,
+      agentName: "合同助手",
+      note: null,
+      evaluationCaseId: null,
       updatedAt: "2026-09-26T00:00:00.000Z",
     }).success).toBe(false);
   });
