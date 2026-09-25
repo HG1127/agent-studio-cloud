@@ -124,6 +124,7 @@ export async function getPendingWait(runId: string, workspaceId: string): Promis
     eventKey: row?.data?.eventKey,
     title: row?.title,
     payloadSchema: row?.data?.payloadSchema ?? { type: "object" },
+    submissionToken: row?.data?.submissionToken ?? row?.data?.hookToken,
   });
   return parsed.success ? parsed.data : null;
 }
@@ -132,6 +133,7 @@ export async function getPendingWaitHook(runId: string, workspaceId: string): Pr
   eventKey: string;
   payloadSchema: Record<string, unknown>;
   hookToken: string;
+  submissionToken: string | null;
 } | null> {
   if (!RUN_ID.safeParse(runId).success) return null;
   const [row] = await db
@@ -151,11 +153,22 @@ export async function getPendingWaitHook(runId: string, workspaceId: string): Pr
     eventKey: row?.data?.eventKey,
     title: "等待外部消息",
     payloadSchema: row?.data?.payloadSchema ?? { type: "object" },
+    submissionToken: row?.data?.submissionToken ?? row?.data?.hookToken,
   });
   const hookToken = row?.data?.hookToken;
-  return view.success && typeof hookToken === "string" && hookToken.length > 0
-    ? { eventKey: view.data.eventKey, payloadSchema: view.data.payloadSchema, hookToken }
-    : null;
+  if (!view.success) return null;
+  return {
+    eventKey: view.data.eventKey,
+    payloadSchema: view.data.payloadSchema,
+    hookToken: typeof hookToken === "string" && hookToken.length > 0
+      ? hookToken
+      : `wait:${runId}:${view.data.eventKey}`,
+    submissionToken: typeof row?.data?.submissionToken === "string" && row.data.submissionToken.length > 0
+      ? row.data.submissionToken
+      : typeof hookToken === "string" && hookToken.length > 0
+        ? hookToken
+        : null,
+  };
 }
 
 export async function getRunView(runId: string, workspaceId: string): Promise<RunView | null> {

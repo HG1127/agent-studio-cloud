@@ -7,6 +7,7 @@ import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { validateJsonObjectSchema } from "@/server/domain/json-schema";
 import { getPendingWait, getPendingWaitHook } from "@/server/queries/runs";
+import { matchesWaitEventToken } from "@/server/security/wait-event-token";
 
 export const dynamic = "force-dynamic";
 
@@ -68,6 +69,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ runId: 
   }
   if (!pendingWait || pendingWait.eventKey !== eventKey) {
     return Response.json({ ok: false, error: "消息未匹配到当前等待步骤" }, { status: 409 });
+  }
+  if (pendingHook?.submissionToken && !matchesWaitEventToken(req.headers.get("x-wait-event-token"), pendingHook.submissionToken)) {
+    return Response.json({ ok: false, error: "消息提交凭据无效，请刷新页面后重试" }, { status: 403 });
   }
   const payloadError = validateJsonObjectSchema(payload.data, pendingWait.payloadSchema);
   if (payloadError) {

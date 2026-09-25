@@ -85,9 +85,12 @@ describe("等待节点暂停与恢复", () => {
     try {
       const handle = await start(agentRunWorkflow, [runId, manifest, {}]);
       const token = await waitForCurrentWaitHook(handle, runId);
+      const pending = await getPendingWaitHook(runId, DEMO_WORKSPACE_ID);
 
       const [waiting] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
       expect(waiting?.status).toBe("waiting_event");
+      expect(pending?.submissionToken).toMatch(/^[A-Za-z0-9_-]{40,}$/);
+      expect(pending?.submissionToken).not.toBe(token);
 
       await resumeHook(token, { customerId: "C-100", complete: true });
       expect(await handle.returnValue).toEqual({ status: "completed" });

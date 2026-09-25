@@ -24,10 +24,11 @@ function schemaExample(schema: unknown, depth = 0): unknown {
   return "";
 }
 
-export function WaitEventPanel({ runId, eventKey, title, payloadSchema = { type: "object" } }: {
+export function WaitEventPanel({ runId, eventKey, title, submissionToken, payloadSchema = { type: "object" } }: {
   runId: string;
   eventKey: string;
   title: string;
+  submissionToken: string | null;
   payloadSchema?: Record<string, unknown>;
 }) {
   const router = useRouter();
@@ -65,9 +66,11 @@ export function WaitEventPanel({ runId, eventKey, title, payloadSchema = { type:
           }
           startTransition(async () => {
             try {
+              const headers: Record<string, string> = { "content-type": "application/json" };
+              if (submissionToken) headers["x-wait-event-token"] = submissionToken;
               const response = await fetch(`/api/runs/${runId}/events/${encodeURIComponent(eventKey)}`, {
                 method: "POST",
-                headers: { "content-type": "application/json" },
+                headers,
                 body: JSON.stringify(payload.data),
               });
               const result = WaitEventResumeResult.safeParse(await response.json());

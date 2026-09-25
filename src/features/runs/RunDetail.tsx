@@ -99,7 +99,13 @@ export async function RunDetail({ runId }: { runId: string }) {
       ))}
 
       {run.status === "waiting_event" && pendingWait ? (
-        <WaitEventPanel runId={runId} eventKey={pendingWait.eventKey} title={pendingWait.title} payloadSchema={pendingWait.payloadSchema} />
+        <WaitEventPanel
+          runId={runId}
+          eventKey={pendingWait.eventKey}
+          title={pendingWait.title}
+          submissionToken={pendingWait.submissionToken}
+          payloadSchema={pendingWait.payloadSchema}
+        />
       ) : null}
 
       {childRuns.length > 0 ? (

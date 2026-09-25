@@ -111,6 +111,7 @@ export const PendingWaitView = z.object({
   eventKey: z.string().min(1),
   title: z.string().min(1),
   payloadSchema: z.record(z.string(), z.unknown()).default({ type: "object" }),
+  submissionToken: z.string().min(1).nullable(),
 });
 export type PendingWaitView = z.infer<typeof PendingWaitView>;
 

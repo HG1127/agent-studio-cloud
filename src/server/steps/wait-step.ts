@@ -4,6 +4,7 @@ import { FatalError } from "workflow";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { runs } from "@/db/schema";
 import { db } from "@/lib/db";
+import { createWaitEventToken } from "@/server/security/wait-event-token";
 import { markRunRunning, persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 
@@ -31,6 +32,7 @@ export async function beginWait(args: { runId: string; node: WorkflowNode; hookT
     .where(and(eq(runs.id, args.runId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])))
     .returning({ id: runs.id });
   if (updated.length === 0) throw new FatalError("运行已经结束，不能再进入等待状态");
+  const submissionToken = args.node.wait.mode === "event" ? createWaitEventToken() : undefined;
   await appendTrace({
     runId: args.runId,
     nodeId: args.node.id,
@@ -38,7 +40,12 @@ export async function beginWait(args: { runId: string; node: WorkflowNode; hookT
     title: `「${args.node.title}」正在等待`,
     detail: waitDescription(args.node),
     data: args.node.wait.mode === "event"
-      ? { eventKey: args.node.wait.eventKey, payloadSchema: args.node.wait.payloadSchema, hookToken: args.hookToken }
+      ? {
+          eventKey: args.node.wait.eventKey,
+          payloadSchema: args.node.wait.payloadSchema,
+          hookToken: args.hookToken,
+          submissionToken,
+        }
       : null,
   });
 }

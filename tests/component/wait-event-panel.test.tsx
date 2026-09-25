@@ -15,14 +15,18 @@ describe("等待消息面板", () => {
   it("提交对象消息后继续运行", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
-    render(<WaitEventPanel runId="00000000-0000-4000-8000-000000000001" eventKey="customer.updated" title="等待客户补充资料" />);
+    render(<WaitEventPanel runId="00000000-0000-4000-8000-000000000001" eventKey="customer.updated" title="等待客户补充资料" submissionToken="submit-token" />);
     const user = userEvent.setup();
     fireEvent.change(screen.getByLabelText("消息内容"), { target: { value: '{"complete":true}' } });
     await user.click(screen.getByRole("button", { name: "提交并继续" }));
     expect(await screen.findByRole("status")).toHaveTextContent("消息已提交，运行将继续");
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/runs/00000000-0000-4000-8000-000000000001/events/customer.updated",
-      expect.objectContaining({ method: "POST", body: '{"complete":true}' }),
+      expect.objectContaining({
+        method: "POST",
+        headers: { "content-type": "application/json", "x-wait-event-token": "submit-token" },
+        body: '{"complete":true}',
+      }),
     );
     expect(refresh).toHaveBeenCalledOnce();
   });
@@ -30,7 +34,7 @@ describe("等待消息面板", () => {
   it("拒绝文字和列表格式且不发送请求", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    render(<WaitEventPanel runId="00000000-0000-4000-8000-000000000001" eventKey="customer.updated" title="等待客户补充资料" />);
+    render(<WaitEventPanel runId="00000000-0000-4000-8000-000000000001" eventKey="customer.updated" title="等待客户补充资料" submissionToken="submit-token" />);
     const user = userEvent.setup();
     fireEvent.change(screen.getByLabelText("消息内容"), { target: { value: "[]" } });
     await user.click(screen.getByRole("button", { name: "提交并继续" }));
@@ -41,7 +45,7 @@ describe("等待消息面板", () => {
   it("拒绝包含保留字段的消息并展示具体原因", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    render(<WaitEventPanel runId="00000000-0000-4000-8000-000000000001" eventKey="customer.updated" title="等待客户补充资料" />);
+    render(<WaitEventPanel runId="00000000-0000-4000-8000-000000000001" eventKey="customer.updated" title="等待客户补充资料" submissionToken="submit-token" />);
     const user = userEvent.setup();
     fireEvent.change(screen.getByLabelText("消息内容"), { target: { value: '{"nested":{"constructor":"blocked"}}' } });
     await user.click(screen.getByRole("button", { name: "提交并继续" }));
@@ -54,6 +58,7 @@ describe("等待消息面板", () => {
       runId="00000000-0000-4000-8000-000000000001"
       eventKey="customer.updated"
       title="等待客户补充资料"
+      submissionToken="submit-token"
       payloadSchema={{ type: "object", required: ["complete", "note"] }}
     />);
     expect(screen.getByText("必填字段：complete、note")).toBeInTheDocument();
@@ -64,6 +69,7 @@ describe("等待消息面板", () => {
       runId="00000000-0000-4000-8000-000000000001"
       eventKey="customer.updated"
       title="等待客户补充资料"
+      submissionToken="submit-token"
       payloadSchema={{
         type: "object",
         required: ["complete", "customer", "state"],

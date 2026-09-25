@@ -17,7 +17,11 @@ afterEach(async () => {
   await db.delete(runs).where(eq(runs.id, RUN_ID));
 });
 
-async function insertWaitingRun(payloadSchema: Record<string, unknown> = { type: "object" }, hookToken: string | null = `wait:${RUN_ID}:wait_customer:7`) {
+async function insertWaitingRun(
+  payloadSchema: Record<string, unknown> = { type: "object" },
+  hookToken: string | null = `wait:${RUN_ID}:wait_customer:7`,
+  submissionToken: string | null = "submission-token",
+) {
   await db.insert(runs).values({
     id: RUN_ID,
     workspaceId: DEMO_WORKSPACE_ID,
@@ -35,7 +39,12 @@ async function insertWaitingRun(payloadSchema: Record<string, unknown> = { type:
     nodeId: "wait_customer",
     kind: "wait.started",
     title: "等待客户补充资料",
-    data: { eventKey: "customer.profile.updated", payloadSchema, ...(hookToken ? { hookToken } : {}) },
+    data: {
+      eventKey: "customer.profile.updated",
+      payloadSchema,
+      ...(hookToken ? { hookToken } : {}),
+      ...(submissionToken ? { submissionToken } : {}),
+    },
   });
 
 }
@@ -47,7 +56,7 @@ describe("外部消息恢复接口", () => {
     const response = await POST(
       new Request(`http://localhost/api/runs/${RUN_ID}/events/customer.profile.updated`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "x-wait-event-token": "submission-token" },
         body: JSON.stringify({ customerId: "C-100" }),
       }),
       { params: Promise.resolve({ runId: RUN_ID, eventKey: "customer.profile.updated" }) },
@@ -60,7 +69,7 @@ describe("外部消息恢复接口", () => {
 
   it("仍可恢复升级前已经挂起的旧格式等待", async () => {
     resumeHookMock.mockResolvedValue(undefined);
-    await insertWaitingRun({ type: "object" }, null);
+    await insertWaitingRun({ type: "object" }, null, null);
     const response = await POST(
       new Request(`http://localhost/api/runs/${RUN_ID}/events/customer.profile.updated`, {
         method: "POST",
@@ -74,6 +83,37 @@ describe("外部消息恢复接口", () => {
     expect(resumeHookMock).toHaveBeenCalledWith(`wait:${RUN_ID}:customer.profile.updated`, {});
   });
 
+  it("缺少一次性凭据时不会恢复新格式等待", async () => {
+    await insertWaitingRun();
+    const response = await POST(
+      new Request(`http://localhost/api/runs/${RUN_ID}/events/customer.profile.updated`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      }),
+      { params: Promise.resolve({ runId: RUN_ID, eventKey: "customer.profile.updated" }) },
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ ok: false, error: "消息提交凭据无效，请刷新页面后重试" });
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
+  it("错误的一次性凭据不会恢复新格式等待", async () => {
+    await insertWaitingRun();
+    const response = await POST(
+      new Request(`http://localhost/api/runs/${RUN_ID}/events/customer.profile.updated`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-wait-event-token": "wrong-token" },
+        body: "{}",
+      }),
+      { params: Promise.resolve({ runId: RUN_ID, eventKey: "customer.profile.updated" }) },
+    );
+
+    expect(response.status).toBe(403);
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
   it("消息不满足等待步骤字段结构时不会恢复", async () => {
     await insertWaitingRun({
       type: "object",
@@ -83,7 +123,7 @@ describe("外部消息恢复接口", () => {
     const response = await POST(
       new Request(`http://localhost/api/runs/${RUN_ID}/events/customer.profile.updated`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "x-wait-event-token": "submission-token" },
         body: JSON.stringify({ customerId: "C-100" }),
       }),
       { params: Promise.resolve({ runId: RUN_ID, eventKey: "customer.profile.updated" }) },
@@ -99,7 +139,7 @@ describe("外部消息恢复接口", () => {
     const response = await POST(
       new Request(`http://localhost/api/runs/${RUN_ID}/events/customer.profile.updated`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "x-wait-event-token": "submission-token" },
         body: '{"nested":{"__proto__":{"polluted":true}}}',
       }),
       { params: Promise.resolve({ runId: RUN_ID, eventKey: "customer.profile.updated" }) },
