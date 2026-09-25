@@ -70,4 +70,13 @@ describe("知识文件解析防线", () => {
 
     expect(result.text).toBe("退款说明\n到账需要 1–3 天。");
   });
+
+  it("文本编码损坏时明确失败而不是把乱码写入资料库", async () => {
+    await expect(parseKnowledgeFile({
+      sourceId: "source-1",
+      filename: "损坏资料.txt",
+      mime: "text/plain",
+      content: new Blob([new Uint8Array([0xe4, 0xb8])]).stream(),
+    })).rejects.toThrow("请另存为 UTF-8 后重新上传");
+  });
 });

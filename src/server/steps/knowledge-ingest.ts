@@ -8,6 +8,7 @@ import { db } from "@/lib/db";
 import { chunkText } from "@/server/domain/knowledge/chunker";
 import { validateDocxArchive } from "@/server/domain/knowledge/docx-limits";
 import { extractHtmlText } from "@/server/domain/knowledge/html-text";
+import { decodeKnowledgeText } from "@/server/domain/knowledge/text-decoder";
 import {
   MAX_KNOWLEDGE_FILE_BYTES,
   MAX_KNOWLEDGE_PDF_PAGES,
@@ -65,10 +66,10 @@ export async function parseKnowledgeFile(args: ParseArgs): Promise<{ text: strin
     if (archiveError) throw new FatalError(archiveError);
     const result = await mammoth.extractRawText({ buffer });
     text = result.value;
-  } else if (ext === "html") {
-    text = extractHtmlText(buffer.toString("utf8"));
-  } else if (["txt", "md", "json", "csv", "xml"].includes(ext)) {
-    text = buffer.toString("utf8");
+  } else if (["txt", "md", "html", "json", "csv", "xml"].includes(ext)) {
+    const decoded = decodeKnowledgeText(buffer);
+    if (!decoded.ok) throw new FatalError(decoded.error);
+    text = ext === "html" ? extractHtmlText(decoded.text) : decoded.text;
   } else {
     throw new FatalError(`暂不支持解析「${ext || args.filename}」格式的文件`);
   }
