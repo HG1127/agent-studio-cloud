@@ -1,7 +1,10 @@
 export const KNOWLEDGE_PARSING_STALE_MS = 5 * 60 * 1000;
 
-export function isKnowledgeParsingStalled(source: { status: string; updatedAt: Date }, now = Date.now()) {
-  return source.status === "parsing" && source.updatedAt.getTime() < now - KNOWLEDGE_PARSING_STALE_MS;
+export function isKnowledgeParsingStalled(source: { status: string; updatedAt?: Date | null }, now = Date.now()) {
+  if (source.status !== "parsing" || !(source.updatedAt instanceof Date)) return false;
+
+  const updatedAt = source.updatedAt.getTime();
+  return Number.isFinite(updatedAt) && updatedAt < now - KNOWLEDGE_PARSING_STALE_MS;
 }
 
 export function processedKnowledgeStatus(archivedAt: Date | null, outcome: "indexed" | "failed") {

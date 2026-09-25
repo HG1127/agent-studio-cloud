@@ -19,5 +19,7 @@ describe("知识来源状态", () => {
     expect(isKnowledgeParsingStalled({ status: "parsing", updatedAt: new Date("2026-09-25T12:04:59.999Z") }, now)).toBe(true);
     expect(isKnowledgeParsingStalled({ status: "parsing", updatedAt: new Date("2026-09-25T12:05:00.000Z") }, now)).toBe(false);
     expect(isKnowledgeParsingStalled({ status: "failed", updatedAt: new Date("2026-09-25T12:00:00.000Z") }, now)).toBe(false);
+    expect(isKnowledgeParsingStalled({ status: "parsing" }, now)).toBe(false);
+    expect(isKnowledgeParsingStalled({ status: "parsing", updatedAt: new Date("invalid") }, now)).toBe(false);
   });
 });
