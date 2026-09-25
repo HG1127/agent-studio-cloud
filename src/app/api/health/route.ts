@@ -3,6 +3,8 @@ import { WorkflowRunNotFoundError } from "workflow/errors";
 import { HealthResponse } from "@/contracts/health";
 import { isDatabaseReady } from "@/server/queries/system-health";
 
+export const dynamic = "force-dynamic";
+
 // 探针 run 永远不会被创建：运行时能回答「未找到」即代表连接与配置正常。
 // 格式必须符合平台 wrun_+ULID 约定，否则平台 API 直接 400（本地引擎不校验格式，故仅在 Vercel 暴露）
 const HEALTH_PROBE_RUN_ID = "wrun_00000000000000000000000000";
@@ -53,5 +55,5 @@ export async function GET() {
   const [dbOk, workflowOk] = await Promise.all([probeDatabase(), probeWorkflow()]);
   const ok = dbOk && workflowOk;
   const body = HealthResponse.parse({ ok, db: dbOk, workflow: workflowOk });
-  return Response.json(body, { status: ok ? 200 : 503 });
+  return Response.json(body, { status: ok ? 200 : 503, headers: { "cache-control": "no-store" } });
 }

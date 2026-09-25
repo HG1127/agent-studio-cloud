@@ -29,6 +29,7 @@ describe("生产健康检查", () => {
     mocks.isDatabaseReady.mockResolvedValue(true);
     const response = await GET();
     expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({ ok: true, db: true, workflow: true });
   });
 
