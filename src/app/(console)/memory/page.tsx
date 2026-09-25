@@ -12,7 +12,7 @@ const PAGE_SIZE = 25;
 
 function positivePage(value: string | undefined) {
   const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 1;
+  return Number.isSafeInteger(parsed) && parsed > 0 ? Math.min(parsed, 10_000) : 1;
 }
 
 function pageHref(args: { agentId?: string; query?: string; page: number; archivedPage: number }) {
@@ -35,7 +35,7 @@ export default async function MemoryPage({ searchParams }: {
   const archivedPage = positivePage(one(params.archivedPage));
   const [memoryRows, archivedRows, agents] = await Promise.all([
     listMemories({ agentId, query, limit: PAGE_SIZE + 1, offset: (page - 1) * PAGE_SIZE }),
-    listMemories({ archived: true, limit: PAGE_SIZE + 1, offset: (archivedPage - 1) * PAGE_SIZE }),
+    listMemories({ agentId, query, archived: true, limit: PAGE_SIZE + 1, offset: (archivedPage - 1) * PAGE_SIZE }),
     listMemoryAgentOptions(),
   ]);
   const memories = memoryRows.slice(0, PAGE_SIZE);

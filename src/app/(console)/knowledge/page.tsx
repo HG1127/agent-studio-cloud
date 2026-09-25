@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { KnowledgeList, UploadSourceForm } from "@/features/knowledge/KnowledgeList";
 import { KnowledgeSearch } from "@/features/knowledge/KnowledgeSearch";
 import { listKnowledgeSources, searchKnowledgeChunks } from "@/server/queries/knowledge";
@@ -82,4 +83,3 @@ export default async function KnowledgePage({ searchParams }: {
     </main>
   );
 }
-import Link from "next/link";
