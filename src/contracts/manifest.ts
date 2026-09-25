@@ -4,8 +4,8 @@ import { QualityGateSpec, WorkflowDraft } from "./workflow";
 const RESERVED_FIELD_NAMES: ReadonlySet<string> = new Set(["__proto__", "prototype", "constructor"]);
 
 export const AgentInputField = z.object({
-  name: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).refine((name) => !RESERVED_FIELD_NAMES.has(name), "运行输入字段名不能使用保留名称"),
-  label: z.string().optional(),
+  name: z.string().max(200).regex(/^[A-Za-z_][A-Za-z0-9_]*$/).refine((name) => !RESERVED_FIELD_NAMES.has(name), "运行输入字段名不能使用保留名称"),
+  label: z.string().max(200).optional(),
   required: z.boolean().default(true),
   type: z.enum(["string", "number", "boolean", "object", "array"]).default("string"),
 });

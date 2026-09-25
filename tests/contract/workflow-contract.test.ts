@@ -5,6 +5,7 @@ import {
   MAX_WORKFLOW_BYTES,
   MAX_WORKFLOW_NODES,
   MAX_WORKFLOW_OUTPUT_FIELDS,
+  MAX_WORKFLOW_VARIABLES,
   WorkflowDraft,
   WorkflowNode,
 } from "@/contracts/workflow";
@@ -104,6 +105,21 @@ describe("WorkflowDraft", () => {
     expect(WorkflowDraft.safeParse({
       ...baseDraft,
       outputContract: { fields: [{ path: "x".repeat(201), required: true, sourceNodeId: "ai" }] },
+    }).success).toBe(false);
+  });
+
+  it("限制运行输入字段数量和文本长度", () => {
+    expect(WorkflowDraft.safeParse({
+      ...baseDraft,
+      variables: Array.from({ length: MAX_WORKFLOW_VARIABLES + 1 }, (_, index) => ({ name: `field_${index}` })),
+    }).success).toBe(false);
+    expect(WorkflowDraft.safeParse({
+      ...baseDraft,
+      variables: [{ name: "x".repeat(201), label: "正常名称" }],
+    }).success).toBe(false);
+    expect(WorkflowDraft.safeParse({
+      ...baseDraft,
+      variables: [{ name: "brief", label: "字".repeat(201) }],
     }).success).toBe(false);
   });
 });

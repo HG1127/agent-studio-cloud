@@ -40,5 +40,7 @@ describe("manifest 模型冻结向后兼容", () => {
     expect(AgentManifest.safeParse({ ...base, ...model, inputContract: { fields: [{ name: "1brief" }] } }).success).toBe(false);
     expect(AgentManifest.safeParse({ ...base, ...model, inputContract: { fields: [{ name: "brief" }, { name: "brief" }] } }).success).toBe(false);
     expect(AgentManifest.safeParse({ ...base, ...model, inputContract: { fields: [{ name: "constructor" }] } }).success).toBe(false);
+    expect(AgentManifest.safeParse({ ...base, ...model, inputContract: { fields: [{ name: "x".repeat(201) }] } }).success).toBe(false);
+    expect(AgentManifest.safeParse({ ...base, ...model, inputContract: { fields: [{ name: "brief", label: "字".repeat(201) }] } }).success).toBe(false);
   });
 });

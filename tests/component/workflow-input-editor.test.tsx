@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { MAX_WORKFLOW_VARIABLES } from "@/contracts/workflow";
 import { WorkflowInputEditor } from "@/features/workflow-canvas/WorkflowInputEditor";
 
 describe("运行输入字段编辑", () => {
@@ -31,5 +32,22 @@ describe("运行输入字段编辑", () => {
     expect(onChange).toHaveBeenLastCalledWith([{ ...variable, required: false }]);
     await user.click(screen.getByRole("button", { name: "删除" }));
     expect(onChange).toHaveBeenLastCalledWith([]);
+  });
+
+  it("达到字段上限后停止添加并明确提示", async () => {
+    const onChange = vi.fn();
+    const variables = Array.from({ length: MAX_WORKFLOW_VARIABLES }, (_, index) => ({
+      name: `field_${index + 1}`,
+      label: `字段 ${index + 1}`,
+      type: "string",
+      scope: "run",
+      required: true,
+    }));
+    render(<WorkflowInputEditor variables={variables} onChange={onChange} />);
+    const add = screen.getByRole("button", { name: "添加输入字段" });
+    expect(add).toBeDisabled();
+    expect(screen.getByText(`运行输入字段已达到 ${MAX_WORKFLOW_VARIABLES} 项上限。`)).toBeInTheDocument();
+    await userEvent.click(add);
+    expect(onChange).not.toHaveBeenCalled();
   });
 });

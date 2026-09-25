@@ -1,4 +1,4 @@
-import type { WorkflowVariable } from "@/contracts/workflow";
+import { MAX_WORKFLOW_VARIABLES, type WorkflowVariable } from "@/contracts/workflow";
 
 const FIELD_TYPES = [
   ["string", "文字"],
@@ -16,6 +16,7 @@ export function WorkflowInputEditor({ variables, onChange }: {
     onChange(variables.map((variable, position) => position === index ? { ...variable, ...patch } : variable));
   }
   function add() {
+    if (variables.length >= MAX_WORKFLOW_VARIABLES) return;
     let index = variables.length + 1;
     while (variables.some((variable) => variable.name === `field_${index}`)) index += 1;
     onChange([...variables, { name: `field_${index}`, label: "新输入字段", type: "string", scope: "run", required: true }]);
@@ -29,6 +30,7 @@ export function WorkflowInputEditor({ variables, onChange }: {
           <div key={index} className="grid gap-2 rounded-md border border-gray-100 p-3 md:grid-cols-[1fr_1fr_120px_auto_auto]">
             <label className="flex flex-col gap-1 text-xs text-gray-600">字段名
               <input aria-label={`字段 ${index + 1} 名称`} value={variable.name}
+                maxLength={200}
                 onChange={(event) => {
                   const cleaned = event.target.value.replace(/[^A-Za-z0-9_]/g, "");
                   update(index, { name: /^\d/.test(cleaned) ? `_${cleaned}` : cleaned });
@@ -37,6 +39,7 @@ export function WorkflowInputEditor({ variables, onChange }: {
             </label>
             <label className="flex flex-col gap-1 text-xs text-gray-600">显示名称
               <input aria-label={`字段 ${index + 1} 显示名称`} value={variable.label ?? ""}
+                maxLength={200}
                 onChange={(event) => update(index, { label: event.target.value })}
                 className="rounded-md border border-gray-300 px-2 py-1.5 text-sm" />
             </label>
@@ -55,7 +58,11 @@ export function WorkflowInputEditor({ variables, onChange }: {
           </div>
         ))}
       </div> : null}
-      <button type="button" onClick={add} className="mt-3 rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:border-gray-500">添加输入字段</button>
+      {variables.length >= MAX_WORKFLOW_VARIABLES
+        ? <p className="mt-3 text-xs text-amber-700">运行输入字段已达到 {MAX_WORKFLOW_VARIABLES} 项上限。</p>
+        : null}
+      <button type="button" disabled={variables.length >= MAX_WORKFLOW_VARIABLES} onClick={add}
+        className="mt-3 rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:border-gray-500 disabled:text-gray-400">添加输入字段</button>
     </details>
   );
 }

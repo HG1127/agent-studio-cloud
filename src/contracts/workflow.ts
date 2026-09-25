@@ -62,12 +62,12 @@ export const HandoffContract = z.object({
   }).optional(),
 });
 export const WorkflowVariable = z.object({
-  name: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).refine((name) => !RESERVED_FIELD_NAMES.has(name), "运行输入字段名不能使用保留名称"),
-  label: z.string().optional(),
-  type: z.string().default("string"),
-  scope: z.string().default("run"),
+  name: z.string().max(200).regex(/^[A-Za-z_][A-Za-z0-9_]*$/).refine((name) => !RESERVED_FIELD_NAMES.has(name), "运行输入字段名不能使用保留名称"),
+  label: z.string().max(200).optional(),
+  type: z.string().max(50).default("string"),
+  scope: z.string().max(50).default("run"),
   required: z.boolean().default(true),
-  description: z.string().optional(),
+  description: z.string().max(1_000).optional(),
 });
 export const QualityGateSpec = z.object({
   requiredOutputTitles: z.array(z.string().min(1).max(200)).max(MAX_WORKFLOW_NODES).default([]),
