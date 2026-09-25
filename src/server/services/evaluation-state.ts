@@ -86,6 +86,22 @@ export async function completeEvaluationForRun(
   await refreshEvaluationSummary(evaluationRunId);
 }
 
+export async function reconcileTerminalEvaluationRun(runId: string): Promise<void> {
+  const [run] = await db
+    .select({ status: runs.status, result: runs.result, error: runs.error })
+    .from(runs)
+    .where(eq(runs.id, runId))
+    .limit(1);
+  if (run?.status === "completed") {
+    await completeEvaluationForRun(runId, run.result ?? null);
+    return;
+  }
+  if (run?.status === "failed" || run?.status === "cancelled") {
+    const fallback = run.status === "cancelled" ? "验收运行已取消" : "验收运行失败";
+    await completeEvaluationForRun(runId, null, run.error ?? fallback);
+  }
+}
+
 export async function markEvaluationStartFailure(evaluationRunId: string, evaluationCaseId: string, error: string): Promise<void> {
   const updated = await db
     .update(evaluationCaseResults)

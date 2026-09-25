@@ -7,7 +7,7 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 import { agentVersions, agents, evaluationCaseResults, evaluationCases, evaluationRuns, runs } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
-import { createEvaluationCaseAction, setEvaluationCaseArchivedAction, updateEvaluationCaseAction } from "@/server/actions/evaluations";
+import { createEvaluationCaseAction, setEvaluationCaseArchivedAction, startEvaluationAction, updateEvaluationCaseAction } from "@/server/actions/evaluations";
 import { completeEvaluationForRun } from "@/server/services/evaluation-state";
 import { prepareEvaluationRun } from "@/server/services/evaluation-start";
 
@@ -112,6 +112,35 @@ describe("自动验收并发启动", () => {
 
     const [result] = await db.select().from(evaluationCaseResults).where(eq(evaluationCaseResults.evaluationRunId, prepared.evaluationId));
     expect(result).toMatchObject({ status: "passed", error: null, runId: RUN_ID });
+  });
+
+  it("检查并继续时对账已经结束但尚未汇总的运行", async () => {
+    await insertFixture();
+    await db.update(evaluationCases)
+      .set({ expectations: [{ path: "answer", operator: "equals", value: "通过" }] })
+      .where(eq(evaluationCases.id, CASE_ID));
+    const prepared = await prepareEvaluationRun(AGENT_ID);
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+    await db.insert(runs).values({
+      id: RUN_ID,
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
+      agentId: AGENT_ID,
+      versionId: VERSION_ID,
+      status: "completed",
+      input: {},
+      result: { answer: "通过" },
+      sourceType: "evaluation",
+      sourceKey: `evaluation:${prepared.evaluationId}:${CASE_ID}`,
+    });
+
+    await expect(startEvaluationAction(AGENT_ID)).resolves.toEqual({ ok: true });
+
+    const [evaluation] = await db.select().from(evaluationRuns).where(eq(evaluationRuns.id, prepared.evaluationId));
+    const [result] = await db.select().from(evaluationCaseResults).where(eq(evaluationCaseResults.evaluationRunId, prepared.evaluationId));
+    expect(evaluation).toMatchObject({ status: "completed", passedCount: 1, failedCount: 0 });
+    expect(result).toMatchObject({ status: "passed", runId: RUN_ID, error: null });
   });
 
   it("多个样例同时完成时汇总不会被较早的部分结果覆盖", async () => {

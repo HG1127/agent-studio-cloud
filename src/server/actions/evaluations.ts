@@ -13,7 +13,7 @@ import {
 import { agents, evaluationCaseResults, evaluationCases, evaluationRuns } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
-import { markEvaluationStartFailure } from "@/server/services/evaluation-state";
+import { markEvaluationStartFailure, reconcileTerminalEvaluationRun } from "@/server/services/evaluation-state";
 import { prepareEvaluationRun } from "@/server/services/evaluation-start";
 import { startRunCore } from "@/server/services/start-run-core";
 
@@ -149,6 +149,7 @@ export async function startEvaluationAction(agentId: string): Promise<Evaluation
             eq(evaluationCaseResults.evaluationRunId, prepared.evaluationId),
             eq(evaluationCaseResults.evaluationCaseId, testCase.id),
           ));
+        await reconcileTerminalEvaluationRun(started.runId);
       } else {
         await markEvaluationStartFailure(prepared.evaluationId, testCase.id, started.error);
       }
