@@ -8,6 +8,7 @@ import { ApprovalDecisionInput, type ApprovalDecisionResult } from "@/contracts/
 import { approvals, runs } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
+import { redactCredentialText } from "@/server/domain/security/redact-sensitive";
 
 // 人工审批决定入口：原子条件更新抢占 pending 行（并发下只有一次提交生效），再恢复工作流；
 // 恢复结果不确定时保留确认决定，由页面提供显式继续入口。token 由确认记录 ID 按服务端约定重建，不经过前端。
@@ -48,7 +49,7 @@ export async function decideApprovalAction(
       try {
         await resumeHook(`approval:${row.id}`, {
           decision: row.status,
-          note: row.note ?? undefined,
+          note: row.note ? redactCredentialText(row.note) : undefined,
         });
       } catch (error) {
         console.error("继续已确认的工作流失败", error);
@@ -62,7 +63,7 @@ export async function decideApprovalAction(
       return { ok: true };
     }
     const approved = parsedInput.data.decision === "approved";
-    const note = parsedInput.data.note?.trim() ? parsedInput.data.note.trim() : null;
+    const note = parsedInput.data.note?.trim() ? redactCredentialText(parsedInput.data.note.trim()) : null;
     const now = new Date();
     const claimed = await db.transaction(async (tx) => {
       const [lockedRun] = await tx

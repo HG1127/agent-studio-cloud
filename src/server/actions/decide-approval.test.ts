@@ -90,6 +90,44 @@ describe("已记录确认的运行恢复", () => {
     expect(mocks.updates).toBe(0);
   });
 
+  it("继续历史确认时不会把备注中的服务凭据再次送入工作流", async () => {
+    mocks.rows = [
+      [{ id: APPROVAL_ID, status: "approved", note: "同意，authorization: Bearer private-approval-token" }],
+      [{ agentId: AGENT_ID, status: "waiting_approval" }],
+    ];
+
+    const result = await decideApprovalAction(RUN_ID, APPROVAL_ID, {
+      decision: "approved",
+      resumeOnly: true,
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(mocks.resumeHook).toHaveBeenCalledWith(`approval:${APPROVAL_ID}`, {
+      decision: "approved",
+      note: "同意，[已隐藏敏感信息]",
+    });
+  });
+
+  it("新确认在保存和恢复前隐藏备注中的服务凭据", async () => {
+    mocks.rows = [
+      [{ id: APPROVAL_ID, status: "pending", note: null }],
+      [{ agentId: AGENT_ID, status: "waiting_approval" }],
+      [{ status: "waiting_approval" }],
+    ];
+    mocks.returningRows = [[{ id: APPROVAL_ID }]];
+
+    const result = await decideApprovalAction(RUN_ID, APPROVAL_ID, {
+      decision: "approved",
+      note: "同意，secret=private-approval-value",
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(mocks.resumeHook).toHaveBeenCalledWith(`approval:${APPROVAL_ID}`, {
+      decision: "approved",
+      note: "同意，[已隐藏敏感信息]",
+    });
+  });
+
   it("恢复失败时保留原决定供稍后重试", async () => {
     mocks.rows = [
       [{ id: APPROVAL_ID, status: "rejected", note: "信息不完整" }],

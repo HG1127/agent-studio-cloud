@@ -10,6 +10,7 @@ import { approvals, runs } from "@/db/schema";
 import { db } from "@/lib/db";
 import { approvalRecordId } from "@/server/domain/approval/approval-id";
 import { selectApprovalReview } from "@/server/domain/approval/select-review";
+import { redactCredentialData, redactCredentialText } from "@/server/domain/security/redact-sensitive";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 
@@ -46,9 +47,9 @@ export async function requestApproval(args: RequestApprovalInput): Promise<Appro
     // 集成测试和运维直调不在 Workflow 上下文中，仍需得到稳定标识。
   }
   const stableApprovalId = approvalRecordId(args.runId, node.id, workflowStepId);
-  const role = node.approval?.role ?? "业务负责人";
-  const reason = node.approval?.reason ?? `确认「${node.title}」后流程才会继续`;
-  const payload = ApprovalPayload.parse({ review: selectApprovalReview(args.outputs, args.nodes) });
+  const role = redactCredentialText(node.approval?.role ?? "业务负责人");
+  const reason = redactCredentialText(node.approval?.reason ?? `确认「${node.title}」后流程才会继续`);
+  const payload = ApprovalPayload.parse(redactCredentialData({ review: selectApprovalReview(args.outputs, args.nodes) }));
   const now = new Date();
   const result = await db.transaction(async (tx) => {
     const [run] = await tx
@@ -111,7 +112,7 @@ export async function requestApproval(args: RequestApprovalInput): Promise<Appro
   const recordedDecision: ApprovalHandle["recordedDecision"] = result.row.status === "approved" || result.row.status === "rejected"
     ? {
         decision: result.row.status,
-        ...(result.row.note ? { note: result.row.note } : {}),
+        ...(result.row.note ? { note: redactCredentialText(result.row.note) } : {}),
       }
     : undefined;
   if (!recordedDecision) {
@@ -134,6 +135,7 @@ export async function recordDecision(args: RecordDecisionInput): Promise<{
   "use step";
   const approved = args.decision.decision === "approved";
   const decisionStatus = approved ? "approved" : "rejected";
+  const note = args.decision.note ? redactCredentialText(args.decision.note) : null;
   await db.transaction(async (tx) => {
     const [run] = await tx
       .select({ status: runs.status })
@@ -157,7 +159,7 @@ export async function recordDecision(args: RecordDecisionInput): Promise<{
       .update(approvals)
       .set({
         status: decisionStatus,
-        note: args.decision.note ?? null,
+        note,
         decidedAt: sql`now()`,
         updatedAt: sql`now()`,
       })
@@ -169,13 +171,13 @@ export async function recordDecision(args: RecordDecisionInput): Promise<{
     kind: "approval.decided",
     level: approved ? "info" : "warn",
     title: approved ? `「${args.node.title}」已确认` : `「${args.node.title}」未获确认`,
-    detail: args.decision.note ?? null,
+    detail: note,
     dedupeKey: `approval-decided:${args.approvalId}:${decisionStatus}`,
   });
   const output = {
     approvalId: args.approvalId,
     decision: args.decision.decision,
-    note: args.decision.note ?? null,
+    note,
   };
   await persistStep({
     runId: args.runId,

@@ -15,6 +15,7 @@ import { agentVersions, agents, approvals, runSteps, runs, traceEvents, type Run
 import { db } from "@/lib/db";
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
 import { isRunStartLeaseExpired } from "@/server/services/run-start-lease";
+import { redactCredentialData, redactCredentialText } from "@/server/domain/security/redact-sensitive";
 
 const RUN_ID = z.string().uuid();
 
@@ -255,10 +256,10 @@ export async function listApprovals(runId: string, workspaceId: string): Promise
       nodeId: row.nodeId,
       nodeTitle: row.nodeTitle,
       status: row.status,
-      role: row.role,
-      reason: row.reason,
-      review: ApprovalPayload.safeParse(row.payload).data?.review ?? null,
-      note: row.note,
+      role: redactCredentialText(row.role),
+      reason: redactCredentialText(row.reason),
+      review: ApprovalPayload.safeParse(redactCredentialData(row.payload)).data?.review ?? null,
+      note: row.note ? redactCredentialText(row.note) : null,
       decidedAt: row.decidedAt?.toISOString() ?? null,
     })));
 }
