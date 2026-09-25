@@ -2,7 +2,7 @@
 import mammoth from "mammoth";
 import { extractText, getDocumentProxy } from "unpdf";
 import { FatalError } from "workflow";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { knowledgeChunks, knowledgeSources } from "@/db/schema";
 import { db } from "@/lib/db";
 import { chunkText } from "@/server/domain/knowledge/chunker";
@@ -88,7 +88,10 @@ export async function indexKnowledgeChunks(args: { sourceId: string; text: strin
     if (!source) throw new FatalError("找不到要入库的知识来源");
     if (source.parseEngine !== args.ingestToken) throw new FatalError("资料已有新的解析任务，忽略旧任务结果");
     // 失败后重新上传会复用同一来源；事务保证旧分片不会被半套新数据覆盖。
-    await tx.delete(knowledgeChunks).where(eq(knowledgeChunks.sourceId, args.sourceId));
+    await tx.delete(knowledgeChunks).where(and(
+      eq(knowledgeChunks.sourceId, args.sourceId),
+      eq(knowledgeChunks.workspaceId, source.workspaceId),
+    ));
     for (let i = 0; i < chunks.length; i += 200) {
       const batch = chunks.slice(i, i + 200);
       await tx.insert(knowledgeChunks).values(
@@ -106,7 +109,10 @@ export async function indexKnowledgeChunks(args: { sourceId: string; text: strin
     await tx
       .update(knowledgeSources)
       .set({ status: processedKnowledgeStatus(source.archivedAt, "indexed"), chunkCount: chunks.length, charCount, parseEngine: "builtin", error: null, updatedAt: new Date() })
-      .where(eq(knowledgeSources.id, args.sourceId));
+      .where(and(
+        eq(knowledgeSources.id, args.sourceId),
+        eq(knowledgeSources.workspaceId, source.workspaceId),
+      ));
   });
   return { chunkCount: chunks.length };
 }
@@ -115,7 +121,7 @@ export async function markKnowledgeFailed(args: { sourceId: string; error: strin
   "use step";
   await db.transaction(async (tx) => {
     const [source] = await tx
-      .select({ archivedAt: knowledgeSources.archivedAt, parseEngine: knowledgeSources.parseEngine })
+      .select({ workspaceId: knowledgeSources.workspaceId, archivedAt: knowledgeSources.archivedAt, parseEngine: knowledgeSources.parseEngine })
       .from(knowledgeSources)
       .where(eq(knowledgeSources.id, args.sourceId))
       .for("update")
@@ -125,6 +131,9 @@ export async function markKnowledgeFailed(args: { sourceId: string; error: strin
     await tx
       .update(knowledgeSources)
       .set({ status: processedKnowledgeStatus(source.archivedAt, "failed"), parseEngine: "builtin", error: args.error, updatedAt: new Date() })
-      .where(eq(knowledgeSources.id, args.sourceId));
+      .where(and(
+        eq(knowledgeSources.id, args.sourceId),
+        eq(knowledgeSources.workspaceId, source.workspaceId),
+      ));
   });
 }

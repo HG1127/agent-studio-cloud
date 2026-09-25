@@ -179,7 +179,10 @@ export async function POST(req: Request) {
       await db
         .update(knowledgeSources)
         .set({ blobPathname: effectiveBlobPathname, updatedAt: new Date() })
-        .where(eq(knowledgeSources.id, concurrent.id));
+        .where(and(
+          eq(knowledgeSources.id, concurrent.id),
+          eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID),
+        ));
     }
     return Response.json({
       ok: true,

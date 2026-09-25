@@ -47,7 +47,12 @@ export async function decideApprovalAction(
     const claimed = await db
       .update(approvals)
       .set({ status: approved ? "approved" : "rejected", note, decidedAt: now, updatedAt: now })
-      .where(and(eq(approvals.id, approvalId), eq(approvals.runId, runId), eq(approvals.status, "pending")))
+      .where(and(
+        eq(approvals.id, approvalId),
+        eq(approvals.runId, runId),
+        eq(approvals.workspaceId, DEMO_WORKSPACE_ID),
+        eq(approvals.status, "pending"),
+      ))
       .returning({ id: approvals.id });
     if (claimed.length === 0) {
       return { ok: false, error: "这条确认已经处理过，请勿重复提交" };
@@ -64,6 +69,8 @@ export async function decideApprovalAction(
         .set({ status: "pending", note: null, decidedAt: null, updatedAt: new Date() })
         .where(and(
           eq(approvals.id, approvalId),
+          eq(approvals.runId, runId),
+          eq(approvals.workspaceId, DEMO_WORKSPACE_ID),
           eq(approvals.status, approved ? "approved" : "rejected"),
           exists(
             db

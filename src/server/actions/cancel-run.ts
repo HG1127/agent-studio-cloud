@@ -47,7 +47,11 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
       const rows = await tx
         .update(runs)
         .set({ status: "cancelled", error: "已由员工取消", finishedAt: now, updatedAt: now })
-        .where(and(eq(runs.id, rootRunId), inArray(runs.status, LIVE_STATUSES)))
+        .where(and(
+          eq(runs.id, rootRunId),
+          eq(runs.workspaceId, DEMO_WORKSPACE_ID),
+          inArray(runs.status, LIVE_STATUSES),
+        ))
         .returning({ id: runs.id });
       if (rows.length > 0) {
         const descendantIds: string[] = [];
@@ -70,7 +74,11 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
           await tx
             .update(runs)
             .set({ status: "cancelled", error: "上级运行已取消", finishedAt: now, updatedAt: now })
-            .where(and(inArray(runs.id, descendantIds), inArray(runs.status, LIVE_STATUSES)));
+            .where(and(
+              inArray(runs.id, descendantIds),
+              eq(runs.workspaceId, DEMO_WORKSPACE_ID),
+              inArray(runs.status, LIVE_STATUSES),
+            ));
         }
         await tx
           .update(approvals)
