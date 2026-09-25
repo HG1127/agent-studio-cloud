@@ -64,6 +64,17 @@ afterEach(() => {
 });
 
 describe("重新解析知识资料", () => {
+  it("原文件存储未配置时返回准确说明", async () => {
+    delete process.env.BLOB_READ_WRITE_TOKEN;
+
+    await expect(retryKnowledgeSourceAction(SOURCE_ID)).resolves.toEqual({
+      ok: false,
+      error: "原文件存储尚未配置，暂时无法直接重新解析",
+    });
+
+    expect(mocks.get).not.toHaveBeenCalled();
+  });
+
   it("锁定失败资料后从私有原文件启动新的解析任务", async () => {
     mocks.rows = [[source], [source]];
 
@@ -113,5 +124,19 @@ describe("重新解析知识资料", () => {
       error: "解析任务启动失败，请稍后重试",
       parseEngine: null,
     });
+  });
+
+  it("原文件暂时无法读取时给出可行动提示", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.rows = [[source]];
+    mocks.get.mockRejectedValue(new Error("blob unavailable"));
+
+    await expect(retryKnowledgeSourceAction(SOURCE_ID)).resolves.toEqual({
+      ok: false,
+      error: "原文件暂时无法读取，请稍后重试或重新上传同一文件",
+    });
+
+    expect(mocks.updates).toHaveLength(0);
+    expect(mocks.start).not.toHaveBeenCalled();
   });
 });

@@ -18,7 +18,7 @@ export async function retryKnowledgeSourceAction(sourceId: string): Promise<Know
     return { ok: false, error: "知识资料信息不正确，请刷新页面后重试" };
   }
   const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
-  if (!blobToken) return { ok: false, error: "这份资料没有可重新解析的原文件，请重新上传同一文件" };
+  if (!blobToken) return { ok: false, error: "原文件存储尚未配置，暂时无法直接重新解析" };
   try {
     const [source] = await db
       .select({
@@ -39,7 +39,13 @@ export async function retryKnowledgeSourceAction(sourceId: string): Promise<Know
     if (source.status !== "failed") return { ok: false, error: "资料状态已经变化，请刷新页面查看最新状态" };
     if (!source.blobPathname) return { ok: false, error: "这份资料没有保留原文件，请重新上传同一文件" };
 
-    const blob = await get(source.blobPathname, { access: "private", token: blobToken });
+    let blob: Awaited<ReturnType<typeof get>>;
+    try {
+      blob = await get(source.blobPathname, { access: "private", token: blobToken });
+    } catch (error) {
+      console.error("读取知识原文件以重新解析失败", error);
+      return { ok: false, error: "原文件暂时无法读取，请稍后重试或重新上传同一文件" };
+    }
     if (!blob?.stream) return { ok: false, error: "原文件不存在或暂时无法读取，请重新上传同一文件" };
     const ingestToken = `pending:${randomUUID()}`;
     const claimed = await db.transaction(async (tx) => {
