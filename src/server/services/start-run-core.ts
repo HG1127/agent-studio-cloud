@@ -60,6 +60,7 @@ async function collaboratorIssue(node: AgentManifest["workflowSnapshot"]["nodes"
         eq(agentVersions.id, node.agentCall!.versionId),
         eq(agentVersions.agentId, node.agentCall!.targetAgentId),
         eq(agentVersions.workspaceId, workspaceId),
+        eq(agents.workspaceId, workspaceId),
         isNull(agents.archivedAt),
       ))
       .limit(1);
@@ -76,6 +77,7 @@ async function collaboratorIssue(node: AgentManifest["workflowSnapshot"]["nodes"
         eq(agentVersions.id, node.toAgent!.versionId!),
         eq(agentVersions.agentId, node.toAgent!.id),
         eq(agentVersions.workspaceId, workspaceId),
+        eq(agents.workspaceId, workspaceId),
         isNull(agents.archivedAt),
       ))
       .limit(1);
@@ -111,7 +113,7 @@ export async function startRunCore(args: {
       .from(agentVersions)
       .where(args.versionId
         ? and(eq(agentVersions.id, args.versionId), eq(agentVersions.agentId, agentId), eq(agentVersions.workspaceId, agent.workspaceId))
-        : and(eq(agentVersions.agentId, agentId), eq(agentVersions.status, "production")))
+        : and(eq(agentVersions.agentId, agentId), eq(agentVersions.workspaceId, agent.workspaceId), eq(agentVersions.status, "production")))
       .orderBy(desc(agentVersions.version))
       .limit(1);
     if (!version) {

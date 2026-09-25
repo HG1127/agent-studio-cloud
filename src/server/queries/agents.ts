@@ -22,17 +22,19 @@ async function listAgentsByArchivedState(
       status: agents.status,
       archivedAt: agents.archivedAt,
       updatedAt: agents.updatedAt,
-      versionCount:
-        sql<number>`(select count(*) from ${agentVersions} where ${agentVersions.agentId} = ${agents.id})`.mapWith(
-          Number,
-        ),
+      versionCount: sql<number>`count(${agentVersions.id})`.mapWith(Number),
     })
     .from(agents)
+    .leftJoin(agentVersions, and(
+      eq(agentVersions.agentId, agents.id),
+      eq(agentVersions.workspaceId, agents.workspaceId),
+    ))
     .where(and(
       eq(agents.workspaceId, workspaceId),
       archived ? isNotNull(agents.archivedAt) : isNull(agents.archivedAt),
       query ? or(ilike(agents.name, `%${query}%`), ilike(agents.description, `%${query}%`)) : undefined,
     ))
+    .groupBy(agents.id)
     .orderBy(desc(agents.updatedAt))
     .limit(limit)
     .offset(offset);

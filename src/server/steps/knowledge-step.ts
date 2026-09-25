@@ -58,6 +58,7 @@ export async function runKnowledgeStep(args: RunKnowledgeStepInput): Promise<{ r
       and(
         inArray(knowledgeChunks.sourceId, snapshot),
         eq(knowledgeChunks.workspaceId, run.workspaceId),
+        eq(knowledgeSources.workspaceId, run.workspaceId),
         eq(knowledgeSources.status, "indexed"),
         isNull(knowledgeSources.archivedAt),
       ),

@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { startMock, cancelMock } = vi.hoisted(() => ({ startMock: vi.fn(), cancelMock: vi.fn() }));
@@ -14,6 +14,8 @@ const AGENT_ID = "00000000-0000-4000-8000-0000000007a1";
 const VERSION_ID = "00000000-0000-4000-8000-0000000007a2";
 const EVALUATION_ID = "00000000-0000-4000-8000-0000000007a3";
 const CASE_ID = "00000000-0000-4000-8000-0000000007a4";
+const CROSS_VERSION_ID = "00000000-0000-4000-8000-0000000007a5";
+const OTHER_WS = "00000000-0000-4000-8000-0000000007af";
 const manifest = AgentManifest.parse({
   schemaVersion: "4.0",
   workflowFingerprint: "7".repeat(64),
@@ -37,7 +39,7 @@ async function cleanup() {
   await db.delete(evaluationCaseResults).where(eq(evaluationCaseResults.evaluationRunId, EVALUATION_ID));
   await db.delete(evaluationRuns).where(eq(evaluationRuns.id, EVALUATION_ID));
   await db.delete(evaluationCases).where(eq(evaluationCases.id, CASE_ID));
-  await db.delete(agentVersions).where(eq(agentVersions.id, VERSION_ID));
+  await db.delete(agentVersions).where(inArray(agentVersions.id, [VERSION_ID, CROSS_VERSION_ID]));
   await db.delete(agents).where(eq(agents.id, AGENT_ID));
 }
 
@@ -68,6 +70,25 @@ describe("运行启动句柄恢复", () => {
     expect(first.ok).toBe(true);
     expect(second).toEqual(first);
     expect(startMock).toHaveBeenCalledOnce();
+  });
+
+  it("默认运行只选择助手本工作区的生产版本", async () => {
+    const crossManifest = AgentManifest.parse({
+      ...manifest,
+      workflowFingerprint: "8".repeat(64),
+    });
+    await db.insert(agentVersions).values({
+      id: CROSS_VERSION_ID, agentId: AGENT_ID, workspaceId: OTHER_WS, createdBy: DEMO_USER_ID,
+      version: 2, status: "production", manifest: crossManifest,
+    });
+
+    const result = await startRunCore({ agentId: AGENT_ID, input: {} });
+
+    expect(result.ok).toBe(true);
+    expect(startMock).toHaveBeenCalledWith(expect.any(Function), expect.arrayContaining([
+      expect.any(String),
+      expect.objectContaining({ workflowFingerprint: "7".repeat(64) }),
+    ]));
   });
 
   it("验收运行启动失败时直接落定样例与验收汇总", async () => {

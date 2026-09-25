@@ -36,6 +36,7 @@ export async function prepareEvaluationRun(agentId: string) {
           eq(evaluationCaseResults.evaluationRunId, runningEvaluation.id),
           eq(evaluationCaseResults.status, "running"),
           eq(evaluationCaseResults.workspaceId, DEMO_WORKSPACE_ID),
+          eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID),
         ))
         .limit(MAX_EVALUATION_CASES + 1);
       if (!evaluation) return { ok: false as const, error: "自动验收记录不完整，请稍后重试" };
@@ -55,6 +56,7 @@ export async function prepareEvaluationRun(agentId: string) {
       .where(and(
         eq(agentVersions.agentId, agentId),
         eq(agentVersions.workspaceId, DEMO_WORKSPACE_ID),
+        eq(agents.workspaceId, DEMO_WORKSPACE_ID),
         inArray(agentVersions.status, ["candidate", "production"]),
         isNull(agents.archivedAt),
       ))

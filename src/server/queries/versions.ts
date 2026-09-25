@@ -17,7 +17,12 @@ export async function listVersions(agentId: string, workspaceId: string, paginat
       createdAt: agentVersions.createdAt,
     })
     .from(agentVersions)
-    .where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.workspaceId, workspaceId)))
+    .innerJoin(agents, eq(agents.id, agentVersions.agentId))
+    .where(and(
+      eq(agentVersions.agentId, agentId),
+      eq(agentVersions.workspaceId, workspaceId),
+      eq(agents.workspaceId, workspaceId),
+    ))
     .orderBy(desc(agentVersions.version))
     .limit(limit)
     .offset(offset);
