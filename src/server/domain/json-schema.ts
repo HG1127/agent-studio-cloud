@@ -86,8 +86,8 @@ function validateSchemaRule(schema: unknown, path: string, depth: number): strin
   if (conflictingNumericBounds(rule)) return `${path}的数值上下限相互冲突`;
   if (rule.pattern !== undefined) {
     if (typeof rule.pattern !== "string") return `${path}的 pattern 必须是文字`;
-    try { new RegExp(rule.pattern); } catch { return `${path}的 pattern 不是有效正则表达式`; }
     if (rule.pattern.length > MAX_PATTERN_LENGTH) return `${path}的 pattern 不能超过 ${MAX_PATTERN_LENGTH} 个字符`;
+    try { new RegExp(rule.pattern); } catch { return `${path}的 pattern 不是有效正则表达式`; }
     const unescaped = rule.pattern.replace(/\\./g, "");
     if (/[()|]/.test(unescaped) || /\\[1-9]/.test(rule.pattern)) {
       return `${path}的 pattern 只能使用简单文字、字符范围和数量规则`;

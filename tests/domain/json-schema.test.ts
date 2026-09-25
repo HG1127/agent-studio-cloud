@@ -128,6 +128,10 @@ describe("外部消息字段校验", () => {
   it("限制外部消息正则和字段契约复杂度", () => {
     expect(validateJsonObjectSchema({}, {
       type: "object",
+      properties: { code: { type: "string", pattern: `${"a".repeat(201)}[`, maxLength: 100 } },
+    })).toContain("不能超过 200 个字符");
+    expect(validateJsonObjectSchema({}, {
+      type: "object",
       properties: { code: { type: "string", pattern: "(a+)+$", maxLength: 100 } },
     })).toContain("只能使用简单文字");
     expect(validateJsonObjectSchema({}, {
