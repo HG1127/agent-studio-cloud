@@ -4,6 +4,7 @@ import type { WorkflowDraft } from "@/contracts/workflow";
 import { validateOutputContract } from "@/server/domain/runtime/output-contract";
 import { validateWaitContracts } from "@/server/domain/runtime/wait-contract";
 import { validateWorkflowRoutes } from "@/server/domain/runtime/workflow-routes";
+import { validateInlineWorkflows } from "@/server/domain/runtime/inline-workflow";
 import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
 
 export const MAX_AGENT_IMPORT_BYTES = 2 * 1024 * 1024;
@@ -23,7 +24,8 @@ export function agentImportSizeIssue(input: unknown): string | null {
 export function importedWorkflowIssue(workflow: WorkflowDraft): string | null {
   return validateWorkflowRoutes(workflow)
     ?? validateOutputContract(workflow.outputContract?.fields ?? [], workflow.nodes)
-    ?? validateWaitContracts(workflow.nodes);
+    ?? validateWaitContracts(workflow.nodes)
+    ?? validateInlineWorkflows(workflow);
 }
 
 export interface NormalizedAgentImport {
@@ -69,7 +71,7 @@ function nestedSteps(node: Record<string, unknown>): Record<string, unknown>[] {
   return [...subflowSteps, ...parallelSteps];
 }
 
-function collectCollaborationKeys(node: Record<string, unknown>, keys: Set<string>) {
+function collectCollaborationKey(node: Record<string, unknown>, keys: Set<string>) {
   if (node.type === "agent_call" && isRecord(node.agentCall)) {
     const targetAgentId = node.agentCall.targetAgentId;
     const versionId = node.agentCall.versionId;
@@ -84,18 +86,20 @@ function collectCollaborationKeys(node: Record<string, unknown>, keys: Set<strin
       keys.add(`${targetAgentId}:${versionId}`);
     }
   }
-  for (const step of nestedSteps(node)) collectCollaborationKeys(step, keys);
 }
 
 export function workflowCollaborationKeys(workflow: WorkflowDraft) {
   const keys = new Set<string>();
-  for (const node of Object.values(workflow.nodes)) collectCollaborationKeys(node, keys);
+  for (const node of Object.values(workflow.nodes)) {
+    collectCollaborationKey(node, keys);
+    for (const step of nestedSteps(node)) collectCollaborationKey(step, keys);
+  }
   return [...keys];
 }
 
 export const importedCollaborationKeys = workflowCollaborationKeys;
 
-function rebindNode(node: Record<string, unknown>, validKeys: ReadonlySet<string>): Record<string, unknown> {
+function rebindCollaborationNode(node: Record<string, unknown>, validKeys: ReadonlySet<string>): Record<string, unknown> {
   const rebound = { ...node };
   if (node.type === "agent_call" && isRecord(node.agentCall)) {
     const key = `${node.agentCall.targetAgentId ?? ""}:${node.agentCall.versionId ?? ""}`;
@@ -109,17 +113,22 @@ function rebindNode(node: Record<string, unknown>, validKeys: ReadonlySet<string
     }
   }
 
+  return rebound;
+}
+
+function rebindTopLevelNode(node: Record<string, unknown>, validKeys: ReadonlySet<string>): Record<string, unknown> {
+  const rebound = rebindCollaborationNode(node, validKeys);
   if (isRecord(node.subflow) && Array.isArray(node.subflow.steps)) {
     rebound.subflow = {
       ...node.subflow,
-      steps: node.subflow.steps.map((step) => isRecord(step) ? rebindNode(step, validKeys) : step),
+      steps: node.subflow.steps.map((step) => isRecord(step) ? rebindCollaborationNode(step, validKeys) : step),
     };
   }
   if (isRecord(node.parallel) && Array.isArray(node.parallel.branches)) {
     rebound.parallel = {
       ...node.parallel,
       branches: node.parallel.branches.map((branch) => isRecord(branch) && Array.isArray(branch.steps)
-        ? { ...branch, steps: branch.steps.map((step) => isRecord(step) ? rebindNode(step, validKeys) : step) }
+        ? { ...branch, steps: branch.steps.map((step) => isRecord(step) ? rebindCollaborationNode(step, validKeys) : step) }
         : branch),
     };
   }
@@ -133,7 +142,7 @@ export function rebindImportedWorkflow(args: {
   validCollaborationKeys: ReadonlySet<string>;
 }): WorkflowDraft {
   const nodes = Object.fromEntries(Object.entries(args.workflow.nodes).map(
-    ([id, node]) => [id, rebindNode(node, args.validCollaborationKeys)],
+    ([id, node]) => [id, rebindTopLevelNode(node, args.validCollaborationKeys)],
   )) as WorkflowDraft["nodes"];
   return bindWorkflowRootAgent({
     ...args.workflow,

@@ -117,6 +117,28 @@ describe("助手导入格式归一化", () => {
     expect(importedWorkflowIssue(historicalUnsafe)).toBe("步骤“开始”的标识包含不安全字符");
   });
 
+  it("导入前拒绝运行器无法执行的内嵌步骤", () => {
+    const unsupportedInline = WorkflowDraft.parse({
+      ...workflow,
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "group" },
+        group: {
+          id: "group",
+          title: "一组步骤",
+          type: "subflow",
+          next: "done",
+          subflow: {
+            name: "人工处理",
+            steps: [{ id: "approve", title: "人工确认", type: "human", approval: { role: "负责人", reason: "核对" } }],
+          },
+        },
+        done: { id: "done", title: "结束", type: "end", next: null },
+      },
+    });
+
+    expect(importedWorkflowIssue(unsupportedInline)).toContain("暂不支持步骤类型「human」");
+  });
+
   it("导入副本重绑定根助手并清理当前工作区不存在的协作引用", () => {
     const withCollaboration = WorkflowDraft.parse({
       ...workflow,

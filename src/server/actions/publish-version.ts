@@ -22,6 +22,7 @@ import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
 import { knowledgeStepTitles, prepareKnowledgeSnapshot } from "@/server/domain/runtime/knowledge-snapshot";
 import { workflowCollaborationKeys } from "@/server/domain/import-agent";
 import { inspectCollaborationVersionGraph } from "@/server/domain/runtime/collaboration-dependencies";
+import { validateInlineWorkflows } from "@/server/domain/runtime/inline-workflow";
 
 export async function publishVersionAction(agentId: string, modelSelection?: PublishModelSelection): Promise<PublishVersionResult> {
   if (!z.string().uuid().safeParse(agentId).success) {
@@ -59,6 +60,8 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
     if (waitError) return { ok: false, error: waitError, issues: [] };
     const routeError = validateWorkflowRoutes(draft);
     if (routeError) return { ok: false, error: routeError, issues: [] };
+    const inlineError = validateInlineWorkflows(draft);
+    if (inlineError) return { ok: false, error: inlineError, issues: [] };
     const audit = auditWorkflow(draft);
     // M1 演示发布策略：critical 门禁交给 filterPublishBlockers 裁决，豁免项随成功返回值透出给面板提醒
     const { blocking, exempted } = filterPublishBlockers(audit.issues, draft);

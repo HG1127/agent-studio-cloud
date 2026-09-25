@@ -12,6 +12,7 @@ import { auditEventValues } from "@/server/audit/event-values";
 import { validateOutputContract } from "@/server/domain/runtime/output-contract";
 import { validateWaitContracts } from "@/server/domain/runtime/wait-contract";
 import { validateWorkflowRoutes } from "@/server/domain/runtime/workflow-routes";
+import { validateInlineWorkflows } from "@/server/domain/runtime/inline-workflow";
 import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
 import { validationMessage } from "@/server/domain/validation-message";
 
@@ -36,6 +37,8 @@ export async function saveWorkflowAction(
   if (waitError) return { ok: false, error: waitError };
   const routeError = validateWorkflowRoutes(parsed.data);
   if (routeError) return { ok: false, error: routeError };
+  const inlineError = validateInlineWorkflows(parsed.data);
+  if (inlineError) return { ok: false, error: inlineError };
   const expectedRevision = expectedUpdatedAt === undefined || expectedUpdatedAt === null
     ? null
     : new Date(expectedUpdatedAt);
