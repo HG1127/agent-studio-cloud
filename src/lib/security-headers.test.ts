@@ -7,6 +7,7 @@ describe("全站浏览器安全响应头", () => {
       .toMatchObject({
         "x-content-type-options": "nosniff",
         "x-frame-options": "DENY",
+        "x-robots-tag": "noindex, nofollow",
         "referrer-policy": "strict-origin-when-cross-origin",
         "permissions-policy": "camera=(), microphone=(), geolocation=()",
       });
