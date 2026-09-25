@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from "vitest";
 import golden1 from "../fixtures/domain/intent-golden-1.json";
 import { WorkflowDraft } from "@/contracts/workflow";
 import { bindDemoCapabilities, buildAgentDraft, buildManifest } from "@/server/domain/pipeline";
+import { validateOutputContract } from "@/server/domain/runtime/output-contract";
+import { validateWorkflowRoutes } from "@/server/domain/runtime/workflow-routes";
 
 const mocks = vi.hoisted(() => ({ compileIntentWorkflow: vi.fn() }));
 
@@ -90,6 +92,20 @@ describe("创建助手管道 buildAgentDraft", () => {
       expect.objectContaining({ name: "input_3", label: "商品信息" }),
     ]));
     expect(result.draft?.outputContract?.fields.length).toBeGreaterThan(0);
+    expect(result.draft?.nodes[result.draft.startNodeId].title).toBe("收到新工单后");
+    expect(Object.values(result.draft?.nodes ?? {}).some((node) =>
+      /^(?:触发条件|需要的业务输入|的业务输入)[：:]/.test(node.title),
+    )).toBe(false);
+    expect(Object.values(result.draft?.nodes ?? {})).toContainEqual(expect.objectContaining({
+      title: "生成回复邮件和处理记录",
+      type: "ai",
+      ui: { visibility: "business" },
+    }));
+    expect(result.draft?.outputContract?.fields).toEqual([
+      expect.objectContaining({ path: "output_1", label: "回复邮件和处理记录", required: true }),
+    ]);
+    expect(validateOutputContract(result.draft!.outputContract!.fields, result.draft!.nodes)).toBeNull();
+    expect(validateWorkflowRoutes(result.draft!)).toBeNull();
     expect(JSON.stringify(result.draft?.businessRequirements)).toContain("发送前必须由负责人确认");
     const manifest = buildManifest(result.draft!, {
       modelId: "mock",

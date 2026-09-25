@@ -1,6 +1,6 @@
 // 创建助手的纯 domain 管道：意图文本 → 编译 → 业务落地门禁 → 复杂意图契约 → 设计审计。
 // 只做纯计算，不碰数据库；Server Action 是薄封装。创建页业务蓝图写入意图文本，
-// 这里把资料清单转成运行输入，其余 trigger/outputs 仍由门禁按意图文本抽取需求。
+// 这里把蓝图中的触发、输入与交付要求收敛为可执行契约。
 // 发布侧纯函数也在此文件：stableStringify / buildManifest（env 由 Server Action 读取后经参数传入）。
 import { createHash } from "node:crypto";
 import { AgentManifest } from "@/contracts/manifest";
@@ -27,17 +27,99 @@ export interface AgentPipelineResult {
   diagnostics: AgentDraftDiagnostics;
 }
 
-function applyBlueprintInputs(draft: WorkflowDraft, intentText: string): void {
-  const match = /(?:^|\n)需要的业务输入[：:]\s*([^\n。；;]+)/.exec(intentText);
-  if (!match) return;
-  const labels = [
+interface AgentBlueprint {
+  trigger: string | null;
+  inputs: string[];
+  outputs: string[];
+}
+
+function blueprintValue(intentText: string, label: string): string | null {
+  const match = new RegExp(`(?:^|\\n)${label}[：:]\\s*([^\\n]+)`).exec(intentText);
+  return match?.[1]?.trim().replace(/[。；;]+$/, "").slice(0, 500) || null;
+}
+
+function blueprintLabels(value: string | null): string[] {
+  if (!value) return [];
+  return [
     ...new Set(
-      match[1]
+      value
         .split(/[、,，/]+/)
         .map((label) => label.trim().slice(0, 200))
         .filter(Boolean),
     ),
   ].slice(0, 20);
+}
+
+function parseAgentBlueprint(intentText: string): AgentBlueprint {
+  return {
+    trigger: blueprintValue(intentText, "触发条件"),
+    inputs: blueprintLabels(blueprintValue(intentText, "需要的业务输入")),
+    outputs: blueprintLabels(blueprintValue(intentText, "最终交付")),
+  };
+}
+
+function removeLinearNode(draft: WorkflowDraft, nodeId: string): void {
+  const removed = draft.nodes[nodeId];
+  if (!removed) return;
+  const replacement = removed.next;
+  const replace = (target: string | null | undefined): string | null | undefined => target === nodeId ? replacement : target;
+  for (const node of Object.values(draft.nodes)) {
+    if (node.id === nodeId) continue;
+    node.next = replace(node.next) ?? null;
+    node.rejectNext = replace(node.rejectNext) ?? null;
+    node.onErrorNext = replace(node.onErrorNext) ?? null;
+    if (node.condition) {
+      node.condition.defaultNext = replace(node.condition.defaultNext) ?? null;
+      for (const branch of node.condition.branches) branch.next = replace(branch.next) ?? null;
+    }
+    if (node.loop) {
+      node.loop.bodyNext = replace(node.loop.bodyNext) ?? null;
+      node.loop.exitNext = replace(node.loop.exitNext) ?? null;
+    }
+    if (node.wait) node.wait.onTimeoutNext = replace(node.wait.onTimeoutNext) ?? null;
+  }
+  if (draft.startNodeId === nodeId && replacement) draft.startNodeId = replacement;
+  delete draft.nodes[nodeId];
+  if (draft.ui?.positions) delete draft.ui.positions[nodeId];
+}
+
+function applyBlueprintStructure(draft: WorkflowDraft, blueprint: AgentBlueprint): string | null {
+  if (blueprint.trigger) {
+    const trigger = draft.nodes[draft.startNodeId] ?? Object.values(draft.nodes).find((node) => node.type === "trigger");
+    if (trigger?.type === "trigger") {
+      trigger.title = blueprint.trigger.slice(0, 200);
+      trigger.description = `触发条件：${blueprint.trigger}`;
+    }
+  }
+
+  const removable = Object.values(draft.nodes)
+    .filter((node) => /^(?:触发条件|需要的业务输入|的业务输入)[：:]/.test(node.title.trim()))
+    .map((node) => node.id);
+  for (const nodeId of removable) removeLinearNode(draft, nodeId);
+
+  const outputNode = Object.values(draft.nodes).find((node) => /^最终交付[：:]/.test(node.title.trim()));
+  if (outputNode && blueprint.outputs.length > 0) {
+    const description = blueprint.outputs.join("、");
+    outputNode.type = "ai";
+    outputNode.title = `生成${description}`.slice(0, 200);
+    outputNode.description = `根据前序处理结果生成最终交付：${description}`;
+    outputNode.purpose = outputNode.description;
+    outputNode.modelClass ||= "default";
+    outputNode.ui = { visibility: "business" };
+    delete outputNode.system;
+    delete outputNode.rule;
+    delete outputNode.controlPlane;
+    return outputNode.id;
+  }
+
+  const candidates = Object.values(draft.nodes).filter((node) =>
+    node.ui?.visibility !== "control"
+    && !["trigger", "end", "human", "condition", "rule", "wait"].includes(node.type),
+  );
+  return candidates.at(-1)?.id ?? null;
+}
+
+function applyBlueprintInputs(draft: WorkflowDraft, labels: string[]): void {
   if (labels.length === 0) return;
   const names = new Set(draft.variables.map((variable) => variable.name));
   for (const [index, label] of labels.entries()) {
@@ -71,7 +153,9 @@ export function finalizeAgentDraft(params: {
   const { intentText, workflow, orderedSteps } = params;
   try {
     bindDemoCapabilities(workflow);
-    applyBlueprintInputs(workflow, intentText);
+    const blueprint = parseAgentBlueprint(intentText);
+    const outputSourceId = applyBlueprintStructure(workflow, blueprint);
+    applyBlueprintInputs(workflow, blueprint.inputs);
     const intent = { orderedSteps, trigger: undefined, outputs: [] };
     const grounded = groundBusinessWorkflow(workflow, {
       sourceText: intentText,
@@ -79,8 +163,21 @@ export function finalizeAgentDraft(params: {
       answers: {},
     });
     const enriched = attachComplexIntentContract(grounded, intent, intentText);
+    const enrichedWithBlueprint = blueprint.outputs.length > 0 && outputSourceId && enriched.nodes[outputSourceId]
+      ? {
+        ...enriched,
+        outputContract: {
+        fields: blueprint.outputs.map((label, index) => ({
+          path: `output_${index + 1}`,
+          label,
+          required: true,
+          sourceNodeId: outputSourceId,
+        })),
+        },
+      }
+      : enriched;
     // parse 在此补全默认值并把形状收敛到契约——入库与后续画布都消费契约形状，不落原始结构
-    const parsedDraft = WorkflowDraft.parse(enriched);
+    const parsedDraft = WorkflowDraft.parse(enrichedWithBlueprint);
     const draft = applySafeAuditFixes(parsedDraft, {
       codes: new Set(["output_contract_missing", "end_without_delivery"]),
     }).draft;
