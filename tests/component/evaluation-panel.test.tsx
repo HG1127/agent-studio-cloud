@@ -29,6 +29,7 @@ const CASES = [{
   input: { input: "生成续约方案" },
   expectations: [{ path: "", operator: "contains" as const, value: "续约" }],
   createdAt: "2026-09-24T00:00:00.000Z",
+  updatedAt: "2026-09-24T00:05:00.000Z",
 }];
 
 describe("EvaluationPanel", () => {
@@ -154,6 +155,7 @@ describe("EvaluationPanel", () => {
       caseId: CASES[0].id,
       name: "客户续约",
       input: { input: "生成新版续约方案" },
+      expectedUpdatedAt: CASES[0].updatedAt,
       expectations: [
         { path: "outputs.review", operator: "exists" },
         { path: "", operator: "contains", value: "新版续约" },

@@ -154,6 +154,7 @@ export async function updateEvaluationCaseAction(input: unknown): Promise<Evalua
       }).where(and(
         eq(evaluationCases.id, parsed.data.caseId), eq(evaluationCases.agentId, parsed.data.agentId),
         eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID), isNull(evaluationCases.archivedAt),
+        eq(evaluationCases.updatedAt, new Date(parsed.data.expectedUpdatedAt)),
       )).returning({ id: evaluationCases.id });
       if (rows.length > 0) {
         await tx.insert(auditEvents).values(auditEventValues({
@@ -170,7 +171,7 @@ export async function updateEvaluationCaseAction(input: unknown): Promise<Evalua
     });
     if (rows === "running") return { ok: false, error: "自动验收运行期间不能修改验收样例" };
     if (!rows) return { ok: false, error: "找不到这个助手，请刷新页面后重试" };
-    if (rows.length === 0) return { ok: false, error: "找不到这条验收样例，请刷新页面后重试" };
+    if (rows.length === 0) return { ok: false, error: "验收样例已在其他页面发生变化；你的修改仍保留在本页，请刷新核对后再保存" };
     revalidatePath(`/agents/${parsed.data.agentId}`);
     return { ok: true };
   } catch (error) {

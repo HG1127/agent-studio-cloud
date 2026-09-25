@@ -19,6 +19,7 @@ const CASE_ID_2 = "00000000-0000-4000-8000-0000000000a5";
 const RUN_ID_2 = "00000000-0000-4000-8000-0000000000a6";
 const CROSS_VERSION_ID = "00000000-0000-4000-8000-0000000000a7";
 const OTHER_WS = "00000000-0000-4000-8000-0000000000af";
+const CASE_UPDATED_AT = new Date("2026-09-25T00:00:00.000Z");
 
 const manifest = AgentManifest.parse({
   schemaVersion: "4.0",
@@ -61,11 +62,34 @@ async function insertFixture() {
   });
   await db.insert(evaluationCases).values({
     id: CASE_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, agentId: AGENT_ID,
-    name: "基础样例", input: {}, expectations: [],
+    name: "基础样例", input: {}, expectations: [], updatedAt: CASE_UPDATED_AT,
   });
 }
 
 describe("自动验收并发启动", () => {
+  it("旧页面不会覆盖其他页面刚保存的验收样例", async () => {
+    await insertFixture();
+    await db.update(evaluationCases)
+      .set({ name: "其他页面的新名称", updatedAt: new Date(CASE_UPDATED_AT.getTime() + 1_000) })
+      .where(eq(evaluationCases.id, CASE_ID));
+
+    const result = await updateEvaluationCaseAction({
+      caseId: CASE_ID,
+      agentId: AGENT_ID,
+      name: "旧页面名称",
+      input: {},
+      expectations: [],
+      expectedUpdatedAt: CASE_UPDATED_AT.toISOString(),
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "验收样例已在其他页面发生变化；你的修改仍保留在本页，请刷新核对后再保存",
+    });
+    const [testCase] = await db.select().from(evaluationCases).where(eq(evaluationCases.id, CASE_ID));
+    expect(testCase.name).toBe("其他页面的新名称");
+  });
+
   it("同一助手同时发起两次时复用同一轮验收", async () => {
     await insertFixture();
     const results = await Promise.all([prepareEvaluationRun(AGENT_ID), prepareEvaluationRun(AGENT_ID)]);
@@ -84,7 +108,14 @@ describe("自动验收并发启动", () => {
 
     const [created, updated, archived] = await Promise.all([
       createEvaluationCaseAction({ agentId: AGENT_ID, name: "新增样例", input: {}, expectations: [] }),
-      updateEvaluationCaseAction({ caseId: CASE_ID, agentId: AGENT_ID, name: "被修改", input: {}, expectations: [] }),
+      updateEvaluationCaseAction({
+        caseId: CASE_ID,
+        agentId: AGENT_ID,
+        name: "被修改",
+        input: {},
+        expectations: [],
+        expectedUpdatedAt: CASE_UPDATED_AT.toISOString(),
+      }),
       setEvaluationCaseArchivedAction({ caseId: CASE_ID, agentId: AGENT_ID, archived: true }),
     ]);
 

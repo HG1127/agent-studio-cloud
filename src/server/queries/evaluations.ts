@@ -26,6 +26,7 @@ export async function listEvaluationCases(
   return parseQueryRows("验收样例列表", EvaluationCaseView, rows.map((row) => ({
     ...row,
     createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
   })));
 }
 

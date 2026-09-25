@@ -42,7 +42,10 @@ export const EvaluationCaseCreateInput = EvaluationCaseFields.superRefine((value
 });
 export type EvaluationCaseCreateInput = z.infer<typeof EvaluationCaseCreateInput>;
 
-export const EvaluationCaseUpdateInput = EvaluationCaseFields.extend({ caseId: z.string().uuid() }).superRefine((value, ctx) => {
+export const EvaluationCaseUpdateInput = EvaluationCaseFields.extend({
+  caseId: z.string().uuid(),
+  expectedUpdatedAt: z.iso.datetime(),
+}).superRefine((value, ctx) => {
   const issue = evaluationCaseSizeIssue(value);
   if (issue) ctx.addIssue({ code: "custom", message: issue });
 });
@@ -54,6 +57,7 @@ export const EvaluationCaseView = z.object({
   input: z.record(z.string(), z.unknown()),
   expectations: z.array(EvaluationExpectation),
   createdAt: z.string(),
+  updatedAt: z.string().optional(),
 });
 export type EvaluationCaseView = z.infer<typeof EvaluationCaseView>;
 

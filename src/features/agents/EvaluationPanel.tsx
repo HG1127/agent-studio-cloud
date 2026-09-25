@@ -73,6 +73,7 @@ export function EvaluationPanel({
   const [inputText, setInputText] = useState('{"input":"请处理这条验收任务"}');
   const [expectedText, setExpectedText] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingUpdatedAt, setEditingUpdatedAt] = useState<string | null>(null);
   const [advancedExpectations, setAdvancedExpectations] = useState<AdvancedExpectationDraft[]>([]);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -90,6 +91,7 @@ export function EvaluationPanel({
     setInputText('{"input":"请处理这条验收任务"}');
     setExpectedText("");
     setEditingId(null);
+    setEditingUpdatedAt(null);
     setAdvancedExpectations([]);
   }
 
@@ -97,6 +99,7 @@ export function EvaluationPanel({
     setError(null);
     setNotice(null);
     setEditingId(testCase.id);
+    setEditingUpdatedAt(testCase.updatedAt ?? testCase.createdAt);
     setName(testCase.name);
     setInputText(JSON.stringify(testCase.input));
     setExpectedText(commonExpectation(testCase.expectations));
@@ -134,7 +137,7 @@ export function EvaluationPanel({
         expectations: mergeCommonExpectation(advancedExpectations.map(expectationFromDraft), expectedText),
       };
       const result = editingId
-        ? await updateEvaluationCaseAction({ ...payload, caseId: editingId })
+        ? await updateEvaluationCaseAction({ ...payload, caseId: editingId, expectedUpdatedAt: editingUpdatedAt })
         : await createEvaluationCaseAction(payload);
       if (!result.ok) setError(result.error);
       else {
