@@ -160,6 +160,8 @@ export interface AuditNode {
   toAgent?: { id?: string | null; [key: string]: unknown } | null;
   contract?: AuditContract | null;
   system?: { kind?: string | null; [key: string]: unknown } | null;
+  rule?: { kind?: string | null; sourceNodeId?: string | null; [key: string]: unknown } | null;
+  quality?: { requiredOutputTitles?: unknown; [key: string]: unknown } | null;
   controlPlane?: { hiddenByDefault?: boolean | null; [key: string]: unknown } | null;
   ui?: { visibility?: string | null; [key: string]: unknown } | null;
   businessSpec?: AuditSpec | null;
@@ -476,6 +478,18 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
 
     if (n.type === "memory" && !n.memory?.mode) {
       issues.push(issue("critical", "memory", "经验步骤设置不完整", `「${n.title}」没有选择读取或保存经验，无法执行。`, { nodeId: id, fixable: true, code: "memory_mode" }));
+    }
+
+    if (n.type === "rule") {
+      const kind = n.rule?.kind;
+      if (["tool_result", "tool_receipt"].includes(kind || "")) {
+        const source = n.rule?.sourceNodeId ? nodes[n.rule.sourceNodeId] : null;
+        if (!source || source.type !== "tool") {
+          issues.push(issue("critical", "logic", "系统回执检查缺少工具来源", `「${n.title}」没有选择要核对的工具步骤。`, { nodeId: id, fixable: true, code: "rule_tool_source" }));
+        }
+      } else if (kind !== "business_rule" && !n.quality) {
+        issues.push(issue("critical", "logic", "检查步骤设置不完整", `「${n.title}」没有可执行的业务判断、系统回执或交付检查设置。`, { nodeId: id, fixable: true, code: "rule_spec" }));
+      }
     }
 
     if (n.type === "condition") {

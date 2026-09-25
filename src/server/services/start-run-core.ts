@@ -293,6 +293,17 @@ async function validateRuntimePreflight(args: {
       if (!node.tool || node.tool.unresolved === true || (!demoBound && !realBound)) unsupported.push(node.title);
     }
     if (node.type === "knowledge" && !node.knowledge?.space) unsupported.push(node.title);
+    if (node.type === "condition" && !node.condition) unsupported.push(`${node.title}（条件设置不完整）`);
+    if (node.type === "loop" && !node.loop) unsupported.push(`${node.title}（逐项处理设置不完整）`);
+    if (node.type === "rule") {
+      const kind = node.rule?.kind;
+      if (["tool_result", "tool_receipt"].includes(kind || "")) {
+        const source = node.rule?.sourceNodeId ? args.manifest.workflowSnapshot.nodes[node.rule.sourceNodeId] : null;
+        if (!source || source.type !== "tool") unsupported.push(`${node.title}（系统回执来源不可用）`);
+      } else if (kind !== "business_rule" && !node.quality) {
+        unsupported.push(`${node.title}（检查设置不完整）`);
+      }
+    }
     if (node.type === "parallel") {
       const prepared = prepareParallelBranches(node);
       if (!prepared.ok) {

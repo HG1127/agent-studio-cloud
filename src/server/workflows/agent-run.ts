@@ -372,6 +372,18 @@ export async function agentRunWorkflow(
         continue;
       }
       if (node.type === "rule") {
+        if (node.rule?.kind === "business_rule" && !node.quality) {
+          try {
+            const result = await runModelStep({ runId, node, manifest, outputs, input });
+            outputs[node.id] = result.output;
+            currentId = node.next;
+          } catch (error) {
+            const handled = await recordHandledNodeFailure({ runId, node, error, fallback: `步骤「${node.title}」执行业务判断失败` });
+            outputs[node.id] = handled.output;
+            currentId = handled.next;
+          }
+          continue;
+        }
         try {
           const quality = await runQualityGate({ runId, node, outputs, nodes: draft.nodes, repairAttempts: qualityRepairAttempts });
           if (quality.repair) {

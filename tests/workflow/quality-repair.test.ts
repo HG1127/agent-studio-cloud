@@ -81,6 +81,24 @@ const emptyResultManifest = AgentManifest.parse({
   },
 });
 
+const businessRuleManifest = AgentManifest.parse({
+  ...manifest,
+  workflowFingerprint: "b".repeat(64),
+  workflowSnapshot: {
+    ...manifest.workflowSnapshot,
+    id: "draft-business-rule-test",
+    nodes: {
+      start: { id: "start", title: "收到任务", type: "trigger", next: "check" },
+      check: {
+        id: "check", title: "判断申请是否符合业务规则", type: "rule", next: "done",
+        description: "结合本次输入判断申请是否满足业务条件，并说明依据",
+        rule: { kind: "business_rule" },
+      },
+      done: { id: "done", title: "完成", type: "end", next: null },
+    },
+  },
+});
+
 async function cleanup(runId: string) {
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -98,6 +116,23 @@ async function cleanup(runId: string) {
 }
 
 describe("质量检查自动返工", () => {
+  it("业务规则步骤会真正调用模型而不是静默通过", async () => {
+    const [row] = await db.insert(runs).values({
+      workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, agentId: AGENT_ID,
+      versionId: VERSION_ID, status: "queued", input: { amount: 100 },
+    }).returning({ id: runs.id });
+    try {
+      const handle = await start(agentRunWorkflow, [row.id, businessRuleManifest, { amount: 100 }]);
+      await expect(handle.returnValue).resolves.toEqual({ status: "completed" });
+      const [finished] = await db.select().from(runs).where(eq(runs.id, row.id)).limit(1);
+      expect(finished?.result).toMatchObject({ check: expect.stringContaining("[模拟输出]") });
+      const [step] = await db.select().from(runSteps).where(eq(runSteps.runId, row.id)).limit(1);
+      expect(step).toMatchObject({ nodeId: "check", nodeType: "rule", status: "succeeded" });
+    } finally {
+      await cleanup(row.id);
+    }
+  }, 240_000);
+
   it("缺少智能处理结果时自动重写，再次检查通过后完成", async () => {
     const [row] = await db.insert(runs).values({
       workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, agentId: AGENT_ID,

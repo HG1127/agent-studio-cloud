@@ -277,6 +277,25 @@ describe("直测：结构性检查", () => {
     ]));
   });
 
+  it("没有执行设置或回执来源的检查步骤会阻止发布", () => {
+    const result = auditWorkflow(WorkflowDraft.parse({
+      id: "invalid-rules",
+      rootAgent: { id: "agent", name: "测试助手", role: "处理" },
+      memoryPolicy: { taskContext: true, longTerm: false },
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "empty" },
+        empty: { id: "empty", title: "空检查", type: "rule", next: "receipt" },
+        receipt: { id: "receipt", title: "核对回执", type: "rule", next: "done", rule: { kind: "tool_result", sourceNodeId: "missing" } },
+        done: { id: "done", title: "结束", type: "end", next: null },
+      },
+    }));
+
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "rule_spec", severity: "critical", nodeId: "empty" }),
+      expect.objectContaining({ code: "rule_tool_source", severity: "critical", nodeId: "receipt" }),
+    ]));
+  });
+
   it("隐藏的质量控制节点不会被误判为业务目标声明", () => {
     const out = auditWorkflow({
       ...deadEndDraft,

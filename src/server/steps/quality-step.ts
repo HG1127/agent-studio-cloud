@@ -72,8 +72,8 @@ export async function runQualityGate(args: RunQualityGateInput): Promise<Quality
     nodeType: node.type,
     status: "running",
   });
-  if (node.rule?.kind === "tool_result") {
-    const sourceNodeId = node.rule.sourceNodeId;
+  if (["tool_result", "tool_receipt"].includes(node.rule?.kind ?? "")) {
+    const sourceNodeId = node.rule?.sourceNodeId;
     const receipt = sourceNodeId ? args.outputs[sourceNodeId] : undefined;
     if (!isReceiptOk(receipt)) {
       return reject(`步骤「${node.title}」未取得来源步骤的系统回执，流程停止`);
@@ -148,7 +148,7 @@ export async function runQualityGate(args: RunQualityGateInput): Promise<Quality
         return reject("交付前检查未通过：需要人工确认的步骤还没有确认记录");
       }
     }
-  }
+  } else return reject(`步骤「${node.title}」的检查设置不完整`);
   await persistStep({
     runId: args.runId,
     nodeId: node.id,
