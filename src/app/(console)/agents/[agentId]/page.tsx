@@ -97,6 +97,7 @@ export default async function AgentDetailPage({
         currentVersionId={currentVersion?.id ?? null}
         versionPage={versionPage}
         hasMoreVersions={versions.length > versionPageSize}
+        archivedCasesPage={archivedCasesPage}
       />
       <EvaluationPanel
         agentId={agentId}

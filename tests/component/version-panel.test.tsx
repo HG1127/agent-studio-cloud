@@ -84,6 +84,26 @@ describe("VersionPanel", () => {
     );
   });
 
+  it("版本翻页时保留已归档验收样例页码", () => {
+    render(<VersionPanel
+      agentId={AGENT_ID}
+      versions={[VERSIONS[1]]}
+      connections={[]}
+      defaultModelLabel="演示模式"
+      versionPage={2}
+      hasMoreVersions
+      archivedCasesPage={4}
+    />);
+    expect(screen.getByRole("link", { name: "上一页" })).toHaveAttribute(
+      "href",
+      "?versionsPage=1&archivedCasesPage=4#versions",
+    );
+    expect(screen.getByRole("link", { name: "下一页" })).toHaveAttribute(
+      "href",
+      "?versionsPage=3&archivedCasesPage=4#versions",
+    );
+  });
+
   it("流程有未保存修改时阻止发布旧草稿", async () => {
     renderPanel();
     act(() => window.dispatchEvent(new CustomEvent(DRAFT_STATE_EVENT, { detail: { agentId: AGENT_ID, dirty: true } })));

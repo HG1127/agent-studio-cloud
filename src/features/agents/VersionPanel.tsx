@@ -23,6 +23,7 @@ export function VersionPanel({
   currentVersionId = null,
   versionPage = 1,
   hasMoreVersions = false,
+  archivedCasesPage = 1,
 }: {
   agentId: string;
   versions: VersionSummary[];
@@ -31,6 +32,7 @@ export function VersionPanel({
   currentVersionId?: string | null;
   versionPage?: number;
   hasMoreVersions?: boolean;
+  archivedCasesPage?: number;
 }) {
   const router = useRouter();
   const [optimisticVersions, setOptimisticVersions] = useState<VersionSummary[]>([]);
@@ -70,6 +72,11 @@ export function VersionPanel({
       })),
   ], versions);
   const effectiveCurrentVersionId = displayedVersions.find((version) => version.status === "production")?.id ?? currentVersionId;
+  const versionPageHref = (page: number) => {
+    const params = new URLSearchParams({ versionsPage: String(page) });
+    if (archivedCasesPage > 1) params.set("archivedCasesPage", String(archivedCasesPage));
+    return `?${params.toString()}#versions`;
+  };
 
   async function handlePublish() {
     if (hasUnsavedDraft) {
@@ -220,9 +227,9 @@ export function VersionPanel({
       )}
       {versionPage > 1 || hasMoreVersions ? (
         <nav aria-label="版本翻页" className="flex items-center justify-between border-t border-gray-100 pt-3 text-sm">
-          {versionPage > 1 ? <Link href={`?versionsPage=${versionPage - 1}#versions`} className="text-blue-700 hover:underline">上一页</Link> : <span />}
+          {versionPage > 1 ? <Link href={versionPageHref(versionPage - 1)} className="text-blue-700 hover:underline">上一页</Link> : <span />}
           <span className="text-xs text-gray-500">第 {versionPage} 页</span>
-          {hasMoreVersions ? <Link href={`?versionsPage=${versionPage + 1}#versions`} className="text-blue-700 hover:underline">下一页</Link> : <span />}
+          {hasMoreVersions ? <Link href={versionPageHref(versionPage + 1)} className="text-blue-700 hover:underline">下一页</Link> : <span />}
         </nav>
       ) : null}
     </section>
