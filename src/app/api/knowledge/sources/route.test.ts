@@ -9,6 +9,7 @@ const dbState = vi.hoisted(() => ({
   insertRows: [] as unknown[],
   auditRows: [] as Array<Record<string, unknown>>,
   update: vi.fn(),
+  updateRows: [] as unknown[],
 }));
 
 vi.mock("@vercel/blob", () => ({ del, put }));
@@ -34,7 +35,10 @@ vi.mock("@/lib/db", () => ({
         };
       },
     }),
-    update: () => ({ set: () => ({ where: dbState.update }) }),
+    update: () => ({ set: () => ({ where: (...args: unknown[]) => {
+      dbState.update(...args);
+      return { returning: async () => dbState.updateRows };
+    } }) }),
     };
     return { ...client, transaction: async (run: (tx: typeof client) => unknown) => run(client) };
   })(),
@@ -53,6 +57,7 @@ afterEach(() => {
   dbState.insertRows = [];
   dbState.auditRows = [];
   dbState.update.mockReset();
+  dbState.updateRows = [];
 });
 
 describe("知识原文件上传", () => {
@@ -306,6 +311,28 @@ describe("知识原文件上传", () => {
     expect(await response.json()).toMatchObject({ ok: true, deduped: true, blobStored: true });
     expect(del).toHaveBeenCalledWith("knowledge/unused.txt", { token: "test-token" });
     expect(startMock).not.toHaveBeenCalled();
+  });
+
+  it("补写原文件地址竞争失败时保留胜出地址并清理本请求 Blob", async () => {
+    process.env.BLOB_READ_WRITE_TOKEN = "test-token";
+    const concurrent = {
+      id: "00000000-0000-4000-8000-0000000000f4", name: "售后手册.txt", mime: "text/plain",
+      sizeBytes: 12, status: "parsing", chunkCount: 0, charCount: 0, error: null,
+      createdAt: new Date("2026-09-24T00:00:00Z"), blobPathname: null, archivedAt: null,
+    };
+    dbState.selectQueue = [[], [concurrent], [{ blobPathname: "knowledge/winner.txt" }]];
+    dbState.insertRows = [];
+    dbState.updateRows = [];
+    put.mockResolvedValue({ pathname: "knowledge/unused.txt" });
+    const form = new FormData();
+    form.set("file", new File(["退货说明"], "售后手册.txt", { type: "text/plain" }));
+
+    const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, deduped: true, blobStored: true });
+    expect(dbState.update).toHaveBeenCalledOnce();
+    expect(del).toHaveBeenCalledWith("knowledge/unused.txt", { token: "test-token" });
   });
 
   it("首次上传时原子记录上传操作并启动解析", async () => {
