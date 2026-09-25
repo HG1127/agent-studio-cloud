@@ -125,7 +125,7 @@ export async function getPendingWait(runId: string, workspaceId: string): Promis
     eventKey: row?.data?.eventKey,
     title: row?.title,
     payloadSchema: row?.data?.payloadSchema ?? { type: "object" },
-    submissionToken: row?.data?.submissionToken ?? row?.data?.hookToken,
+    submissionToken: row?.data?.submissionToken,
   });
   return parsed.success ? parsed.data : null;
 }
@@ -166,9 +166,7 @@ export async function getPendingWaitHook(runId: string, workspaceId: string): Pr
       : `wait:${runId}:${view.data.eventKey}`,
     submissionToken: typeof row?.data?.submissionToken === "string" && row.data.submissionToken.length > 0
       ? row.data.submissionToken
-      : typeof hookToken === "string" && hookToken.length > 0
-        ? hookToken
-        : null,
+      : null,
   };
 }
 

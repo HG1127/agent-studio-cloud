@@ -8,6 +8,7 @@ import { POST } from "@/app/api/runs/[runId]/events/[eventKey]/route";
 import { runs, traceEvents } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
+import { getPendingWait } from "@/server/queries/runs";
 
 const RUN_ID = "00000000-0000-4000-8000-0000000000b3";
 
@@ -88,7 +89,7 @@ describe("外部消息恢复接口", () => {
     const response = await POST(
       new Request(`http://localhost/api/runs/${RUN_ID}/events/customer.profile.updated`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", origin: "http://localhost" },
         body: "{}",
       }),
       { params: Promise.resolve({ runId: RUN_ID, eventKey: "customer.profile.updated" }) },
@@ -96,6 +97,23 @@ describe("外部消息恢复接口", () => {
 
     expect(response.status).toBe(200);
     expect(resumeHookMock).toHaveBeenCalledWith(`wait:${RUN_ID}:customer.profile.updated`, {});
+    expect((await getPendingWait(RUN_ID, DEMO_WORKSPACE_ID))?.submissionToken).toBeNull();
+  });
+
+  it("升级前的旧格式等待拒绝无来源的外部请求", async () => {
+    await insertWaitingRun({ type: "object" }, `wait:${RUN_ID}:wait_customer:7`, null);
+    const response = await POST(
+      new Request(`http://localhost/api/runs/${RUN_ID}/events/customer.profile.updated`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      }),
+      { params: Promise.resolve({ runId: RUN_ID, eventKey: "customer.profile.updated" }) },
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ ok: false, error: "这条旧运行只能从当前页面提交消息" });
+    expect(resumeHookMock).not.toHaveBeenCalled();
   });
 
   it("缺少一次性凭据时不会恢复新格式等待", async () => {
