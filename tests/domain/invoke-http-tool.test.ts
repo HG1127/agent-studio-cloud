@@ -51,4 +51,17 @@ describe("HTTP 工具调用", () => {
       fetchImpl: vi.fn(async () => Response.json(["not-object"])),
     })).resolves.toMatchObject({ ok: false, error: expect.stringContaining("JSON 对象") });
   });
+
+  it("把读取到一半中断的回执标为可重试", async () => {
+    const interrupted = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"receiptId":'));
+        controller.error(new Error("connection reset"));
+      },
+    });
+    await expect(invokeHttpTool({
+      tool, idempotencyKey: "run:node", action: tool.action, input: {}, outputs: {},
+      fetchImpl: vi.fn(async () => new Response(interrupted)),
+    })).resolves.toEqual({ ok: false, error: "业务系统返回中断，稍后自动重试", retryable: true });
+  });
 });

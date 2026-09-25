@@ -15,15 +15,19 @@ async function readBoundedBody(response: Response): Promise<string | null> {
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > MAX_TOOL_RESPONSE_BYTES) {
-      await reader.cancel();
-      return null;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_TOOL_RESPONSE_BYTES) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
     }
-    chunks.push(value);
+  } finally {
+    reader.releaseLock();
   }
   const body = new Uint8Array(size);
   let offset = 0;
@@ -79,7 +83,12 @@ export async function invokeHttpTool(args: {
       retryable,
     };
   }
-  const raw = await readBoundedBody(response);
+  let raw: string | null;
+  try {
+    raw = await readBoundedBody(response);
+  } catch {
+    return { ok: false, error: "业务系统返回中断，稍后自动重试", retryable: true };
+  }
   if (raw === null) return { ok: false, error: "业务系统返回内容超过 1 MB", retryable: false };
   if (!raw.trim()) return { ok: true, output: { ok: true } };
   try {
