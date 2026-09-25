@@ -10,6 +10,8 @@ export const AuditEventAction = z.enum([
   "workflow.auto_fixed",
   "version.published",
   "version.restored",
+  "knowledge.uploaded",
+  "knowledge.reingested",
   "knowledge.archived",
   "knowledge.restored",
   "memory.archived",

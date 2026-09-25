@@ -39,6 +39,15 @@ describe("操作记录契约", () => {
     expect(AuditEventCreate.safeParse({
       workspaceId: DEMO_WORKSPACE_ID,
       createdBy: DEMO_USER_ID,
+      action: "knowledge.uploaded",
+      targetType: "knowledge",
+      targetId: "00000000-0000-4000-8000-000000000101",
+      summary: "上传知识资料",
+      data: { sizeBytes: 1024, originalStored: false },
+    }).success).toBe(true);
+    expect(AuditEventCreate.safeParse({
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
       action: "evaluation.started",
       targetType: "evaluation",
       targetId: "00000000-0000-4000-8000-000000000102",

@@ -6,6 +6,7 @@ const dbState = vi.hoisted(() => ({
   rows: [] as unknown[],
   selectQueue: [] as unknown[][],
   insertRows: [] as unknown[],
+  auditRows: [] as Array<Record<string, unknown>>,
   update: vi.fn(),
 }));
 
@@ -22,9 +23,15 @@ vi.mock("@/lib/db", () => ({
       }),
     }),
     insert: () => ({
-      values: () => ({
-        onConflictDoNothing: () => ({ returning: async () => dbState.insertRows }),
-      }),
+      values: (value: Record<string, unknown>) => {
+        if ("action" in value) {
+          dbState.auditRows.push(value);
+          return Promise.resolve();
+        }
+        return {
+          onConflictDoNothing: () => ({ returning: async () => dbState.insertRows }),
+        };
+      },
     }),
     update: () => ({ set: () => ({ where: dbState.update }) }),
     };
@@ -42,6 +49,7 @@ afterEach(() => {
   dbState.rows = [];
   dbState.selectQueue = [];
   dbState.insertRows = [];
+  dbState.auditRows = [];
   dbState.update.mockReset();
 });
 
@@ -136,6 +144,10 @@ describe("知识原文件上传", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ ok: true, deduped: true, source: { status: "indexed" } });
     expect(dbState.update).toHaveBeenCalledOnce();
+    expect(dbState.auditRows).toContainEqual(expect.objectContaining({
+      action: "knowledge.restored",
+      targetId: "00000000-0000-4000-8000-0000000000f3",
+    }));
   });
 
   it("重新上传归档但尚无分片的资料时重新启动解析", async () => {
@@ -155,6 +167,7 @@ describe("知识原文件上传", () => {
     expect(startMock).toHaveBeenCalledOnce();
     expect(startMock.mock.calls[0]?.[1]?.[0]).toMatchObject({ ingestToken: expect.stringMatching(/^pending:/) });
     expect(dbState.update).toHaveBeenCalledOnce();
+    expect(dbState.auditRows.map((row) => row.action)).toEqual(["knowledge.restored", "knowledge.reingested"]);
   });
 
   it("重新上传解析失败的同一文件会复用记录并重新入库", async () => {
@@ -173,6 +186,10 @@ describe("知识原文件上传", () => {
     expect(startMock).toHaveBeenCalledOnce();
     expect(startMock.mock.calls[0]?.[1]?.[0]).toMatchObject({ ingestToken: expect.stringMatching(/^pending:/) });
     expect(dbState.update).toHaveBeenCalledOnce();
+    expect(dbState.auditRows).toContainEqual(expect.objectContaining({
+      action: "knowledge.reingested",
+      data: { previousStatus: "failed" },
+    }));
   });
 
   it("重新上传长时间停在解析中的同一文件会恢复入库任务", async () => {
@@ -233,5 +250,28 @@ describe("知识原文件上传", () => {
       source: { id: concurrent.id, status: "parsing" },
     });
     expect(startMock).not.toHaveBeenCalled();
+  });
+
+  it("首次上传时原子记录上传操作并启动解析", async () => {
+    const created = {
+      id: "00000000-0000-4000-8000-0000000000f5", name: "退款规则.md", mime: "text/markdown",
+      sizeBytes: 12, status: "parsing", chunkCount: 0, charCount: 0, error: null,
+      createdAt: new Date("2026-09-25T00:00:00Z"), blobPathname: null, archivedAt: null,
+    };
+    dbState.insertRows = [created];
+    const form = new FormData();
+    form.set("file", new File(["退款规则内容"], "退款规则.md", { type: "text/markdown" }));
+
+    const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, deduped: false, source: { id: created.id } });
+    expect(dbState.auditRows).toContainEqual(expect.objectContaining({
+      action: "knowledge.uploaded",
+      targetType: "knowledge",
+      targetId: created.id,
+      summary: "上传知识资料「退款规则.md」",
+    }));
+    expect(startMock).toHaveBeenCalledOnce();
   });
 });

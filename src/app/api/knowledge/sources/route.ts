@@ -2,11 +2,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { put } from "@vercel/blob";
 import { and, eq } from "drizzle-orm";
 import { start } from "workflow/api";
-import { knowledgeSources } from "@/db/schema";
+import { auditEvents, knowledgeSources } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { MAX_KNOWLEDGE_FILE_BYTES } from "@/server/domain/knowledge/text-limits";
 import { knowledgeIngestWorkflow } from "@/server/workflows/knowledge-ingest";
+import { auditEventValues } from "@/server/audit/event-values";
 
 export const dynamic = "force-dynamic";
 
@@ -65,6 +66,28 @@ async function reconcileDuplicateSource(sourceId: string, suppliedBlobPathname: 
         .update(knowledgeSources)
         .set({ archivedAt: null, status, error, blobPathname, parseEngine: ingestToken ?? current.parseEngine, updatedAt: new Date() })
         .where(and(eq(knowledgeSources.id, current.id), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)));
+      if (current.archivedAt) {
+        await tx.insert(auditEvents).values(auditEventValues({
+          workspaceId: DEMO_WORKSPACE_ID,
+          createdBy: DEMO_USER_ID,
+          action: "knowledge.restored",
+          targetType: "knowledge",
+          targetId: current.id,
+          summary: `通过重新上传恢复知识资料「${current.name}」`,
+          data: {},
+        }));
+      }
+      if (retrying) {
+        await tx.insert(auditEvents).values(auditEventValues({
+          workspaceId: DEMO_WORKSPACE_ID,
+          createdBy: DEMO_USER_ID,
+          action: "knowledge.reingested",
+          targetType: "knowledge",
+          targetId: current.id,
+          summary: `重新解析知识资料「${current.name}」`,
+          data: { previousStatus: current.status },
+        }));
+      }
     }
     return { row: { ...current, archivedAt: null, status, error, blobPathname, parseEngine: ingestToken ?? current.parseEngine }, retrying, ingestToken };
   });
@@ -150,21 +173,34 @@ export async function POST(req: Request) {
     }
   }
   const ingestToken = `pending:${randomUUID()}`;
-  const [row] = await db
-    .insert(knowledgeSources)
-    .values({
+  const row = await db.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(knowledgeSources)
+      .values({
+        workspaceId: DEMO_WORKSPACE_ID,
+        name: file.name,
+        mime: file.type || `application/${ext}`,
+        sizeBytes: bytes.length,
+        sha256,
+        status: "parsing",
+        parseEngine: ingestToken,
+        blobPathname,
+        createdBy: DEMO_USER_ID,
+      })
+      .onConflictDoNothing({ target: [knowledgeSources.workspaceId, knowledgeSources.sha256] })
+      .returning();
+    if (!created) return null;
+    await tx.insert(auditEvents).values(auditEventValues({
       workspaceId: DEMO_WORKSPACE_ID,
-      name: file.name,
-      mime: file.type || `application/${ext}`,
-      sizeBytes: bytes.length,
-      sha256,
-      status: "parsing",
-      parseEngine: ingestToken,
-      blobPathname,
       createdBy: DEMO_USER_ID,
-    })
-    .onConflictDoNothing({ target: [knowledgeSources.workspaceId, knowledgeSources.sha256] })
-    .returning();
+      action: "knowledge.uploaded",
+      targetType: "knowledge",
+      targetId: created.id,
+      summary: `上传知识资料「${created.name}」`,
+      data: { sizeBytes: created.sizeBytes, originalStored: Boolean(created.blobPathname) },
+    }));
+    return created;
+  });
   if (!row) {
     const [concurrent] = await db
       .select()

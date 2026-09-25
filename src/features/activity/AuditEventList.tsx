@@ -11,6 +11,8 @@ const ACTION_LABELS: Record<AuditEventAction, string> = {
   "workflow.auto_fixed": "自动修复流程",
   "version.published": "发布版本",
   "version.restored": "恢复版本",
+  "knowledge.uploaded": "上传资料",
+  "knowledge.reingested": "重新解析资料",
   "knowledge.archived": "归档资料",
   "knowledge.restored": "恢复资料",
   "memory.archived": "停用经验",
