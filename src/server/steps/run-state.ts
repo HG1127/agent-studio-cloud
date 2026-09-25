@@ -96,9 +96,39 @@ export interface PersistStepInput {
   emitTrace?: boolean;
 }
 
+async function appendCommittedStepTrace(step: PersistStepInput, stepId: string): Promise<void> {
+  const title = step.nodeTitle ?? step.nodeId;
+  const event = {
+    runId: step.runId,
+    nodeId: step.nodeId,
+    kind: `step.${step.status}`,
+    level: step.status === "failed" ? "error" as const : "info" as const,
+    title:
+      step.status === "running"
+        ? `开始步骤「${title}」`
+        : step.status === "succeeded"
+          ? `步骤「${title}」完成`
+          : `步骤「${title}」失败`,
+    detail: step.error ?? null,
+    dedupeKey: `step:${stepId}:${step.nodeId}:${step.status}`,
+  };
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await appendTrace(event);
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  // 步骤结果已经提交；此时重抛会让模型或外部动作整体重放，轨迹降级不能制造重复业务副作用。
+  console.error(`步骤 ${step.runId}/${step.nodeId} 的运行轨迹写入失败`, lastError);
+}
+
 // upsert run_steps（run_id+node_id 唯一）+ runs.stepStates + trace step.*；running 计一次尝试
 export async function persistStep(step: PersistStepInput): Promise<void> {
   "use step";
+  const stepId = workflowStepId();
   let rejectedOutput = step.output !== undefined && step.output !== null
     ? jsonStorageIssue(step.output, MAX_STEP_OUTPUT_BYTES, `步骤「${step.nodeTitle ?? step.nodeId}」的输出`)
     : null;
@@ -107,7 +137,6 @@ export async function persistStep(step: PersistStepInput): Promise<void> {
     : step;
   const now = new Date();
   let starting = storedStep.status === "running";
-  const title = step.nodeTitle ?? step.nodeId;
   await db.transaction(async (tx) => {
     // 锁住运行状态直到步骤与摘要一起落库，取消操作要么在前、要么在后，不能插进检查与写入之间。
     const [run] = await tx
@@ -161,19 +190,7 @@ export async function persistStep(step: PersistStepInput): Promise<void> {
     await tx.update(runs).set({ stepStates: states, updatedAt: now }).where(eq(runs.id, storedStep.runId));
   });
   if (storedStep.emitTrace !== false) {
-    await appendTrace({
-      runId: storedStep.runId,
-      nodeId: storedStep.nodeId,
-      kind: `step.${storedStep.status}`,
-      level: storedStep.status === "failed" ? "error" : "info",
-      title:
-        storedStep.status === "running"
-          ? `开始步骤「${title}」`
-          : storedStep.status === "succeeded"
-            ? `步骤「${title}」完成`
-            : `步骤「${title}」失败`,
-      detail: storedStep.error ?? null,
-    });
+    await appendCommittedStepTrace(storedStep, stepId);
   }
   if (rejectedOutput) throw new FatalError(rejectedOutput);
 }
