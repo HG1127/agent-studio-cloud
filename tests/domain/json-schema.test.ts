@@ -27,6 +27,30 @@ describe("外部消息字段校验", () => {
     expect(validateJsonObjectSchema({ complete: true, customer: { id: "c-1" }, state: "unknown" }, schema)).toBe("消息.state不是允许的值");
   });
 
+  it("按 JSON 结构比较对象和数组枚举值", () => {
+    const structured = {
+      type: "object",
+      required: ["selection", "fixed"],
+      properties: {
+        selection: { enum: [{ code: "A", tags: ["重点"] }] },
+        fixed: { const: { approved: true, levels: [1, 2] } },
+      },
+    };
+
+    expect(validateJsonObjectSchema({
+      selection: { tags: ["重点"], code: "A" },
+      fixed: { levels: [1, 2], approved: true },
+    }, structured)).toBeNull();
+    expect(validateJsonObjectSchema({
+      selection: { code: "A", tags: ["普通"] },
+      fixed: { approved: true, levels: [1, 2] },
+    }, structured)).toBe("消息.selection不是允许的值");
+    expect(validateJsonObjectSchema({
+      selection: { code: "A", tags: ["重点"] },
+      fixed: { approved: true, levels: [2, 1] },
+    }, structured)).toBe("消息.fixed不是约定的固定值");
+  });
+
   it("拒绝超过支持深度的字段结构而不是静默跳过校验", () => {
     let nestedSchema: Record<string, unknown> = { type: "string" };
     let nestedPayload: Record<string, unknown> = { value: "ok" };
