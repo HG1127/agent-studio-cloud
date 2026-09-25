@@ -14,6 +14,14 @@ import { auditEventValues } from "@/server/audit/event-values";
 import { knowledgeIngestWorkflow } from "@/server/workflows/knowledge-ingest";
 import { isKnowledgeParsingStalled } from "@/server/domain/knowledge/source-state";
 
+async function cancelBlobStream(stream: ReadableStream<Uint8Array>): Promise<void> {
+  try {
+    await stream.cancel();
+  } catch {
+    // 流可能已经被远端关闭；清理失败不覆盖原业务结果。
+  }
+}
+
 export async function retryKnowledgeSourceAction(sourceId: string): Promise<KnowledgeRetryResult> {
   if (!z.string().uuid().safeParse(sourceId).success) {
     return { ok: false, error: "知识资料信息不正确，请刷新页面后重试" };
@@ -88,7 +96,10 @@ export async function retryKnowledgeSourceAction(sourceId: string): Promise<Know
       }));
       return current;
     });
-    if (!claimed) return { ok: false, error: "资料状态已经变化，请刷新页面查看最新状态" };
+    if (!claimed) {
+      await cancelBlobStream(blob.stream);
+      return { ok: false, error: "资料状态已经变化，请刷新页面查看最新状态" };
+    }
     try {
       await start(knowledgeIngestWorkflow, [{
         sourceId: claimed.id,
@@ -99,6 +110,7 @@ export async function retryKnowledgeSourceAction(sourceId: string): Promise<Know
       }]);
     } catch (error) {
       console.error("知识重新解析工作流启动失败", error);
+      await cancelBlobStream(blob.stream);
       await db
         .update(knowledgeSources)
         .set({ status: "failed", error: "解析任务启动失败，请稍后重试", parseEngine: null, updatedAt: new Date() })

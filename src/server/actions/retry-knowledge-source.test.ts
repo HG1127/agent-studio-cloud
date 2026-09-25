@@ -125,6 +125,9 @@ describe("重新解析知识资料", () => {
   });
 
   it("锁内状态已变化时不重复启动解析", async () => {
+    const stream = new ReadableStream({ start(controller) { controller.close(); } });
+    const cancel = vi.spyOn(stream, "cancel");
+    mocks.get.mockResolvedValue({ stream });
     mocks.rows = [[source], [{ ...source, status: "parsing", updatedAt: new Date() }]];
 
     await expect(retryKnowledgeSourceAction(SOURCE_ID)).resolves.toEqual({
@@ -134,10 +137,14 @@ describe("重新解析知识资料", () => {
 
     expect(mocks.updates).toHaveLength(0);
     expect(mocks.start).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledOnce();
   });
 
   it("工作流启动失败时把资料恢复成可重试失败状态", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const stream = new ReadableStream({ start(controller) { controller.close(); } });
+    const cancel = vi.spyOn(stream, "cancel");
+    mocks.get.mockResolvedValue({ stream });
     mocks.rows = [[source], [source]];
     mocks.start.mockRejectedValue(new Error("workflow unavailable"));
 
@@ -151,6 +158,7 @@ describe("重新解析知识资料", () => {
       error: "解析任务启动失败，请稍后重试",
       parseEngine: null,
     });
+    expect(cancel).toHaveBeenCalledOnce();
   });
 
   it("原文件暂时无法读取时给出可行动提示", async () => {
