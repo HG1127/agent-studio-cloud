@@ -57,6 +57,11 @@ function changeInlineStep(
 
 const INLINE_STEP_TYPES = ["ai", "system", "tool", "knowledge", "memory"] as const;
 type InlineStepType = (typeof INLINE_STEP_TYPES)[number];
+const CONDITION_OPERATORS = [
+  ["eq", "等于"], ["neq", "不等于"], ["contains", "包含"],
+  ["gt", "大于"], ["gte", "大于等于"], ["lt", "小于"], ["lte", "小于等于"],
+  ["truthy", "有值且为真"], ["exists", "存在"],
+] as const;
 
 function changeInlineStepType(steps: Array<Record<string, unknown>>, index: number, type: InlineStepType) {
   return steps.map((step, stepIndex) => {
@@ -325,26 +330,73 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
             <select id="condition-operator" value={node.condition.operator}
               onChange={(event) => onNodeChange({ ...node, condition: { ...node.condition!, operator: event.target.value } })}
               className="rounded-md border border-gray-300 px-3 py-2 text-sm">
-              <option value="eq">等于</option><option value="neq">不等于</option><option value="contains">包含</option>
-              <option value="gt">大于</option><option value="gte">大于等于</option><option value="lt">小于</option><option value="lte">小于等于</option>
-              <option value="truthy">有值且为真</option><option value="exists">存在</option>
+              {CONDITION_OPERATORS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
           </div>
           <div className="flex flex-col gap-2">
             <span className="text-sm font-medium">满足的情况</span>
-            {node.condition.branches.map((branch, index) => (
-              <div key={index} className="grid grid-cols-[1fr_1fr_auto] gap-1">
-                <input aria-label={`情况 ${index + 1} 名称`} value={branch.label} placeholder="情况名称"
-                  onChange={(event) => onNodeChange({ ...node, condition: { ...node.condition!, branches: node.condition!.branches.map((item, itemIndex) => itemIndex === index ? { ...item, label: event.target.value } : item) } })}
-                  className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
-                <input aria-label={`情况 ${index + 1} 比较值`} value={branch.value === null ? "null" : String(branch.value ?? "")} placeholder="比较值"
-                  onChange={(event) => onNodeChange({ ...node, condition: { ...node.condition!, branches: node.condition!.branches.map((item, itemIndex) => itemIndex === index ? { ...item, value: parseConditionValue(event.target.value) } : item) } })}
-                  className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
-                <button type="button" aria-label={`删除情况 ${index + 1}`}
-                  onClick={() => onNodeChange({ ...node, condition: { ...node.condition!, branches: node.condition!.branches.filter((_, itemIndex) => itemIndex !== index) } })}
-                  className="px-1 text-xs text-red-600">删除</button>
-              </div>
-            ))}
+            {node.condition.branches.map((branch, index) => {
+              const rules = branch.rules ?? [];
+              const updateBranch = (next: typeof branch) => onNodeChange({
+                ...node,
+                condition: {
+                  ...node.condition!,
+                  branches: node.condition!.branches.map((item, itemIndex) => itemIndex === index ? next : item),
+                },
+              });
+              return <div key={index} className="space-y-2 rounded-md border border-gray-200 p-2">
+                <div className="grid grid-cols-[1fr_auto] gap-1">
+                  <input aria-label={`情况 ${index + 1} 名称`} value={branch.label} placeholder="情况名称"
+                    onChange={(event) => updateBranch({ ...branch, label: event.target.value })}
+                    className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
+                  <button type="button" aria-label={`删除情况 ${index + 1}`}
+                    onClick={() => onNodeChange({ ...node, condition: { ...node.condition!, branches: node.condition!.branches.filter((_, itemIndex) => itemIndex !== index) } })}
+                    className="px-1 text-xs text-red-600">删除</button>
+                </div>
+                {rules.length === 0 ? <div className="grid grid-cols-[1fr_auto] gap-2">
+                  <input aria-label={`情况 ${index + 1} 比较值`} value={branch.value === null ? "null" : String(branch.value ?? "")} placeholder="比较值"
+                    onChange={(event) => updateBranch({ ...branch, value: parseConditionValue(event.target.value) })}
+                    className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
+                  <button type="button" onClick={() => updateBranch({
+                    ...branch,
+                    mode: "all",
+                    rules: [{ source: node.condition!.source ?? "", operator: node.condition!.operator, value: branch.value }],
+                  })} className="text-xs text-blue-700">添加并列条件</button>
+                </div> : <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-xs text-gray-700">条件组合
+                    <select aria-label={`情况 ${index + 1} 条件组合`} value={branch.mode ?? "all"}
+                      onChange={(event) => updateBranch({ ...branch, mode: event.target.value as "all" | "any" })}
+                      className="rounded-md border border-gray-300 px-2 py-1.5 text-xs">
+                      <option value="all">全部满足</option><option value="any">任一满足</option>
+                    </select>
+                  </label>
+                  {rules.map((rule, ruleIndex) => <div key={ruleIndex} className="grid gap-1 md:grid-cols-[1.5fr_1fr_1fr_auto]">
+                    <input aria-label={`情况 ${index + 1} 条件 ${ruleIndex + 1} 数据`} value={rule.source} placeholder="input.status"
+                      onChange={(event) => updateBranch({ ...branch, rules: rules.map((item, itemIndex) => itemIndex === ruleIndex ? { ...item, source: event.target.value } : item) })}
+                      className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
+                    <select aria-label={`情况 ${index + 1} 条件 ${ruleIndex + 1} 判断方式`} value={rule.operator}
+                      onChange={(event) => updateBranch({ ...branch, rules: rules.map((item, itemIndex) => itemIndex === ruleIndex ? { ...item, operator: event.target.value } : item) })}
+                      className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs">
+                      {CONDITION_OPERATORS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </select>
+                    <input aria-label={`情况 ${index + 1} 条件 ${ruleIndex + 1} 比较值`} value={rule.value === null ? "null" : String(rule.value ?? "")} placeholder="比较值"
+                      onChange={(event) => updateBranch({ ...branch, rules: rules.map((item, itemIndex) => itemIndex === ruleIndex ? { ...item, value: parseConditionValue(event.target.value) } : item) })}
+                      className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
+                    <button type="button" aria-label={`删除情况 ${index + 1} 条件 ${ruleIndex + 1}`}
+                      disabled={rules.length === 1}
+                      onClick={() => updateBranch({ ...branch, rules: rules.filter((_, itemIndex) => itemIndex !== ruleIndex) })}
+                      className="text-xs text-red-600 disabled:text-gray-300">删除</button>
+                  </div>)}
+                  <div className="flex gap-3">
+                    <button type="button" disabled={rules.length >= MAX_CONDITION_BRANCHES}
+                      onClick={() => updateBranch({ ...branch, rules: [...rules, { source: "input.", operator: "eq", value: "" }] })}
+                      className="text-xs text-blue-700 disabled:text-gray-400">添加条件</button>
+                    <button type="button" onClick={() => updateBranch({ ...branch, value: rules[0]?.value, rules: undefined, mode: undefined })}
+                      className="text-xs text-gray-600">改回单一条件</button>
+                  </div>
+                </div>}
+              </div>;
+            })}
             <button type="button" disabled={node.condition.branches.length >= MAX_CONDITION_BRANCHES} onClick={() => onNodeChange({ ...node, condition: { ...node.condition!, branches: [...node.condition!.branches, { label: `情况 ${node.condition!.branches.length + 1}`, value: "", next: null }] } })}
               className="w-fit text-xs text-blue-700 disabled:text-gray-400">添加情况</button>
             <p className="text-xs text-gray-500">添加后，从节点右侧对应圆点连接到下一步；最下方圆点代表其他情况。</p>

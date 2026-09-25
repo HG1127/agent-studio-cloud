@@ -111,6 +111,50 @@ describe("NodeInspector", () => {
     expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({ condition: expect.objectContaining({ branches: [expect.objectContaining({ label: "情况 1" })] }) }));
   });
 
+  it("条件分支可以配置全部或任一满足的复合条件", async () => {
+    const compoundNode = WorkflowNode.parse({
+      ...CONDITION_NODE,
+      condition: {
+        ...CONDITION_NODE.condition!,
+        branches: [{ label: "重点订单", value: "high", next: null }],
+      },
+    });
+    const onNodeChange = vi.fn();
+    const user = userEvent.setup();
+    const { rerender } = render(<NodeInspector node={compoundNode} onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "添加并列条件" }));
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      condition: expect.objectContaining({ branches: [expect.objectContaining({
+        mode: "all",
+        rules: [{ source: "input.amount", operator: "eq", value: "high" }],
+      })] }),
+    }));
+
+    const configured = WorkflowNode.parse({
+      ...compoundNode,
+      condition: {
+        ...compoundNode.condition!,
+        branches: [{
+          label: "重点订单",
+          next: null,
+          mode: "all",
+          rules: [{ source: "input.amount", operator: "gte", value: 1000 }],
+        }],
+      },
+    });
+    onNodeChange.mockClear();
+    rerender(<NodeInspector node={configured} onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
+    await user.selectOptions(screen.getByLabelText("情况 1 条件组合"), "any");
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      condition: expect.objectContaining({ branches: [expect.objectContaining({ mode: "any" })] }),
+    }));
+    await user.click(screen.getAllByRole("button", { name: "添加条件" }).at(-1)!);
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      condition: expect.objectContaining({ branches: [expect.objectContaining({ rules: [expect.anything(), { source: "input.", operator: "eq", value: "" }] })] }),
+    }));
+  });
+
   it("条件比较值保留数字和布尔类型，普通文字仍按字符串保存", () => {
     expect(parseConditionValue("42")).toBe(42);
     expect(parseConditionValue("true")).toBe(true);
