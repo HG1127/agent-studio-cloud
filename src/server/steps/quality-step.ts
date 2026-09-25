@@ -81,7 +81,7 @@ export async function runQualityGate(args: RunQualityGateInput): Promise<Quality
     }
   } else if (node.quality) {
     const quality = node.quality;
-    const referenceIssue = qualityOutputReferenceIssue(args.nodes, quality.requiredOutputTitles);
+    const referenceIssue = qualityOutputReferenceIssue(args.nodes, quality.requiredOutputTitles, quality.minOutputCount);
     if (referenceIssue) return reject(referenceIssue);
     // 拒绝收尾：run 已有 rejected 决定即走 not_approved 语义（保留当前结果并停止高影响动作），
     // 被拒绝分支的交付物/回执按设计不会产生，完整核对不适用，只要求人工决定记录存在

@@ -510,4 +510,27 @@ describe("直测：结构性检查", () => {
       expect.objectContaining({ code: "quality_source_missing_缺少步骤", severity: "critical" }),
     ]));
   });
+
+  it("交付检查引用无结果步骤或设置不可能满足的数量时阻止发布", () => {
+    const out = auditWorkflow(WorkflowDraft.parse({
+      id: "quality-output-impossible",
+      rootAgent: { id: "agent", name: "测试助手", role: "处理" },
+      memoryPolicy: { taskContext: true, longTerm: false },
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "draft" },
+        draft: { id: "draft", title: "生成方案", type: "ai", next: "approve" },
+        approve: { id: "approve", title: "负责人确认", type: "human", next: "quality", approval: { role: "负责人", reason: "确认" } },
+        quality: {
+          id: "quality", title: "交付检查", type: "rule", next: "done",
+          quality: { requiredOutputTitles: ["生成方案", "负责人确认"], minOutputCount: 3 },
+        },
+        done: { id: "done", title: "完成", type: "end", next: null },
+      },
+    }));
+
+    expect(out.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "quality_source_no_result_负责人确认", severity: "critical" }),
+      expect.objectContaining({ code: "quality_min_output_impossible", severity: "critical" }),
+    ]));
+  });
 });

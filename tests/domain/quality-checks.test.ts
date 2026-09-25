@@ -70,4 +70,10 @@ describe("质量门禁执行范围", () => {
     }, ["生成方案"])).toBe("交付检查引用的步骤名称「生成方案」不唯一，请先修改重复名称");
     expect(qualityOutputReferenceIssue(nodes, ["生成方案"])).toBeNull();
   });
+
+  it("拒绝不会产出结果或数量门槛不可能满足的来源", () => {
+    expect(qualityOutputReferenceIssue(nodes, ["负责人确认"])).toBe("交付检查引用的步骤「负责人确认」不会产生可检查结果");
+    expect(qualityOutputReferenceIssue(nodes, ["生成方案"], 2)).toBe("交付检查要求至少 2 项结果，但只指定了 1 个结果来源");
+    expect(qualityOutputReferenceIssue(nodes, ["生成方案", "保留当前结果"], 2)).toBeNull();
+  });
 });

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { isConversationalOrMeta } from "@/server/domain/intent";
 import { forbiddenActionMatch, type PolicyNode } from "@/server/domain/grounding/business-policy";
 import { safeDataPathSegments } from "@/server/domain/runtime/data-path";
+import { canProduceQualityResult } from "@/server/domain/runtime/quality-checks";
 
 // 旧系统 server/designAuditor.mjs 的逐行移植（设计审计 auditWorkflow，minified 展开为可读 TS）。
 // 移植边界按引用可达性逐个核实：旧版 proposeAuditFixes 不直接移植，仅保留检查逻辑；
@@ -163,7 +164,7 @@ export interface AuditNode {
   contract?: AuditContract | null;
   system?: { kind?: string | null; [key: string]: unknown } | null;
   rule?: { kind?: string | null; sourceNodeId?: string | null; [key: string]: unknown } | null;
-  quality?: { requiredOutputTitles?: unknown; [key: string]: unknown } | null;
+  quality?: { requiredOutputTitles?: unknown; minOutputCount?: unknown; [key: string]: unknown } | null;
   controlPlane?: { hiddenByDefault?: boolean | null; [key: string]: unknown } | null;
   ui?: { visibility?: string | null; [key: string]: unknown } | null;
   businessSpec?: AuditSpec | null;
@@ -528,13 +529,20 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
         issues.push(issue("critical", "logic", "检查步骤设置不完整", `「${n.title}」没有可执行的业务判断、系统回执或交付检查设置。`, { nodeId: id, fixable: true, code: "rule_spec" }));
       }
       if (n.quality && Array.isArray(n.quality.requiredOutputTitles)) {
-        for (const title of [...new Set(n.quality.requiredOutputTitles.map(String))]) {
+        const requiredTitles = [...new Set(n.quality.requiredOutputTitles.map(String))];
+        for (const title of requiredTitles) {
           const matches = Object.values(nodes).filter((candidate) => candidate.title === title);
           if (matches.length === 0) {
             issues.push(issue("critical", "logic", "交付检查引用的步骤不存在", `「${n.title}」要求检查「${title}」，但画布中没有这个步骤。`, { nodeId: id, fixable: true, code: `quality_source_missing_${title}` }));
           } else if (matches.length > 1) {
             issues.push(issue("critical", "logic", "交付检查引用的步骤名称重复", `「${n.title}」要求检查「${title}」，但有多个步骤使用这个名称，无法确定检查对象。`, { nodeId: id, fixable: true, code: `quality_source_ambiguous_${title}` }));
+          } else if (!canProduceQualityResult(matches[0].type)) {
+            issues.push(issue("critical", "logic", "交付检查引用的步骤没有结果", `「${n.title}」要求检查「${title}」，但这个步骤不会产生可检查的交付结果。`, { nodeId: id, fixable: true, code: `quality_source_no_result_${title}` }));
           }
+        }
+        const minOutputCount = Number(n.quality.minOutputCount);
+        if (requiredTitles.length > 0 && Number.isInteger(minOutputCount) && minOutputCount > requiredTitles.length) {
+          issues.push(issue("critical", "logic", "交付检查的结果数量无法满足", `「${n.title}」要求至少 ${minOutputCount} 项结果，但只指定了 ${requiredTitles.length} 个结果来源。`, { nodeId: id, fixable: true, code: "quality_min_output_impossible" }));
         }
       }
     }

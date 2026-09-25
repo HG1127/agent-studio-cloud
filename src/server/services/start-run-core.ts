@@ -323,7 +323,11 @@ async function validateRuntimePreflight(args: {
       } else if (kind !== "business_rule" && !node.quality) {
         unsupported.push(`${node.title}（检查设置不完整）`);
       } else if (node.quality) {
-        const referenceIssue = qualityOutputReferenceIssue(args.manifest.workflowSnapshot.nodes, node.quality.requiredOutputTitles);
+        const referenceIssue = qualityOutputReferenceIssue(
+          args.manifest.workflowSnapshot.nodes,
+          node.quality.requiredOutputTitles,
+          node.quality.minOutputCount,
+        );
         if (referenceIssue) unsupported.push(`${node.title}（${referenceIssue}）`);
       }
     }
