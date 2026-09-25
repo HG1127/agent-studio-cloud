@@ -1,6 +1,6 @@
 "use step";
 import mammoth from "mammoth";
-import { extractText, getDocumentProxy } from "unpdf";
+import { getDocumentProxy } from "unpdf";
 import { FatalError } from "workflow";
 import { and, eq } from "drizzle-orm";
 import { knowledgeChunks, knowledgeSources } from "@/db/schema";
@@ -14,6 +14,7 @@ import {
   MAX_KNOWLEDGE_PDF_PAGES,
   validateExtractedKnowledgeText,
 } from "@/server/domain/knowledge/text-limits";
+import { extractBoundedPdfText, KnowledgePdfLimitError } from "@/server/domain/knowledge/pdf-text";
 import { processedKnowledgeStatus } from "@/server/domain/knowledge/source-state";
 import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 import { withSafeWorkflowError } from "@/server/security/workflow-error";
@@ -27,6 +28,7 @@ interface ParseArgs {
 
 function safeKnowledgeParseError(error: unknown, message: string): never {
   if (error instanceof FatalError) throw error;
+  if (error instanceof KnowledgePdfLimitError) throw new FatalError(error.message);
   throw new FatalError(message);
 }
 
@@ -73,8 +75,7 @@ export async function parseKnowledgeFile(args: ParseArgs): Promise<{ text: strin
       if (pdf.numPages > MAX_KNOWLEDGE_PDF_PAGES) {
         throw new FatalError(`PDF 超过 ${MAX_KNOWLEDGE_PDF_PAGES} 页限制，请拆分后重新上传`);
       }
-      const result = await extractText(pdf, { mergePages: true });
-      text = result.text;
+      text = await extractBoundedPdfText(pdf);
     } catch (error) {
       safeKnowledgeParseError(error, "PDF 文件解析失败，请检查文件是否完整");
     } finally {
