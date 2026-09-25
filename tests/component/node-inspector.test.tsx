@@ -197,6 +197,11 @@ describe("NodeInspector", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("字段契约不是有效的 JSON 对象");
     expect(onNodeChange).not.toHaveBeenCalled();
 
+    fireEvent.change(editor, { target: { value: JSON.stringify({ type: "object", allOf: [] }) } });
+    await user.click(screen.getByRole("button", { name: "应用字段契约" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("暂不支持的规则");
+    expect(onNodeChange).not.toHaveBeenCalled();
+
     const schema = { type: "object", required: ["customerId"], properties: { customerId: { type: "string" } } };
     fireEvent.change(editor, { target: { value: JSON.stringify(schema) } });
     await user.click(screen.getByRole("button", { name: "应用字段契约" }));

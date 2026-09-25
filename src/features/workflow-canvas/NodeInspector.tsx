@@ -10,6 +10,7 @@ import {
   MAX_SUBFLOW_STEPS,
   type WorkflowNode,
 } from "@/contracts/workflow";
+import { validateJsonSchemaDefinition } from "@/server/domain/json-schema";
 import { NODE_TYPE_LABELS } from "./CustomNodes";
 
 interface NodeInspectorProps {
@@ -232,16 +233,14 @@ function WaitPayloadSchemaEditor({ node, onNodeChange }: {
       const parsed: unknown = JSON.parse(value);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
       const schema = parsed as Record<string, unknown>;
-      if (schema.type && schema.type !== "object") {
+      const schemaError = validateJsonSchemaDefinition(schema);
+      if (schemaError) {
+        setError(schemaError);
+        return;
+      }
+      const rootTypes = Array.isArray(schema.type) ? schema.type : [schema.type];
+      if (schema.type !== undefined && !rootTypes.includes("object")) {
         setError("消息字段契约的根类型必须是 object");
-        return;
-      }
-      if (schema.required && (!Array.isArray(schema.required) || schema.required.some((field) => typeof field !== "string"))) {
-        setError("必填字段 required 必须是文字列表");
-        return;
-      }
-      if (schema.properties && (typeof schema.properties !== "object" || Array.isArray(schema.properties))) {
-        setError("字段 properties 必须是对象");
         return;
       }
       setError(null);
