@@ -191,6 +191,7 @@ export async function finalizeRun(
     .returning({ id: runs.id });
   if (updated.length === 0) {
     // 终态写入后若验收汇总瞬时失败，Workflow 会重试本步骤；重入时仍需完成对账。
+    await appendTrace({ runId, kind: "run.completed", title: "流程执行完成", detail: `共 ${Object.keys(result).length} 个步骤产出` });
     await reconcileTerminalEvaluationRun(runId);
     return;
   }
@@ -224,6 +225,7 @@ export async function failRun(runId: string, error: string): Promise<void> {
   });
   if (updated.length === 0) {
     // 已是终态时不改写运行结果，但要修复上一次可能未完成的验收汇总。
+    await appendTrace({ runId, kind: "run.failed", level: "error", title: "流程执行失败", detail: error });
     await reconcileTerminalEvaluationRun(runId);
     return;
   }

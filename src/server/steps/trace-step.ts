@@ -1,12 +1,12 @@
 "use step";
 // 轨迹步骤：双写——trace_events 表（seq 按 run 递增）+ workflow 命名空间流（namespace: trace）。
 // 供其余步骤"先写轨迹再干活"时调用；步骤内互调按普通函数执行，不产生嵌套 step 事件。
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { FatalError, getWritable } from "workflow";
 import { db } from "@/lib/db";
 import { runs, traceEvents } from "@/db/schema";
 import { writeTraceStreamBestEffort } from "@/server/domain/trace-stream";
-import { canAppendTraceToRun } from "@/server/domain/trace-state";
+import { canAppendTraceToRun, isTerminalTraceKind } from "@/server/domain/trace-state";
 
 export type TraceLevel = "info" | "warn" | "error";
 
@@ -50,6 +50,14 @@ export async function appendTrace(event: AppendTraceInput): Promise<void> {
       .limit(1);
     if (!run) throw new FatalError("运行记录不存在，无法写入轨迹");
     if (!canAppendTraceToRun(run.status, event.kind)) return null;
+    if (isTerminalTraceKind(event.kind)) {
+      const [existing] = await tx
+        .select({ seq: traceEvents.seq })
+        .from(traceEvents)
+        .where(and(eq(traceEvents.runId, event.runId), eq(traceEvents.kind, event.kind)))
+        .limit(1);
+      if (existing) return null;
+    }
     const [row] = await tx
       .select({ max: sql<number>`coalesce(max(${traceEvents.seq}), 0)`.mapWith(Number) })
       .from(traceEvents)

@@ -42,7 +42,10 @@ describe("运行终态步骤", () => {
     await finalizeRun("run-1", { answer: "done" });
 
     expect(mocks.reconcileTerminalEvaluationRun).toHaveBeenCalledWith("run-1");
-    expect(mocks.appendTrace).not.toHaveBeenCalled();
+    expect(mocks.appendTrace).toHaveBeenCalledWith(expect.objectContaining({
+      runId: "run-1",
+      kind: "run.completed",
+    }));
     expect(mocks.completeEvaluationForRun).not.toHaveBeenCalled();
   });
 

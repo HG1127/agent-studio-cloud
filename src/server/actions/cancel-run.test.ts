@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   selectedRun: null as Record<string, unknown> | null,
   reconcileTerminalEvaluationRun: vi.fn(),
   revalidatePath: vi.fn(),
+  appendTrace: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -23,6 +24,7 @@ vi.mock("@/server/services/evaluation-state", () => ({
   completeEvaluationForRun: vi.fn(),
   reconcileTerminalEvaluationRun: mocks.reconcileTerminalEvaluationRun,
 }));
+vi.mock("@/server/steps/trace-step", () => ({ appendTrace: mocks.appendTrace }));
 
 import { cancelRunAction } from "@/server/actions/cancel-run";
 
@@ -46,6 +48,7 @@ describe("取消运行幂等性", () => {
     await expect(cancelRunAction(RUN_ID)).resolves.toEqual({ ok: true });
 
     expect(mocks.reconcileTerminalEvaluationRun).toHaveBeenCalledWith(RUN_ID);
+    expect(mocks.appendTrace).toHaveBeenCalledWith(expect.objectContaining({ runId: RUN_ID, kind: "run.cancelled" }));
     expect(mocks.revalidatePath).toHaveBeenCalledWith(`/runs/${RUN_ID}`);
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/runs");
   });

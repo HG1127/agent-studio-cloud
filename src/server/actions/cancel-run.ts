@@ -33,6 +33,7 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
     if (!run) return { ok: false, error: "找不到这次运行" };
     if (run.status === "cancelled") {
       // 首次请求可能已写入取消终态、但在验收汇总时失败；重复请求负责把对账补齐。
+      await appendCancellationTrace(runId);
       await reconcileTerminalEvaluationRun(runId);
       revalidatePath(`/runs/${runId}`);
       revalidatePath("/runs");
@@ -131,24 +132,14 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
         .where(and(eq(runs.id, rootRunId), eq(runs.workspaceId, DEMO_WORKSPACE_ID)))
         .limit(1);
       if (current?.status !== "cancelled") return { ok: false, error: "运行已在取消前结束，请刷新页面查看结果" };
+      await appendCancellationTrace(rootRunId);
       await reconcileTerminalEvaluationRun(rootRunId);
       revalidatePath(`/runs/${runId}`);
       if (rootRunId !== runId) revalidatePath(`/runs/${rootRunId}`);
       revalidatePath("/runs");
       return { ok: true };
     }
-    try {
-      await appendTrace({
-        runId: rootRunId,
-        kind: "run.cancelled",
-        level: "warn",
-        title: "运行已取消",
-        detail: "员工手动取消了这次运行",
-      });
-    } catch (traceError) {
-      // 取消终态已经提交；轨迹故障不能把成功取消误报成失败。
-      console.error("记录取消轨迹失败：", traceError);
-    }
+    await appendCancellationTrace(rootRunId);
     await completeEvaluationForRun(rootRunId, null, "运行已取消");
     revalidatePath(`/runs/${runId}`);
     if (rootRunId !== runId) revalidatePath(`/runs/${rootRunId}`);
@@ -157,5 +148,20 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
   } catch (error) {
     console.error("取消运行失败：", error);
     return { ok: false, error: "取消失败，请稍后重试" };
+  }
+}
+
+async function appendCancellationTrace(runId: string): Promise<void> {
+  try {
+    await appendTrace({
+      runId,
+      kind: "run.cancelled",
+      level: "warn",
+      title: "运行已取消",
+      detail: "员工手动取消了这次运行",
+    });
+  } catch (traceError) {
+    // 取消终态已经提交；轨迹故障不能把成功取消误报成失败。
+    console.error("记录取消轨迹失败：", traceError);
   }
 }
