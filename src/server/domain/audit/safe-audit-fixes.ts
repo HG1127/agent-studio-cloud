@@ -103,7 +103,14 @@ function safeFixIssue(draft: WorkflowDraft, issue: AuditIssue, applied: string[]
     applied.push(`移除无法到达的步骤「${node.title}」`);
     return;
   }
-  if (issue.code === "meta_node_detected" && node && node.type !== "trigger" && node.type !== "end") {
+  if (
+    issue.code === "meta_node_detected"
+    && node
+    && node.type !== "trigger"
+    && node.type !== "end"
+    && node.ui?.visibility !== "control"
+    && node.controlPlane?.hiddenByDefault !== true
+  ) {
     const target = node.next ?? end?.id ?? null;
     redirectReferences(nodes, node.id, target);
     delete nodes[node.id];

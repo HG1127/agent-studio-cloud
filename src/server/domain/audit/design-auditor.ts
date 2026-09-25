@@ -670,7 +670,8 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
   // 目标声明/开场白被误建成节点的检查：isConversationalOrMeta(undefined) 与旧实现 String(text||'') 等价
   for (const id of ids) {
     const n = nodes[id];
-    if (["trigger", "end"].includes(n?.type ?? "")) continue;
+    const isControl = n?.controlPlane?.hiddenByDefault === true || n?.ui?.visibility === "control";
+    if (isControl || ["trigger", "end"].includes(n?.type ?? "")) continue;
     if (
       isConversationalOrMeta(n?.title || "") ||
       /^(?:搭建|创建|制作|开发|配置|做|构建)?\s*(?:一个|个)?\s*[\p{Script=Han}a-zA-Z0-9_\-\s]{0,20}?\s*(?:的)?\s*(?:agent|助手|智能体|机器人|流程|工作流)$/iu.test(n?.title ?? "")

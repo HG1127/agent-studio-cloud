@@ -39,12 +39,10 @@ describe("创建助手管道 buildAgentDraft", () => {
     expect(result.draft?.businessGrounding).toBeTruthy();
     expect(Array.isArray(result.issues)).toBe(true);
     expect(result.diagnostics.error).toBeUndefined();
-    // 创建期已经补齐最终交付契约；剩余关键问题仅允许是明确控制节点的业务审计误报。
+    // 创建期已经补齐最终交付契约，隐藏控制节点不参与业务目标误报。
     expect(result.draft?.outputContract?.fields.length).toBeGreaterThan(0);
-    expect(result.diagnostics.audit).toMatchObject({ status: "blocked", counts: { critical: 1 } });
-    expect(result.issues.filter((issue) => issue.severity === "critical").every((issue) =>
-      issue.code === "meta_node_detected" && result.draft?.nodes[issue.nodeId ?? ""]?.ui?.visibility === "control",
-    )).toBe(true);
+    expect(result.diagnostics.audit).toMatchObject({ status: "ready", score: 100, counts: { critical: 0 } });
+    expect(result.issues.filter((issue) => issue.severity === "critical")).toEqual([]);
     expect(() => WorkflowDraft.parse(result.draft)).not.toThrow();
   });
 

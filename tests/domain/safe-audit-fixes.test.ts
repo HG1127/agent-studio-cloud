@@ -50,4 +50,20 @@ describe("设计检查安全修复", () => {
     expect(result.draft.nodes.call.agentCall).toMatchObject({ targetAgentId: "", versionId: "" });
     expect(result.skipped).toContain("还没有选择可调用 Agent");
   });
+
+  it("不会把隐藏的质量控制节点当作目标声明删除", () => {
+    const input = draft({
+      start: { id: "start", title: "开始", type: "trigger", next: "work" },
+      work: { id: "work", title: "形成方案", type: "ai", next: "quality_review" },
+      quality_review: {
+        id: "quality_review", title: "交付前检查结果", type: "rule", next: "done",
+        controlPlane: { kind: "quality", hiddenByDefault: true }, ui: { visibility: "control" },
+        quality: { requiredOutputTitles: [], minOutputCount: 1 },
+      },
+      done: { id: "done", title: "完成", type: "end" },
+    });
+    const result = applySafeAuditFixes(input);
+    expect(result.draft.nodes.quality_review).toBeDefined();
+    expect(result.applied.some((item) => item.includes("移除误识别的目标声明"))).toBe(false);
+  });
 });

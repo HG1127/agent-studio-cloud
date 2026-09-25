@@ -135,4 +135,21 @@ describe("直测：结构性检查", () => {
       expect.objectContaining({ code: "variable_input_type_open", severity: "critical" }),
     ]));
   });
+
+  it("隐藏的质量控制节点不会被误判为业务目标声明", () => {
+    const out = auditWorkflow({
+      ...deadEndDraft,
+      nodes: {
+        start: { id: "start", title: "收到任务", type: "trigger", next: "work" },
+        work: { id: "work", title: "整理工单摘要", type: "ai", next: "quality_review" },
+        quality_review: {
+          id: "quality_review", title: "交付前检查结果", type: "rule", next: "done",
+          controlPlane: { kind: "quality", hiddenByDefault: true }, ui: { visibility: "control" },
+          quality: { requiredOutputTitles: [], minOutputCount: 1 },
+        },
+        done: { id: "done", title: "完成", type: "end" },
+      },
+    }, {});
+    expect(out.issues.some((item) => item.code === "meta_node_detected" && item.nodeId === "quality_review")).toBe(false);
+  });
 });

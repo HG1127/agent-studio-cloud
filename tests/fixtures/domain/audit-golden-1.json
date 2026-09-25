@@ -1176,10 +1176,10 @@
   },
   "output": {
     "id": "AUDIT-40062b41-d99b-43ed-8332-e3075f03f1b4",
-    "score": 64,
+    "score": 76,
     "status": "blocked",
     "counts": {
-      "critical": 3,
+      "critical": 2,
       "warning": 0,
       "info": 0
     },
@@ -1193,16 +1193,6 @@
         "nodeId": null,
         "fixable": true,
         "code": "output_contract_missing"
-      },
-      {
-        "id": "AUD-a845955483",
-        "severity": "critical",
-        "category": "logic",
-        "title": "目标声明被误识别为工作流节点",
-        "detail": "「交付前检查结果」是整体目标/Agent构建意图，不应该作为具体执行节点。AI 可自动将其移出流程并平滑重连前后节点。",
-        "nodeId": "quality_review",
-        "fixable": true,
-        "code": "meta_node_detected"
       },
       {
         "id": "AUD-e66dcc295f",
@@ -1223,8 +1213,8 @@
       },
       {
         "category": "logic",
-        "status": "blocked",
-        "issues": 1
+        "status": "good",
+        "issues": 0
       },
       {
         "category": "permission",
