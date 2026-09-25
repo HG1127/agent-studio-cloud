@@ -11,7 +11,7 @@ export function DashboardOverview({ summary, recentRuns }: {
     { label: "在用助手", value: summary.activeAgents, detail: `${summary.publishedAgents} 个已发布`, href: "/agents" },
     { label: "已就绪资料", value: summary.indexedSources, detail: "可供助手检索", href: "/knowledge" },
     { label: "近 24 小时运行", value: summary.runsLast24h, detail: `${summary.failuresLast24h} 次失败`, href: "/runs" },
-    { label: "正在处理", value: summary.activeRuns, detail: `${summary.pendingApprovals} 项等待确认`, href: "/runs?status=waiting_approval" },
+    { label: "正在处理", value: summary.activeRuns, detail: `${summary.pendingApprovals} 项等待确认 · ${summary.pendingEvents} 项等待继续`, href: "/runs" },
   ];
   return (
     <>
@@ -27,6 +27,11 @@ export function DashboardOverview({ summary, recentRuns }: {
       {summary.pendingApprovals > 0 ? (
         <Link href="/runs?status=waiting_approval" className="block rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
           有 {summary.pendingApprovals} 项工作等待员工确认，点击查看并处理。
+        </Link>
+      ) : null}
+      {summary.pendingEvents > 0 ? (
+        <Link href="/runs?status=waiting_event" className="block rounded-lg border border-cyan-200 bg-cyan-50 p-4 text-sm text-cyan-800">
+          有 {summary.pendingEvents} 项工作等待外部消息或员工补充，点击查看并继续。
         </Link>
       ) : null}
       <section className="flex flex-col gap-3">

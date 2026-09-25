@@ -6,6 +6,7 @@ export const DashboardSummary = z.object({
   indexedSources: z.number().int().nonnegative(),
   activeRuns: z.number().int().nonnegative(),
   pendingApprovals: z.number().int().nonnegative(),
+  pendingEvents: z.number().int().nonnegative(),
   runsLast24h: z.number().int().nonnegative(),
   failuresLast24h: z.number().int().nonnegative(),
 });

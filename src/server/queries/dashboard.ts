@@ -8,7 +8,7 @@ const countValue = sql<number>`count(*)`.mapWith(Number);
 
 export async function getDashboardSummary() {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1_000);
-  const [activeAgentRows, publishedAgentRows, sourceRows, activeRunRows, approvalRows, recentRunRows] = await Promise.all([
+  const [activeAgentRows, publishedAgentRows, sourceRows, activeRunRows, approvalRows, eventRows, recentRunRows] = await Promise.all([
     db.select({ count: countValue }).from(agents).where(and(
       eq(agents.workspaceId, DEMO_WORKSPACE_ID),
       isNull(agents.archivedAt),
@@ -37,6 +37,10 @@ export async function getDashboardSummary() {
       eq(approvals.status, "pending"),
       eq(runs.status, "waiting_approval"),
     )),
+    db.select({ count: countValue }).from(runs).where(and(
+      eq(runs.workspaceId, DEMO_WORKSPACE_ID),
+      eq(runs.status, "waiting_event"),
+    )),
     db.select({
       total: countValue,
       failed: sql<number>`count(*) filter (where ${runs.status} = 'failed')`.mapWith(Number),
@@ -51,6 +55,7 @@ export async function getDashboardSummary() {
     indexedSources: sourceRows[0]?.count ?? 0,
     activeRuns: activeRunRows[0]?.count ?? 0,
     pendingApprovals: approvalRows[0]?.count ?? 0,
+    pendingEvents: eventRows[0]?.count ?? 0,
     runsLast24h: recentRunRows[0]?.total ?? 0,
     failuresLast24h: recentRunRows[0]?.failed ?? 0,
   });
