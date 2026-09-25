@@ -72,6 +72,94 @@ function ownsRunStartLease(token: string) {
   return sql<boolean>`${runs.stepStates} -> ${RUN_START_LEASE_KEY} ->> 'token' = ${token}`;
 }
 
+async function createRunWithLockedDependencies(args: {
+  agentId: string;
+  workspaceId: string;
+  versionId: string;
+  manifest: AgentManifest;
+  input: Record<string, unknown>;
+  sourceType: "manual" | "schedule" | "evaluation";
+  sourceKey: string | null;
+  lease: RunStartLease;
+}): Promise<{ runId: string | null; error: string | null }> {
+  return db.transaction(async (tx) => {
+    const collaborationKeys = workflowCollaborationKeys(args.manifest.workflowSnapshot);
+    let collaborationAgentIds: string[] = [];
+    let collaborationKnowledgeIds: string[] = [];
+    if (collaborationKeys.length > 0) {
+      const dependencyVersions = await tx
+        .select({
+          versionId: agentVersions.id,
+          agentId: agentVersions.agentId,
+          agentName: agents.name,
+          status: agentVersions.status,
+          agentArchivedAt: agents.archivedAt,
+          manifest: agentVersions.manifest,
+        })
+        .from(agentVersions)
+        .innerJoin(agents, eq(agents.id, agentVersions.agentId))
+        .where(and(
+          eq(agentVersions.workspaceId, args.workspaceId),
+          eq(agents.workspaceId, args.workspaceId),
+        ));
+      const graph = inspectCollaborationVersionGraph({
+        rootAgentId: args.agentId,
+        directKeys: collaborationKeys,
+        versions: dependencyVersions,
+      });
+      if (graph.issue) return { runId: null, error: `${graph.issue}，请重新发布助手后再运行` };
+      collaborationAgentIds = graph.agentIds;
+      collaborationKnowledgeIds = graph.knowledgeSourceIds;
+    }
+
+    // 与归档动作锁同一批资源行：旧冻结版本的运行创建和依赖停用只能有一方先完成。
+    const requiredAgentIds = [...new Set([args.agentId, ...collaborationAgentIds])].sort();
+    const lockedAgents = await tx
+      .select({ id: agents.id, archivedAt: agents.archivedAt })
+      .from(agents)
+      .where(and(eq(agents.workspaceId, args.workspaceId), inArray(agents.id, requiredAgentIds)))
+      .orderBy(agents.id)
+      .for("update");
+    if (lockedAgents.length !== requiredAgentIds.length || lockedAgents.some((row) => row.archivedAt !== null)) {
+      return { runId: null, error: "助手或协作助手已停用，请刷新页面后重试" };
+    }
+
+    const requiredKnowledgeIds = [...new Set([
+      ...(args.manifest.knowledgeSnapshot ?? []),
+      ...collaborationKnowledgeIds,
+    ])].sort();
+    if (requiredKnowledgeIds.length > 0) {
+      const lockedSources = await tx
+        .select({ id: knowledgeSources.id, status: knowledgeSources.status, archivedAt: knowledgeSources.archivedAt })
+        .from(knowledgeSources)
+        .where(and(eq(knowledgeSources.workspaceId, args.workspaceId), inArray(knowledgeSources.id, requiredKnowledgeIds)))
+        .orderBy(knowledgeSources.id)
+        .for("update");
+      if (lockedSources.length !== requiredKnowledgeIds.length
+        || lockedSources.some((row) => row.status !== "indexed" || row.archivedAt !== null)) {
+        return { runId: null, error: "这个冻结版本使用的知识资料已归档或尚未完成解析，请恢复资料后再运行" };
+      }
+    }
+
+    const [run] = await tx
+      .insert(runs)
+      .values({
+        workspaceId: args.workspaceId,
+        createdBy: DEMO_USER_ID,
+        agentId: args.agentId,
+        versionId: args.versionId,
+        status: "queued",
+        input: args.input,
+        stepStates: withRunStartLease({}, args.lease),
+        sourceType: args.sourceType,
+        sourceKey: args.sourceKey,
+      })
+      .onConflictDoNothing()
+      .returning({ id: runs.id });
+    return { runId: run?.id ?? null, error: null };
+  });
+}
+
 async function markRunStartFailed(runId: string, token: string, error = "运行启动失败，请稍后重试"): Promise<void> {
   const updated = await db
     .update(runs)
@@ -479,22 +567,37 @@ export async function startRunCore(args: {
     });
     if (preflightError) return { ok: false, error: preflightError };
     const lease = createRunStartLease();
-    const [run] = await db
-      .insert(runs)
-      .values({
-        workspaceId: agent.workspaceId,
-        createdBy: DEMO_USER_ID,
-        agentId,
-        versionId: version.id,
-        status: "queued",
-        input: runInput,
-        stepStates: withRunStartLease({}, lease),
-        sourceType: args.sourceType ?? "manual",
-        sourceKey: args.sourceKey ?? null,
-      })
-      .onConflictDoNothing()
-      .returning({ id: runs.id });
-    if (!run && args.sourceKey) {
+    const hasLockedDependencies = (manifest.knowledgeSnapshot?.length ?? 0) > 0
+      || workflowCollaborationKeys(manifest.workflowSnapshot).length > 0;
+    const created = hasLockedDependencies
+      ? await createRunWithLockedDependencies({
+          agentId,
+          workspaceId: agent.workspaceId,
+          versionId: version.id,
+          manifest,
+          input: runInput,
+          sourceType: args.sourceType ?? "manual",
+          sourceKey: args.sourceKey ?? null,
+          lease,
+        })
+      : await db
+          .insert(runs)
+          .values({
+            workspaceId: agent.workspaceId,
+            createdBy: DEMO_USER_ID,
+            agentId,
+            versionId: version.id,
+            status: "queued",
+            input: runInput,
+            stepStates: withRunStartLease({}, lease),
+            sourceType: args.sourceType ?? "manual",
+            sourceKey: args.sourceKey ?? null,
+          })
+          .onConflictDoNothing()
+          .returning({ id: runs.id })
+          .then(([run]) => ({ runId: run?.id ?? null, error: null }));
+    if (created.error) return { ok: false, error: created.error };
+    if (!created.runId && args.sourceKey) {
       const [existing] = await db
         .select({
           id: runs.id,
@@ -517,8 +620,8 @@ export async function startRunCore(args: {
       }
       return { ok: true, runId: existing.id };
     }
-    if (!run) return { ok: false, error: "运行启动冲突，请稍后重试" };
-    return launchClaimedRun({ runId: run.id, manifest, input: runInput, lease });
+    if (!created.runId) return { ok: false, error: "运行启动冲突，请稍后重试" };
+    return launchClaimedRun({ runId: created.runId, manifest, input: runInput, lease });
   } catch (error) {
     console.error("运行启动失败：", safeErrorForLog(error));
     return { ok: false, error: "运行启动失败，请稍后重试" };
