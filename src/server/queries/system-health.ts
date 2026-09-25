@@ -1,30 +1,39 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 
+export const REQUIRED_DATABASE_OBJECTS = [
+  "public.agents",
+  "public.agent_versions",
+  "public.workflow_definitions",
+  "public.runs",
+  "public.run_steps",
+  "public.trace_events",
+  "public.approvals",
+  "public.knowledge_sources",
+  "public.knowledge_chunks",
+  "public.schedules",
+  "public.model_connections",
+  "public.agent_memories",
+  "public.evaluation_cases",
+  "public.evaluation_runs",
+  "public.evaluation_case_results",
+  "public.audit_events",
+  "public.run_feedback",
+  "public.runs_workspace_status_created_idx",
+  "public.knowledge_sources_workspace_archived_created_idx",
+  "public.run_feedback_workspace_run_unique",
+  "public.run_feedback_workspace_agent_updated_idx",
+] as const;
+
 export async function isDatabaseReady() {
+  const requiredObjects = sql.join(
+    REQUIRED_DATABASE_OBJECTS.map((objectName) => sql`(${objectName})`),
+    sql`, `,
+  );
   const rows = await db.execute<{ ready: boolean }>(sql`
-    select
+      select
       (select bool_and(to_regclass(required.object_name) is not null)
-        from (values
-          ('public.agents'),
-          ('public.agent_versions'),
-          ('public.workflow_definitions'),
-          ('public.runs'),
-          ('public.run_steps'),
-          ('public.trace_events'),
-          ('public.approvals'),
-          ('public.knowledge_sources'),
-          ('public.knowledge_chunks'),
-          ('public.schedules'),
-          ('public.model_connections'),
-          ('public.agent_memories'),
-          ('public.evaluation_cases'),
-          ('public.evaluation_runs'),
-          ('public.evaluation_case_results'),
-          ('public.audit_events'),
-          ('public.runs_workspace_status_created_idx'),
-          ('public.knowledge_sources_workspace_archived_created_idx')
-        ) as required(object_name))
+        from (values ${requiredObjects}) as required(object_name))
       and
       (select bool_and(exists(
         select 1
