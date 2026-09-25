@@ -206,7 +206,7 @@ async function collaboratorIssue(node: AgentManifest["workflowSnapshot"]["nodes"
     const error = validateAgentCallNode(node, currentAgentId);
     if (error) return error;
     const [target] = await db
-      .select({ id: agentVersions.id })
+      .select({ manifest: agentVersions.manifest })
       .from(agentVersions)
       .innerJoin(agents, eq(agents.id, agentVersions.agentId))
       .where(and(
@@ -217,13 +217,15 @@ async function collaboratorIssue(node: AgentManifest["workflowSnapshot"]["nodes"
         isNull(agents.archivedAt),
       ))
       .limit(1);
-    return target ? null : `步骤「${node.title}」所选协作助手版本不可用`;
+    return target && AgentManifest.safeParse(target.manifest).success
+      ? null
+      : `步骤「${node.title}」所选协作助手版本不可用`;
   }
   if (node.type === "handoff") {
     const error = validateHandoffNode(node, currentAgentId);
     if (error) return error;
     const [target] = await db
-      .select({ id: agentVersions.id })
+      .select({ manifest: agentVersions.manifest })
       .from(agentVersions)
       .innerJoin(agents, eq(agents.id, agentVersions.agentId))
       .where(and(
@@ -234,7 +236,9 @@ async function collaboratorIssue(node: AgentManifest["workflowSnapshot"]["nodes"
         isNull(agents.archivedAt),
       ))
       .limit(1);
-    return target ? null : `步骤「${node.title}」所选接收助手版本不可用`;
+    return target && AgentManifest.safeParse(target.manifest).success
+      ? null
+      : `步骤「${node.title}」所选接收助手版本不可用`;
   }
   return null;
 }
