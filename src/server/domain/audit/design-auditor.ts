@@ -541,7 +541,7 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
     if (n.type === "agent_call") {
       const call: AuditAgentCall = n.agentCall || {};
       if (!call.targetAgentId || !call.workflowId || !call.versionId) {
-        issues.push(issue("warning", "handoff", "还没有选择可调用 Agent", `「${n.title}」可以先保存；测试这一步前请选择一个已发布 Agent。`, { nodeId: id, fixable: true, code: "agent_call_target" }));
+        issues.push(issue("critical", "handoff", "还没有选择可调用 Agent", `「${n.title}」无法执行；发布前请选择一个已发布 Agent。`, { nodeId: id, fixable: true, code: "agent_call_target" }));
       }
       if (call.targetAgentId === wf.rootAgent?.id) {
         issues.push(issue("critical", "logic", "Agent 不能调用自己", `「${n.title}」会形成循环调用，请选择其他已发布 Agent。`, { nodeId: id, fixable: true, code: "agent_call_self" }));

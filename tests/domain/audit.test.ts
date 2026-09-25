@@ -11,6 +11,7 @@
 // 直测两条期望 id（AUD-c20bf44861/AUD-6f5b9efa53）为按旧 issue 公式独立预计算的 sha1 值。
 import { describe, expect, it } from "vitest";
 import golden1 from "../fixtures/domain/audit-golden-1.json";
+import { WorkflowDraft } from "@/contracts/workflow";
 import { auditWorkflow } from "@/server/domain/audit";
 
 function normalize(serialized: string): string {
@@ -134,6 +135,21 @@ describe("直测：结构性检查", () => {
       expect.objectContaining({ code: "variable_type_payload", severity: "critical" }),
       expect.objectContaining({ code: "variable_input_type_open", severity: "critical" }),
     ]));
+  });
+
+  it("未选择协作助手时作为发布阻塞问题", () => {
+    const result = auditWorkflow(WorkflowDraft.parse({
+      id: "missing-collaborator",
+      rootAgent: { id: "agent", name: "测试助手", role: "处理" },
+      memoryPolicy: { taskContext: true, longTerm: false },
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "call" },
+        call: { id: "call", title: "请专业助手处理", type: "agent_call", next: "done", agentCall: { targetAgentId: "", versionId: "" } },
+        done: { id: "done", title: "结束", type: "end", next: null },
+      },
+    }));
+
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: "agent_call_target", severity: "critical" }));
   });
 
   it("隐藏的质量控制节点不会被误判为业务目标声明", () => {
