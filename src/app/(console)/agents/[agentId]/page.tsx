@@ -15,6 +15,7 @@ import { listModelConnections } from "@/server/queries/model-connections";
 import { listEvaluationCases, listEvaluationRuns } from "@/server/queries/evaluations";
 import { AgentManifest } from "@/contracts/manifest";
 import { listToolRegistryOptions } from "@/server/tools/tool-registry";
+import { pageFromSearchParam } from "@/lib/search-params";
 
 export const dynamic = "force-dynamic";
 
@@ -37,11 +38,9 @@ export default async function AgentDetailPage({
 }) {
   const { agentId } = await params;
   const query = await searchParams;
-  const rawVersionPage = Number(query.versionsPage ?? "1");
-  const versionPage = Number.isInteger(rawVersionPage) && rawVersionPage > 0 ? rawVersionPage : 1;
+  const versionPage = pageFromSearchParam(query.versionsPage);
   const versionPageSize = 50;
-  const rawArchivedCasesPage = Number(query.archivedCasesPage ?? "1");
-  const archivedCasesPage = Number.isInteger(rawArchivedCasesPage) && rawArchivedCasesPage > 0 ? rawArchivedCasesPage : 1;
+  const archivedCasesPage = pageFromSearchParam(query.archivedCasesPage);
   const archivedCasesPageSize = 25;
   const detail = await getAgentDetail(agentId, DEMO_WORKSPACE_ID);
   if (!detail) notFound();

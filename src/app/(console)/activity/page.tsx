@@ -2,26 +2,22 @@ import Link from "next/link";
 import { AuditEventFilters } from "@/contracts/audit-event";
 import { AuditEventList, AuditEventPagination } from "@/features/activity/AuditEventList";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
+import { firstSearchParam, pageFromSearchParam } from "@/lib/search-params";
 import { listAuditEvents } from "@/server/queries/audit-events";
 
 export const dynamic = "force-dynamic";
 const PAGE_SIZE = 25;
-
-function one(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] : value;
-}
 
 export default async function ActivityPage({ searchParams }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
   const parsedFilters = AuditEventFilters.safeParse({
-    targetType: one(params.type) || undefined,
-    query: one(params.q)?.trim() || undefined,
+    targetType: firstSearchParam(params.type) || undefined,
+    query: firstSearchParam(params.q)?.trim() || undefined,
   });
   const filters = parsedFilters.success ? parsedFilters.data : {};
-  const requestedPage = Number(one(params.page));
-  const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? Math.min(requestedPage, 10_000) : 1;
+  const page = pageFromSearchParam(params.page);
   const rows = await listAuditEvents(DEMO_WORKSPACE_ID, filters, {
     limit: PAGE_SIZE + 1,
     offset: (page - 1) * PAGE_SIZE,

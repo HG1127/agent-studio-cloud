@@ -2,27 +2,23 @@ import { RunListFilters } from "@/contracts/run";
 import { RunFilters } from "@/features/runs/RunFilters";
 import { RunList, RunPagination } from "@/features/runs/RunList";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
+import { firstSearchParam, pageFromSearchParam } from "@/lib/search-params";
 import { listRunAgentOptions, listRuns } from "@/server/queries/runs";
 
 export const dynamic = "force-dynamic";
 const PAGE_SIZE = 25;
-
-function one(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
 
 export default async function RunsPage({ searchParams }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
   const parsed = RunListFilters.safeParse({
-    status: one(params.status) || undefined,
-    sourceType: one(params.source) || undefined,
-    agentId: one(params.agent) || undefined,
+    status: firstSearchParam(params.status) || undefined,
+    sourceType: firstSearchParam(params.source) || undefined,
+    agentId: firstSearchParam(params.agent) || undefined,
   });
   const filters = parsed.success ? parsed.data : {};
-  const requestedPage = Number(one(params.page));
-  const page = Number.isInteger(requestedPage) && requestedPage > 0 ? Math.min(requestedPage, 10_000) : 1;
+  const page = pageFromSearchParam(params.page);
   const [runs, agentOptions] = await Promise.all([
     listRuns(DEMO_WORKSPACE_ID, filters, { limit: PAGE_SIZE + 1, offset: (page - 1) * PAGE_SIZE }),
     listRunAgentOptions(DEMO_WORKSPACE_ID),

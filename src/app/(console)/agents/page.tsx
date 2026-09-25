@@ -3,20 +3,12 @@ import { CreateAgentForm } from "@/features/agents/CreateAgentForm";
 import { AgentList } from "@/features/agents/AgentList";
 import { ImportAgentForm } from "@/features/agents/ImportAgentForm";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
+import { firstSearchParam, pageFromSearchParam } from "@/lib/search-params";
 import { listAgents, listArchivedAgents } from "@/server/queries/agents";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 const PAGE_SIZE = 20;
-
-function one(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-function positivePage(value: string | undefined) {
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? Math.min(parsed, 10_000) : 1;
-}
 
 function pageHref(query: string, page: number, archivedPage: number) {
   const params = new URLSearchParams();
@@ -42,9 +34,9 @@ export default async function AgentsPage({ searchParams }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  const query = one(params.q)?.trim().slice(0, 200) ?? "";
-  const page = positivePage(one(params.page));
-  const archivedPage = positivePage(one(params.archivedPage));
+  const query = firstSearchParam(params.q)?.trim().slice(0, 200) ?? "";
+  const page = pageFromSearchParam(params.page);
+  const archivedPage = pageFromSearchParam(params.archivedPage);
   const [agentRows, archivedRows] = await Promise.all([
     listAgents(DEMO_WORKSPACE_ID, { query, limit: PAGE_SIZE + 1, offset: (page - 1) * PAGE_SIZE }),
     listArchivedAgents(DEMO_WORKSPACE_ID, { query, limit: PAGE_SIZE + 1, offset: (archivedPage - 1) * PAGE_SIZE }),
