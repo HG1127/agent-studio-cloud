@@ -80,5 +80,9 @@ describe("助手导出文件契约", () => {
       format: "agent-studio-cloud-version", formatVersion: 1, exportedAt: "2026-09-24T00:00:00.000Z",
       agent: { name: "客户助手" }, version: { number: 2, status: "retired", createdAt: "2026-09-23T00:00:00.000Z" }, manifest,
     }).success).toBe(true);
+    expect(AgentImportFile.safeParse({
+      format: "agent-studio-cloud-version", formatVersion: 1, exportedAt: "2026-09-24T00:00:00.000Z",
+      agent: { name: "   " }, version: { number: 2, status: "retired", createdAt: "2026-09-23T00:00:00.000Z" }, manifest,
+    }).success).toBe(false);
   });
 });

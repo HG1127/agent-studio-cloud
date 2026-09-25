@@ -34,7 +34,7 @@ export const VersionExportFile = z.object({
   format: z.literal("agent-studio-cloud-version"),
   formatVersion: z.literal(1),
   exportedAt: z.iso.datetime(),
-  agent: z.object({ name: z.string() }),
+  agent: z.object({ name: z.string().trim().min(1).max(60) }),
   version: z.object({ number: z.number().int().positive(), status: z.string(), createdAt: z.iso.datetime() }),
   manifest: AgentManifest,
 });
