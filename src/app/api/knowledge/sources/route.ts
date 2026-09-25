@@ -2,10 +2,14 @@ import { createHash, randomUUID } from "node:crypto";
 import { put } from "@vercel/blob";
 import { and, eq } from "drizzle-orm";
 import { start } from "workflow/api";
+import { MAX_KNOWLEDGE_FILENAME_LENGTH } from "@/contracts/knowledge";
 import { auditEvents, knowledgeSources } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
-import { MAX_KNOWLEDGE_FILE_BYTES } from "@/server/domain/knowledge/text-limits";
+import {
+  MAX_KNOWLEDGE_FILE_BYTES,
+  MAX_KNOWLEDGE_MIME_LENGTH,
+} from "@/server/domain/knowledge/text-limits";
 import { knowledgeIngestWorkflow } from "@/server/workflows/knowledge-ingest";
 import { auditEventValues } from "@/server/audit/event-values";
 
@@ -114,6 +118,12 @@ export async function POST(req: Request) {
   }
   if (file.size === 0) {
     return Response.json({ ok: false, error: "文件内容为空，请选择有效文件" }, { status: 400 });
+  }
+  if (file.name.length > MAX_KNOWLEDGE_FILENAME_LENGTH) {
+    return Response.json({ ok: false, error: `文件名不能超过 ${MAX_KNOWLEDGE_FILENAME_LENGTH} 个字符` }, { status: 400 });
+  }
+  if (file.type.length > MAX_KNOWLEDGE_MIME_LENGTH) {
+    return Response.json({ ok: false, error: "文件类型信息过长，请重新选择文件" }, { status: 400 });
   }
   const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
   if (!ALLOWED_EXT.has(ext)) {

@@ -139,6 +139,19 @@ describe("知识库列表", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("上传前拒绝超长文件名", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { container } = render(<UploadSourceForm />);
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+
+    await userEvent.upload(input, new window.File(["内容"], `${"a".repeat(241)}.txt`, { type: "text/plain" }));
+    await userEvent.click(screen.getByRole("button", { name: "上传文档" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("文件名不能超过 240 个字符");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("可以按文件名查找资料", async () => {
     const source = {
       id: "00000000-0000-4000-8000-0000000000f3", mime: "text/plain", sizeBytes: 2048,

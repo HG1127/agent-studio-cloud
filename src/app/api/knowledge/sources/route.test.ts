@@ -93,6 +93,25 @@ describe("知识原文件上传", () => {
     expect(startMock).not.toHaveBeenCalled();
   });
 
+  it("服务端拒绝超长文件名和类型元数据", async () => {
+    const longNameForm = new FormData();
+    longNameForm.set("file", new File(["内容"], `${"a".repeat(241)}.txt`, { type: "text/plain" }));
+
+    const longNameResponse = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: longNameForm }));
+
+    expect(longNameResponse.status).toBe(400);
+    expect(await longNameResponse.json()).toEqual({ ok: false, error: "文件名不能超过 240 个字符" });
+
+    const longMimeForm = new FormData();
+    longMimeForm.set("file", new File(["内容"], "资料.txt", { type: `text/${"x".repeat(201)}` }));
+
+    const longMimeResponse = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: longMimeForm }));
+
+    expect(longMimeResponse.status).toBe(400);
+    expect(await longMimeResponse.json()).toEqual({ ok: false, error: "文件类型信息过长，请重新选择文件" });
+    expect(startMock).not.toHaveBeenCalled();
+  });
+
   it("服务端拒绝超过生产入口限制的文件", async () => {
     const form = new FormData();
     form.set("file", new File([new Uint8Array(4 * 1024 * 1024 + 1)], "超大资料.pdf", { type: "application/pdf" }));

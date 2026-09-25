@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export const MAX_KNOWLEDGE_FILENAME_LENGTH = 240;
+
 export const KnowledgeSourceStatus = z.enum(["parsing", "indexed", "failed", "archived"]);
 export type KnowledgeSourceStatus = z.infer<typeof KnowledgeSourceStatus>;
 

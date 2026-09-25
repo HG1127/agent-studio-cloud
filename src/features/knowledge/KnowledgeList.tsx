@@ -1,7 +1,7 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { KnowledgeUploadResult, type KnowledgeSourceView } from "@/contracts/knowledge";
+import { KnowledgeUploadResult, MAX_KNOWLEDGE_FILENAME_LENGTH, type KnowledgeSourceView } from "@/contracts/knowledge";
 import { setKnowledgeSourceArchivedAction } from "@/server/actions/archive-knowledge-source";
 import { retryKnowledgeSourceAction } from "@/server/actions/retry-knowledge-source";
 
@@ -29,6 +29,10 @@ export function UploadSourceForm() {
           const file = form.querySelector<HTMLInputElement>('input[name="file"]')?.files?.[0];
           if (!file || file.size === 0) {
             setError("请选择要上传的文件");
+            return;
+          }
+          if (file.name.length > MAX_KNOWLEDGE_FILENAME_LENGTH) {
+            setError(`文件名不能超过 ${MAX_KNOWLEDGE_FILENAME_LENGTH} 个字符`);
             return;
           }
           const extension = file.name.split(".").pop()?.toLocaleLowerCase("zh-CN") ?? "";
