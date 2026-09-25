@@ -4,6 +4,7 @@ import {
   countMeaningfulQualityOutputs,
   hasExecutedHumanStep,
   missingExecutedToolReceipts,
+  qualityOutputReferenceIssue,
 } from "@/server/domain/runtime/quality-checks";
 import { hasMeaningfulResult } from "@/server/domain/runtime/result-content";
 
@@ -59,5 +60,14 @@ describe("质量门禁执行范围", () => {
       safe: { status: "completed" },
       send: { ok: true },
     }, ["保留当前结果", "保留当前结果"])).toBe(1);
+  });
+
+  it("拒绝不存在或名称重复的交付检查来源", () => {
+    expect(qualityOutputReferenceIssue(nodes, ["不存在的步骤"])).toBe("交付检查引用的步骤「不存在的步骤」不存在");
+    expect(qualityOutputReferenceIssue({
+      ...nodes,
+      duplicate: WorkflowNode.parse({ id: "duplicate", title: "生成方案", type: "ai" }),
+    }, ["生成方案"])).toBe("交付检查引用的步骤名称「生成方案」不唯一，请先修改重复名称");
+    expect(qualityOutputReferenceIssue(nodes, ["生成方案"])).toBeNull();
   });
 });

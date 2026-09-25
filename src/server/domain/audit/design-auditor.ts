@@ -527,6 +527,16 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
       } else if (kind !== "business_rule" && !n.quality) {
         issues.push(issue("critical", "logic", "检查步骤设置不完整", `「${n.title}」没有可执行的业务判断、系统回执或交付检查设置。`, { nodeId: id, fixable: true, code: "rule_spec" }));
       }
+      if (n.quality && Array.isArray(n.quality.requiredOutputTitles)) {
+        for (const title of [...new Set(n.quality.requiredOutputTitles.map(String))]) {
+          const matches = Object.values(nodes).filter((candidate) => candidate.title === title);
+          if (matches.length === 0) {
+            issues.push(issue("critical", "logic", "交付检查引用的步骤不存在", `「${n.title}」要求检查「${title}」，但画布中没有这个步骤。`, { nodeId: id, fixable: true, code: `quality_source_missing_${title}` }));
+          } else if (matches.length > 1) {
+            issues.push(issue("critical", "logic", "交付检查引用的步骤名称重复", `「${n.title}」要求检查「${title}」，但有多个步骤使用这个名称，无法确定检查对象。`, { nodeId: id, fixable: true, code: `quality_source_ambiguous_${title}` }));
+          }
+        }
+      }
     }
 
     if (n.type === "condition") {

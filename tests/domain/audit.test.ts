@@ -487,4 +487,27 @@ describe("直测：结构性检查", () => {
     }, {});
     expect(out.issues.some((item) => item.code === "meta_node_detected" && item.nodeId === "quality_review")).toBe(false);
   });
+
+  it("交付检查引用不存在或名称重复的步骤时阻止发布", () => {
+    const out = auditWorkflow(WorkflowDraft.parse({
+      id: "quality-output-reference",
+      rootAgent: { id: "agent", name: "测试助手", role: "处理" },
+      memoryPolicy: { taskContext: true, longTerm: false },
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "draft_one" },
+        draft_one: { id: "draft_one", title: "生成方案", type: "ai", next: "draft_two" },
+        draft_two: { id: "draft_two", title: "生成方案", type: "ai", next: "quality" },
+        quality: {
+          id: "quality", title: "交付检查", type: "rule", next: "done",
+          quality: { requiredOutputTitles: ["生成方案", "缺少步骤"], minOutputCount: 1 },
+        },
+        done: { id: "done", title: "完成", type: "end", next: null },
+      },
+    }));
+
+    expect(out.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "quality_source_ambiguous_生成方案", severity: "critical" }),
+      expect.objectContaining({ code: "quality_source_missing_缺少步骤", severity: "critical" }),
+    ]));
+  });
 });

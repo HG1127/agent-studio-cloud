@@ -14,6 +14,18 @@ const RESULT_NODE_TYPES: ReadonlySet<WorkflowNode["type"]> = new Set([
   "ai", "tool", "knowledge", "system", "subflow", "loop", "parallel", "agent_call", "handoff",
 ]);
 
+export function qualityOutputReferenceIssue(
+  nodes: Record<string, WorkflowNode>,
+  requiredOutputTitles: string[],
+): string | null {
+  for (const title of [...new Set(requiredOutputTitles)]) {
+    const matches = Object.values(nodes).filter((node) => node.title === title);
+    if (matches.length === 0) return `交付检查引用的步骤「${title}」不存在`;
+    if (matches.length > 1) return `交付检查引用的步骤名称「${title}」不唯一，请先修改重复名称`;
+  }
+  return null;
+}
+
 export function countMeaningfulQualityOutputs(
   nodes: Record<string, WorkflowNode>,
   outputs: Record<string, unknown>,
