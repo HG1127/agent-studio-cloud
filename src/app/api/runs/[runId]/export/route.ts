@@ -2,7 +2,7 @@ import { RunReportFile, RunStepReport } from "@/contracts/run";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { redactSensitiveData } from "@/server/domain/security/redact-sensitive";
 import { getRunContext, getRunView, listApprovals, listRunSteps } from "@/server/queries/runs";
-import { listTrace } from "@/server/queries/trace";
+import { listTraceSince } from "@/server/queries/trace";
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
 
 export const dynamic = "force-dynamic";
@@ -11,18 +11,46 @@ function safeFilename(value: string): string {
   return value.replace(/[^\p{L}\p{N}._-]+/gu, "-").slice(0, 50) || "run";
 }
 
-function streamedJson(value: unknown): ReadableStream<Uint8Array> {
-  const bytes = new TextEncoder().encode(JSON.stringify(value, null, 2));
-  let offset = 0;
+function streamedRunReport(
+  report: RunReportFile,
+  firstTraceBatch: Awaited<ReturnType<typeof listTraceSince>>,
+): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  const redacted = redactSensitiveData({ ...report, trace: [] }) as RunReportFile;
+  const approvals = redacted.approvals;
+  const head = { ...redacted, trace: undefined, approvals: undefined };
+  let prefix = `${JSON.stringify(head).slice(0, -1)},"trace":[`;
+  let tail = `],"approvals":${JSON.stringify(approvals)}}`;
+  let batch = firstTraceBatch;
+  let cursor = 0;
+  let firstEvent = true;
+  let finished = false;
   return new ReadableStream({
-    pull(controller) {
-      if (offset >= bytes.byteLength) {
-        controller.close();
+    async pull(controller) {
+      if (prefix) {
+        controller.enqueue(encoder.encode(prefix));
+        prefix = "";
         return;
       }
-      const next = Math.min(offset + 64 * 1024, bytes.byteLength);
-      controller.enqueue(bytes.subarray(offset, next));
-      offset = next;
+      if (batch.events.length > 0) {
+        const chunk = batch.events.map((event) => `${firstEvent ? "" : ","}${JSON.stringify(event)}`).join("");
+        firstEvent = false;
+        controller.enqueue(encoder.encode(chunk));
+      }
+      cursor = batch.nextCursor;
+      if (batch.scannedCount > 0) {
+        batch = await listTraceSince(report.run.id, DEMO_WORKSPACE_ID, cursor);
+        return;
+      }
+      if (!finished) {
+        controller.enqueue(encoder.encode(tail));
+        tail = "";
+        finished = true;
+        return;
+      }
+      if (finished) {
+        controller.close();
+      }
     },
   });
 }
@@ -32,10 +60,10 @@ export async function GET(_request: Request, context: { params: Promise<{ runId:
   const run = await getRunView(runId, DEMO_WORKSPACE_ID);
   if (!run) return Response.json({ ok: false, error: "找不到这次运行" }, { status: 404 });
 
-  const [runContext, steps, trace, approvals] = await Promise.all([
+  const [runContext, steps, firstTraceBatch, approvals] = await Promise.all([
     getRunContext(runId, DEMO_WORKSPACE_ID),
     listRunSteps(runId, DEMO_WORKSPACE_ID),
-    listTrace(runId, DEMO_WORKSPACE_ID),
+    listTraceSince(runId, DEMO_WORKSPACE_ID, 0),
     listApprovals(runId, DEMO_WORKSPACE_ID),
   ]);
   const report = RunReportFile.safeParse({
@@ -55,7 +83,7 @@ export async function GET(_request: Request, context: { params: Promise<{ runId:
       startedAt: step.startedAt?.toISOString() ?? null,
       finishedAt: step.finishedAt?.toISOString() ?? null,
     }))),
-    trace,
+    trace: [],
     approvals,
   });
   if (!report.success) {
@@ -64,7 +92,7 @@ export async function GET(_request: Request, context: { params: Promise<{ runId:
   const date = (run.finishedAt ?? run.startedAt ?? report.data.exportedAt).slice(0, 10);
   const filename = `${safeFilename(run.agentName)}-${date}-运行报告.json`;
   // 运行上下文与步骤结果可以超过函数的普通响应上限，下载必须保持流式传输。
-  return new Response(streamedJson(redactSensitiveData(report.data)), {
+  return new Response(streamedRunReport(report.data, firstTraceBatch), {
     headers: {
       "content-type": "application/json; charset=utf-8",
       "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,

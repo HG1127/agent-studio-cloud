@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   getRunContext: vi.fn(),
   listRunSteps: vi.fn(),
   listApprovals: vi.fn(),
-  listTrace: vi.fn(),
+  listTraceSince: vi.fn(),
 }));
 
 vi.mock("@/server/queries/runs", () => ({
@@ -14,7 +14,7 @@ vi.mock("@/server/queries/runs", () => ({
   listRunSteps: mocks.listRunSteps,
   listApprovals: mocks.listApprovals,
 }));
-vi.mock("@/server/queries/trace", () => ({ listTrace: mocks.listTrace }));
+vi.mock("@/server/queries/trace", () => ({ listTraceSince: mocks.listTraceSince }));
 
 import { GET } from "./route";
 
@@ -38,10 +38,16 @@ beforeEach(() => {
     output: { output: "通过" }, error: null,
     startedAt: new Date("2026-09-24T01:00:10.000Z"), finishedAt: new Date("2026-09-24T01:00:20.000Z"),
   }]);
-  mocks.listTrace.mockResolvedValue([{
-    id: "00000000-0000-4000-8000-000000000013", seq: 1, nodeId: "review", kind: "step.succeeded",
-    level: "info", title: "审核完成", detail: null, at: "2026-09-24T01:00:20.000Z",
-  }]);
+  mocks.listTraceSince.mockImplementation(async (_runId: string, _workspaceId: string, cursor: number) => cursor === 0
+    ? {
+        events: [{
+          id: "00000000-0000-4000-8000-000000000013", seq: 1, nodeId: "review", kind: "step.succeeded",
+          level: "info", title: "审核完成", detail: null, at: "2026-09-24T01:00:20.000Z",
+        }],
+        nextCursor: 1,
+        scannedCount: 1,
+      }
+    : { events: [], nextCursor: cursor, scannedCount: 0 });
   mocks.listApprovals.mockResolvedValue([]);
 });
 
@@ -58,6 +64,7 @@ describe("运行报告导出", () => {
       trace: [{ title: "审核完成" }],
       approvals: [],
     });
+    expect(mocks.listTraceSince).toHaveBeenLastCalledWith(RUN_ID, expect.any(String), 1);
   });
 
   it("大体积运行报告使用流式响应且内容保持完整", async () => {
