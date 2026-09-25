@@ -8,9 +8,21 @@ export type ToolInvocationResult =
   | { ok: true; output: Record<string, unknown> }
   | { ok: false; error: string; retryable: boolean };
 
+async function cancelResponseBody(response: Response): Promise<void> {
+  if (!response.body || response.body.locked) return;
+  try {
+    await response.body.cancel();
+  } catch {
+    // 远端可能已经关闭连接；释放失败不覆盖原调用结果。
+  }
+}
+
 async function readBoundedBody(response: Response): Promise<string | null> {
   const declared = Number(response.headers.get("content-length") ?? 0);
-  if (declared > MAX_TOOL_RESPONSE_BYTES) return null;
+  if (declared > MAX_TOOL_RESPONSE_BYTES) {
+    await cancelResponseBody(response);
+    return null;
+  }
   if (!response.body) return "";
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -73,6 +85,7 @@ export async function invokeHttpTool(args: {
     return { ok: false, error: "业务系统暂时无法连接，稍后自动重试", retryable: true };
   }
   if (!response.ok) {
+    await cancelResponseBody(response);
     if (response.status === 401 || response.status === 403) {
       return { ok: false, error: "业务系统拒绝访问，请检查服务端工具凭据", retryable: false };
     }

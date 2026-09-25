@@ -37,6 +37,26 @@ describe("HTTP 工具调用", () => {
     })).resolves.toMatchObject({ ok: false, retryable: false, error: expect.stringContaining("凭据") });
   });
 
+  it("关闭无需读取的错误响应和已声明超限的响应体", async () => {
+    const errorStream = new ReadableStream<Uint8Array>();
+    const cancelErrorStream = vi.spyOn(errorStream, "cancel");
+    await invokeHttpTool({
+      tool, idempotencyKey: "run:node", action: tool.action, input: {}, outputs: {},
+      fetchImpl: vi.fn(async () => new Response(errorStream, { status: 503 })),
+    });
+    expect(cancelErrorStream).toHaveBeenCalledOnce();
+
+    const oversizedStream = new ReadableStream<Uint8Array>();
+    const cancelOversizedStream = vi.spyOn(oversizedStream, "cancel");
+    await invokeHttpTool({
+      tool, idempotencyKey: "run:node", action: tool.action, input: {}, outputs: {},
+      fetchImpl: vi.fn(async () => new Response(oversizedStream, {
+        headers: { "content-length": String(2 * 1024 * 1024) },
+      })),
+    });
+    expect(cancelOversizedStream).toHaveBeenCalledOnce();
+  });
+
   it("拒绝超大请求、超大回执和非对象回执", async () => {
     await expect(invokeHttpTool({
       tool, idempotencyKey: "run:node", action: tool.action,
