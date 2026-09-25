@@ -92,4 +92,35 @@ describe("运行报告导出", () => {
     expect(body).not.toContain("context-secret");
     expect(body).not.toContain("step-secret");
   });
+
+  it("忽略单条损坏的历史步骤而不是让整份报告失败", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.listRunSteps.mockResolvedValueOnce([
+      {
+        nodeId: "review", nodeTitle: "审核合同", nodeType: "ai", status: "succeeded", attempt: 1,
+        output: { output: "通过" }, error: null,
+        startedAt: new Date("2026-09-24T01:00:10.000Z"), finishedAt: new Date("2026-09-24T01:00:20.000Z"),
+      },
+      {
+        nodeId: null, nodeTitle: "损坏步骤", nodeType: "ai", status: "succeeded", attempt: 1,
+        output: null, error: null, startedAt: null, finishedAt: null,
+      },
+    ]);
+
+    const response = await GET(new Request("http://localhost"), { params: Promise.resolve({ runId: RUN_ID }) });
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).steps).toEqual([expect.objectContaining({ nodeId: "review" })]);
+    expect(warn).toHaveBeenCalledWith("[query] 已忽略 1 条不符合运行报告步骤契约的历史记录");
+    warn.mockRestore();
+  });
+
+  it("报告顶层数据损坏时返回可理解的错误", async () => {
+    mocks.getRunContext.mockResolvedValueOnce([]);
+
+    const response = await GET(new Request("http://localhost"), { params: Promise.resolve({ runId: RUN_ID }) });
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({ ok: false, error: "运行报告包含无法导出的历史数据" });
+  });
 });

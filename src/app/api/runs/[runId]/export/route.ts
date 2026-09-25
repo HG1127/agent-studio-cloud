@@ -1,8 +1,9 @@
-import { RunReportFile } from "@/contracts/run";
+import { RunReportFile, RunStepReport } from "@/contracts/run";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { redactSensitiveData } from "@/server/domain/security/redact-sensitive";
 import { getRunContext, getRunView, listApprovals, listRunSteps } from "@/server/queries/runs";
 import { listTrace } from "@/server/queries/trace";
+import { parseQueryRows } from "@/server/queries/parse-query-rows";
 
 export const dynamic = "force-dynamic";
 
@@ -21,13 +22,13 @@ export async function GET(_request: Request, context: { params: Promise<{ runId:
     listTrace(runId, DEMO_WORKSPACE_ID),
     listApprovals(runId, DEMO_WORKSPACE_ID),
   ]);
-  const report = RunReportFile.parse({
+  const report = RunReportFile.safeParse({
     format: "agent-studio-cloud-run",
     formatVersion: 1,
     exportedAt: new Date().toISOString(),
     run,
     context: runContext,
-    steps: steps.map((step) => ({
+    steps: parseQueryRows("运行报告步骤", RunStepReport, steps.map((step) => ({
       nodeId: step.nodeId,
       nodeTitle: step.nodeTitle,
       nodeType: step.nodeType,
@@ -37,13 +38,16 @@ export async function GET(_request: Request, context: { params: Promise<{ runId:
       error: step.error,
       startedAt: step.startedAt?.toISOString() ?? null,
       finishedAt: step.finishedAt?.toISOString() ?? null,
-    })),
+    }))),
     trace,
     approvals,
   });
-  const date = (run.finishedAt ?? run.startedAt ?? report.exportedAt).slice(0, 10);
+  if (!report.success) {
+    return Response.json({ ok: false, error: "运行报告包含无法导出的历史数据" }, { status: 422 });
+  }
+  const date = (run.finishedAt ?? run.startedAt ?? report.data.exportedAt).slice(0, 10);
   const filename = `${safeFilename(run.agentName)}-${date}-运行报告.json`;
-  return new Response(JSON.stringify(redactSensitiveData(report), null, 2), {
+  return new Response(JSON.stringify(redactSensitiveData(report.data), null, 2), {
     headers: {
       "content-type": "application/json; charset=utf-8",
       "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
