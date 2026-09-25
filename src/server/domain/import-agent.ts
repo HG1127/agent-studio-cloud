@@ -22,16 +22,73 @@ export interface NormalizedAgentImport {
   workflow: WorkflowDraft;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function nestedSteps(node: Record<string, unknown>): Record<string, unknown>[] {
+  const subflow = isRecord(node.subflow) ? node.subflow : null;
+  const parallel = isRecord(node.parallel) ? node.parallel : null;
+  const subflowSteps = Array.isArray(subflow?.steps) ? subflow.steps.filter(isRecord) : [];
+  const parallelSteps = Array.isArray(parallel?.branches)
+    ? parallel.branches.flatMap((branch) => isRecord(branch) && Array.isArray(branch.steps) ? branch.steps.filter(isRecord) : [])
+    : [];
+  return [...subflowSteps, ...parallelSteps];
+}
+
+function collectCollaborationKeys(node: Record<string, unknown>, keys: Set<string>) {
+  if (node.type === "agent_call" && isRecord(node.agentCall)) {
+    const targetAgentId = node.agentCall.targetAgentId;
+    const versionId = node.agentCall.versionId;
+    if (typeof targetAgentId === "string" && targetAgentId && typeof versionId === "string" && versionId) {
+      keys.add(`${targetAgentId}:${versionId}`);
+    }
+  }
+  if (node.type === "handoff" && isRecord(node.toAgent)) {
+    const targetAgentId = node.toAgent.id;
+    const versionId = node.toAgent.versionId;
+    if (typeof targetAgentId === "string" && targetAgentId && typeof versionId === "string" && versionId) {
+      keys.add(`${targetAgentId}:${versionId}`);
+    }
+  }
+  for (const step of nestedSteps(node)) collectCollaborationKeys(step, keys);
+}
+
 export function importedCollaborationKeys(workflow: WorkflowDraft) {
-  return [...new Set(Object.values(workflow.nodes).flatMap((node) => {
-    if (node.type === "agent_call" && node.agentCall?.targetAgentId && node.agentCall.versionId) {
-      return [`${node.agentCall.targetAgentId}:${node.agentCall.versionId}`];
+  const keys = new Set<string>();
+  for (const node of Object.values(workflow.nodes)) collectCollaborationKeys(node, keys);
+  return [...keys];
+}
+
+function rebindNode(node: Record<string, unknown>, validKeys: ReadonlySet<string>): Record<string, unknown> {
+  const rebound = { ...node };
+  if (node.type === "agent_call" && isRecord(node.agentCall)) {
+    const key = `${node.agentCall.targetAgentId ?? ""}:${node.agentCall.versionId ?? ""}`;
+    if (!validKeys.has(key)) rebound.agentCall = { targetAgentId: "", versionId: "" };
+  }
+  if (node.type === "handoff" && isRecord(node.toAgent)) {
+    const key = `${node.toAgent.id ?? ""}:${node.toAgent.versionId ?? ""}`;
+    if (!validKeys.has(key)) {
+      rebound.toAgent = { id: "", versionId: "" };
+      rebound.contract = undefined;
     }
-    if (node.type === "handoff" && node.toAgent?.id && node.toAgent.versionId) {
-      return [`${node.toAgent.id}:${node.toAgent.versionId}`];
-    }
-    return [];
-  }))];
+  }
+
+  if (isRecord(node.subflow) && Array.isArray(node.subflow.steps)) {
+    rebound.subflow = {
+      ...node.subflow,
+      steps: node.subflow.steps.map((step) => isRecord(step) ? rebindNode(step, validKeys) : step),
+    };
+  }
+  if (isRecord(node.parallel) && Array.isArray(node.parallel.branches)) {
+    rebound.parallel = {
+      ...node.parallel,
+      branches: node.parallel.branches.map((branch) => isRecord(branch) && Array.isArray(branch.steps)
+        ? { ...branch, steps: branch.steps.map((step) => isRecord(step) ? rebindNode(step, validKeys) : step) }
+        : branch),
+    };
+  }
+  return rebound;
 }
 
 export function rebindImportedWorkflow(args: {
@@ -40,21 +97,9 @@ export function rebindImportedWorkflow(args: {
   agentName: string;
   validCollaborationKeys: ReadonlySet<string>;
 }): WorkflowDraft {
-  const nodes = Object.fromEntries(Object.entries(args.workflow.nodes).map(([id, node]) => {
-    if (node.type === "agent_call" && node.agentCall) {
-      const key = `${node.agentCall.targetAgentId}:${node.agentCall.versionId}`;
-      if (!args.validCollaborationKeys.has(key)) {
-        return [id, { ...node, agentCall: { targetAgentId: "", versionId: "" } }];
-      }
-    }
-    if (node.type === "handoff" && node.toAgent) {
-      const key = `${node.toAgent.id}:${node.toAgent.versionId ?? ""}`;
-      if (!args.validCollaborationKeys.has(key)) {
-        return [id, { ...node, toAgent: { id: "", versionId: "" }, contract: undefined }];
-      }
-    }
-    return [id, node];
-  }));
+  const nodes = Object.fromEntries(Object.entries(args.workflow.nodes).map(
+    ([id, node]) => [id, rebindNode(node, args.validCollaborationKeys)],
+  )) as WorkflowDraft["nodes"];
   return {
     ...args.workflow,
     versionId: null,

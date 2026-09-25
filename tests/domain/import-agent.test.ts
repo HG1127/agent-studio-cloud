@@ -94,4 +94,62 @@ describe("助手导入格式归一化", () => {
     expect(rebound.nodes.handoff.toAgent).toEqual({ id: "", versionId: "" });
     expect(rebound.nodes.handoff.contract).toBeUndefined();
   });
+
+  it("递归校验并清理一组步骤和并行工作中的协作引用", () => {
+    const withNestedCollaboration = WorkflowDraft.parse({
+      ...workflow,
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "group" },
+        group: {
+          id: "group",
+          title: "一组步骤",
+          type: "subflow",
+          next: "parallel",
+          subflow: {
+            name: "协作处理",
+            steps: [{ id: "nested-call", title: "协作", type: "agent_call", agentCall: { targetAgentId: "target-a", versionId: "version-a" } }],
+          },
+        },
+        parallel: {
+          id: "parallel",
+          title: "并行处理",
+          type: "parallel",
+          next: "done",
+          parallel: {
+            strategy: "all",
+            failurePolicy: "fail_fast",
+            branches: [{
+              id: "branch",
+              label: "交接处理",
+              steps: [{
+                id: "nested-handoff",
+                title: "交接",
+                type: "handoff",
+                toAgent: { id: "target-b", versionId: "version-b" },
+                contract: { deliverables: ["结果"], mustNotInclude: ["密钥"], inputSchema: [], outputSchema: [] },
+              }],
+            }],
+          },
+        },
+        done: { id: "done", title: "结束", type: "end" },
+      },
+    });
+
+    expect(importedCollaborationKeys(withNestedCollaboration)).toEqual([
+      "target-a:version-a",
+      "target-b:version-b",
+    ]);
+
+    const rebound = rebindImportedWorkflow({
+      workflow: withNestedCollaboration,
+      agentId: "new-agent",
+      agentName: "导入副本",
+      validCollaborationKeys: new Set(["target-a:version-a"]),
+    });
+    const subflowSteps = rebound.nodes.group.subflow?.steps as Array<Record<string, unknown>>;
+    const parallelSteps = rebound.nodes.parallel.parallel?.branches[0].steps as Array<Record<string, unknown>>;
+    expect(subflowSteps[0].agentCall).toMatchObject({ targetAgentId: "target-a", versionId: "version-a" });
+    expect(parallelSteps[0].toAgent).toEqual({ id: "", versionId: "" });
+    expect(parallelSteps[0].contract).toBeUndefined();
+  });
 });
