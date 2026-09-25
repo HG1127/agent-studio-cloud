@@ -1,7 +1,14 @@
 import { z } from "zod";
 
 const RESERVED_FIELD_NAMES: ReadonlySet<string> = new Set(["__proto__", "prototype", "constructor"]);
+const RESERVED_WORKFLOW_NODE_IDS: ReadonlySet<string> = new Set([
+  ...RESERVED_FIELD_NAMES,
+  ...Object.getOwnPropertyNames(Object.prototype),
+]);
 const safeFieldPath = (value: string) => value.split(".").every((segment) => segment.length > 0 && !RESERVED_FIELD_NAMES.has(segment));
+const safeTopLevelNodeId = (value: string) => value.length <= 200
+  && /^[A-Za-z0-9_-]+$/.test(value)
+  && !RESERVED_WORKFLOW_NODE_IDS.has(value);
 
 export const MAX_WORKFLOW_NODES = 200;
 export const MAX_WORKFLOW_BYTES = 1024 * 1024;
@@ -140,6 +147,13 @@ export const WorkflowDraft = z.object({
   }).optional(),
   ui: z.object({ positions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })).default({}) }).default({ positions: {} }),
 }).superRefine((draft, ctx) => {
+  for (const [nodeKey, node] of Object.entries(draft.nodes)) {
+    if (!safeTopLevelNodeId(nodeKey)) {
+      ctx.addIssue({ code: "custom", path: ["nodes", nodeKey], message: "步骤标识包含不安全字符或保留名称" });
+    } else if (node.id !== nodeKey) {
+      ctx.addIssue({ code: "custom", path: ["nodes", nodeKey, "id"], message: "步骤标识与画布记录不一致" });
+    }
+  }
   try {
     const bytes = new TextEncoder().encode(JSON.stringify(draft)).byteLength;
     if (bytes > MAX_WORKFLOW_BYTES) ctx.addIssue({ code: "custom", message: "流程草稿不能超过 1MB" });

@@ -85,7 +85,14 @@ describe("最终交付结果", () => {
     }).nodes;
     expect(validateOutputContract([{ path: "plan", label: "方案", required: true, sourceNodeId: "draft" }], nodes)).toBeNull();
     expect(validateOutputContract([{ path: "plan", label: "方案", required: true, sourceNodeId: "missing" }], nodes)).toContain("必须选择有效的业务步骤来源");
+    expect(validateOutputContract([{ path: "plan", label: "方案", required: true, sourceNodeId: "toString" }], nodes)).toContain("必须选择有效的业务步骤来源");
     expect(validateOutputContract([{ path: "plan", label: "方案", required: true, sourceNodeId: "start" }], nodes)).toContain("必须选择有效的业务步骤来源");
     expect(validateOutputContract([{ path: "plan", label: "方案", required: true, sourceNodeId: "check" }], nodes)).toContain("必须选择有效的业务步骤来源");
+  });
+
+  it("不会读取结果对象继承属性作为交付内容", () => {
+    expect(projectWorkflowResult({}, [{
+      path: "plan", label: "方案", required: true, sourceNodeId: "toString",
+    }])).toEqual({ ok: false, missing: ["方案"] });
   });
 });

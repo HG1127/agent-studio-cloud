@@ -28,7 +28,8 @@ function nodeRoutes(node: WorkflowNode): RouteRef[] {
 
 export function validateWorkflowRoutes(draft: Pick<WorkflowDraft, "startNodeId" | "nodes">): string | null {
   const nodes = draft.nodes;
-  const start = Object.prototype.hasOwnProperty.call(nodes, draft.startNodeId) ? nodes[draft.startNodeId] : undefined;
+  const hasNode = (nodeId: string) => Object.prototype.hasOwnProperty.call(nodes, nodeId);
+  const start = hasNode(draft.startNodeId) ? nodes[draft.startNodeId] : undefined;
   if (!start) return "流程的启动步骤不存在，请重新连接后保存";
   if (start.type !== "trigger") return "流程必须从启动步骤开始";
 
@@ -38,9 +39,9 @@ export function validateWorkflowRoutes(draft: Pick<WorkflowDraft, "startNodeId" 
       return `步骤“${node.title || nodeKey}”的标识包含不安全字符`;
     }
     for (const route of nodeRoutes(node)) {
-      if (route.target && !nodes[route.target]) return `步骤“${node.title}”的${route.label}指向了不存在的步骤`;
+      if (route.target && !hasNode(route.target)) return `步骤“${node.title}”的${route.label}指向了不存在的步骤`;
     }
-    if (node.type === "human" && !node.rejectNext && !nodes.not_approved) {
+    if (node.type === "human" && !node.rejectNext && !hasNode("not_approved")) {
       return `员工确认步骤“${node.title}”缺少未通过后的安全处理路径`;
     }
   }

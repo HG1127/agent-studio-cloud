@@ -71,6 +71,20 @@ describe("WorkflowDraft", () => {
     }).success).toBe(false);
   });
 
+  it("拒绝对象原型名称和标识错位的顶层步骤", () => {
+    const inheritedNameNodes = { ...baseDraft.nodes } as Record<string, unknown>;
+    Object.defineProperty(inheritedNameNodes, "toString", {
+      configurable: true,
+      enumerable: true,
+      value: { id: "toString", title: "危险步骤", type: "system" },
+    });
+    expect(WorkflowDraft.safeParse({ ...baseDraft, nodes: inheritedNameNodes }).success).toBe(false);
+    expect(WorkflowDraft.safeParse({
+      ...baseDraft,
+      nodes: { ...baseDraft.nodes, mismatched: { id: "another", title: "错位步骤", type: "system" } },
+    }).success).toBe(false);
+  });
+
   it("步骤组只接受明确的失败处理策略", () => {
     expect(WorkflowNode.safeParse({
       id: "group", title: "准备材料", type: "subflow",

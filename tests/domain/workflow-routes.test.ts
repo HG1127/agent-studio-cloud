@@ -47,6 +47,12 @@ describe("工作流路线校验", () => {
     }
   });
 
+  it("不会把对象继承属性当成真实步骤", () => {
+    const value = draft();
+    value.nodes.start.next = "toString";
+    expect(validateWorkflowRoutes(value)).toContain("不存在");
+  });
+
   it("拒绝节点标识错位及没有拒绝路径的员工确认", () => {
     const mismatched = draft();
     mismatched.nodes.wait.id = "another";

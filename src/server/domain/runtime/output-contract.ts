@@ -37,7 +37,7 @@ export function validateOutputContract(fields: OutputField[], nodes: Record<stri
   if (pathError) return pathError;
   for (const field of fields) {
     const sourceId = field.sourceNodeId ?? field.path.split(".")[0];
-    const source = nodes[sourceId];
+    const source = Object.prototype.hasOwnProperty.call(nodes, sourceId) ? nodes[sourceId] : undefined;
     if (!source || source.type === "trigger" || source.type === "end" || source.ui?.visibility === "control") {
       return `最终交付“${field.label || field.path}”必须选择有效的业务步骤来源`;
     }
@@ -81,7 +81,9 @@ export function projectWorkflowResult(outputs: Record<string, unknown>, fields: 
       if (field.required) missing.push(field.label || field.path);
       continue;
     }
-    const value = field.sourceNodeId ? outputs[field.sourceNodeId] : readPath(outputs, field.path);
+    const value = field.sourceNodeId
+      ? Object.prototype.hasOwnProperty.call(outputs, field.sourceNodeId) ? outputs[field.sourceNodeId] : undefined
+      : readPath(outputs, field.path);
     if (!hasMeaningfulResult(value)) {
       if (field.required) missing.push(field.label || field.path);
       continue;

@@ -360,7 +360,9 @@ async function validateRuntimePreflight(args: {
     if (node.type === "rule") {
       const kind = node.rule?.kind;
       if (["tool_result", "tool_receipt"].includes(kind || "")) {
-        const source = node.rule?.sourceNodeId ? args.manifest.workflowSnapshot.nodes[node.rule.sourceNodeId] : null;
+        const source = node.rule?.sourceNodeId && Object.prototype.hasOwnProperty.call(args.manifest.workflowSnapshot.nodes, node.rule.sourceNodeId)
+          ? args.manifest.workflowSnapshot.nodes[node.rule.sourceNodeId]
+          : null;
         if (!source || source.type !== "tool") unsupported.push(`${node.title}（系统回执来源不可用）`);
       } else if (kind !== "business_rule" && !node.quality) {
         unsupported.push(`${node.title}（检查设置不完整）`);

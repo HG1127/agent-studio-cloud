@@ -200,7 +200,9 @@ export async function agentRunWorkflow(
     while (currentId && guard < executionLimit) {
       guard += 1;
       // 显式标注打断 currentId 收窄与节点类型之间的推导环（TS7022）
-      const node: WorkflowNode | undefined = draft.nodes[currentId];
+      const node: WorkflowNode | undefined = Object.prototype.hasOwnProperty.call(draft.nodes, currentId)
+        ? draft.nodes[currentId]
+        : undefined;
       if (!node) break;
       if (node.type === "trigger") {
         currentId = node.next;
@@ -387,7 +389,9 @@ export async function agentRunWorkflow(
         try {
           const quality = await runQualityGate({ runId, node, outputs, nodes: draft.nodes, repairAttempts: qualityRepairAttempts });
           if (quality.repair) {
-            const repairNode = draft.nodes[quality.repair.nodeId];
+            const repairNode = Object.prototype.hasOwnProperty.call(draft.nodes, quality.repair.nodeId)
+              ? draft.nodes[quality.repair.nodeId]
+              : undefined;
             if (!repairNode || repairNode.type !== "ai") throw new FatalError("质量返工目标不存在或不支持自动重写");
             qualityRepairAttempts[repairNode.id] = quality.repair.nextRepairAttempt;
             const repaired = await runModelStep({

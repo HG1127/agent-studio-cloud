@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AgentManifest } from "@/contracts/manifest";
-import { WorkflowDraft } from "@/contracts/workflow";
+import { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
 import {
   agentImportSizeIssue,
   importedCollaborationKeys,
@@ -107,14 +107,14 @@ describe("助手导入格式归一化", () => {
       },
     }))).toBe("步骤“开始”的正常路径指向了不存在的步骤");
 
-    expect(importedWorkflowIssue(WorkflowDraft.parse({
-      ...workflow,
-      startNodeId: "unsafe.node",
-      nodes: {
-        "unsafe.node": { id: "unsafe.node", title: "开始", type: "trigger", next: "done" },
-        done: { id: "done", title: "结束", type: "end", next: null },
-      },
-    }))).toBe("步骤“开始”的标识包含不安全字符");
+    const historicalUnsafe = WorkflowDraft.parse(workflow);
+    historicalUnsafe.startNodeId = "unsafe.node";
+    Object.defineProperty(historicalUnsafe.nodes, "unsafe.node", {
+      configurable: true,
+      enumerable: true,
+      value: WorkflowNode.parse({ id: "unsafe.node", title: "开始", type: "trigger", next: "done" }),
+    });
+    expect(importedWorkflowIssue(historicalUnsafe)).toBe("步骤“开始”的标识包含不安全字符");
   });
 
   it("导入副本重绑定根助手并清理当前工作区不存在的协作引用", () => {
