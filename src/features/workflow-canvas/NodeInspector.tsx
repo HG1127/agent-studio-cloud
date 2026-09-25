@@ -511,7 +511,7 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
           </label>
           <label className="flex flex-col gap-1 text-sm font-medium">失败处理
             <select aria-label="步骤组失败处理" value={node.subflow.failurePolicy ?? "checkpoint"}
-              onChange={(event) => onNodeChange({ ...node, subflow: { ...node.subflow!, failurePolicy: event.target.value } })}
+              onChange={(event) => onNodeChange({ ...node, subflow: { ...node.subflow!, failurePolicy: event.target.value as "checkpoint" | "continue" } })}
               className="rounded-md border border-gray-300 px-3 py-2 text-sm font-normal">
               <option value="checkpoint">停止整个流程</option><option value="continue">记录问题后继续</option>
             </select>

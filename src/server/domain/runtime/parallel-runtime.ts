@@ -42,10 +42,14 @@ export function prepareParallelBranches(node: WorkflowNode): PreparedParallel {
       return { ok: false, error: `并行工作「${branch.label}」最多允许 ${MAX_PARALLEL_STEPS} 个步骤` };
     }
     const steps: WorkflowNode[] = [];
+    const stepIds = new Set<string>();
     for (const [stepIndex, raw] of branch.steps.entries()) {
+      const sourceId = String(raw.id || `step_${stepIndex + 1}`);
+      if (stepIds.has(sourceId)) return { ok: false, error: `并行工作「${branch.label}」存在重复的步骤标识` };
+      stepIds.add(sourceId);
       const parsed = WorkflowNode.safeParse({
         ...raw,
-        id: `${node.id}.${branch.id}.${String(raw.id || `step_${stepIndex + 1}`)}`,
+        id: `${node.id}.${branch.id}.${sourceId}`,
         title: String(raw.title || `并行步骤 ${stepIndex + 1}`),
         next: null,
         requirementIds: Array.isArray(raw.requirementIds) ? raw.requirementIds : [],

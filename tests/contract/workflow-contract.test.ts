@@ -68,4 +68,15 @@ describe("WorkflowDraft", () => {
       businessGrounding: { source: "字".repeat(MAX_WORKFLOW_BYTES) },
     }).success).toBe(false);
   });
+
+  it("步骤组只接受明确的失败处理策略", () => {
+    expect(WorkflowNode.safeParse({
+      id: "group", title: "准备材料", type: "subflow",
+      subflow: { name: "准备材料", steps: [{ id: "draft", title: "起草", type: "ai" }], failurePolicy: "continute" },
+    }).success).toBe(false);
+    expect(WorkflowNode.parse({
+      id: "group", title: "准备材料", type: "subflow",
+      subflow: { name: "准备材料", steps: [{ id: "draft", title: "起草", type: "ai" }] },
+    }).subflow?.failurePolicy).toBe("checkpoint");
+  });
 });

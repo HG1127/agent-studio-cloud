@@ -6,7 +6,7 @@ export type PreparedSubflow = {
   ok: true;
   name: string;
   outputNames: string[];
-  failurePolicy: string;
+  failurePolicy: "checkpoint" | "continue";
   steps: WorkflowNode[];
 };
 export type PrepareSubflowResult = PreparedSubflow | { ok: false; error: string };
@@ -45,7 +45,7 @@ export function prepareSubflow(node: WorkflowNode): PrepareSubflowResult {
     ok: true,
     name: subflow.name,
     outputNames: subflow.outputs,
-    failurePolicy: subflow.failurePolicy || "checkpoint",
+    failurePolicy: subflow.failurePolicy,
     steps,
   };
 }

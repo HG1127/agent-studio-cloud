@@ -53,6 +53,23 @@ describe("并行分支运行准备", () => {
     expect(prepareParallelBranches(any)).toMatchObject({ ok: true });
   });
 
+  it("拒绝同一并行工作内重复的步骤标识", () => {
+    const duplicateSteps = parallelNode({
+      parallel: {
+        strategy: "all",
+        failurePolicy: "fail_fast",
+        branches: [
+          { id: "market", label: "市场材料", steps: [
+            { id: "same", title: "步骤一", type: "system" },
+            { id: "same", title: "步骤二", type: "system" },
+          ] },
+          { id: "risk", label: "风险材料", steps: [{ id: "check", title: "整理风险", type: "system" }] },
+        ],
+      },
+    });
+    expect(prepareParallelBranches(duplicateSteps)).toMatchObject({ ok: false, error: expect.stringContaining("重复的步骤标识") });
+  });
+
   it("任一成功时继续并选中成功分支，全部失败时进入失败路径", () => {
     expect(resolveParallelOutcome({ strategy: "any", failurePolicy: "fail_fast", statuses: ["failed", "completed"] })).toEqual({
       status: "completed",
