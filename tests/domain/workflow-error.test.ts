@@ -7,6 +7,8 @@ describe("工作流安全异常边界", () => {
     await expect(withSafeWorkflowError(async () => "ok", "保存失败")).resolves.toBe("ok");
     const fatal = new FatalError("业务规则不允许继续");
     await expect(withSafeWorkflowError(async () => { throw fatal; }, "保存失败")).rejects.toBe(fatal);
+    const retryable = new RetryableError("稍后重试", { retryAfter: "5s" });
+    await expect(withSafeWorkflowError(async () => { throw retryable; }, "保存失败")).rejects.toBe(retryable);
   });
 
   it("把可能携带业务参数的原始异常替换成无 cause 的安全错误", async () => {
