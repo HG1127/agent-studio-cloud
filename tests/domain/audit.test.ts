@@ -123,6 +123,18 @@ describe("直测：结构性检查", () => {
     expect(result.issues).toContainEqual(expect.objectContaining({ code: "condition_source", severity: "critical" }));
   });
 
+  it("未绑定执行能力的工具步骤阻止发布", () => {
+    const result = auditWorkflow({
+      startNodeId: "start", rootAgent: { id: "agent" }, memoryPolicy: { taskContext: true, longTerm: false },
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "send" },
+        send: { id: "send", title: "发送通知", type: "tool", next: "done", tool: { scope: "notice.read", protocol: "unbound", unresolved: true } },
+        done: { id: "done", title: "结束", type: "end", next: null },
+      },
+    });
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: "tool_binding", severity: "critical" }));
+  });
+
   it("condition 无 defaultNext：condition_default warning，issue 全字段含稳定 id 精确断言", () => {
     const out = auditWorkflow(conditionDraft, {});
     const defaults = out.issues.filter((x) => x.code === "condition_default");

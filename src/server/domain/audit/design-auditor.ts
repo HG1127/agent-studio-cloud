@@ -45,6 +45,9 @@ export interface AuditTool {
   action?: string | null;
   risk?: string | null;
   maxRetries?: number | null;
+  registryToolId?: string | null;
+  protocol?: string | null;
+  unresolved?: boolean | null;
 }
 
 export interface AuditConditionBranch {
@@ -411,6 +414,9 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
     }
 
     if (n.type === "tool") {
+      if (!n.tool || n.tool.unresolved === true || (!n.tool.registryToolId && n.tool.protocol !== "demo")) {
+        issues.push(issue("critical", "permission", "工具尚未绑定可执行能力", `「${n.title}」没有绑定演示工具或服务端注册工具。`, { nodeId: id, fixable: true, code: "tool_binding" }));
+      }
       if (!n.tool?.scope) {
         issues.push(issue("critical", "permission", "工具缺少权限范围", `「${n.title}」没有声明 scope，无法进入受控运行。`, { nodeId: id, fixable: true, code: "tool_scope" }));
       }
