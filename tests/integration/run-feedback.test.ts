@@ -4,7 +4,7 @@ import { AgentManifest } from "@/contracts/manifest";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-import { agents, agentVersions, auditEvents, evaluationCases, runFeedback, runs } from "@/db/schema";
+import { agents, agentVersions, auditEvents, evaluationCases, evaluationRuns, runFeedback, runs } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { createRegressionCaseFromRunFeedbackAction, saveRunFeedbackAction } from "@/server/actions/run-feedback";
@@ -35,6 +35,7 @@ const manifest = AgentManifest.parse({
 afterEach(async () => {
   await db.delete(auditEvents).where(eq(auditEvents.targetId, RUN_ID));
   await db.delete(runFeedback).where(eq(runFeedback.runId, RUN_ID));
+  await db.delete(evaluationRuns).where(eq(evaluationRuns.agentId, AGENT_ID));
   await db.delete(evaluationCases).where(eq(evaluationCases.agentId, AGENT_ID));
   await db.delete(runs).where(eq(runs.id, RUN_ID));
   await db.delete(agentVersions).where(eq(agentVersions.id, VERSION_ID));
@@ -87,6 +88,27 @@ describe("运行反馈闭环", () => {
       input: { request: "检查合同", apiKey: "[已隐藏敏感信息]" },
       expectations: [],
     });
+  });
+
+  it("自动验收运行期间不能从差评新增未参与本轮的回归样例", async () => {
+    await insertFixture();
+    await saveRunFeedbackAction({ runId: RUN_ID, rating: "needs_improvement", note: "需要加入回归" });
+    await db.insert(evaluationRuns).values({
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
+      agentId: AGENT_ID,
+      versionId: VERSION_ID,
+      status: "running",
+      totalCount: 1,
+    });
+
+    const result = await createRegressionCaseFromRunFeedbackAction(RUN_ID);
+
+    expect(result).toEqual({
+      ok: false,
+      error: "自动验收运行期间不能新增回归样例，请等待验收完成",
+    });
+    expect(await db.select().from(evaluationCases).where(eq(evaluationCases.agentId, AGENT_ID))).toHaveLength(0);
   });
 
   it("写入和读取反馈时隐藏误贴的服务凭据", async () => {

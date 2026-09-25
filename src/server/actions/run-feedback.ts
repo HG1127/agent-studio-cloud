@@ -10,7 +10,7 @@ import {
   type RunFeedbackRegressionResult,
   type RunFeedbackSaveResult,
 } from "@/contracts/run-feedback";
-import { agents, auditEvents, evaluationCases, runFeedback, runs } from "@/db/schema";
+import { agents, auditEvents, evaluationCases, evaluationRuns, runFeedback, runs } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { auditEventValues } from "@/server/audit/event-values";
@@ -95,6 +95,12 @@ export async function createRegressionCaseFromRunFeedbackAction(runId: string): 
         .for("update")
         .limit(1);
       if (!agent) return { kind: "agent-missing" as const };
+      const [runningEvaluation] = await tx.select({ id: evaluationRuns.id }).from(evaluationRuns).where(and(
+        eq(evaluationRuns.agentId, agent.id),
+        eq(evaluationRuns.workspaceId, DEMO_WORKSPACE_ID),
+        eq(evaluationRuns.status, "running"),
+      )).limit(1);
+      if (runningEvaluation) return { kind: "evaluation-running" as const };
       const [active] = await tx.select({ count: count() }).from(evaluationCases).where(and(
         eq(evaluationCases.agentId, agent.id),
         eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID),
@@ -135,6 +141,9 @@ export async function createRegressionCaseFromRunFeedbackAction(runId: string): 
     if (outcome.kind === "not-completed") return { ok: false, error: "运行完成后才能加入验收样例" };
     if (outcome.kind === "feedback-required") return { ok: false, error: "请先提交需要改进的结果反馈" };
     if (outcome.kind === "agent-missing") return { ok: false, error: "这个助手已停用，无法新增验收样例" };
+    if (outcome.kind === "evaluation-running") {
+      return { ok: false, error: "自动验收运行期间不能新增回归样例，请等待验收完成" };
+    }
     if (outcome.kind === "limit") return { ok: false, error: `启用中的验收样例已达到 ${MAX_EVALUATION_CASES} 条上限` };
     if (outcome.kind === "input-invalid") return { ok: false, error: "这次运行的历史输入不符合当前验收格式，无法自动加入" };
     revalidatePath(`/runs/${runId}`);
