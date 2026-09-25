@@ -141,6 +141,8 @@ export async function persistStep(step: PersistStepInput): Promise<void> {
 
 export async function persistContext(runId: string, outputs: Record<string, unknown>): Promise<void> {
   "use step";
+  const contextIssue = jsonStorageIssue({ outputs }, MAX_RUN_CONTEXT_BYTES, "运行完整上下文");
+  if (contextIssue) throw new FatalError(contextIssue);
   const updated = await db
     .update(runs)
     .set({ context: { outputs }, updatedAt: new Date() })
@@ -159,7 +161,7 @@ export async function finalizeRun(
   "use step";
   const resultIssue = jsonStorageIssue(result, MAX_RUN_RESULT_BYTES, "运行结果");
   if (resultIssue) throw new FatalError(resultIssue);
-  const contextIssue = jsonStorageIssue(contextOutputs, MAX_RUN_CONTEXT_BYTES, "运行完整上下文");
+  const contextIssue = jsonStorageIssue({ outputs: contextOutputs }, MAX_RUN_CONTEXT_BYTES, "运行完整上下文");
   if (contextIssue) throw new FatalError(contextIssue);
   const now = new Date();
   const updated = await db

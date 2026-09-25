@@ -17,7 +17,7 @@ import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { cancelRunAction } from "@/server/actions/cancel-run";
 import { recordDecision, requestApproval } from "@/server/steps/approval-step";
-import { failRun, finalizeRun, initializeRun, markRunRunning, persistStep } from "@/server/steps/run-state";
+import { failRun, finalizeRun, initializeRun, markRunRunning, persistContext, persistStep } from "@/server/steps/run-state";
 
 const RUN_ID = "00000000-0000-4000-8000-0000000000c1";
 const CHILD_RUN_ID = "00000000-0000-4000-8000-0000000000c4";
@@ -254,6 +254,16 @@ describe("取消运行", () => {
     expect(retried).toMatchObject({ status: "running", output: null, error: null, finishedAt: null, attempt: 2 });
   });
 
+  it("中间上下文超过上限时在写入数据库前终止", async () => {
+    await insertWaitingRun();
+
+    await expect(persistContext(RUN_ID, { large: "x".repeat(4 * 1024 * 1024) }))
+      .rejects.toThrow("运行完整上下文不能超过 4MB");
+
+    const [run] = await db.select({ context: runs.context }).from(runs).where(eq(runs.id, RUN_ID));
+    expect(run.context).toEqual({});
+  });
+
   it("运行取消后迟到的确认结果不能覆盖已关闭状态", async () => {
     await insertWaitingRun();
     const [approval] = await db.select().from(approvals).where(and(
@@ -286,7 +296,7 @@ describe("取消运行", () => {
       eq(approvals.runId, RUN_ID), eq(approvals.nodeId, "confirm"),
     ));
     expect(rows).toHaveLength(1);
-    expect(appendTraceMock).toHaveBeenCalledOnce();
+    expect(appendTraceMock.mock.calls.filter(([event]) => event.kind === "approval.requested")).toHaveLength(1);
   });
 
   it("运行取消后恢复动作明确失败且不写继续轨迹", async () => {
