@@ -3,7 +3,7 @@ import { z } from "zod";
 import { start } from "workflow/api";
 import { AgentManifest } from "@/contracts/manifest";
 import { RunInputPayload, type StartRunResult } from "@/contracts/run";
-import { agentVersions, agents, runs } from "@/db/schema";
+import { agentVersions, agents, knowledgeSources, runs } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { prepareParallelBranches } from "@/server/domain/runtime/parallel-runtime";
@@ -14,6 +14,7 @@ import { validateHandoffNode } from "@/server/domain/runtime/handoff-runtime";
 import { validateRunInput } from "@/server/domain/runtime/run-input";
 import { validateWaitContracts } from "@/server/domain/runtime/wait-contract";
 import { validateWorkflowRoutes } from "@/server/domain/runtime/workflow-routes";
+import { knowledgeStepTitles, validateKnowledgeSnapshot } from "@/server/domain/runtime/knowledge-snapshot";
 import { completeEvaluationForRun } from "@/server/services/evaluation-state";
 import {
   createRunStartLease,
@@ -257,6 +258,27 @@ export async function startRunCore(args: {
     const manifest = manifestParsed.data;
     const inputError = validateRunInput(runInput, manifest.inputContract.fields);
     if (inputError) return { ok: false, error: inputError };
+    const knowledgeTitles = knowledgeStepTitles(manifest.workflowSnapshot.nodes);
+    if (knowledgeTitles.length > 0) {
+      const snapshotSourceIds = manifest.knowledgeSnapshot ?? [];
+      const availableSources = snapshotSourceIds.length > 0
+        ? await db
+            .select({ id: knowledgeSources.id })
+            .from(knowledgeSources)
+            .where(and(
+              inArray(knowledgeSources.id, snapshotSourceIds),
+              eq(knowledgeSources.workspaceId, agent.workspaceId),
+              eq(knowledgeSources.status, "indexed"),
+              isNull(knowledgeSources.archivedAt),
+            ))
+        : [];
+      const knowledgeError = validateKnowledgeSnapshot({
+        knowledgeTitles,
+        snapshotSourceIds,
+        availableSourceIds: new Set(availableSources.map((source) => source.id)),
+      });
+      if (knowledgeError) return { ok: false, error: knowledgeError };
+    }
     const waitError = validateWaitContracts(manifest.workflowSnapshot.nodes);
     if (waitError) return { ok: false, error: waitError };
     const routeError = validateWorkflowRoutes(manifest.workflowSnapshot);

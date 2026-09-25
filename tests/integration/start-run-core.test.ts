@@ -65,6 +65,32 @@ afterEach(async () => {
 });
 
 describe("运行启动句柄恢复", () => {
+  it("知识步骤的发布快照没有可用资料时不创建运行", async () => {
+    const knowledgeManifest = AgentManifest.parse({
+      ...manifest,
+      workflowFingerprint: "k".repeat(64),
+      knowledgeSnapshot: [],
+      workflowSnapshot: {
+        ...manifest.workflowSnapshot,
+        nodes: {
+          start: { id: "start", title: "开始", type: "trigger", next: "knowledge" },
+          knowledge: { id: "knowledge", title: "查询制度", type: "knowledge", next: "done", knowledge: { space: "业务资料库" } },
+          done: { id: "done", title: "结束", type: "end", next: null },
+        },
+      },
+    });
+    await db.update(agentVersions).set({ manifest: knowledgeManifest }).where(eq(agentVersions.id, VERSION_ID));
+
+    const result = await startRunCore({ agentId: AGENT_ID, input: {} });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "「查询制度」需要知识资料，但这个版本的发布快照中没有可用资料；请恢复资料，或上传后重新发布",
+    });
+    expect(startMock).not.toHaveBeenCalled();
+    expect(await db.select().from(runs).where(eq(runs.agentId, AGENT_ID))).toEqual([]);
+  });
+
   it("相同来源键重试时复用已有运行且不重复启动工作流", async () => {
     const first = await startRunCore({ agentId: AGENT_ID, input: {}, sourceType: "evaluation", sourceKey: "evaluation:00000000-0000-4000-8000-000000000701:00000000-0000-4000-8000-000000000702" });
     const second = await startRunCore({ agentId: AGENT_ID, input: {}, sourceType: "evaluation", sourceKey: "evaluation:00000000-0000-4000-8000-000000000701:00000000-0000-4000-8000-000000000702" });
