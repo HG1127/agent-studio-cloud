@@ -7,6 +7,7 @@ import { MAX_KNOWLEDGE_SCAN_CHUNKS, scoreChunks } from "@/server/domain/knowledg
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
 import { isKnowledgeParsingStalled } from "@/server/domain/knowledge/source-state";
 import { escapeLikePattern } from "@/server/domain/search-pattern";
+import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 
 export async function listKnowledgeSources(
   archived = false,
@@ -29,7 +30,7 @@ export async function listKnowledgeSources(
   return parseQueryRows("知识资料列表", KnowledgeSourceView, rows.map((row) => ({
     id: row.id, name: row.name, mime: row.mime, sizeBytes: row.sizeBytes,
     status: archived ? "archived" : row.status,
-    chunkCount: row.chunkCount, charCount: row.charCount, error: row.error,
+    chunkCount: row.chunkCount, charCount: row.charCount, error: row.error ? redactSensitiveText(row.error) : null,
     hasOriginal: Boolean(row.blobPathname),
     parsingStalled: isKnowledgeParsingStalled(row),
     createdAt: row.createdAt.toISOString(),

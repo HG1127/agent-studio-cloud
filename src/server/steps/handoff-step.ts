@@ -11,6 +11,7 @@ import { validateCollaborationTarget } from "@/server/domain/runtime/collaborati
 import { loadCollaborationChain } from "@/server/services/collaboration-chain";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
+import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 
 export async function beginHandoff(args: {
   runId: string;
@@ -111,7 +112,7 @@ export async function finishHandoff(args: {
   const [child] = await db.select({ status: runs.status, result: runs.result, error: runs.error }).from(runs).where(eq(runs.id, args.childRunId)).limit(1);
   const contractError = child?.status === "completed" ? validateHandoffOutput(args.node, child.result ?? {}) : null;
   const failed = Boolean(args.failed || child?.status !== "completed" || contractError);
-  const reason = args.error || child?.error || contractError || "接收助手未能完成交接任务";
+  const reason = redactSensitiveText(args.error || child?.error || contractError || "接收助手未能完成交接任务");
   const output = failed
     ? { assistant: args.targetName, status: "failed", error: reason }
     : { assistant: args.targetName, status: "completed", deliverables: args.node.contract?.deliverables ?? [], result: child?.result ?? {} };

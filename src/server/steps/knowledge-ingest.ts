@@ -15,6 +15,7 @@ import {
   validateExtractedKnowledgeText,
 } from "@/server/domain/knowledge/text-limits";
 import { processedKnowledgeStatus } from "@/server/domain/knowledge/source-state";
+import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 
 interface ParseArgs {
   sourceId: string;
@@ -123,6 +124,7 @@ export async function indexKnowledgeChunks(args: { sourceId: string; text: strin
 
 export async function markKnowledgeFailed(args: { sourceId: string; error: string; ingestToken: string }): Promise<void> {
   "use step";
+  const safeError = redactSensitiveText(args.error);
   await db.transaction(async (tx) => {
     const [source] = await tx
       .select({ workspaceId: knowledgeSources.workspaceId, archivedAt: knowledgeSources.archivedAt, parseEngine: knowledgeSources.parseEngine })
@@ -134,7 +136,7 @@ export async function markKnowledgeFailed(args: { sourceId: string; error: strin
     if (source.parseEngine !== args.ingestToken) return;
     await tx
       .update(knowledgeSources)
-      .set({ status: processedKnowledgeStatus(source.archivedAt, "failed"), parseEngine: "builtin", error: args.error, updatedAt: new Date() })
+      .set({ status: processedKnowledgeStatus(source.archivedAt, "failed"), parseEngine: "builtin", error: safeError, updatedAt: new Date() })
       .where(and(
         eq(knowledgeSources.id, args.sourceId),
         eq(knowledgeSources.workspaceId, source.workspaceId),

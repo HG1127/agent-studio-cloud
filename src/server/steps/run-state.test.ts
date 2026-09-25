@@ -6,21 +6,28 @@ const mocks = vi.hoisted(() => ({
   appendTrace: vi.fn(),
   completeEvaluationForRun: vi.fn(),
   reconcileTerminalEvaluationRun: vi.fn(),
+  setValues: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
-  db: {
+  db: (() => {
+    const client = {
     update: vi.fn(() => ({
-      set: vi.fn(() => ({
+      set: vi.fn((values: unknown) => {
+        mocks.setValues(values);
+        return ({
         where: vi.fn(() => ({ returning: mocks.returning })),
-      })),
+        });
+      }),
     })),
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => ({ limit: mocks.selectRows })),
       })),
     })),
-  },
+    };
+    return { ...client, transaction: async (callback: (tx: typeof client) => unknown) => callback(client) };
+  })(),
 }));
 vi.mock("@/server/steps/trace-step", () => ({ appendTrace: mocks.appendTrace }));
 vi.mock("@/server/services/evaluation-state", () => ({
@@ -29,7 +36,7 @@ vi.mock("@/server/services/evaluation-state", () => ({
 }));
 
 import type { WorkflowDraft } from "@/contracts/workflow";
-import { finalizeRun, initializeRun, markRunRunning, persistContext } from "@/server/steps/run-state";
+import { failRun, finalizeRun, initializeRun, markRunRunning, persistContext } from "@/server/steps/run-state";
 
 const draft = {
   startNodeId: "start",
@@ -40,6 +47,21 @@ describe("运行终态步骤", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.selectRows.mockResolvedValue([]);
+  });
+
+  it("失败终态、轨迹和验收只接收已脱敏的错误", async () => {
+    mocks.returning.mockResolvedValue([{ id: "run-1" }]);
+    const error = "联系 person@example.com，authorization: Bearer private-run-token";
+    const safeError = "联系 [已隐藏敏感信息]，[已隐藏敏感信息]";
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await failRun("run-1", error);
+
+    expect(mocks.setValues).toHaveBeenCalledWith(expect.objectContaining({ status: "failed", error: safeError }));
+    expect(mocks.appendTrace).toHaveBeenCalledWith(expect.objectContaining({ kind: "run.failed", detail: safeError }));
+    expect(mocks.completeEvaluationForRun).toHaveBeenCalledWith("run-1", null, safeError);
+    expect(JSON.stringify(log.mock.calls)).not.toContain("person@example.com");
+    expect(JSON.stringify(log.mock.calls)).not.toContain("private-run-token");
   });
 
   it("重入已结束的运行时继续修复验收汇总", async () => {

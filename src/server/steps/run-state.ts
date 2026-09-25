@@ -16,6 +16,7 @@ import {
   MAX_RUN_STEP_OUTPUT_TOTAL_BYTES,
   MAX_STEP_OUTPUT_BYTES,
 } from "@/server/domain/runtime/json-storage";
+import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 
 function workflowStepId(): string {
   try {
@@ -129,12 +130,13 @@ async function appendCommittedStepTrace(step: PersistStepInput, stepId: string):
 export async function persistStep(step: PersistStepInput): Promise<void> {
   "use step";
   const stepId = workflowStepId();
-  let rejectedOutput = step.output !== undefined && step.output !== null
-    ? jsonStorageIssue(step.output, MAX_STEP_OUTPUT_BYTES, `步骤「${step.nodeTitle ?? step.nodeId}」的输出`)
+  const safeStep = step.error ? { ...step, error: redactSensitiveText(step.error) } : step;
+  let rejectedOutput = safeStep.output !== undefined && safeStep.output !== null
+    ? jsonStorageIssue(safeStep.output, MAX_STEP_OUTPUT_BYTES, `步骤「${safeStep.nodeTitle ?? safeStep.nodeId}」的输出`)
     : null;
   let storedStep: PersistStepInput = rejectedOutput
-    ? { ...step, status: "failed", output: null, error: rejectedOutput }
-    : step;
+    ? { ...safeStep, status: "failed", output: null, error: rejectedOutput }
+    : safeStep;
   const now = new Date();
   let starting = storedStep.status === "running";
   await db.transaction(async (tx) => {
@@ -243,12 +245,13 @@ export async function finalizeRun(
 
 export async function failRun(runId: string, error: string): Promise<void> {
   "use step";
-  console.error(`运行 ${runId} 失败：${error}`);
+  const safeError = redactSensitiveText(error);
+  console.error(`运行 ${runId} 失败：${safeError}`);
   const now = new Date();
   const updated = await db.transaction(async (tx) => {
     const rows = await tx
       .update(runs)
-      .set({ status: "failed", error, finishedAt: now, updatedAt: now })
+      .set({ status: "failed", error: safeError, finishedAt: now, updatedAt: now })
       // 等待态也在守卫内：恢复链路抛错时必须能落失败终态，而不是永久卡住
       .where(and(eq(runs.id, runId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])))
       .returning({ id: runs.id });
@@ -262,12 +265,12 @@ export async function failRun(runId: string, error: string): Promise<void> {
   });
   if (updated.length === 0) {
     // 已是终态时不改写运行结果，但要修复上一次可能未完成的验收汇总。
-    await appendTrace({ runId, kind: "run.failed", level: "error", title: "流程执行失败", detail: error });
+    await appendTrace({ runId, kind: "run.failed", level: "error", title: "流程执行失败", detail: safeError });
     await reconcileTerminalEvaluationRun(runId);
     return;
   }
-  await appendTrace({ runId, kind: "run.failed", level: "error", title: "流程执行失败", detail: error });
-  await completeEvaluationForRun(runId, null, error);
+  await appendTrace({ runId, kind: "run.failed", level: "error", title: "流程执行失败", detail: safeError });
+  await completeEvaluationForRun(runId, null, safeError);
 }
 
 // 等待结束后把 run 拉回 running 并留下持久轨迹（瞬态状态不可断言，轨迹可）

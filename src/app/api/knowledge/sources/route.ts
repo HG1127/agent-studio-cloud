@@ -14,6 +14,7 @@ import { knowledgeIngestWorkflow } from "@/server/workflows/knowledge-ingest";
 import { auditEventValues } from "@/server/audit/event-values";
 import { isKnowledgeParsingStalled } from "@/server/domain/knowledge/source-state";
 import { hasCrossSiteOrigin } from "@/server/security/request-origin";
+import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,7 @@ function toView(row: typeof knowledgeSources.$inferSelect) {
   return {
     id: row.id, name: row.name, mime: row.mime, sizeBytes: row.sizeBytes,
     status: row.status as "parsing" | "indexed" | "failed" | "archived",
-    chunkCount: row.chunkCount, charCount: row.charCount, error: row.error,
+    chunkCount: row.chunkCount, charCount: row.charCount, error: row.error ? redactSensitiveText(row.error) : null,
     hasOriginal: Boolean(row.blobPathname),
     parsingStalled: isKnowledgeParsingStalled(row),
     createdAt: row.createdAt.toISOString(),
