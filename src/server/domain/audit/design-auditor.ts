@@ -138,6 +138,8 @@ export interface AuditNode {
   condition?: AuditCondition | null;
   loop?: AuditLoop | null;
   wait?: AuditWait | null;
+  knowledge?: { space?: string | null; [key: string]: unknown } | null;
+  memory?: { mode?: string | null; [key: string]: unknown } | null;
   parallel?: AuditParallel | null;
   subflow?: {
     name?: string | null;
@@ -420,6 +422,14 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
       }
     }
 
+    if (n.type === "knowledge" && !n.knowledge?.space?.trim()) {
+      issues.push(issue("critical", "data", "读取资料步骤没有资料范围", `「${n.title}」没有选择可查询的资料范围。`, { nodeId: id, fixable: true, code: "knowledge_space" }));
+    }
+
+    if (n.type === "memory" && !n.memory?.mode) {
+      issues.push(issue("critical", "memory", "经验步骤设置不完整", `「${n.title}」没有选择读取或保存经验，无法执行。`, { nodeId: id, fixable: true, code: "memory_mode" }));
+    }
+
     if (n.type === "condition") {
       const bs = n.condition?.branches || [];
       if (bs.length < 1) {
@@ -508,7 +518,7 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
       const inlineSteps = Array.isArray(sf?.steps) ? (sf.steps as AuditSubflowStep[]) : [];
       const nested = sf?.workflow;
       if (!sf?.name || (!inlineSteps.length && !nested?.nodes)) {
-        issues.push(issue("warning", "logic", "子流程说明不完整", `「${n.title}」缺少可审阅的子流程步骤。`, { nodeId: id, fixable: true, code: "subflow_spec" }));
+        issues.push(issue("critical", "logic", "子流程说明不完整", `「${n.title}」缺少可执行的子流程步骤。`, { nodeId: id, fixable: true, code: "subflow_spec" }));
       }
       if (!Array.isArray(sf?.outputs) || !sf.outputs.length) {
         issues.push(issue("warning", "data", "子流程没有声明输出", `「${n.title}」无法说明返回主流程的业务结果。`, { nodeId: id, fixable: true, code: "subflow_output" }));

@@ -175,6 +175,27 @@ describe("直测：结构性检查", () => {
     ]));
   });
 
+  it("缺少执行设置的资料、经验和步骤组会阻止发布", () => {
+    const result = auditWorkflow(WorkflowDraft.parse({
+      id: "missing-runtime-settings",
+      rootAgent: { id: "agent", name: "测试助手", role: "处理" },
+      memoryPolicy: { taskContext: true, longTerm: false },
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "knowledge" },
+        knowledge: { id: "knowledge", title: "读取资料", type: "knowledge", next: "memory" },
+        memory: { id: "memory", title: "读取经验", type: "memory", next: "group" },
+        group: { id: "group", title: "执行步骤组", type: "subflow", next: "done", subflow: { name: "", steps: [], inputs: [], outputs: [], failurePolicy: "checkpoint" } },
+        done: { id: "done", title: "结束", type: "end", next: null },
+      },
+    }));
+
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "knowledge_space", severity: "critical" }),
+      expect.objectContaining({ code: "memory_mode", severity: "critical" }),
+      expect.objectContaining({ code: "subflow_spec", severity: "critical" }),
+    ]));
+  });
+
   it("隐藏的质量控制节点不会被误判为业务目标声明", () => {
     const out = auditWorkflow({
       ...deadEndDraft,
