@@ -314,6 +314,21 @@ async function validateRuntimePreflight(args: {
       versions: dependencyVersions,
     });
     if (graph.issue) return `${graph.issue}，请重新发布助手后再运行`;
+    if (graph.knowledgeSourceIds.length > 0) {
+      const availableSources = await db
+        .select({ id: knowledgeSources.id })
+        .from(knowledgeSources)
+        .where(and(
+          inArray(knowledgeSources.id, graph.knowledgeSourceIds),
+          eq(knowledgeSources.workspaceId, args.workspaceId),
+          eq(knowledgeSources.status, "indexed"),
+          isNull(knowledgeSources.archivedAt),
+        ));
+      const availableIds = new Set(availableSources.map((source) => source.id));
+      if (graph.knowledgeSourceIds.some((id) => !availableIds.has(id))) {
+        return "协作助手使用的知识资料已归档或尚未完成解析，请先恢复资料后再运行";
+      }
+    }
   }
 
   const unsupported: string[] = [];

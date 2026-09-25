@@ -20,6 +20,7 @@ export type CollaborationGraphInspection = {
   issue: string | null;
   agentIds: string[];
   versionIds: string[];
+  knowledgeSourceIds: string[];
 };
 
 export function inspectCollaborationVersionGraph(args: {
@@ -30,6 +31,7 @@ export function inspectCollaborationVersionGraph(args: {
   const byKey = new Map(args.versions.map((version) => [`${version.agentId}:${version.versionId}`, version]));
   const agentIds = new Set<string>();
   const versionIds = new Set<string>();
+  const knowledgeSourceIds = new Set<string>();
   let issue: string | null = null;
 
   const visit = (key: string, depth: number, path: ReadonlySet<string>) => {
@@ -57,6 +59,7 @@ export function inspectCollaborationVersionGraph(args: {
     }
     agentIds.add(agentId);
     versionIds.add(versionId);
+    for (const sourceId of manifest.data.knowledgeSnapshot) knowledgeSourceIds.add(sourceId);
     const nextPath = new Set(path);
     nextPath.add(agentId);
     for (const dependencyKey of workflowCollaborationKeys(manifest.data.workflowSnapshot)) {
@@ -67,7 +70,7 @@ export function inspectCollaborationVersionGraph(args: {
   for (const key of [...new Set(args.directKeys)]) {
     visit(key, 1, new Set([args.rootAgentId]));
   }
-  return { issue, agentIds: [...agentIds], versionIds: [...versionIds] };
+  return { issue, agentIds: [...agentIds], versionIds: [...versionIds], knowledgeSourceIds: [...knowledgeSourceIds] };
 }
 
 export function activeVersionDependingOnAgent(
@@ -94,6 +97,36 @@ export function activeVersionDependingOnAgent(
       const dependency = byKey.get(key);
       if (!dependency || dependency.agentArchivedAt !== null) continue;
       pending.push(...(dependencies.get(dependency.versionId) ?? []));
+    }
+  }
+  return null;
+}
+
+export function activeVersionDependingOnKnowledgeSource(
+  versions: CollaborationVersionDependency[],
+  targetSourceId: string,
+): { agentId: string; agentName: string } | null {
+  const byKey = new Map(versions.map((version) => [`${version.agentId}:${version.versionId}`, version]));
+  const roots = versions.filter((version) =>
+    version.agentArchivedAt === null
+    && ["production", "candidate"].includes(version.status));
+  for (const root of roots) {
+    const pending = [root];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      const key = `${current.agentId}:${current.versionId}`;
+      if (visited.has(key) || current.agentArchivedAt !== null) continue;
+      visited.add(key);
+      const manifest = AgentManifest.safeParse(current.manifest);
+      if (!manifest.success) continue;
+      if (manifest.data.knowledgeSnapshot.includes(targetSourceId)) {
+        return { agentId: root.agentId, agentName: root.agentName };
+      }
+      for (const dependencyKey of workflowCollaborationKeys(manifest.data.workflowSnapshot)) {
+        const dependency = byKey.get(dependencyKey);
+        if (dependency) pending.push(dependency);
+      }
     }
   }
   return null;

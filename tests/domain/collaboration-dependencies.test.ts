@@ -2,11 +2,12 @@ import { describe, expect, it } from "vitest";
 import { AgentManifest } from "@/contracts/manifest";
 import {
   activeVersionDependingOnAgent,
+  activeVersionDependingOnKnowledgeSource,
   inspectCollaborationVersionGraph,
   type CollaborationVersionDependency,
 } from "@/server/domain/runtime/collaboration-dependencies";
 
-function manifest(agentId: string, versionId?: string): AgentManifest {
+function manifest(agentId: string, versionId?: string, knowledgeSnapshot: string[] = []): AgentManifest {
   return AgentManifest.parse({
     schemaVersion: "4.0",
     workflowSnapshot: {
@@ -33,7 +34,7 @@ function manifest(agentId: string, versionId?: string): AgentManifest {
     outputContract: { fields: [] },
     resourceSelection: { model: { modelId: "mock", mock: true, connectionId: null } },
     designAudit: { status: "passed", issueCount: 0, criticalCount: 0 },
-    knowledgeSnapshot: [],
+    knowledgeSnapshot,
   });
 }
 
@@ -85,7 +86,12 @@ describe("在线版本的传递协作依赖", () => {
       rootAgentId: "agent-a",
       directKeys: ["agent-b:version-b"],
       versions: valid,
-    })).toEqual({ issue: null, agentIds: ["agent-b", "agent-c"], versionIds: ["version-b", "version-c"] });
+    })).toEqual({
+      issue: null,
+      agentIds: ["agent-b", "agent-c"],
+      versionIds: ["version-b", "version-c"],
+      knowledgeSourceIds: [],
+    });
 
     expect(inspectCollaborationVersionGraph({
       rootAgentId: "agent-a",
@@ -115,5 +121,20 @@ describe("在线版本的传递协作依赖", () => {
       directKeys: ["agent-1:version-1"],
       versions,
     }).issue).toContain("5 层");
+  });
+
+  it("识别在线版本经历史协作版本间接使用的知识资料", () => {
+    const sourceId = "00000000-0000-4000-8000-0000000000a1";
+    const versions = [
+      version({ versionId: "version-a", agentId: "agent-a", agentName: "客户助手", status: "production", manifest: manifest("agent-b", "version-b") }),
+      version({ versionId: "version-b", agentId: "agent-b", agentName: "研究助手", manifest: manifest("", undefined, [sourceId]) }),
+    ];
+
+    expect(activeVersionDependingOnKnowledgeSource(versions, sourceId)).toEqual({ agentId: "agent-a", agentName: "客户助手" });
+    expect(inspectCollaborationVersionGraph({
+      rootAgentId: "agent-a",
+      directKeys: ["agent-b:version-b"],
+      versions,
+    }).knowledgeSourceIds).toEqual([sourceId]);
   });
 });

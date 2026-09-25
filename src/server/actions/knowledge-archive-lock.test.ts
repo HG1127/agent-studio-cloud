@@ -10,7 +10,8 @@ const mocks = vi.hoisted(() => ({
 
 const tx = {
   select: () => ({
-    from: () => ({
+    from: () => {
+      const tail = {
       where: () => {
         const take = async () => mocks.rows.shift() ?? [];
         return {
@@ -24,7 +25,9 @@ const tx = {
           }),
         };
       },
-    }),
+      };
+      return { ...tail, innerJoin: () => tail };
+    },
   }),
   update: () => ({
     set: (value: Record<string, unknown>) => ({
@@ -76,13 +79,34 @@ describe("知识资料归档并发保护", () => {
   it("当前版本仍在使用资料时拒绝归档", async () => {
     mocks.rows = [
       [{ id: SOURCE_ID, name: "退款规则.md", status: "indexed", chunkCount: 3, error: null }],
-      [{ id: "00000000-0000-4000-8000-000000000092" }],
+      [{
+        versionId: "00000000-0000-4000-8000-000000000092",
+        agentId: "00000000-0000-4000-8000-000000000093",
+        agentName: "客户服务助手",
+        status: "production",
+        agentArchivedAt: null,
+        manifest: {
+          schemaVersion: "4.0",
+          workflowSnapshot: {
+            id: "workflow", versionId: null, startNodeId: "start",
+            rootAgent: { id: "00000000-0000-4000-8000-000000000093", name: "客户服务助手", role: "处理" },
+            nodes: {
+              start: { id: "start", title: "开始", type: "trigger", next: "done" },
+              done: { id: "done", title: "完成", type: "end", next: null },
+            },
+            memoryPolicy: { taskContext: true, longTerm: false },
+          },
+          workflowFingerprint: "fingerprint", inputContract: { fields: [] }, outputContract: { fields: [] },
+          resourceSelection: { model: { modelId: "mock", mock: true, connectionId: null } },
+          designAudit: { status: "passed", issueCount: 0, criticalCount: 0 }, knowledgeSnapshot: [SOURCE_ID],
+        },
+      }],
     ];
 
     await expect(setKnowledgeSourceArchivedAction({ sourceId: SOURCE_ID, archived: true }))
       .resolves.toEqual({
         ok: false,
-        error: "这份资料仍被当前版本或待验收版本使用，请先发布不再使用它的新版本",
+        error: "助手「客户服务助手」的当前版本或待验收版本仍在使用这份资料，请先发布不再使用它的新版本",
       });
     expect(mocks.updates).toHaveLength(0);
     expect(mocks.auditEvents).toHaveLength(0);

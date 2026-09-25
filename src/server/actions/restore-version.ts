@@ -46,6 +46,7 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
           if (source.status !== "retired") return { kind: "source-not-retired" as const };
           const manifest = AgentManifest.safeParse(source.manifest);
           if (!manifest.success) return { kind: "manifest-invalid" as const };
+          let collaborationKnowledgeSourceIds: string[] = [];
           const collaborationKeys = workflowCollaborationKeys(manifest.data.workflowSnapshot);
           const uuid = z.string().uuid();
           const collaborationRefs = collaborationKeys.map((key) => {
@@ -80,6 +81,7 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
               versions: dependencyVersions,
             });
             if (graph.issue) return { kind: "collaboration-invalid" as const, error: graph.issue };
+            collaborationKnowledgeSourceIds = graph.knowledgeSourceIds;
             const targetAgentIds = graph.agentIds;
             const targetAgents = await tx
               .select({ id: agents.id })
@@ -96,14 +98,15 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
             }
           }
           const knowledgeTitles = knowledgeStepTitles(manifest.data.workflowSnapshot.nodes);
-          if (knowledgeTitles.length > 0) {
-            const snapshotSourceIds = manifest.data.knowledgeSnapshot;
-            const availableSources = snapshotSourceIds.length > 0
+          const snapshotSourceIds = manifest.data.knowledgeSnapshot;
+          const requiredKnowledgeSourceIds = [...new Set([...snapshotSourceIds, ...collaborationKnowledgeSourceIds])];
+          if (knowledgeTitles.length > 0 || collaborationKnowledgeSourceIds.length > 0) {
+            const availableSources = requiredKnowledgeSourceIds.length > 0
               ? await tx
                   .select({ id: knowledgeSources.id })
                   .from(knowledgeSources)
                   .where(and(
-                    inArray(knowledgeSources.id, snapshotSourceIds),
+                    inArray(knowledgeSources.id, requiredKnowledgeSourceIds),
                     eq(knowledgeSources.workspaceId, agent.workspaceId),
                     eq(knowledgeSources.status, "indexed"),
                     isNull(knowledgeSources.archivedAt),
@@ -116,6 +119,10 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
               availableSourceIds: new Set(availableSources.map((row) => row.id)),
             });
             if (knowledgeError) return { kind: "knowledge-unavailable" as const, error: knowledgeError };
+            const availableSourceIds = new Set(availableSources.map((row) => row.id));
+            if (collaborationKnowledgeSourceIds.some((id) => !availableSourceIds.has(id))) {
+              return { kind: "knowledge-unavailable" as const, error: "协作助手使用的知识资料已归档或尚未完成解析，请先恢复资料" };
+            }
           }
           const restoredManifest = {
             ...manifest.data,

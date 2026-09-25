@@ -169,6 +169,10 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
           if (collaborationGraph.issue) {
             return { kind: "collaboration_invalid" as const, error: collaborationGraph.issue };
           }
+          const requiredKnowledgeSourceIds = [...new Set([
+            ...knowledgeSnapshot.sourceIds,
+            ...collaborationGraph.knowledgeSourceIds,
+          ])];
           const collaborationAgentIds = collaborationGraph.agentIds;
           const lockedAgents = await tx
             .select({ id: agents.id, updatedAt: agents.updatedAt, archivedAt: agents.archivedAt })
@@ -196,18 +200,18 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
           if (!lockedDefinition || lockedDefinition.updatedAt.getTime() !== definition.updatedAt.getTime()) {
             return { kind: "stale" as const };
           }
-          if (knowledgeSnapshot.sourceIds.length > 0) {
+          if (requiredKnowledgeSourceIds.length > 0) {
             const lockedSources = await tx
               .select({ id: knowledgeSources.id })
               .from(knowledgeSources)
               .where(and(
-                inArray(knowledgeSources.id, knowledgeSnapshot.sourceIds),
+                inArray(knowledgeSources.id, requiredKnowledgeSourceIds),
                 eq(knowledgeSources.workspaceId, agent.workspaceId),
                 eq(knowledgeSources.status, "indexed"),
                 isNull(knowledgeSources.archivedAt),
               ))
               .for("share");
-            if (lockedSources.length !== knowledgeSnapshot.sourceIds.length) {
+            if (lockedSources.length !== requiredKnowledgeSourceIds.length) {
               return { kind: "knowledge_changed" as const };
             }
           }
@@ -265,7 +269,7 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
           return { ok: false, error: "助手或流程刚刚发生变化，请重新发布", issues: [] };
         }
         if (publishOutcome.kind === "knowledge_changed") {
-          return { ok: false, error: "所选知识资料刚刚发生变化，请重新选择后发布", issues: [] };
+          return { ok: false, error: "流程依赖的知识资料刚刚发生变化，请恢复资料或重新发布", issues: [] };
         }
         if (publishOutcome.kind === "collaboration_changed") {
           return { ok: false, error: "协作助手刚刚被停用或版本已不可用，请重新选择后发布", issues: [] };
