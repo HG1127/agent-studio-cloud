@@ -106,6 +106,8 @@ describe("创建助手管道 buildAgentDraft", () => {
     ]);
     expect(validateOutputContract(result.draft!.outputContract!.fields, result.draft!.nodes)).toBeNull();
     expect(validateWorkflowRoutes(result.draft!)).toBeNull();
+    expect(result.issues.some((issue) => issue.code === "requirement_coverage")).toBe(false);
+    expect(result.draft?.requirementContract?.coverage).toMatchObject({ complete: true, percent: 100 });
     expect(JSON.stringify(result.draft?.businessRequirements)).toContain("发送前必须由负责人确认");
     const manifest = buildManifest(result.draft!, {
       modelId: "mock",

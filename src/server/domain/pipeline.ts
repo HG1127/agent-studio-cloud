@@ -84,11 +84,14 @@ function removeLinearNode(draft: WorkflowDraft, nodeId: string): void {
 }
 
 function applyBlueprintStructure(draft: WorkflowDraft, blueprint: AgentBlueprint): string | null {
-  if (blueprint.trigger) {
+  if (blueprint.trigger || blueprint.inputs.length > 0) {
     const trigger = draft.nodes[draft.startNodeId] ?? Object.values(draft.nodes).find((node) => node.type === "trigger");
     if (trigger?.type === "trigger") {
-      trigger.title = blueprint.trigger.slice(0, 200);
-      trigger.description = `触发条件：${blueprint.trigger}`;
+      if (blueprint.trigger) trigger.title = blueprint.trigger.slice(0, 200);
+      trigger.description = [
+        blueprint.trigger ? `触发条件：${blueprint.trigger}` : null,
+        blueprint.inputs.length > 0 ? `需要的业务输入：${blueprint.inputs.join("、")}` : null,
+      ].filter(Boolean).join("\n");
     }
   }
 
