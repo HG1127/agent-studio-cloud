@@ -54,8 +54,8 @@ export async function requestApproval(args: RequestApprovalInput): Promise<Appro
       .where(and(eq(approvals.runId, args.runId), eq(approvals.nodeId, node.id)))
       .orderBy(desc(approvals.createdAt))
       .limit(1);
-    if (existing) {
-      if (existing.status === "pending" && run.status !== "waiting_approval") {
+    if (existing?.status === "pending") {
+      if (run.status !== "waiting_approval") {
         await tx.update(runs).set({ status: "waiting_approval", updatedAt: now }).where(eq(runs.id, args.runId));
       }
       return { row: existing, created: false };
@@ -86,7 +86,7 @@ export async function requestApproval(args: RequestApprovalInput): Promise<Appro
       data: { approvalId: result.row.id, role },
     });
   }
-  return { approvalId: result.row.id, token: `approval:${args.runId}:${node.id}` };
+  return { approvalId: result.row.id, token: `approval:${result.row.id}` };
 }
 
 export async function recordDecision(args: RecordDecisionInput): Promise<void> {

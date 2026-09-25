@@ -1,7 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { resumeHook, start } from "workflow/api";
-import { waitForHook } from "@workflow/vitest";
 import { AgentManifest } from "@/contracts/manifest";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
 import { failRun, markRunRunning } from "@/server/steps/run-state";
@@ -9,6 +8,7 @@ import { failRunProbeWorkflow } from "./failrun-probe.workflow";
 import { runs, traceEvents } from "@/db/schema";
 import { db } from "@/lib/db";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
+import { waitForPendingApprovalHook } from "./approval-helpers";
 
 const AGENT_ID = "00000000-0000-4000-8000-0000000000e3";
 const VERSION_ID = "00000000-0000-4000-8000-0000000000e4";
@@ -54,8 +54,8 @@ describe("运行状态与审批健壮性", () => {
   it("failRun 对已终态 run 是 no-op：不改状态、不刷 finishedAt、不产生失败轨迹", async () => {
     const runId = await insertRun();
     const handle = await start(agentRunWorkflow, [runId, manifest, {}]);
-    await waitForHook(handle, { token: `approval:${runId}:confirm`, timeout: 90_000 });
-    await resumeHook(`approval:${runId}:confirm`, { decision: "approved" });
+    const token = await waitForPendingApprovalHook(handle, runId);
+    await resumeHook(token, { decision: "approved" });
     expect(await handle.returnValue).toEqual({ status: "completed" });
 
     const [before] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
@@ -75,8 +75,8 @@ describe("运行状态与审批健壮性", () => {
     // status 短暂为 running 不可靠（恢复后很快 completed），用持久轨迹作证据
     const runId = await insertRun();
     const handle = await start(agentRunWorkflow, [runId, manifest, {}]);
-    await waitForHook(handle, { token: `approval:${runId}:confirm`, timeout: 90_000 });
-    await resumeHook(`approval:${runId}:confirm`, { decision: "rejected", note: "方案需要修改" });
+    const token = await waitForPendingApprovalHook(handle, runId);
+    await resumeHook(token, { decision: "rejected", note: "方案需要修改" });
     expect(await handle.returnValue).toEqual({ status: "completed" });
 
     const [after] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
@@ -109,8 +109,8 @@ describe("运行状态与审批健壮性", () => {
   it("markRunRunning 对已终态 run 是 no-op", async () => {
     const runId = await insertRun();
     const handle = await start(agentRunWorkflow, [runId, manifest, {}]);
-    await waitForHook(handle, { token: `approval:${runId}:confirm`, timeout: 90_000 });
-    await resumeHook(`approval:${runId}:confirm`, { decision: "approved" });
+    const token = await waitForPendingApprovalHook(handle, runId);
+    await resumeHook(token, { decision: "approved" });
     expect(await handle.returnValue).toEqual({ status: "completed" });
 
     const resumedBefore = await db

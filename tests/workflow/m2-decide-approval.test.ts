@@ -39,6 +39,7 @@ describe("审批决定的原子性", () => {
     await insertPendingApproval();
     const first = await decideApprovalAction(RUN_ID, APPROVAL_ID, { decision: "approved", note: "同意执行" });
     expect(first.ok).toBe(true);
+    expect(resumeHookMock).toHaveBeenCalledWith(`approval:${APPROVAL_ID}`, { decision: "approved", note: "同意执行" });
     const [afterFirst] = await db.select().from(approvals).where(eq(approvals.id, APPROVAL_ID)).limit(1);
     expect(afterFirst?.status).toBe("approved");
     expect(afterFirst?.decidedAt).not.toBeNull();

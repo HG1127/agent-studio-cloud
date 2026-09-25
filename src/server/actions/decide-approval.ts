@@ -10,7 +10,7 @@ import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 
 // 人工审批决定入口：原子条件更新抢占 pending 行（并发下只有一次提交生效），再恢复工作流；
-// 恢复失败则回滚确认行。token 由 runId + nodeId 按服务端约定重建，不经过前端。
+// 恢复失败则回滚确认行。token 由确认记录 ID 按服务端约定重建，不经过前端。
 export async function decideApprovalAction(
   runId: string,
   approvalId: string,
@@ -53,7 +53,7 @@ export async function decideApprovalAction(
       return { ok: false, error: "这条确认已经处理过，请勿重复提交" };
     }
     try {
-      await resumeHook(`approval:${runId}:${row.nodeId}`, {
+      await resumeHook(`approval:${row.id}`, {
         decision: parsedInput.data.decision,
         note: note ?? undefined,
       });

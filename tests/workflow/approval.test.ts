@@ -1,12 +1,12 @@
 import { and, eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { resumeHook, start } from "workflow/api";
-import { waitForHook } from "@workflow/vitest";
 import { AgentManifest } from "@/contracts/manifest";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
 import { approvals, runs, traceEvents } from "@/db/schema";
 import { db } from "@/lib/db";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
+import { waitForPendingApprovalHook } from "./approval-helpers";
 
 // 最小 manifest：start → human（确认）→ done；拒绝经 not_approved → quality_review → done
 const AGENT_ID = "00000000-0000-4000-8000-0000000000c1";
@@ -77,19 +77,19 @@ describe("人工审批暂停与恢复", () => {
     });
     const runId = await insertRun();
     const handle = await start(agentRunWorkflow, [runId, withDraft, {}]);
-    await waitForHook(handle, { token: `approval:${runId}:confirm`, timeout: 90_000 });
+    const token = await waitForPendingApprovalHook(handle, runId);
     const [pending] = await db.select().from(approvals).where(eq(approvals.runId, runId)).limit(1);
     expect(pending?.payload).toMatchObject({
       review: { sourceNodeId: "draft", sourceTitle: "生成回复草稿", content: expect.stringContaining("[模拟输出]") },
     });
-    await resumeHook(`approval:${runId}:confirm`, { decision: "approved" });
+    await resumeHook(token, { decision: "approved" });
     expect(await handle.returnValue).toEqual({ status: "completed" });
   }, 240_000);
 
   it("批准：run 挂起在 waiting_approval 且 approvals 有 pending 行，恢复后 completed", async () => {
     const runId = await insertRun();
     const handle = await start(agentRunWorkflow, [runId, manifest, {}]);
-    await waitForHook(handle, { token: `approval:${runId}:confirm`, timeout: 90_000 });
+    const token = await waitForPendingApprovalHook(handle, runId);
 
     const [runWhileWaiting] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
     expect(runWhileWaiting?.status).toBe("waiting_approval");
@@ -101,7 +101,7 @@ describe("人工审批暂停与恢复", () => {
     expect(pendingRow?.status).toBe("pending");
     expect(pendingRow?.nodeTitle).toBe("负责人确认处理方案");
 
-    await resumeHook(`approval:${runId}:confirm`, { decision: "approved", note: "同意执行" });
+    await resumeHook(token, { decision: "approved", note: "同意执行" });
     expect(await handle.returnValue).toEqual({ status: "completed" });
 
     const [runAfter] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
@@ -119,9 +119,9 @@ describe("人工审批暂停与恢复", () => {
   it("拒绝：经 not_approved 走质量门禁后 completed，approval 行为 rejected", async () => {
     const runId = await insertRun();
     const handle = await start(agentRunWorkflow, [runId, manifest, {}]);
-    await waitForHook(handle, { token: `approval:${runId}:confirm`, timeout: 90_000 });
+    const token = await waitForPendingApprovalHook(handle, runId);
 
-    await resumeHook(`approval:${runId}:confirm`, { decision: "rejected", note: "方案需要修改" });
+    await resumeHook(token, { decision: "rejected", note: "方案需要修改" });
     expect(await handle.returnValue).toEqual({ status: "completed" });
 
     const [runAfter] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
@@ -154,9 +154,9 @@ describe("人工审批暂停与恢复", () => {
     });
     const runId = await insertRun();
     const handle = await start(agentRunWorkflow, [runId, directDoneManifest, {}]);
-    await waitForHook(handle, { token: `approval:${runId}:confirm`, timeout: 90_000 });
+    const token = await waitForPendingApprovalHook(handle, runId);
 
-    await resumeHook(`approval:${runId}:confirm`, { decision: "rejected", note: "方案需要修改" });
+    await resumeHook(token, { decision: "rejected", note: "方案需要修改" });
     expect(await handle.returnValue).toEqual({ status: "completed" });
 
     const [runAfter] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
@@ -196,9 +196,9 @@ describe("人工审批暂停与恢复", () => {
     });
     const runId = await insertRun();
     const handle = await start(agentRunWorkflow, [runId, rejectManifest, {}]);
-    await waitForHook(handle, { token: `approval:${runId}:confirm`, timeout: 90_000 });
+    const token = await waitForPendingApprovalHook(handle, runId);
 
-    await resumeHook(`approval:${runId}:confirm`, { decision: "rejected" });
+    await resumeHook(token, { decision: "rejected" });
     expect(await handle.returnValue).toEqual({ status: "completed" });
 
     const [runAfter] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
@@ -206,5 +206,41 @@ describe("人工审批暂停与恢复", () => {
     const traces = await db.select().from(traceEvents).where(eq(traceEvents.runId, runId));
     const passed = traces.find((t) => t.kind === "quality.passed");
     expect(passed?.title).toContain("未获确认");
+  }, 240_000);
+
+  it("循环中的同一确认节点每一轮都创建独立确认", async () => {
+    const loopManifest = AgentManifest.parse({
+      ...manifest,
+      workflowFingerprint: "f".repeat(64),
+      workflowSnapshot: {
+        ...manifest.workflowSnapshot,
+        id: "draft-approval-loop-test",
+        nodes: {
+          start: { id: "start", title: "收到任务", type: "trigger", next: "each_item" },
+          each_item: {
+            id: "each_item",
+            title: "逐项确认",
+            type: "loop",
+            next: null,
+            loop: { collectionPath: "input.items", itemKey: "item", maxIterations: 10, bodyNext: "confirm", exitNext: "done" },
+          },
+          confirm: { ...manifest.workflowSnapshot.nodes.confirm, next: "each_item" },
+          not_approved: { ...manifest.workflowSnapshot.nodes.not_approved, next: "done" },
+          done: { id: "done", title: "流程结束", type: "end", next: null },
+        },
+      },
+    });
+    const runId = await insertRun();
+    const handle = await start(agentRunWorkflow, [runId, loopManifest, { items: ["第一项", "第二项"] }]);
+    const firstToken = await waitForPendingApprovalHook(handle, runId);
+    await resumeHook(firstToken, { decision: "approved" });
+    const secondToken = await waitForPendingApprovalHook(handle, runId, "confirm", firstToken);
+    expect(secondToken).not.toBe(firstToken);
+    await resumeHook(secondToken, { decision: "approved" });
+    await expect(handle.returnValue).resolves.toEqual({ status: "completed" });
+
+    const rows = await db.select().from(approvals).where(and(eq(approvals.runId, runId), eq(approvals.nodeId, "confirm")));
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.status === "approved")).toBe(true);
   }, 240_000);
 });
