@@ -87,11 +87,13 @@ function collectCollaborationKeys(node: Record<string, unknown>, keys: Set<strin
   for (const step of nestedSteps(node)) collectCollaborationKeys(step, keys);
 }
 
-export function importedCollaborationKeys(workflow: WorkflowDraft) {
+export function workflowCollaborationKeys(workflow: WorkflowDraft) {
   const keys = new Set<string>();
   for (const node of Object.values(workflow.nodes)) collectCollaborationKeys(node, keys);
   return [...keys];
 }
+
+export const importedCollaborationKeys = workflowCollaborationKeys;
 
 function rebindNode(node: Record<string, unknown>, validKeys: ReadonlySet<string>): Record<string, unknown> {
   const rebound = { ...node };

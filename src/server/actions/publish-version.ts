@@ -20,6 +20,7 @@ import { validateWorkflowRoutes } from "@/server/domain/runtime/workflow-routes"
 import { auditEventValues } from "@/server/audit/event-values";
 import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
 import { knowledgeStepTitles, prepareKnowledgeSnapshot } from "@/server/domain/runtime/knowledge-snapshot";
+import { workflowCollaborationKeys } from "@/server/domain/import-agent";
 
 export async function publishVersionAction(agentId: string, modelSelection?: PublishModelSelection): Promise<PublishVersionResult> {
   if (!z.string().uuid().safeParse(agentId).success) {
@@ -112,6 +113,15 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
       : [];
     const knowledgeSnapshot = prepareKnowledgeSnapshot(draft.nodes, snapshotRows.map((row) => row.id));
     if (!knowledgeSnapshot.ok) return { ok: false, error: knowledgeSnapshot.error, issues: [] };
+    const collaborationKeys = workflowCollaborationKeys(draft);
+    const uuid = z.string().uuid();
+    const collaborationRefs = collaborationKeys.map((key) => {
+      const separator = key.lastIndexOf(":");
+      return { agentId: key.slice(0, separator), versionId: key.slice(separator + 1) };
+    });
+    if (collaborationRefs.some((ref) => !uuid.safeParse(ref.agentId).success || !uuid.safeParse(ref.versionId).success)) {
+      return { ok: false, error: "协作助手信息不完整，请重新选择后再发布", issues: [] };
+    }
     const manifest = buildManifest(draft, {
       modelId: manifestModel.modelId,
       mock: manifestModel.mock,
@@ -132,15 +142,38 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
       try {
         const publishOutcome = await db.transaction(async (tx) => {
           // 保存流程和修改基本信息都会先锁同一助手行；发布也拿这把锁并核对快照，
-          // 防止耗时的设计检查期间草稿已变化，却仍把旧内容发布成新版本。
-          const [lockedAgent] = await tx
-            .select({ updatedAt: agents.updatedAt })
+          // 同时锁住协作目标，防止发布与停用并发时留下上线即失效的版本。
+          const collaborationAgentIds = [...new Set(collaborationRefs.map((ref) => ref.agentId))];
+          const lockedAgents = await tx
+            .select({ id: agents.id, updatedAt: agents.updatedAt, archivedAt: agents.archivedAt })
             .from(agents)
-            .where(and(eq(agents.id, agentId), eq(agents.workspaceId, agent.workspaceId), isNull(agents.archivedAt)))
-            .for("update")
-            .limit(1);
-          if (!lockedAgent || lockedAgent.updatedAt.getTime() !== agent.updatedAt.getTime()) {
+            .where(and(
+              inArray(agents.id, [...new Set([agentId, ...collaborationAgentIds])].sort()),
+              eq(agents.workspaceId, agent.workspaceId),
+            ))
+            .orderBy(agents.id)
+            .for("update");
+          const lockedAgent = lockedAgents.find((row) => row.id === agentId);
+          if (!lockedAgent || lockedAgent.archivedAt || lockedAgent.updatedAt.getTime() !== agent.updatedAt.getTime()) {
             return { kind: "stale" as const };
+          }
+          const availableAgentIds = new Set(lockedAgents.filter((row) => !row.archivedAt).map((row) => row.id));
+          if (collaborationAgentIds.some((id) => !availableAgentIds.has(id))) {
+            return { kind: "collaboration_changed" as const };
+          }
+          if (collaborationRefs.length > 0) {
+            const versionIds = [...new Set(collaborationRefs.map((ref) => ref.versionId))];
+            const targetVersions = await tx
+              .select({ id: agentVersions.id, agentId: agentVersions.agentId })
+              .from(agentVersions)
+              .where(and(
+                inArray(agentVersions.id, versionIds),
+                eq(agentVersions.workspaceId, agent.workspaceId),
+              ));
+            const availableKeys = new Set(targetVersions.map((row) => `${row.agentId}:${row.id}`));
+            if (collaborationKeys.some((key) => !availableKeys.has(key))) {
+              return { kind: "collaboration_changed" as const };
+            }
           }
           const [lockedDefinition] = await tx
             .select({ updatedAt: workflowDefinitions.updatedAt })
@@ -221,6 +254,9 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
         }
         if (publishOutcome.kind === "knowledge_changed") {
           return { ok: false, error: "所选知识资料刚刚发生变化，请重新选择后发布", issues: [] };
+        }
+        if (publishOutcome.kind === "collaboration_changed") {
+          return { ok: false, error: "协作助手刚刚被停用或版本已不可用，请重新选择后发布", issues: [] };
         }
         revalidatePath(`/agents/${agentId}`);
         return { ok: true, release, version: publishOutcome.version, exempted: exempted.map((issue) => ({ title: issue.title })) };
