@@ -22,6 +22,7 @@ export async function listMemories(filters: {
     .innerJoin(agents, eq(agents.id, agentMemories.agentId))
     .where(and(
       eq(agentMemories.workspaceId, DEMO_WORKSPACE_ID),
+      eq(agents.workspaceId, DEMO_WORKSPACE_ID),
       filters.archived ? isNotNull(agentMemories.archivedAt) : isNull(agentMemories.archivedAt),
       agentId ? eq(agentMemories.agentId, agentId) : undefined,
       query ? ilike(agentMemories.content, `%${query}%`) : undefined,
@@ -46,7 +47,7 @@ export async function listMemoryAgentOptions() {
     .selectDistinct({ id: agents.id, name: agents.name })
     .from(agentMemories)
     .innerJoin(agents, eq(agents.id, agentMemories.agentId))
-    .where(eq(agentMemories.workspaceId, DEMO_WORKSPACE_ID))
+    .where(and(eq(agentMemories.workspaceId, DEMO_WORKSPACE_ID), eq(agents.workspaceId, DEMO_WORKSPACE_ID)))
     .orderBy(asc(agents.name));
   return rows.map((row) => MemoryAgentOption.parse(row));
 }

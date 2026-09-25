@@ -33,7 +33,12 @@ export async function listEvaluationRuns(agentId: string, workspaceId: string): 
     .select({ evaluation: evaluationRuns, version: agentVersions.version })
     .from(evaluationRuns)
     .innerJoin(agentVersions, eq(agentVersions.id, evaluationRuns.versionId))
-    .where(and(eq(evaluationRuns.agentId, agentId), eq(evaluationRuns.workspaceId, workspaceId)))
+    .where(and(
+      eq(evaluationRuns.agentId, agentId),
+      eq(evaluationRuns.workspaceId, workspaceId),
+      eq(agentVersions.agentId, agentId),
+      eq(agentVersions.workspaceId, workspaceId),
+    ))
     .orderBy(desc(evaluationRuns.createdAt))
     .limit(10);
   if (rows.length === 0) return [];
@@ -44,6 +49,7 @@ export async function listEvaluationRuns(agentId: string, workspaceId: string): 
     .where(and(
       inArray(evaluationCaseResults.evaluationRunId, rows.map(({ evaluation }) => evaluation.id)),
       eq(evaluationCaseResults.workspaceId, workspaceId),
+      eq(evaluationCases.workspaceId, workspaceId),
     ));
   const resultsByRun = new Map<string, typeof resultRows>();
   for (const result of resultRows) {
