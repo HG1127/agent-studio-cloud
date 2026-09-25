@@ -33,7 +33,9 @@ function streamedRunReport(
         return;
       }
       if (batch.events.length > 0) {
-        const chunk = batch.events.map((event) => `${firstEvent ? "" : ","}${JSON.stringify(event)}`).join("");
+        const chunk = batch.events
+          .map((event, index) => `${firstEvent && index === 0 ? "" : ","}${JSON.stringify(redactSensitiveData(event))}`)
+          .join("");
         firstEvent = false;
         controller.enqueue(encoder.encode(chunk));
       }

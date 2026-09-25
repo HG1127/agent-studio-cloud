@@ -40,12 +40,18 @@ beforeEach(() => {
   }]);
   mocks.listTraceSince.mockImplementation(async (_runId: string, _workspaceId: string, cursor: number) => cursor === 0
     ? {
-        events: [{
-          id: "00000000-0000-4000-8000-000000000013", seq: 1, nodeId: "review", kind: "step.succeeded",
-          level: "info", title: "审核完成", detail: null, at: "2026-09-24T01:00:20.000Z",
-        }],
-        nextCursor: 1,
-        scannedCount: 1,
+        events: [
+          {
+            id: "00000000-0000-4000-8000-000000000013", seq: 1, nodeId: "review", kind: "step.running",
+            level: "info", title: "开始审核", detail: null, at: "2026-09-24T01:00:10.000Z",
+          },
+          {
+            id: "00000000-0000-4000-8000-000000000014", seq: 2, nodeId: "review", kind: "step.succeeded",
+            level: "info", title: "审核完成", detail: null, at: "2026-09-24T01:00:20.000Z",
+          },
+        ],
+        nextCursor: 2,
+        scannedCount: 2,
       }
     : { events: [], nextCursor: cursor, scannedCount: 0 });
   mocks.listApprovals.mockResolvedValue([]);
@@ -61,10 +67,10 @@ describe("运行报告导出", () => {
       run: { id: RUN_ID, input: { contract: "示例" } },
       context: { outputs: { review: "通过" } },
       steps: [{ nodeId: "review", output: { output: "通过" } }],
-      trace: [{ title: "审核完成" }],
+      trace: [{ title: "开始审核" }, { title: "审核完成" }],
       approvals: [],
     });
-    expect(mocks.listTraceSince).toHaveBeenLastCalledWith(RUN_ID, expect.any(String), 1);
+    expect(mocks.listTraceSince).toHaveBeenLastCalledWith(RUN_ID, expect.any(String), 2);
   });
 
   it("大体积运行报告使用流式响应且内容保持完整", async () => {
@@ -99,6 +105,15 @@ describe("运行报告导出", () => {
       output: { token: "step-secret", output: "通过" }, error: null,
       startedAt: new Date("2026-09-24T01:00:10.000Z"), finishedAt: new Date("2026-09-24T01:00:20.000Z"),
     }]);
+    mocks.listTraceSince.mockImplementationOnce(async () => ({
+      events: [{
+        id: "00000000-0000-4000-8000-000000000013", seq: 1, nodeId: "wait_customer", kind: "wait.started",
+        level: "info", title: "等待客户资料", detail: "authorization: Bearer trace-secret-value", at: "2026-09-24T01:00:20.000Z",
+        data: { hookToken: "wait-hook-secret", submissionToken: "submission-secret", customer: "甲公司" },
+      }],
+      nextCursor: 1,
+      scannedCount: 1,
+    }));
 
     const response = await GET(new Request("http://localhost"), { params: Promise.resolve({ runId: RUN_ID }) });
     const body = JSON.stringify(await response.json());
@@ -110,6 +125,9 @@ describe("运行报告导出", () => {
     expect(body).not.toContain("result-secret");
     expect(body).not.toContain("context-secret");
     expect(body).not.toContain("step-secret");
+    expect(body).not.toContain("trace-secret-value");
+    expect(body).not.toContain("wait-hook-secret");
+    expect(body).not.toContain("submission-secret");
   });
 
   it("忽略单条损坏的历史步骤而不是让整份报告失败", async () => {
