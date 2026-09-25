@@ -226,6 +226,57 @@ describe("直测：结构性检查", () => {
     ]));
   });
 
+  it("并行工作中的未绑定工具会在发布前被阻止", () => {
+    const result = auditWorkflow(WorkflowDraft.parse({
+      id: "parallel-runtime-settings",
+      rootAgent: { id: "agent", name: "测试助手", role: "处理" },
+      memoryPolicy: { taskContext: true, longTerm: false },
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "parallel" },
+        parallel: {
+          id: "parallel", title: "并行处理", type: "parallel", next: "done",
+          parallel: {
+            strategy: "all", failurePolicy: "fail_fast",
+            branches: [
+              { id: "one", label: "第一项", inputs: [], outputs: [], steps: [{ id: "tool", title: "调用系统", type: "tool", tool: { connector: "unknown", action: "run", scope: "record.read", risk: "low", maxRetries: 1, registryToolId: null, protocol: "unbound", unresolved: true, inputSchema: {}, outputSchema: {} } }] },
+              { id: "two", label: "第二项", inputs: [], outputs: [], steps: [{ id: "ai", title: "整理结果", type: "ai" }] },
+            ],
+          },
+        },
+        done: { id: "done", title: "结束", type: "end", next: null },
+      },
+    }));
+
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: "parallel_runtime_0_0", severity: "critical" }));
+  });
+
+  it("步骤组中的协作与经验设置不完整时会在发布前被阻止", () => {
+    const result = auditWorkflow(WorkflowDraft.parse({
+      id: "subflow-runtime-settings",
+      rootAgent: { id: "agent", name: "测试助手", role: "处理" },
+      memoryPolicy: { taskContext: true, longTerm: false },
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "group" },
+        group: {
+          id: "group", title: "执行步骤组", type: "subflow", next: "done",
+          subflow: {
+            name: "内部处理", inputs: [], outputs: ["处理结果"], failurePolicy: "checkpoint",
+            steps: [
+              { id: "memory", title: "读取经验", type: "memory" },
+              { id: "call", title: "请求协作", type: "agent_call", agentCall: { targetAgentId: "", versionId: "" } },
+            ],
+          },
+        },
+        done: { id: "done", title: "结束", type: "end", next: null },
+      },
+    }));
+
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "child_runtime_0", severity: "critical" }),
+      expect.objectContaining({ code: "child_runtime_1", severity: "critical" }),
+    ]));
+  });
+
   it("隐藏的质量控制节点不会被误判为业务目标声明", () => {
     const out = auditWorkflow({
       ...deadEndDraft,

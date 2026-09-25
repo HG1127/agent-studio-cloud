@@ -86,6 +86,11 @@ export interface AuditSubflowStep {
   type?: string | null;
   title?: string | null;
   tool?: AuditTool | null;
+  knowledge?: { space?: string | null; [key: string]: unknown } | null;
+  memory?: { mode?: string | null; [key: string]: unknown } | null;
+  agentCall?: AuditAgentCall | null;
+  toAgent?: { id?: string | null; versionId?: string | null; [key: string]: unknown } | null;
+  contract?: AuditContract | null;
   subflow?: { name?: string | null; workflow?: AuditWorkflow | null; [key: string]: unknown } | null;
 }
 
@@ -311,6 +316,43 @@ function highImpactScope(scope: string | null = ""): boolean {
   return /send|delete|pay|payment|publish|write|offer|salary|admin/i.test(String(scope));
 }
 
+const SUPPORTED_INLINE_TYPES = new Set(["ai", "tool", "knowledge", "system", "memory", "agent_call", "handoff"]);
+
+function inlineRuntimeSettingIssue(step: AuditSubflowStep): { category: string; title: string; detail: string } | null {
+  if (!step.type || !SUPPORTED_INLINE_TYPES.has(step.type)) {
+    return { category: "logic", title: "内部步骤类型无法执行", detail: `步骤类型「${step.type || "未设置"}」不能在这里自动执行。` };
+  }
+  if (step.type === "tool" && (!step.tool || step.tool.unresolved === true || (!step.tool.registryToolId && step.tool.protocol !== "demo"))) {
+    return { category: "permission", title: "内部工具尚未绑定可执行能力", detail: "没有绑定演示工具或服务端注册工具。" };
+  }
+  if (step.type === "knowledge" && !step.knowledge?.space?.trim()) {
+    return { category: "data", title: "内部资料步骤没有资料范围", detail: "没有选择可查询的资料范围。" };
+  }
+  if (step.type === "memory" && !step.memory?.mode) {
+    return { category: "memory", title: "内部经验步骤设置不完整", detail: "没有选择读取或保存经验。" };
+  }
+  if (step.type === "agent_call" && (!step.agentCall?.targetAgentId || !step.agentCall.versionId)) {
+    return { category: "handoff", title: "内部协作步骤没有可调用助手", detail: "没有选择已发布的协作助手。" };
+  }
+  if (step.type === "handoff") {
+    const contract = step.contract;
+    if (
+      !step.toAgent?.id ||
+      !step.toAgent.versionId ||
+      !Array.isArray(contract?.deliverables) ||
+      !contract.deliverables.length ||
+      !Array.isArray(contract.mustNotInclude) ||
+      !contract.mustNotInclude.length ||
+      !fieldSchemaOk(contract.inputSchema) ||
+      !fieldSchemaOk(contract.outputSchema) ||
+      !contract.memoryPolicy
+    ) {
+      return { category: "handoff", title: "内部交接契约不完整", detail: "接收助手、必交内容、禁止内容、输入输出结构或经验边界尚未完整设置。" };
+    }
+  }
+  return null;
+}
+
 function memoryPolicy(wf: AuditWorkflow): AuditMemoryPolicy | null {
   return wf?.team?.memoryPolicy || wf?.memoryPolicy || null;
 }
@@ -484,6 +526,14 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
         }
         let seenHuman = false;
         for (const [stepIndex, step] of branchSteps.entries()) {
+          const runtimeIssue = inlineRuntimeSettingIssue(step);
+          if (runtimeIssue) {
+            issues.push(issue("critical", runtimeIssue.category, runtimeIssue.title, `「${branch.label || n.title}」里的「${step.title || `步骤 ${stepIndex + 1}`}」${runtimeIssue.detail}`, {
+              nodeId: id,
+              fixable: true,
+              code: `parallel_runtime_${index}_${stepIndex}`,
+            }));
+          }
           if (step.type === "human") seenHuman = true;
           if (step.type === "tool") {
             if (!step.tool?.scope) {
@@ -534,6 +584,14 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
       }
       let seenHuman = false;
       for (const [i, step] of inlineSteps.entries()) {
+        const runtimeIssue = inlineRuntimeSettingIssue(step);
+        if (runtimeIssue) {
+          issues.push(issue("critical", runtimeIssue.category, runtimeIssue.title, `「${n.title}」内部第 ${i + 1} 步「${step.title || "未命名步骤"}」${runtimeIssue.detail}`, {
+            nodeId: id,
+            fixable: true,
+            code: `child_runtime_${i}`,
+          }));
+        }
         if (step?.type === "human") seenHuman = true;
         if (step?.type === "tool") {
           if (!step.tool?.scope) {
