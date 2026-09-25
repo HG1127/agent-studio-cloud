@@ -6,6 +6,7 @@ import { WorkflowDraft } from "@/contracts/workflow";
 import { db } from "@/lib/db";
 import { agentVersions, agents, workflowDefinitions } from "@/db/schema";
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
+import { escapeLikePattern } from "@/server/domain/search-pattern";
 
 async function listAgentsByArchivedState(
   workspaceId: string,
@@ -33,7 +34,10 @@ async function listAgentsByArchivedState(
     .where(and(
       eq(agents.workspaceId, workspaceId),
       archived ? isNotNull(agents.archivedAt) : isNull(agents.archivedAt),
-      query ? or(ilike(agents.name, `%${query}%`), ilike(agents.description, `%${query}%`)) : undefined,
+      query ? or(
+        ilike(agents.name, `%${escapeLikePattern(query)}%`),
+        ilike(agents.description, `%${escapeLikePattern(query)}%`),
+      ) : undefined,
     ))
     .groupBy(agents.id)
     .orderBy(desc(agents.updatedAt))

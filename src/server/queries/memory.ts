@@ -5,6 +5,7 @@ import { agentMemories, agents } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
+import { escapeLikePattern } from "@/server/domain/search-pattern";
 
 export async function listMemories(filters: {
   agentId?: string;
@@ -26,7 +27,7 @@ export async function listMemories(filters: {
       eq(agents.workspaceId, DEMO_WORKSPACE_ID),
       filters.archived ? isNotNull(agentMemories.archivedAt) : isNull(agentMemories.archivedAt),
       agentId ? eq(agentMemories.agentId, agentId) : undefined,
-      query ? ilike(agentMemories.content, `%${query}%`) : undefined,
+      query ? ilike(agentMemories.content, `%${escapeLikePattern(query)}%`) : undefined,
     ))
     .orderBy(desc(agentMemories.createdAt))
     .limit(limit)

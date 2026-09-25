@@ -3,6 +3,7 @@ import { AuditEventView, type AuditEventFilters, type AuditEventView as AuditEve
 import { auditEvents, users } from "@/db/schema";
 import { db } from "@/lib/db";
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
+import { escapeLikePattern } from "@/server/domain/search-pattern";
 
 export async function listAuditEvents(
   workspaceId: string,
@@ -19,7 +20,7 @@ export async function listAuditEvents(
     .where(and(
       eq(auditEvents.workspaceId, workspaceId),
       filters.targetType ? eq(auditEvents.targetType, filters.targetType) : undefined,
-      query ? ilike(auditEvents.summary, `%${query}%`) : undefined,
+      query ? ilike(auditEvents.summary, `%${escapeLikePattern(query)}%`) : undefined,
     ))
     .orderBy(desc(auditEvents.createdAt), desc(auditEvents.id))
     .limit(limit)

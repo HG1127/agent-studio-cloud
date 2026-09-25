@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { MAX_KNOWLEDGE_SCAN_CHUNKS, scoreChunks } from "@/server/domain/knowledge/search";
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
 import { isKnowledgeParsingStalled } from "@/server/domain/knowledge/source-state";
+import { escapeLikePattern } from "@/server/domain/search-pattern";
 
 export async function listKnowledgeSources(
   archived = false,
@@ -20,7 +21,7 @@ export async function listKnowledgeSources(
     .where(and(
       eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID),
       archived ? isNotNull(knowledgeSources.archivedAt) : isNull(knowledgeSources.archivedAt),
-      query ? ilike(knowledgeSources.name, `%${query}%`) : undefined,
+      query ? ilike(knowledgeSources.name, `%${escapeLikePattern(query)}%`) : undefined,
     ))
     .orderBy(desc(knowledgeSources.createdAt))
     .limit(limit)
