@@ -25,6 +25,11 @@ interface ParseArgs {
   content: ReadableStream<Uint8Array>;
 }
 
+function safeKnowledgeParseError(error: unknown, message: string): never {
+  if (error instanceof FatalError) throw error;
+  throw new FatalError(message);
+}
+
 export async function readKnowledgeFile(content: ReadableStream<Uint8Array>): Promise<Buffer> {
   const reader = content.getReader();
   const chunks: Uint8Array[] = [];
@@ -48,32 +53,49 @@ export async function readKnowledgeFile(content: ReadableStream<Uint8Array>): Pr
 
 export async function parseKnowledgeFile(args: ParseArgs): Promise<{ text: string }> {
   "use step";
-  const buffer = await readKnowledgeFile(args.content);
+  let buffer: Buffer;
+  try {
+    buffer = await readKnowledgeFile(args.content);
+  } catch (error) {
+    safeKnowledgeParseError(error, "读取上传文件失败，请重新上传");
+  }
   const ext = args.filename.split(".").pop()?.toLowerCase() ?? "";
   let text: string;
   if (ext === "pdf") {
     // unpdf 内置 serverless 版 pdfjs：无 DOMMatrix 依赖，Vercel 函数可直接加载（pdf-parse 会因 browser 条件解析炸掉）
-    const pdf = await getDocumentProxy(new Uint8Array(buffer));
+    let pdf: Awaited<ReturnType<typeof getDocumentProxy>>;
+    try {
+      pdf = await getDocumentProxy(new Uint8Array(buffer));
+    } catch (error) {
+      safeKnowledgeParseError(error, "PDF 文件解析失败，请检查文件是否完整");
+    }
     try {
       if (pdf.numPages > MAX_KNOWLEDGE_PDF_PAGES) {
         throw new FatalError(`PDF 超过 ${MAX_KNOWLEDGE_PDF_PAGES} 页限制，请拆分后重新上传`);
       }
       const result = await extractText(pdf, { mergePages: true });
       text = result.text;
+    } catch (error) {
+      safeKnowledgeParseError(error, "PDF 文件解析失败，请检查文件是否完整");
     } finally {
-      await pdf.cleanup();
+      // 文本已经解析完成时，底层清理失败不应覆盖原有业务结果或安全错误。
+      await Promise.resolve(pdf.cleanup()).catch(() => undefined);
     }
   } else if (ext === "docx") {
     const archiveError = validateDocxArchive(buffer);
     if (archiveError) throw new FatalError(archiveError);
-    const result = await mammoth.extractRawText({ buffer });
-    text = result.value;
+    try {
+      const result = await mammoth.extractRawText({ buffer });
+      text = result.value;
+    } catch (error) {
+      safeKnowledgeParseError(error, "DOCX 文件解析失败，请检查文件是否完整");
+    }
   } else if (["txt", "md", "html", "json", "csv", "xml"].includes(ext)) {
     const decoded = decodeKnowledgeText(buffer);
     if (!decoded.ok) throw new FatalError(decoded.error);
     text = ext === "html" ? extractHtmlText(decoded.text) : decoded.text;
   } else {
-    throw new FatalError(`暂不支持解析「${ext || args.filename}」格式的文件`);
+    throw new FatalError(ext ? `暂不支持解析「${ext}」格式的文件` : "暂不支持解析这种文件格式");
   }
   const textError = validateExtractedKnowledgeText(text);
   if (textError) throw new FatalError(textError);

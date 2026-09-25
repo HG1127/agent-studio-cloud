@@ -50,6 +50,17 @@ describe("知识文件解析防线", () => {
     expect(cleanup).toHaveBeenCalledOnce();
   });
 
+  it("不把 PDF 解析器的原始异常带入工作流日志", async () => {
+    mocks.getDocumentProxy.mockRejectedValue(new Error("invalid pdf contains customer-secret-value"));
+
+    await expect(parseKnowledgeFile({
+      sourceId: "source-1",
+      filename: "损坏资料.pdf",
+      mime: "application/pdf",
+      content: new Blob(["fake-pdf"]).stream(),
+    })).rejects.toMatchObject({ message: "PDF 文件解析失败，请检查文件是否完整" });
+  });
+
   it("在调用解析器前拒绝结构异常的 DOCX", async () => {
     await expect(parseKnowledgeFile({
       sourceId: "source-1",
@@ -58,6 +69,19 @@ describe("知识文件解析防线", () => {
       content: new Blob(["not-a-zip"]).stream(),
     })).rejects.toThrow("DOCX 文件结构不完整");
     expect(mocks.extractRawText).not.toHaveBeenCalled();
+  });
+
+  it("不把 DOCX 解析器的原始异常带入工作流日志", async () => {
+    const validDocxHeader = new Uint8Array(22);
+    validDocxHeader.set([0x50, 0x4b, 0x05, 0x06]);
+    mocks.extractRawText.mockRejectedValue(new Error("zip entry customer-secret-value"));
+
+    await expect(parseKnowledgeFile({
+      sourceId: "source-1",
+      filename: "损坏资料.docx",
+      mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      content: new Blob([validDocxHeader]).stream(),
+    })).rejects.toMatchObject({ message: "DOCX 文件解析失败，请检查文件是否完整" });
   });
 
   it("HTML 资料只把可见正文写入资料库", async () => {
