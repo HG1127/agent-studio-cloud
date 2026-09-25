@@ -59,4 +59,15 @@ describe("知识文件解析防线", () => {
     })).rejects.toThrow("DOCX 文件结构不完整");
     expect(mocks.extractRawText).not.toHaveBeenCalled();
   });
+
+  it("HTML 资料只把可见正文写入资料库", async () => {
+    const result = await parseKnowledgeFile({
+      sourceId: "source-1",
+      filename: "帮助中心.html",
+      mime: "text/html",
+      content: new Blob(["<style>.secret{display:none}</style><h1>退款说明</h1><p>到账需要 1&ndash;3 天。</p><script>不要收录</script>"]).stream(),
+    });
+
+    expect(result.text).toBe("退款说明\n到账需要 1–3 天。");
+  });
 });
