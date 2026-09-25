@@ -1,4 +1,5 @@
 import { AuditEventCreate, type AuditEventCreate as AuditEventCreateType } from "@/contracts/audit-event";
+import { redactCredentialData, redactCredentialText } from "@/server/domain/security/redact-sensitive";
 
 const MAX_AUDIT_SUMMARY_LENGTH = 200;
 
@@ -11,5 +12,9 @@ function boundedSummary(value: string): string {
 }
 
 export function auditEventValues(input: AuditEventCreateType): AuditEventCreateType {
-  return AuditEventCreate.parse({ ...input, summary: boundedSummary(input.summary) });
+  return AuditEventCreate.parse({
+    ...input,
+    summary: boundedSummary(redactCredentialText(input.summary)),
+    data: redactCredentialData(input.data),
+  });
 }

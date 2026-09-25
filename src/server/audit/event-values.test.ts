@@ -31,4 +31,27 @@ describe("操作记录写入值", () => {
 
     expect(values.summary).toBe(`${"甲".repeat(198)}…`);
   });
+
+  it("隐藏摘要和开发者数据里的服务凭据", () => {
+    const values = auditEventValues({
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
+      action: "knowledge.uploaded",
+      targetType: "knowledge",
+      targetId: null,
+      summary: "上传资料「authorization: Bearer audit-secret-value」",
+      data: {
+        apiKey: "sk-audit-secret-value",
+        nested: { password: "private-value" },
+        contact: "person@example.com",
+      },
+    });
+
+    expect(values.summary).toBe("上传资料「[已隐藏敏感信息]」");
+    expect(values.data).toEqual({
+      apiKey: "[已隐藏敏感信息]",
+      nested: { password: "[已隐藏敏感信息]" },
+      contact: "person@example.com",
+    });
+  });
 });

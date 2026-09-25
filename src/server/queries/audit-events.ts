@@ -4,6 +4,7 @@ import { auditEvents, users } from "@/db/schema";
 import { db } from "@/lib/db";
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
 import { escapeLikePattern } from "@/server/domain/search-pattern";
+import { redactCredentialData, redactCredentialText } from "@/server/domain/security/redact-sensitive";
 
 export async function listAuditEvents(
   workspaceId: string,
@@ -27,7 +28,9 @@ export async function listAuditEvents(
     .offset(offset);
   return parseQueryRows("操作记录列表", AuditEventView, rows.map(({ event, actorName }) => ({
     ...event,
-    actorName: actorName || "未知员工",
+    summary: redactCredentialText(event.summary),
+    data: redactCredentialData(event.data),
+    actorName: redactCredentialText(actorName || "未知员工"),
     createdAt: event.createdAt.toISOString(),
   })));
 }

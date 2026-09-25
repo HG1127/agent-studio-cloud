@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { redactCredentialData, redactSensitiveData, redactSensitiveText } from "@/server/domain/security/redact-sensitive";
+import { redactCredentialData, redactCredentialText, redactSensitiveData, redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 
 describe("敏感数据脱敏", () => {
   it("递归隐藏中英文敏感字段并保留业务数据", () => {
@@ -52,6 +52,11 @@ describe("敏感数据脱敏", () => {
 
   it("可直接清理轨迹和错误中的敏感文本", () => {
     expect(redactSensitiveText("Authorization: Bearer abcdefghijklmnop")).toBe("[已隐藏敏感信息]");
+  });
+
+  it("隐藏带标签的凭据时保留业务文本的结束标点", () => {
+    expect(redactCredentialText("资料「authorization: Bearer abcdefghijklmnop」")).toBe("资料「[已隐藏敏感信息]」");
+    expect(redactCredentialText("说明（访问令牌：abcdefghijklmnop）")).toBe("说明（[已隐藏敏感信息]）");
   });
 
   it("验收输入只隐藏凭据并保留业务联系信息", () => {
