@@ -1,8 +1,8 @@
 "use server";
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { KnowledgeArchiveInput, type KnowledgeArchiveResult } from "@/contracts/knowledge";
-import { auditEvents, knowledgeSources } from "@/db/schema";
+import { agentVersions, auditEvents, knowledgeSources } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { auditEventValues } from "@/server/audit/event-values";
@@ -33,6 +33,18 @@ export async function setKnowledgeSourceArchivedAction(input: unknown): Promise<
         .for("update")
         .limit(1);
       if (!source) return false;
+      if (parsed.data.archived) {
+        const [activeVersion] = await tx
+          .select({ id: agentVersions.id })
+          .from(agentVersions)
+          .where(and(
+            eq(agentVersions.workspaceId, DEMO_WORKSPACE_ID),
+            inArray(agentVersions.status, ["production", "candidate"]),
+            sql<boolean>`${agentVersions.manifest} -> 'knowledgeSnapshot' ? ${source.id}`,
+          ))
+          .limit(1);
+        if (activeVersion) return "in-use" as const;
+      }
       const now = new Date();
       const rows = await tx
         .update(knowledgeSources)
@@ -60,6 +72,9 @@ export async function setKnowledgeSourceArchivedAction(input: unknown): Promise<
       }
       return rows.length > 0;
     });
+    if (updated === "in-use") {
+      return { ok: false, error: "这份资料仍被当前版本或待验收版本使用，请先发布不再使用它的新版本" };
+    }
     if (!updated) return { ok: false, error: "知识资料状态已经变化，请刷新页面后重试" };
     revalidatePath("/knowledge");
     return { ok: true };

@@ -11,14 +11,19 @@ const mocks = vi.hoisted(() => ({
 const tx = {
   select: () => ({
     from: () => ({
-      where: () => ({
-        for: () => ({
-          limit: async () => {
-            mocks.lock();
-            return mocks.rows.shift() ?? [];
-          },
-        }),
-      }),
+      where: () => {
+        const take = async () => mocks.rows.shift() ?? [];
+        return {
+          then: (resolve: (value: unknown[]) => unknown) => take().then(resolve),
+          limit: take,
+          for: () => ({
+            limit: async () => {
+              mocks.lock();
+              return take();
+            },
+          }),
+        };
+      },
     }),
   }),
   update: () => ({
@@ -66,6 +71,21 @@ describe("知识资料归档并发保护", () => {
       targetId: SOURCE_ID,
       summary: "恢复知识资料「退款规则.md」",
     }));
+  });
+
+  it("当前版本仍在使用资料时拒绝归档", async () => {
+    mocks.rows = [
+      [{ id: SOURCE_ID, name: "退款规则.md", status: "indexed", chunkCount: 3, error: null }],
+      [{ id: "00000000-0000-4000-8000-000000000092" }],
+    ];
+
+    await expect(setKnowledgeSourceArchivedAction({ sourceId: SOURCE_ID, archived: true }))
+      .resolves.toEqual({
+        ok: false,
+        error: "这份资料仍被当前版本或待验收版本使用，请先发布不再使用它的新版本",
+      });
+    expect(mocks.updates).toHaveLength(0);
+    expect(mocks.auditEvents).toHaveLength(0);
   });
 
   it("锁内状态已变化时不再覆盖资料", async () => {
