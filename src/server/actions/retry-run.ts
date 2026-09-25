@@ -10,8 +10,10 @@ import { db } from "@/lib/db";
 import { startRunCore } from "@/server/services/start-run-core";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
-export async function retryRunAction(runId: string): Promise<StartRunResult> {
-  if (!z.string().uuid().safeParse(runId).success) return { ok: false, error: "运行信息不正确，请刷新页面后重试" };
+export async function retryRunAction(runId: string, requestId?: string): Promise<StartRunResult> {
+  if (!z.string().uuid().safeParse(runId).success || (requestId && !z.string().uuid().safeParse(requestId).success)) {
+    return { ok: false, error: "运行信息不正确，请刷新页面后重试" };
+  }
   try {
     const [source] = await db
       .select({ agentId: runs.agentId, versionId: runs.versionId, input: runs.input })
@@ -28,7 +30,7 @@ export async function retryRunAction(runId: string): Promise<StartRunResult> {
       versionId: source.versionId,
       input: source.input,
       sourceType: "manual",
-      sourceKey: null,
+      sourceKey: requestId ? `manual-retry:${runId}:${requestId}` : null,
     });
     if (result.ok) {
       revalidatePath("/runs");

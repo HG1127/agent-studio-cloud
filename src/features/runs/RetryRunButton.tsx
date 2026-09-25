@@ -1,25 +1,33 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { retryRunAction } from "@/server/actions/retry-run";
 
 export function RetryRunButton({ runId }: { runId: string }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const retryingRef = useRef(false);
+  const requestIdRef = useRef<string | null>(null);
 
   return <div className="flex flex-col items-start gap-1">
     <button type="button" disabled={pending} onClick={async () => {
+      if (retryingRef.current) return;
+      retryingRef.current = true;
+      const requestId = requestIdRef.current ?? crypto.randomUUID();
+      requestIdRef.current = requestId;
       setPending(true);
       setError(null);
       try {
-        const result = await retryRunAction(runId);
+        const result = await retryRunAction(runId, requestId);
+        requestIdRef.current = null;
         if (result.ok) router.push(`/runs/${result.runId}`);
         else setError(result.error);
       } catch {
         setError("再次运行失败，请稍后重试");
       } finally {
+        retryingRef.current = false;
         setPending(false);
       }
     }} className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:border-gray-500 disabled:opacity-50">
