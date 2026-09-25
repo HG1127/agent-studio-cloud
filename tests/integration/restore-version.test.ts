@@ -165,4 +165,38 @@ describe("恢复历史版本", () => {
     expect(versions).toHaveLength(2);
     expect(versions.find((version) => version.id === CURRENT_ID)?.status).toBe("production");
   });
+
+  it("协作助手已经不可用时不会替换当前版本", async () => {
+    const missingAgentId = "00000000-0000-4000-8000-0000000000e2";
+    const missingVersionId = "00000000-0000-4000-8000-0000000000e3";
+    const collaborationManifest = AgentManifest.parse({
+      ...manifest,
+      workflowFingerprint: "restore-collaboration-test",
+      workflowSnapshot: {
+        ...manifest.workflowSnapshot,
+        nodes: {
+          start: { id: "start", title: "开始", type: "trigger", next: "call" },
+          call: {
+            id: "call",
+            title: "请协作助手处理",
+            type: "agent_call",
+            next: "end",
+            agentCall: { targetAgentId: missingAgentId, versionId: missingVersionId },
+          },
+          end: { id: "end", title: "结束", type: "end", next: null },
+        },
+      },
+    });
+    await insertVersions("retired", collaborationManifest);
+
+    const result = await restoreVersionAction(AGENT_ID, SOURCE_ID);
+
+    expect(result).toEqual({
+      ok: false,
+      error: "历史版本绑定的协作助手已停用或版本不可用，请先恢复协作助手",
+    });
+    const versions = await db.select().from(agentVersions).where(eq(agentVersions.agentId, AGENT_ID));
+    expect(versions).toHaveLength(2);
+    expect(versions.find((version) => version.id === CURRENT_ID)?.status).toBe("production");
+  });
 });

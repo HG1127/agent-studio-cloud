@@ -12,6 +12,7 @@ import { isUniqueViolation } from "@/server/unique-violation";
 import { auditEventValues } from "@/server/audit/event-values";
 import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
 import { knowledgeStepTitles, validateKnowledgeSnapshot } from "@/server/domain/runtime/knowledge-snapshot";
+import { workflowCollaborationKeys } from "@/server/domain/import-agent";
 
 export async function restoreVersionAction(agentId: string, versionId: string): Promise<RestoreVersionResult> {
   if (!z.string().uuid().safeParse(agentId).success || !z.string().uuid().safeParse(versionId).success) {
@@ -44,6 +45,45 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
           if (source.status !== "retired") return { kind: "source-not-retired" as const };
           const manifest = AgentManifest.safeParse(source.manifest);
           if (!manifest.success) return { kind: "manifest-invalid" as const };
+          const collaborationKeys = workflowCollaborationKeys(manifest.data.workflowSnapshot);
+          const uuid = z.string().uuid();
+          const collaborationRefs = collaborationKeys.map((key) => {
+            const separator = key.lastIndexOf(":");
+            return { agentId: key.slice(0, separator), versionId: key.slice(separator + 1) };
+          });
+          if (collaborationRefs.some((ref) =>
+            !uuid.safeParse(ref.agentId).success
+            || !uuid.safeParse(ref.versionId).success
+            || ref.agentId === agentId)) {
+            return { kind: "collaboration-unavailable" as const };
+          }
+          if (collaborationRefs.length > 0) {
+            const targetAgentIds = [...new Set(collaborationRefs.map((ref) => ref.agentId))];
+            const targetAgents = await tx
+              .select({ id: agents.id })
+              .from(agents)
+              .where(and(
+                inArray(agents.id, targetAgentIds),
+                eq(agents.workspaceId, agent.workspaceId),
+                isNull(agents.archivedAt),
+              ))
+              .orderBy(agents.id)
+              .for("share");
+            if (targetAgents.length !== targetAgentIds.length) {
+              return { kind: "collaboration-unavailable" as const };
+            }
+            const targetVersions = await tx
+              .select({ id: agentVersions.id, agentId: agentVersions.agentId })
+              .from(agentVersions)
+              .where(and(
+                inArray(agentVersions.id, [...new Set(collaborationRefs.map((ref) => ref.versionId))]),
+                eq(agentVersions.workspaceId, agent.workspaceId),
+              ));
+            const availableKeys = new Set(targetVersions.map((row) => `${row.agentId}:${row.id}`));
+            if (collaborationKeys.some((key) => !availableKeys.has(key))) {
+              return { kind: "collaboration-unavailable" as const };
+            }
+          }
           const knowledgeTitles = knowledgeStepTitles(manifest.data.workflowSnapshot.nodes);
           if (knowledgeTitles.length > 0) {
             const snapshotSourceIds = manifest.data.knowledgeSnapshot;
@@ -123,6 +163,9 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
         if (restoreOutcome.kind === "already-production") return { ok: false, error: "这个版本已经是当前版本" };
         if (restoreOutcome.kind === "source-not-retired") return { ok: false, error: "只有曾经上线的历史版本才能恢复为当前版本" };
         if (restoreOutcome.kind === "manifest-invalid") return { ok: false, error: "历史版本格式过旧，无法直接恢复" };
+        if (restoreOutcome.kind === "collaboration-unavailable") {
+          return { ok: false, error: "历史版本绑定的协作助手已停用或版本不可用，请先恢复协作助手" };
+        }
         if (restoreOutcome.kind === "knowledge-unavailable") return { ok: false, error: restoreOutcome.error };
         revalidatePath(`/agents/${agentId}`);
         return { ok: true, version: restoreOutcome.version };
