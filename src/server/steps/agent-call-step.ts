@@ -5,7 +5,7 @@ import { AgentManifest, type AgentManifest as AgentManifestType } from "@/contra
 import type { WorkflowNode } from "@/contracts/workflow";
 import { agents, agentVersions, runs } from "@/db/schema";
 import { db } from "@/lib/db";
-import { buildAgentCallInput } from "@/server/domain/runtime/agent-call-runtime";
+import { buildAgentCallInput, validateAgentCallOutput } from "@/server/domain/runtime/agent-call-runtime";
 import { validateCollaborationInput } from "@/server/domain/runtime/collaboration-input";
 import { validateCollaborationTarget } from "@/server/domain/runtime/collaboration-chain";
 import { loadCollaborationChain } from "@/server/services/collaboration-chain";
@@ -97,11 +97,12 @@ export async function finishAgentCall(args: {
   failed?: boolean;
   handled?: boolean;
   error?: string;
-}): Promise<{ output: Record<string, unknown> }> {
+}): Promise<{ output: Record<string, unknown>; failed: boolean; error: string | null }> {
   "use step";
   const [child] = await db.select({ status: runs.status, result: runs.result, error: runs.error }).from(runs).where(eq(runs.id, args.childRunId)).limit(1);
-  const failed = args.failed || child?.status !== "completed";
-  const reason = args.error || child?.error || "协作助手未能完成任务";
+  const contractError = child?.status === "completed" ? validateAgentCallOutput(args.node, child.result ?? {}) : null;
+  const failed = Boolean(args.failed || child?.status !== "completed" || contractError);
+  const reason = args.error || child?.error || contractError || "协作助手未能完成任务";
   const output = failed
     ? { assistant: args.targetName, status: "failed", error: reason }
     : { assistant: args.targetName, status: "completed", result: child?.result ?? {} };
@@ -122,5 +123,5 @@ export async function finishAgentCall(args: {
     title: failed ? `「${args.node.title}」未完成` : `「${args.node.title}」已取得协作结果`,
     detail: failed ? reason : null,
   });
-  return { output };
+  return { output, failed, error: failed ? reason : null };
 }

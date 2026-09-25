@@ -90,7 +90,9 @@ async function executeAutomaticNode(args: {
       agentRunWorkflow(prepared.childRunId, prepared.manifest, prepared.input, { depth: args.depth + 1 }),
     ]);
     if (settled.status === "fulfilled") {
-      return (await finishAgentCall({ runId: args.runId, childRunId: prepared.childRunId, node: args.node, targetName: prepared.targetName })).output;
+      const result = await finishAgentCall({ runId: args.runId, childRunId: prepared.childRunId, node: args.node, targetName: prepared.targetName });
+      if (result.failed) throw new FatalError(result.error ?? `步骤「${args.node.title}」未能完成`);
+      return result.output;
     }
     const reason = executionFailureReason(settled.reason, `协作助手「${prepared.targetName}」执行失败`);
     await finishAgentCall({ runId: args.runId, childRunId: prepared.childRunId, node: args.node, targetName: prepared.targetName, failed: true, handled: false, error: reason });
@@ -273,9 +275,16 @@ export async function agentRunWorkflow(
           agentRunWorkflow(preparedCall.childRunId, preparedCall.manifest, preparedCall.input, { depth: executionContext.depth + 1 }),
         ]);
         if (settled.status === "fulfilled") {
-          const result = await finishAgentCall({ runId, childRunId: preparedCall.childRunId, node, targetName: preparedCall.targetName });
+          const result = await finishAgentCall({
+            runId,
+            childRunId: preparedCall.childRunId,
+            node,
+            targetName: preparedCall.targetName,
+            handled: Boolean(node.onErrorNext),
+          });
           outputs[node.id] = result.output;
-          currentId = node.next;
+          if (result.failed && !node.onErrorNext) throw new FatalError(`步骤「${node.title}」未能完成`);
+          currentId = result.failed ? node.onErrorNext : node.next;
           continue;
         }
         const reason = executionFailureReason(settled.reason, `协作助手「${preparedCall.targetName}」执行失败`);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AgentManifest } from "@/contracts/manifest";
 import { WorkflowNode } from "@/contracts/workflow";
-import { buildAgentCallInput, validateAgentCallNode } from "@/server/domain/runtime/agent-call-runtime";
+import { buildAgentCallInput, validateAgentCallNode, validateAgentCallOutput } from "@/server/domain/runtime/agent-call-runtime";
 import { compileModelWorkflowPlan } from "@/server/domain/compile";
 
 const targetManifest = AgentManifest.parse({
@@ -32,6 +32,19 @@ describe("助手调用运行逻辑", () => {
     expect(validateAgentCallNode(missing)).toContain("还没有选择");
     const self = WorkflowNode.parse({ id: "call", title: "调用助手", type: "agent_call", agentCall: { targetAgentId: "agent-a", versionId: "version" } });
     expect(validateAgentCallNode(self, "agent-a")).toContain("不能调用");
+  });
+
+  it("按冻结结果契约拒绝协作助手漏交必填内容", () => {
+    const node = WorkflowNode.parse({
+      id: "call", title: "调用研究助手", type: "agent_call",
+      agentCall: {
+        targetAgentId: "target", versionId: "version",
+        outputContract: { fields: [{ path: "report.summary", label: "研究摘要", required: true }] },
+      },
+    });
+    expect(validateAgentCallOutput(node, {})).toBe("协作结果缺少“研究摘要”");
+    expect(validateAgentCallOutput(node, { report: { summary: "" } })).toBe("协作结果缺少“研究摘要”");
+    expect(validateAgentCallOutput(node, { report: { summary: "已完成" } })).toBeNull();
   });
 
   it("目标没有声明输入字段时仍传递完整上下文", () => {

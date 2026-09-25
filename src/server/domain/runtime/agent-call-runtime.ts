@@ -1,6 +1,8 @@
-import type { AgentManifest } from "@/contracts/manifest";
+import { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { buildBoundedCollaborationContext, isCollaborationMemoryOutput } from "@/server/domain/runtime/collaboration-input";
+import { safeDataPathSegments } from "@/server/domain/runtime/data-path";
+import { hasMeaningfulResult } from "@/server/domain/runtime/result-content";
 import { redactSensitiveData } from "@/server/domain/security/redact-sensitive";
 
 function ownValue(source: Record<string, unknown>, key: string): unknown {
@@ -40,5 +42,26 @@ export function validateAgentCallNode(node: WorkflowNode, currentAgentId?: strin
   const call = node.agentCall;
   if (!call?.targetAgentId || !call.versionId) return `步骤「${node.title}」还没有选择已发布的协作助手`;
   if (currentAgentId && call.targetAgentId === currentAgentId) return `步骤「${node.title}」不能调用当前助手自身`;
+  return null;
+}
+
+function readOutputPath(result: Record<string, unknown>, path: string): unknown {
+  const segments = safeDataPathSegments(path);
+  if (!segments) return undefined;
+  return segments.reduce<unknown>((current, segment) => {
+    if (!current || typeof current !== "object" || Array.isArray(current) || !Object.prototype.hasOwnProperty.call(current, segment)) return undefined;
+    return (current as Record<string, unknown>)[segment];
+  }, result);
+}
+
+export function validateAgentCallOutput(node: WorkflowNode, result: Record<string, unknown>): string | null {
+  const parsed = AgentManifest.shape.outputContract.safeParse(node.agentCall?.outputContract);
+  if (!parsed.success) return `步骤「${node.title}」冻结的协作结果契约不完整`;
+  for (const field of parsed.data?.fields ?? []) {
+    if (!field.required) continue;
+    if (!hasMeaningfulResult(readOutputPath(result, field.path))) {
+      return `协作结果缺少“${field.label || field.path}”`;
+    }
+  }
   return null;
 }
