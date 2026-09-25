@@ -187,6 +187,28 @@ describe("助手与流程并发写入", () => {
     expect(mocks.inserts).toHaveLength(0);
   });
 
+  it("响应丢失后重试相同助手信息时复用已保存版本", async () => {
+    const savedAt = new Date(AGENT_UPDATED_AT.getTime() + 1_000);
+    mocks.selectRows = [[{
+      id: AGENT_ID,
+      name: "已保存名称",
+      description: "已保存说明",
+      updatedAt: savedAt,
+    }]];
+
+    const result = await updateAgentAction({
+      agentId: AGENT_ID,
+      name: "已保存名称",
+      description: "已保存说明",
+      expectedUpdatedAt: AGENT_UPDATED_AT.toISOString(),
+    });
+
+    expect(result).toEqual({ ok: true, updatedAt: savedAt.toISOString() });
+    expect(mocks.updates).toHaveLength(0);
+    expect(mocks.inserts).toHaveLength(0);
+    expect(mocks.revalidatePath).toHaveBeenCalledWith(`/agents/${AGENT_ID}`);
+  });
+
   it("自动修复也锁定助手后再写入最新草稿", async () => {
     mocks.selectRows = [[{ id: AGENT_ID, name: "需要修复的助手" }], [{ id: DEFINITION_ID, draft }]];
     mocks.applySafeAuditFixes.mockReturnValue({

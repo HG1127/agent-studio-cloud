@@ -18,13 +18,16 @@ export async function updateAgentAction(input: unknown): Promise<AgentUpdateResu
     const result = await db.transaction(async (tx) => {
       // 与流程保存共用同一把助手行锁，避免名称与整份草稿并发写入时互相覆盖。
       const [agent] = await tx
-        .select({ id: agents.id, updatedAt: agents.updatedAt })
+        .select({ id: agents.id, name: agents.name, description: agents.description, updatedAt: agents.updatedAt })
         .from(agents)
         .where(and(eq(agents.id, parsed.data.agentId), eq(agents.workspaceId, DEMO_WORKSPACE_ID), isNull(agents.archivedAt)))
         .for("update")
         .limit(1);
       if (!agent) return { kind: "agent-missing" as const };
       if (agent.updatedAt.getTime() !== new Date(parsed.data.expectedUpdatedAt).getTime()) {
+        if (agent.name === parsed.data.name && agent.description === (parsed.data.description || null)) {
+          return { kind: "updated" as const, agentId: agent.id, updatedAt: agent.updatedAt.toISOString() };
+        }
         return { kind: "stale" as const };
       }
       const [definition] = await tx
