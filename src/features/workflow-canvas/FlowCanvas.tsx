@@ -51,6 +51,7 @@ const EDGE_STYLES: Record<EdgeKind, { color: string; dashed: boolean }> = {
 export function FlowCanvas({ agentId, draft: initialDraft, draftUpdatedAt, agentTargets, toolOptions, knowledgeSources }: FlowCanvasProps) {
   const router = useRouter();
   const [draft, setDraft] = useState(initialDraft);
+  const [savedDraft, setSavedDraft] = useState(initialDraft);
   const [showControlNodes, setShowControlNodes] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -86,8 +87,8 @@ export function FlowCanvas({ agentId, draft: initialDraft, draftUpdatedAt, agent
   }, [agentId, initialDraft]);
   useEffect(() => {
     if (!dirty) return;
-    writeSessionValue(draftRecoveryKey(agentId), serializeDraftRecovery(initialDraft, draft));
-  }, [agentId, dirty, draft, initialDraft]);
+    writeSessionValue(draftRecoveryKey(agentId), serializeDraftRecovery(savedDraft, draft));
+  }, [agentId, dirty, draft, savedDraft]);
   useEffect(() => {
     if (!dirty) return;
     const warnBeforeLeave = (event: BeforeUnloadEvent) => {
@@ -225,6 +226,7 @@ export function FlowCanvas({ agentId, draft: initialDraft, draftUpdatedAt, agent
       if (result.ok) {
         setFeedback({ ok: true, text: "草稿已保存" });
         setSavedRevision(result.updatedAt);
+        setSavedDraft(draft);
         setDirty(false);
         removeSessionValue(draftRecoveryKey(agentId));
         router.refresh();
@@ -241,7 +243,7 @@ export function FlowCanvas({ agentId, draft: initialDraft, draftUpdatedAt, agent
   function discardLocalChanges() {
     if (!window.confirm("确定放弃本标签页中所有未保存的流程修改吗？")) return;
     removeSessionValue(draftRecoveryKey(agentId));
-    setDraft(initialDraft);
+    setDraft(savedDraft);
     setSelectedId(null);
     setDirty(false);
     setFeedback({ ok: true, text: "已恢复到最近一次保存的流程" });
