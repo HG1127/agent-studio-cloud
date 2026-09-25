@@ -6,7 +6,7 @@ import { z } from "zod";
 import { VersionSummary, type PublishVersionResult } from "@/contracts/version";
 import { PublishModelSelection } from "@/contracts/connections";
 import { WorkflowDraft } from "@/contracts/workflow";
-import { agentVersions, agents, auditEvents, evaluationCases, knowledgeSources, modelConnections, workflowDefinitions } from "@/db/schema";
+import { agentVersions, agents, auditEvents, evaluationCases, evaluationRuns, knowledgeSources, modelConnections, workflowDefinitions } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { realModelsEnabled, resolvePublishModel } from "@/lib/model";
 import { db } from "@/lib/db";
@@ -178,6 +178,16 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
           if (!lockedAgent || lockedAgent.archivedAt || lockedAgent.updatedAt.getTime() !== agent.updatedAt.getTime()) {
             return { kind: "stale" as const };
           }
+          const [runningEvaluation] = await tx
+            .select({ id: evaluationRuns.id })
+            .from(evaluationRuns)
+            .where(and(
+              eq(evaluationRuns.agentId, agentId),
+              eq(evaluationRuns.workspaceId, agent.workspaceId),
+              eq(evaluationRuns.status, "running"),
+            ))
+            .limit(1);
+          if (runningEvaluation) return { kind: "evaluation_running" as const };
           const availableAgentIds = new Set(lockedAgents.filter((row) => !row.archivedAt).map((row) => row.id));
           if (collaborationAgentIds.some((id) => !availableAgentIds.has(id))) {
             return { kind: "collaboration_changed" as const };
@@ -268,6 +278,9 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
         });
         if (publishOutcome.kind === "stale") {
           return { ok: false, error: "助手或流程刚刚发生变化，请重新发布", issues: [] };
+        }
+        if (publishOutcome.kind === "evaluation_running") {
+          return { ok: false, error: "自动验收运行期间不能发布新版本，请等待验收完成", issues: [] };
         }
         if (publishOutcome.kind === "knowledge_changed") {
           return { ok: false, error: "流程依赖的知识资料刚刚发生变化，请恢复资料或重新发布", issues: [] };

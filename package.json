@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.mts",
     "test:e2e": "playwright test",
     "test:workflow": "vitest run --config vitest.workflow.config.mts",
     "db:generate": "drizzle-kit generate",

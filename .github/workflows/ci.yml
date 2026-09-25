@@ -78,6 +78,7 @@ jobs:
         run: |
           pnpm db:migrate
           pnpm exec next typegen
+          pnpm test:integration
           pnpm test:workflow
           pnpm exec playwright install --with-deps chromium
           pnpm test:e2e

@@ -4,7 +4,7 @@ import { AgentManifest } from "@/contracts/manifest";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-import { agentVersions, agents } from "@/db/schema";
+import { agentVersions, agents, evaluationRuns } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { restoreVersionAction } from "@/server/actions/restore-version";
@@ -41,6 +41,7 @@ const manifest = AgentManifest.parse({
 });
 
 afterEach(async () => {
+  await db.delete(evaluationRuns).where(eq(evaluationRuns.agentId, AGENT_ID));
   await db.delete(agentVersions).where(eq(agentVersions.agentId, AGENT_ID));
   await db.delete(agents).where(eq(agents.id, AGENT_ID));
 });
@@ -85,6 +86,28 @@ describe("恢复历史版本", () => {
     const result = await restoreVersionAction(AGENT_ID, SOURCE_ID);
 
     expect(result).toEqual({ ok: false, error: "只有曾经上线的历史版本才能恢复为当前版本" });
+    const versions = await db.select().from(agentVersions).where(eq(agentVersions.agentId, AGENT_ID));
+    expect(versions).toHaveLength(2);
+    expect(versions.find((version) => version.id === CURRENT_ID)?.status).toBe("production");
+  });
+
+  it("自动验收运行期间不能恢复历史版本", async () => {
+    await insertVersions("retired");
+    await db.insert(evaluationRuns).values({
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
+      agentId: AGENT_ID,
+      versionId: CURRENT_ID,
+      status: "running",
+      totalCount: 1,
+    });
+
+    const result = await restoreVersionAction(AGENT_ID, SOURCE_ID);
+
+    expect(result).toEqual({
+      ok: false,
+      error: "自动验收运行期间不能恢复历史版本，请等待验收完成",
+    });
     const versions = await db.select().from(agentVersions).where(eq(agentVersions.agentId, AGENT_ID));
     expect(versions).toHaveLength(2);
     expect(versions.find((version) => version.id === CURRENT_ID)?.status).toBe("production");

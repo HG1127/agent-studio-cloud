@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { AgentManifest } from "@/contracts/manifest";
 import { VersionSummary, type RestoreVersionResult } from "@/contracts/version";
-import { agentVersions, agents, auditEvents, knowledgeSources } from "@/db/schema";
+import { agentVersions, agents, auditEvents, evaluationRuns, knowledgeSources } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { isUniqueViolation } from "@/server/unique-violation";
@@ -31,6 +31,16 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
             .for("update")
             .limit(1);
           if (!agent) return { kind: "agent-missing" as const };
+          const [runningEvaluation] = await tx
+            .select({ id: evaluationRuns.id })
+            .from(evaluationRuns)
+            .where(and(
+              eq(evaluationRuns.agentId, agentId),
+              eq(evaluationRuns.workspaceId, agent.workspaceId),
+              eq(evaluationRuns.status, "running"),
+            ))
+            .limit(1);
+          if (runningEvaluation) return { kind: "evaluation-running" as const };
           const [source] = await tx
             .select({ version: agentVersions.version, status: agentVersions.status, manifest: agentVersions.manifest })
             .from(agentVersions)
@@ -177,6 +187,9 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
           };
         });
         if (restoreOutcome.kind === "agent-missing") return { ok: false, error: "找不到这个助手，请刷新页面后重试" };
+        if (restoreOutcome.kind === "evaluation-running") {
+          return { ok: false, error: "自动验收运行期间不能恢复历史版本，请等待验收完成" };
+        }
         if (restoreOutcome.kind === "source-missing") return { ok: false, error: "找不到这个历史版本，请刷新页面后重试" };
         if (restoreOutcome.kind === "already-production") return { ok: false, error: "这个版本已经是当前版本" };
         if (restoreOutcome.kind === "source-not-retired") return { ok: false, error: "只有曾经上线的历史版本才能恢复为当前版本" };
