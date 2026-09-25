@@ -4,6 +4,7 @@ import { redactSensitiveData } from "@/server/domain/security/redact-sensitive";
 import { getRunContext, getRunView, listApprovals, listRunSteps } from "@/server/queries/runs";
 import { listTraceSince } from "@/server/queries/trace";
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
+import { getRunFeedback } from "@/server/queries/run-feedback";
 
 export const dynamic = "force-dynamic";
 
@@ -62,11 +63,12 @@ export async function GET(_request: Request, context: { params: Promise<{ runId:
   const run = await getRunView(runId, DEMO_WORKSPACE_ID);
   if (!run) return Response.json({ ok: false, error: "找不到这次运行" }, { status: 404 });
 
-  const [runContext, steps, firstTraceBatch, approvals] = await Promise.all([
+  const [runContext, steps, firstTraceBatch, approvals, feedback] = await Promise.all([
     getRunContext(runId, DEMO_WORKSPACE_ID),
     listRunSteps(runId, DEMO_WORKSPACE_ID),
     listTraceSince(runId, DEMO_WORKSPACE_ID, 0),
     listApprovals(runId, DEMO_WORKSPACE_ID),
+    getRunFeedback(runId, DEMO_WORKSPACE_ID),
   ]);
   const report = RunReportFile.safeParse({
     format: "agent-studio-cloud-run",
@@ -87,6 +89,7 @@ export async function GET(_request: Request, context: { params: Promise<{ runId:
     }))),
     trace: [],
     approvals,
+    feedback,
   });
   if (!report.success) {
     return Response.json({ ok: false, error: "运行报告包含无法导出的历史数据" }, { status: 422 });

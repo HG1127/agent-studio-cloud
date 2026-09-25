@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AgentInputContract } from "./manifest";
+import { RunFeedbackView } from "./run-feedback";
 import { WorkflowDraft } from "./workflow";
 
 export const MAX_RUN_INPUT_BYTES = 100 * 1024;
@@ -239,6 +240,7 @@ export const RunReportFile = z.object({
   steps: z.array(RunStepReport),
   trace: z.array(TraceEventView),
   approvals: z.array(ApprovalView),
+  feedback: RunFeedbackView.nullable().default(null),
 });
 export type RunReportFile = z.infer<typeof RunReportFile>;
 

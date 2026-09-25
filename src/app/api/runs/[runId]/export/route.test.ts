@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   listRunSteps: vi.fn(),
   listApprovals: vi.fn(),
   listTraceSince: vi.fn(),
+  getRunFeedback: vi.fn(),
 }));
 
 vi.mock("@/server/queries/runs", () => ({
@@ -15,6 +16,7 @@ vi.mock("@/server/queries/runs", () => ({
   listApprovals: mocks.listApprovals,
 }));
 vi.mock("@/server/queries/trace", () => ({ listTraceSince: mocks.listTraceSince }));
+vi.mock("@/server/queries/run-feedback", () => ({ getRunFeedback: mocks.getRunFeedback }));
 
 import { GET } from "./route";
 
@@ -55,6 +57,14 @@ beforeEach(() => {
       }
     : { events: [], nextCursor: cursor, scannedCount: 0 });
   mocks.listApprovals.mockResolvedValue([]);
+  mocks.getRunFeedback.mockResolvedValue({
+    id: "00000000-0000-4000-8000-000000000015",
+    runId: RUN_ID,
+    rating: "needs_improvement",
+    note: "缺少合同依据",
+    evaluationCaseId: "00000000-0000-4000-8000-000000000016",
+    updatedAt: "2026-09-26T00:00:00.000Z",
+  });
 });
 
 describe("运行报告导出", () => {
@@ -69,6 +79,7 @@ describe("运行报告导出", () => {
       steps: [{ nodeId: "review", output: { output: "通过" } }],
       trace: [{ title: "开始审核" }, { title: "审核完成" }],
       approvals: [],
+      feedback: { rating: "needs_improvement", note: "缺少合同依据" },
     });
     expect(mocks.listTraceSince).toHaveBeenLastCalledWith(RUN_ID, expect.any(String), 2);
   });
@@ -100,6 +111,14 @@ describe("运行报告导出", () => {
       result: { nested: { authorization: "Bearer result-secret", status: "完成" } },
     });
     mocks.getRunContext.mockResolvedValueOnce({ outputs: { password: "context-secret", review: "通过" } });
+    mocks.getRunFeedback.mockResolvedValueOnce({
+      id: "00000000-0000-4000-8000-000000000015",
+      runId: RUN_ID,
+      rating: "needs_improvement",
+      note: "authorization: Bearer feedback-secret-value",
+      evaluationCaseId: null,
+      updatedAt: "2026-09-26T00:00:00.000Z",
+    });
     mocks.listRunSteps.mockResolvedValueOnce([{
       nodeId: "review", nodeTitle: "审核合同", nodeType: "ai", status: "succeeded", attempt: 1,
       output: { token: "step-secret", output: "通过" }, error: null,
@@ -128,6 +147,7 @@ describe("运行报告导出", () => {
     expect(body).not.toContain("trace-secret-value");
     expect(body).not.toContain("wait-hook-secret");
     expect(body).not.toContain("submission-secret");
+    expect(body).not.toContain("feedback-secret-value");
   });
 
   it("忽略单条损坏的历史步骤而不是让整份报告失败", async () => {
