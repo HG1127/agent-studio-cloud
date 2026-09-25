@@ -16,23 +16,50 @@ type HealthState =
 
 export function HealthCard() {
   const [state, setState] = useState<HealthState>({ phase: "loading" });
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    fetch("/api/health")
+    let active = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    fetch("/api/health", { signal: controller.signal })
       .then((r) => r.json())
       .then((data: unknown) => {
+        if (!active) return;
         const parsed = HealthResponse.safeParse(data);
         setState(
           parsed.success ? { phase: "ready", health: parsed.data } : { phase: "error" },
         );
       })
-      .catch(() => setState({ phase: "error" }));
-  }, []);
+      .catch(() => {
+        if (active) setState({ phase: "error" });
+      })
+      .finally(() => clearTimeout(timeout));
+    return () => {
+      active = false;
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [attempt]);
 
   if (state.phase === "loading") {
     return <p className="text-sm text-gray-400">正在检查系统状态…</p>;
   }
   if (state.phase === "error") {
-    return <p className="text-sm text-red-600">系统状态暂时无法获取</p>;
+    return (
+      <div className="flex items-center gap-3">
+        <p className="text-sm text-red-600">系统状态暂时无法获取</p>
+        <button
+          type="button"
+          onClick={() => {
+            setState({ phase: "loading" });
+            setAttempt((value) => value + 1);
+          }}
+          className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:border-gray-500"
+        >
+          重新检查
+        </button>
+      </div>
+    );
   }
   return (
     <dl className="grid w-full grid-cols-3 gap-4">

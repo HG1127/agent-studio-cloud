@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HealthCard } from "@/features/dashboard/HealthCard";
 
@@ -47,5 +48,21 @@ describe("HealthCard", () => {
     );
     render(<HealthCard />);
     expect(await screen.findByText("系统状态暂时无法获取")).toBeInTheDocument();
+  });
+
+  it("检查失败后可以重新检查", async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, db: true, workflow: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<HealthCard />);
+
+    await screen.findByText("系统状态暂时无法获取");
+    await user.click(screen.getByRole("button", { name: "重新检查" }));
+
+    await screen.findByText("整体状态");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.getAllByText("正常")).toHaveLength(3);
   });
 });
