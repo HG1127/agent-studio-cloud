@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { put } from "@vercel/blob";
+import { del, put } from "@vercel/blob";
 import { and, eq } from "drizzle-orm";
 import { start } from "workflow/api";
 import { MAX_KNOWLEDGE_FILENAME_LENGTH } from "@/contracts/knowledge";
@@ -35,6 +35,15 @@ async function storeOriginal(bytes: Buffer, filename: string, sha256: string, to
     access: "private", addRandomSuffix: true, token,
   });
   return blob.pathname;
+}
+
+async function removeUnusedOriginal(pathname: string | null, retainedPathname: string | null, token: string): Promise<void> {
+  if (!pathname || pathname === retainedPathname) return;
+  try {
+    await del(pathname, { token });
+  } catch (error) {
+    console.error("[knowledge-upload] 清理未采用的并发上传文件失败", error);
+  }
 }
 
 function storageUnavailable() {
@@ -142,17 +151,21 @@ export async function POST(req: Request) {
     .limit(1);
   if (duplicate) {
     let blobPathname = duplicate.blobPathname;
+    let uploadedBlobPathname: string | null = null;
     if (!duplicate.blobPathname && blobToken) {
       try {
-        blobPathname = await storeOriginal(bytes, file.name, sha256, blobToken);
+        uploadedBlobPathname = await storeOriginal(bytes, file.name, sha256, blobToken);
+        blobPathname = uploadedBlobPathname;
       } catch {
         return storageUnavailable();
       }
     }
     const reconciled = await reconcileDuplicateSource(duplicate.id, blobPathname);
     if (!reconciled) {
+      await removeUnusedOriginal(uploadedBlobPathname, null, blobToken);
       return Response.json({ ok: false, error: "资料记录已经不存在，请重新上传" }, { status: 409 });
     }
+    await removeUnusedOriginal(uploadedBlobPathname, reconciled.row.blobPathname, blobToken);
     if (reconciled.retrying) {
       try {
         await start(knowledgeIngestWorkflow, [{
@@ -187,34 +200,40 @@ export async function POST(req: Request) {
     }
   }
   const ingestToken = `pending:${randomUUID()}`;
-  const row = await db.transaction(async (tx) => {
-    const [created] = await tx
-      .insert(knowledgeSources)
-      .values({
+  let row: typeof knowledgeSources.$inferSelect | null;
+  try {
+    row = await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(knowledgeSources)
+        .values({
+          workspaceId: DEMO_WORKSPACE_ID,
+          name: file.name,
+          mime: file.type || `application/${ext}`,
+          sizeBytes: bytes.length,
+          sha256,
+          status: "parsing",
+          parseEngine: ingestToken,
+          blobPathname,
+          createdBy: DEMO_USER_ID,
+        })
+        .onConflictDoNothing({ target: [knowledgeSources.workspaceId, knowledgeSources.sha256] })
+        .returning();
+      if (!created) return null;
+      await tx.insert(auditEvents).values(auditEventValues({
         workspaceId: DEMO_WORKSPACE_ID,
-        name: file.name,
-        mime: file.type || `application/${ext}`,
-        sizeBytes: bytes.length,
-        sha256,
-        status: "parsing",
-        parseEngine: ingestToken,
-        blobPathname,
         createdBy: DEMO_USER_ID,
-      })
-      .onConflictDoNothing({ target: [knowledgeSources.workspaceId, knowledgeSources.sha256] })
-      .returning();
-    if (!created) return null;
-    await tx.insert(auditEvents).values(auditEventValues({
-      workspaceId: DEMO_WORKSPACE_ID,
-      createdBy: DEMO_USER_ID,
-      action: "knowledge.uploaded",
-      targetType: "knowledge",
-      targetId: created.id,
-      summary: `上传知识资料「${created.name}」`,
-      data: { sizeBytes: created.sizeBytes, originalStored: Boolean(created.blobPathname) },
-    }));
-    return created;
-  });
+        action: "knowledge.uploaded",
+        targetType: "knowledge",
+        targetId: created.id,
+        summary: `上传知识资料「${created.name}」`,
+        data: { sizeBytes: created.sizeBytes, originalStored: Boolean(created.blobPathname) },
+      }));
+      return created;
+    });
+  } catch (error) {
+    await removeUnusedOriginal(blobPathname, null, blobToken);
+    throw error;
+  }
   if (!row) {
     const [concurrent] = await db
       .select()
@@ -222,6 +241,7 @@ export async function POST(req: Request) {
       .where(and(eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID), eq(knowledgeSources.sha256, sha256)))
       .limit(1);
     if (!concurrent) {
+      await removeUnusedOriginal(blobPathname, null, blobToken);
       return Response.json({ ok: false, error: "资料记录创建失败，请稍后重试" }, { status: 500 });
     }
     const effectiveBlobPathname = concurrent.blobPathname ?? blobPathname;
@@ -234,6 +254,7 @@ export async function POST(req: Request) {
           eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID),
         ));
     }
+    await removeUnusedOriginal(blobPathname, effectiveBlobPathname, blobToken);
     return Response.json({
       ok: true,
       deduped: true,

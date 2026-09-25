@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const put = vi.hoisted(() => vi.fn());
+const del = vi.hoisted(() => vi.fn());
 const startMock = vi.hoisted(() => vi.fn());
 const dbState = vi.hoisted(() => ({
   rows: [] as unknown[],
@@ -10,7 +11,7 @@ const dbState = vi.hoisted(() => ({
   update: vi.fn(),
 }));
 
-vi.mock("@vercel/blob", () => ({ put }));
+vi.mock("@vercel/blob", () => ({ del, put }));
 vi.mock("@/lib/db", () => ({
   db: (() => {
     const client = {
@@ -45,6 +46,7 @@ import { POST } from "./route";
 afterEach(() => {
   delete process.env.BLOB_READ_WRITE_TOKEN;
   put.mockReset();
+  del.mockReset().mockResolvedValue(undefined);
   startMock.mockReset().mockResolvedValue(undefined);
   dbState.rows = [];
   dbState.selectQueue = [];
@@ -282,6 +284,27 @@ describe("知识原文件上传", () => {
       blobStored: false,
       source: { id: concurrent.id, status: "parsing" },
     });
+    expect(startMock).not.toHaveBeenCalled();
+  });
+
+  it("并发上传已保留原文件时清理本请求未被采用的 Blob", async () => {
+    process.env.BLOB_READ_WRITE_TOKEN = "test-token";
+    const concurrent = {
+      id: "00000000-0000-4000-8000-0000000000f4", name: "售后手册.txt", mime: "text/plain",
+      sizeBytes: 12, status: "parsing", chunkCount: 0, charCount: 0, error: null,
+      createdAt: new Date("2026-09-24T00:00:00Z"), blobPathname: "knowledge/retained.txt", archivedAt: null,
+    };
+    dbState.selectQueue = [[], [concurrent]];
+    dbState.insertRows = [];
+    put.mockResolvedValue({ pathname: "knowledge/unused.txt" });
+    const form = new FormData();
+    form.set("file", new File(["退货说明"], "售后手册.txt", { type: "text/plain" }));
+
+    const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, deduped: true, blobStored: true });
+    expect(del).toHaveBeenCalledWith("knowledge/unused.txt", { token: "test-token" });
     expect(startMock).not.toHaveBeenCalled();
   });
 
