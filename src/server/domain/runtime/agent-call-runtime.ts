@@ -1,17 +1,10 @@
 import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
-import { buildBoundedCollaborationContext } from "@/server/domain/runtime/collaboration-input";
+import { buildBoundedCollaborationContext, isCollaborationMemoryOutput } from "@/server/domain/runtime/collaboration-input";
 import { redactSensitiveData } from "@/server/domain/security/redact-sensitive";
 
 function ownValue(source: Record<string, unknown>, key: string): unknown {
   return Object.prototype.hasOwnProperty.call(source, key) ? source[key] : undefined;
-}
-
-function isMemoryOutput(value: unknown): boolean {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const record = value as Record<string, unknown>;
-  return record.mode === "read" && Array.isArray(record.memories)
-    || record.mode === "write" && typeof record.saved === "boolean";
 }
 
 export function buildAgentCallInput(args: {
@@ -24,7 +17,7 @@ export function buildAgentCallInput(args: {
   const input = redactSensitiveData(args.input) as Record<string, unknown>;
   const accessibleOutputs = args.node.agentCall?.memoryAccess?.mode === "team"
     ? args.outputs
-    : Object.fromEntries(Object.entries(args.outputs).filter(([, value]) => !isMemoryOutput(value)));
+    : Object.fromEntries(Object.entries(args.outputs).filter(([, value]) => !isCollaborationMemoryOutput(value)));
   const outputs = redactSensitiveData(accessibleOutputs) as Record<string, unknown>;
   const fallbackCopies = fields.filter((field) => {
     const value = ownValue(input, field.name) ?? ownValue(outputs, field.name);

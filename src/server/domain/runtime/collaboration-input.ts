@@ -5,6 +5,13 @@ import { validateRunInput } from "@/server/domain/runtime/run-input";
 export const MAX_COLLABORATION_CONTEXT_CHARS = 24_000;
 const TRUNCATION_MARKER = "\n…[协作上下文过长，已截断]…\n";
 
+export function isCollaborationMemoryOutput(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return record.mode === "read" && Array.isArray(record.memories)
+    || record.mode === "write" && typeof record.saved === "boolean";
+}
+
 export function buildBoundedCollaborationContext(value: unknown, copies = 1): string {
   const raw = JSON.stringify(value);
   const budget = Math.max(200, Math.floor(MAX_COLLABORATION_CONTEXT_CHARS / Math.max(1, copies)));

@@ -69,6 +69,36 @@ describe("助手交接运行逻辑", () => {
     expect(prepared.redactedPaths).toEqual(expect.arrayContaining(["password", "summary.authorization"]));
   });
 
+  it("默认不传递长期经验，只有团队共享模式才带入交接上下文", () => {
+    const memoryOutput = { mode: "read", foundCount: 1, memories: [{ content: "仅团队可见经验" }] };
+    const privatePrepared = buildHandoffInput({
+      node: handoffNode(), targetManifest, input: {}, outputs: { memory: memoryOutput, summary: "普通结果" },
+    });
+    expect(String(privatePrepared.input.brief)).toContain("普通结果");
+    expect(String(privatePrepared.input.brief)).not.toContain("仅团队可见经验");
+
+    const teamNode = handoffNode();
+    teamNode.contract!.memoryPolicy = { mode: "team", shared: ["业务经验"], private: ["内部草稿"] };
+    const teamPrepared = buildHandoffInput({
+      node: teamNode, targetManifest, input: {}, outputs: { memory: memoryOutput },
+    });
+    expect(String(teamPrepared.input.brief)).toContain("仅团队可见经验");
+  });
+
+  it("交接经验策略中的私有项参与递归清洗", () => {
+    const node = handoffNode();
+    node.contract!.memoryPolicy = { mode: "team", shared: [], private: ["内部草稿"] };
+    const prepared = buildHandoffInput({
+      node,
+      targetManifest,
+      input: {},
+      outputs: { summary: { 内部草稿: "不能传", 公开结论: "可以传" } },
+    });
+    expect(String(prepared.input.brief)).toContain("公开结论");
+    expect(String(prepared.input.brief)).not.toContain("不能传");
+    expect(prepared.redactedPaths).toContain("summary.内部草稿");
+  });
+
   it("阻止缺少契约、目标或直接交接给自身", () => {
     const missing = WorkflowNode.parse({ id: "handoff", title: "交接", type: "handoff", toAgent: { id: "", versionId: "" } });
     expect(validateHandoffNode(missing)).toContain("还没有选择");

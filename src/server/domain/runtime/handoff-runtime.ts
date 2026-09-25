@@ -1,6 +1,6 @@
 import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
-import { buildBoundedCollaborationContext } from "@/server/domain/runtime/collaboration-input";
+import { buildBoundedCollaborationContext, isCollaborationMemoryOutput } from "@/server/domain/runtime/collaboration-input";
 import { isSafeDataPathSegment, safeDataPathSegments } from "@/server/domain/runtime/data-path";
 
 const SECRET_KEY = /password|passcode|secret|token|api[_-]?key|credential|cookie|authorization|private[_-]?key|密码|密钥|令牌|凭证|授权|私钥/i;
@@ -57,9 +57,16 @@ export function buildHandoffInput(args: {
   input: Record<string, unknown>;
   outputs: Record<string, unknown>;
 }): { input: Record<string, unknown>; redactedPaths: string[] } {
-  const terms = normalizedTerms(args.node);
+  const memoryPolicy = args.node.contract?.memoryPolicy;
+  const terms = [
+    ...normalizedTerms(args.node),
+    ...(memoryPolicy?.private ?? []).map((term) => term.toLowerCase().replace(/[\s_-]/g, "")).filter((term) => term.length >= 2),
+  ];
+  const accessibleOutputs = memoryPolicy?.mode === "team"
+    ? args.outputs
+    : Object.fromEntries(Object.entries(args.outputs).filter(([, value]) => !isCollaborationMemoryOutput(value)));
   const sanitizedInput = sanitizeHandoffValue(args.input, terms);
-  const sanitizedOutputs = sanitizeHandoffValue(args.outputs, terms);
+  const sanitizedOutputs = sanitizeHandoffValue(accessibleOutputs, terms);
   const sourceInput = sanitizedInput.value as Record<string, unknown>;
   const sourceOutputs = sanitizedOutputs.value as Record<string, unknown>;
   const fields = args.targetManifest.inputContract.fields;
