@@ -1,5 +1,6 @@
 import type { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
 import { safeDataPathSegments } from "@/server/domain/runtime/data-path";
+import { hasMeaningfulResult } from "@/server/domain/runtime/result-content";
 
 type OutputField = NonNullable<WorkflowDraft["outputContract"]>["fields"][number];
 
@@ -69,7 +70,7 @@ export function projectWorkflowResult(outputs: Record<string, unknown>, fields: 
       continue;
     }
     const value = field.sourceNodeId ? outputs[field.sourceNodeId] : readPath(outputs, field.path);
-    if (value === undefined || value === null) {
+    if (!hasMeaningfulResult(value)) {
       if (field.required) missing.push(field.label || field.path);
       continue;
     }

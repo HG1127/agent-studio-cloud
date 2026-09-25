@@ -24,6 +24,15 @@ describe("最终交付结果", () => {
     ])).toEqual({ ok: true, result: {} });
   });
 
+  it("必需交付物为空或仅包含失败占位时仍视为缺失", () => {
+    const field = { path: "plan", label: "方案", required: true, sourceNodeId: "draft" };
+    expect(projectWorkflowResult({ draft: "  " }, [field])).toEqual({ ok: false, missing: ["方案"] });
+    expect(projectWorkflowResult({ draft: [] }, [field])).toEqual({ ok: false, missing: ["方案"] });
+    expect(projectWorkflowResult({ draft: {} }, [field])).toEqual({ ok: false, missing: ["方案"] });
+    expect(projectWorkflowResult({ draft: { status: "failed", error: "上游失败" } }, [field]))
+      .toEqual({ ok: false, missing: ["方案"] });
+  });
+
   it("拒绝无效、重复和父子冲突的交付字段位置", () => {
     expect(validateOutputFieldPaths([{ path: "交付.方案", required: true, sourceNodeId: "draft" }])).toBeNull();
     expect(validateOutputFieldPaths([{ path: "a b", required: true, sourceNodeId: "draft" }])).toBe("最终交付字段位置格式不正确");

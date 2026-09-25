@@ -12,9 +12,9 @@ import { selectQualityRepair, type QualityRepairPlan } from "@/server/domain/run
 import {
   countMeaningfulQualityOutputs,
   hasExecutedHumanStep,
-  hasMeaningfulOutput,
   missingExecutedToolReceipts,
 } from "@/server/domain/runtime/quality-checks";
+import { hasMeaningfulResult } from "@/server/domain/runtime/result-content";
 
 function isReceiptOk(value: unknown): boolean {
   return (
@@ -106,7 +106,7 @@ export async function runQualityGate(args: RunQualityGateInput): Promise<Quality
     }
     const missingOutputs = quality.requiredOutputTitles.filter((title) => {
       const sourceNode = Object.values(args.nodes).find((item) => item.title === title);
-      return !sourceNode || !hasMeaningfulOutput(args.outputs[sourceNode.id]);
+      return !sourceNode || !hasMeaningfulResult(args.outputs[sourceNode.id]);
     });
     if (missingOutputs.length > 0) {
       const reason = `交付前检查未通过：以下步骤还没有形成结果：${missingOutputs.join("、")}`;

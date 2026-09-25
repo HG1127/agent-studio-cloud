@@ -3,9 +3,9 @@ import { WorkflowNode } from "@/contracts/workflow";
 import {
   countMeaningfulQualityOutputs,
   hasExecutedHumanStep,
-  hasMeaningfulOutput,
   missingExecutedToolReceipts,
 } from "@/server/domain/runtime/quality-checks";
+import { hasMeaningfulResult } from "@/server/domain/runtime/result-content";
 
 const nodes = {
   send: WorkflowNode.parse({
@@ -42,10 +42,10 @@ describe("质量门禁执行范围", () => {
   });
 
   it("只把非空且非失败的结果计入质量门槛", () => {
-    expect(hasMeaningfulOutput("  ")).toBe(false);
-    expect(hasMeaningfulOutput({ output: "  " })).toBe(false);
-    expect(hasMeaningfulOutput({})).toBe(false);
-    expect(hasMeaningfulOutput({ status: "failed", error: "上游失败" })).toBe(false);
+    expect(hasMeaningfulResult("  ")).toBe(false);
+    expect(hasMeaningfulResult({ output: "  " })).toBe(false);
+    expect(hasMeaningfulResult({})).toBe(false);
+    expect(hasMeaningfulResult({ status: "failed", error: "上游失败" })).toBe(false);
     expect(countMeaningfulQualityOutputs(nodes, {
       draft: "完整方案",
       send: { ok: false, error: "发送失败" },
