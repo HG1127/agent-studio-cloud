@@ -59,6 +59,29 @@ describe("冻结版本差异", () => {
     expect(compareAgentVersions(before, reordered)).toMatchObject({ modelChanged: true, hasChanges: true });
   });
 
+  it("识别起始步骤和流程级运行设置变化", () => {
+    const before = manifest();
+    const after = structuredClone(before);
+    after.workflowSnapshot.startNodeId = "review";
+    after.workflowSnapshot.memoryPolicy.longTerm = true;
+
+    expect(compareAgentVersions(before, after)).toMatchObject({
+      workflowSettingsChanged: true,
+      hasChanges: true,
+    });
+  });
+
+  it("只移动画布位置不视为可执行内容变化", () => {
+    const before = manifest();
+    const after = structuredClone(before);
+    after.workflowSnapshot.ui.positions.review = { x: 360, y: 240 };
+
+    expect(compareAgentVersions(before, after)).toMatchObject({
+      workflowSettingsChanged: false,
+      hasChanges: false,
+    });
+  });
+
   it("对象字段顺序变化不产生虚假的版本差异", () => {
     const before = manifest();
     before.workflowSnapshot.nodes.review.businessSpec = { limits: { daily: 10, enabled: true }, owner: "业务部" };

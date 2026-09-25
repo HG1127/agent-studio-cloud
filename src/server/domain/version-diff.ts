@@ -7,9 +7,17 @@ export interface VersionDiff {
   nodes: ChangeSet;
   inputFields: ChangeSet;
   outputFields: ChangeSet;
+  workflowSettingsChanged: boolean;
   modelChanged: boolean;
   knowledgeChanged: boolean;
   hasChanges: boolean;
+}
+
+function workflowSettings(manifest: AgentManifest) {
+  const excluded = new Set(["nodes", "variables", "outputContract", "ui", "id", "versionId"]);
+  return Object.fromEntries(
+    Object.entries(manifest.workflowSnapshot).filter(([key]) => !excluded.has(key)),
+  );
 }
 
 function same(left: unknown, right: unknown): boolean {
@@ -55,11 +63,13 @@ export function compareAgentVersions(before: AgentManifest, after: AgentManifest
     (field) => field.path,
     (field) => field.label || field.path,
   );
+  const workflowSettingsChanged = !same(workflowSettings(before), workflowSettings(after));
   const modelChanged = !same(before.resourceSelection.model, after.resourceSelection.model);
   const knowledgeChanged = !same([...before.knowledgeSnapshot].sort(), [...after.knowledgeSnapshot].sort());
   const hasChanges = [nodes, inputFields, outputFields]
     .some((group) => group.added.length + group.removed.length + group.changed.length > 0)
+    || workflowSettingsChanged
     || modelChanged
     || knowledgeChanged;
-  return { nodes, inputFields, outputFields, modelChanged, knowledgeChanged, hasChanges };
+  return { nodes, inputFields, outputFields, workflowSettingsChanged, modelChanged, knowledgeChanged, hasChanges };
 }

@@ -60,6 +60,7 @@ export default async function VersionComparePage({ params, searchParams }: {
     <section className="rounded-lg border border-gray-200 bg-white p-4">
       <h2 className="font-semibold">运行资源</h2>
       <ul className="mt-2 space-y-1 text-sm text-gray-700">
+        <li>流程运行设置：{diff.workflowSettingsChanged ? "有变化" : "没有变化"}</li>
         <li>运行模型：{diff.modelChanged ? "有变化" : "没有变化"}</li>
         <li>知识资料范围：{diff.knowledgeChanged ? "有变化" : "没有变化"}</li>
       </ul>
