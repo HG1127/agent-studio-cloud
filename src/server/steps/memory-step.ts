@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { buildMemoryContent } from "@/server/domain/memory/memory-content";
 import { selectRelevantMemories } from "@/server/domain/memory/memory-search";
 import { searchQueryFromInput } from "@/server/domain/runtime/search-query";
+import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 
@@ -45,7 +46,10 @@ export async function runMemoryStep(args: {
       mode: "read",
       query,
       foundCount: selected.length,
-      memories: selected.map((item) => ({ content: item.content, savedAt: item.createdAt.toISOString() })),
+      memories: selected.map((item) => ({
+        content: redactSensitiveText(item.content),
+        savedAt: item.createdAt.toISOString(),
+      })),
     };
     await persistStep({ runId: args.runId, nodeId: args.node.id, nodeTitle: args.node.title, nodeType: args.node.type, status: "succeeded", output });
     await appendTrace({

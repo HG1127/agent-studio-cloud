@@ -104,7 +104,7 @@ describe("长期经验步骤", () => {
 
   it("只返回与查询相关的历史经验", async () => {
     mocks.selectResults.push([runContext], [
-      { content: "客户续约需要提前沟通", createdAt: new Date("2026-02-01") },
+      { content: "客户续约联系 person@example.com，令牌：private-memory-token", createdAt: new Date("2026-02-01") },
       { content: "采购审批需要负责人确认", createdAt: new Date("2026-03-01") },
     ]);
     const result = await runMemoryStep({
@@ -115,7 +115,7 @@ describe("长期经验步骤", () => {
     });
     expect(result.output).toMatchObject({ mode: "read", foundCount: 1 });
     expect(result.output.memories).toEqual([
-      { content: "客户续约需要提前沟通", savedAt: "2026-02-01T00:00:00.000Z" },
+      { content: "客户续约联系 [已隐藏敏感信息]，[已隐藏敏感信息]", savedAt: "2026-02-01T00:00:00.000Z" },
     ]);
   });
 

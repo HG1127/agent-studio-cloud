@@ -6,6 +6,7 @@ import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
 import { escapeLikePattern } from "@/server/domain/search-pattern";
+import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 
 export async function listMemories(filters: {
   agentId?: string;
@@ -38,7 +39,7 @@ export async function listMemories(filters: {
     agentName,
     sourceRunId: memory.sourceRunId,
     sourceNodeTitle: memory.metadata && typeof memory.metadata.nodeTitle === "string" ? memory.metadata.nodeTitle : "保存经验",
-    content: memory.content,
+    content: redactSensitiveText(memory.content),
     createdAt: memory.createdAt.toISOString(),
     archivedAt: memory.archivedAt?.toISOString() ?? null,
   })));
