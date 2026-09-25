@@ -4,6 +4,7 @@ import {
   MAX_PARALLEL_BRANCHES,
   MAX_WORKFLOW_BYTES,
   MAX_WORKFLOW_NODES,
+  MAX_WORKFLOW_OUTPUT_FIELDS,
   WorkflowDraft,
   WorkflowNode,
 } from "@/contracts/workflow";
@@ -88,6 +89,21 @@ describe("WorkflowDraft", () => {
     expect(WorkflowNode.safeParse({
       id: "quality", title: "交付检查", type: "rule",
       quality: { requiredOutputTitles: [], minOutputCount: 1.5 },
+    }).success).toBe(false);
+  });
+
+  it("限制最终交付字段数量和字段长度", () => {
+    expect(WorkflowDraft.safeParse({
+      ...baseDraft,
+      outputContract: {
+        fields: Array.from({ length: MAX_WORKFLOW_OUTPUT_FIELDS + 1 }, (_, index) => ({
+          path: `result_${index}`, required: true, sourceNodeId: "ai",
+        })),
+      },
+    }).success).toBe(false);
+    expect(WorkflowDraft.safeParse({
+      ...baseDraft,
+      outputContract: { fields: [{ path: "x".repeat(201), required: true, sourceNodeId: "ai" }] },
     }).success).toBe(false);
   });
 });

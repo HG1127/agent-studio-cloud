@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { WorkflowNode } from "@/contracts/workflow";
+import { MAX_WORKFLOW_OUTPUT_FIELDS, WorkflowNode } from "@/contracts/workflow";
 import { WorkflowOutputEditor } from "@/features/workflow-canvas/WorkflowOutputEditor";
 
 const nodes = Object.fromEntries([
@@ -35,5 +35,15 @@ describe("最终交付字段编辑", () => {
     expect(onChange).toHaveBeenLastCalledWith([{ ...field, required: false }]);
     await user.click(screen.getByRole("button", { name: "删除" }));
     expect(onChange).toHaveBeenLastCalledWith([]);
+  });
+
+  it("达到安全上限后不再添加交付字段", async () => {
+    const fields = Array.from({ length: MAX_WORKFLOW_OUTPUT_FIELDS }, (_, index) => ({
+      path: `result_${index}`, label: `结果 ${index}`, required: true, sourceNodeId: "draft",
+    }));
+    const onChange = vi.fn();
+    render(<WorkflowOutputEditor nodes={nodes} fields={fields} onChange={onChange} />);
+    expect(screen.getByText(`最终交付字段已达到 ${MAX_WORKFLOW_OUTPUT_FIELDS} 项上限。`)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "添加交付字段" })).toBeDisabled();
   });
 });

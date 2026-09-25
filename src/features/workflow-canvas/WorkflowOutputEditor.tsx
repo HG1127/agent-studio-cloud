@@ -1,4 +1,4 @@
-import type { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
+import { MAX_WORKFLOW_OUTPUT_FIELDS, type WorkflowDraft, type WorkflowNode } from "@/contracts/workflow";
 
 type OutputField = NonNullable<WorkflowDraft["outputContract"]>["fields"][number];
 
@@ -14,6 +14,7 @@ export function WorkflowOutputEditor({ nodes, fields, onChange }: {
     onChange(fields.map((field, position) => position === index ? { ...field, ...patch } : field));
   }
   function add() {
+    if (fields.length >= MAX_WORKFLOW_OUTPUT_FIELDS) return;
     const source = candidates.find((node) => !fields.some((field) => field.sourceNodeId === node.id)) ?? candidates[0];
     if (!source) return;
     onChange([...fields, { path: source.id, label: source.title, required: true, sourceNodeId: source.id }]);
@@ -38,11 +39,13 @@ export function WorkflowOutputEditor({ nodes, fields, onChange }: {
             </label>
             <label className="flex flex-col gap-1 text-xs text-gray-600">结果字段位置
               <input aria-label={`交付字段 ${index + 1} 位置`} value={field.path} placeholder="交付.方案"
+                maxLength={200}
                 onChange={(event) => update(index, { path: event.target.value })}
                 className="rounded-md border border-gray-300 px-2 py-1.5 text-sm" />
             </label>
             <label className="flex flex-col gap-1 text-xs text-gray-600">显示名称
               <input aria-label={`交付字段 ${index + 1} 显示名称`} value={field.label ?? ""}
+                maxLength={200}
                 onChange={(event) => update(index, { label: event.target.value })}
                 className="rounded-md border border-gray-300 px-2 py-1.5 text-sm" />
             </label>
@@ -54,7 +57,10 @@ export function WorkflowOutputEditor({ nodes, fields, onChange }: {
           </div>
         ))}
       </div> : null}
-      <button type="button" disabled={candidates.length === 0} onClick={add}
+      {fields.length >= MAX_WORKFLOW_OUTPUT_FIELDS
+        ? <p className="mt-3 text-xs text-amber-700">最终交付字段已达到 {MAX_WORKFLOW_OUTPUT_FIELDS} 项上限。</p>
+        : null}
+      <button type="button" disabled={candidates.length === 0 || fields.length >= MAX_WORKFLOW_OUTPUT_FIELDS} onClick={add}
         className="mt-3 rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:border-gray-500 disabled:text-gray-400">添加交付字段</button>
     </details>
   );

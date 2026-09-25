@@ -10,6 +10,7 @@ export const MAX_PARALLEL_BRANCHES = 8;
 export const MAX_PARALLEL_STEPS = 20;
 export const MAX_SUBFLOW_STEPS = 50;
 export const MAX_WORKFLOW_VARIABLES = 100;
+export const MAX_WORKFLOW_OUTPUT_FIELDS = 100;
 
 export const WorkflowNodeType = z.enum([
   "trigger", "end", "ai", "human", "tool", "knowledge", "condition",
@@ -125,7 +126,14 @@ export const WorkflowDraft = z.object({
   requirementContract: z.record(z.string(), z.unknown()).optional(),
   complexityProfile: z.record(z.string(), z.unknown()).optional(),
   runtimePolicy: z.record(z.string(), z.unknown()).optional(),
-  outputContract: z.object({ fields: z.array(z.object({ path: z.string(), label: z.string().optional(), required: z.boolean().default(true), sourceNodeId: z.string().optional() })).default([]) }).optional(),
+  outputContract: z.object({
+    fields: z.array(z.object({
+      path: z.string().min(1).max(200),
+      label: z.string().max(200).optional(),
+      required: z.boolean().default(true),
+      sourceNodeId: z.string().min(1).max(200).optional(),
+    })).max(MAX_WORKFLOW_OUTPUT_FIELDS).default([]),
+  }).optional(),
   ui: z.object({ positions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })).default({}) }).default({ positions: {} }),
 }).superRefine((draft, ctx) => {
   try {
