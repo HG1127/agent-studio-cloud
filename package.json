@@ -11,8 +11,7 @@
     "test:e2e": "playwright test",
     "test:workflow": "vitest run --config vitest.workflow.config.mts",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:push": "drizzle-kit push"
+    "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.53",
