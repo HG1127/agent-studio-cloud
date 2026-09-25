@@ -84,6 +84,7 @@ export interface AuditWait {
 
 export interface AuditSubflowStep {
   [key: string]: unknown;
+  id?: string | null;
   type?: string | null;
   title?: string | null;
   tool?: AuditTool | null;
@@ -570,7 +571,16 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
           issues.push(issue("critical", "logic", "并行工作没有实际步骤", `「${branch.label || `并行工作 ${index + 1}`}」里面没有可执行步骤。`, { nodeId: id, fixable: true, code: `parallel_empty_${index}` }));
         }
         let seenHuman = false;
+        const stepIds = new Set<string>();
         for (const [stepIndex, step] of branchSteps.entries()) {
+          if (step.id && stepIds.has(step.id)) {
+            issues.push(issue("critical", "logic", "并行工作存在重复步骤标识", `「${branch.label || n.title}」里的第 ${stepIndex + 1} 个步骤与前面步骤使用了相同标识。`, {
+              nodeId: id,
+              fixable: true,
+              code: `parallel_step_id_${index}_${stepIndex}`,
+            }));
+          }
+          if (step.id) stepIds.add(step.id);
           const runtimeIssue = inlineRuntimeSettingIssue(step);
           if (runtimeIssue) {
             issues.push(issue("critical", runtimeIssue.category, runtimeIssue.title, `「${branch.label || n.title}」里的「${step.title || `步骤 ${stepIndex + 1}`}」${runtimeIssue.detail}`, {
@@ -628,7 +638,16 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
         issues.push(issue("warning", "data", "子流程没有声明输出", `「${n.title}」无法说明返回主流程的业务结果。`, { nodeId: id, fixable: true, code: "subflow_output" }));
       }
       let seenHuman = false;
+      const inlineStepIds = new Set<string>();
       for (const [i, step] of inlineSteps.entries()) {
+        if (step.id && inlineStepIds.has(step.id)) {
+          issues.push(issue("critical", "logic", "步骤组存在重复步骤标识", `「${n.title}」内部第 ${i + 1} 步与前面步骤使用了相同标识。`, {
+            nodeId: id,
+            fixable: true,
+            code: `child_step_id_${i}`,
+          }));
+        }
+        if (step.id) inlineStepIds.add(step.id);
         const runtimeIssue = inlineRuntimeSettingIssue(step);
         if (runtimeIssue) {
           issues.push(issue("critical", runtimeIssue.category, runtimeIssue.title, `「${n.title}」内部第 ${i + 1} 步「${step.title || "未命名步骤"}」${runtimeIssue.detail}`, {

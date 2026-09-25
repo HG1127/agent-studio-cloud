@@ -327,6 +327,34 @@ describe("直测：结构性检查", () => {
     ]));
   });
 
+  it("并行工作和步骤组中的重复步骤标识会阻止发布", () => {
+    const result = auditWorkflow(WorkflowDraft.parse({
+      id: "duplicate-inline-step-ids",
+      rootAgent: { id: "agent", name: "测试助手", role: "处理" },
+      memoryPolicy: { taskContext: true, longTerm: false },
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "parallel" },
+        parallel: {
+          id: "parallel", title: "并行处理", type: "parallel", next: "group",
+          parallel: { strategy: "all", failurePolicy: "fail_fast", branches: [
+            { id: "one", label: "第一项", inputs: [], outputs: [], steps: [{ id: "same", title: "一", type: "ai" }, { id: "same", title: "二", type: "ai" }] },
+            { id: "two", label: "第二项", inputs: [], outputs: [], steps: [{ id: "only", title: "三", type: "ai" }] },
+          ] },
+        },
+        group: {
+          id: "group", title: "步骤组", type: "subflow", next: "done",
+          subflow: { name: "内部处理", inputs: [], outputs: ["结果"], failurePolicy: "checkpoint", steps: [{ id: "same", title: "一", type: "ai" }, { id: "same", title: "二", type: "ai" }] },
+        },
+        done: { id: "done", title: "结束", type: "end", next: null },
+      },
+    }));
+
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "parallel_step_id_0_1", severity: "critical" }),
+      expect.objectContaining({ code: "child_step_id_1", severity: "critical" }),
+    ]));
+  });
+
   it("隐藏的质量控制节点不会被误判为业务目标声明", () => {
     const out = auditWorkflow({
       ...deadEndDraft,
