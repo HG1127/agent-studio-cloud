@@ -6,6 +6,7 @@ import { agentMemories, runs } from "@/db/schema";
 import { db } from "@/lib/db";
 import { buildMemoryContent } from "@/server/domain/memory/memory-content";
 import { selectRelevantMemories } from "@/server/domain/memory/memory-search";
+import { searchQueryFromInput } from "@/server/domain/runtime/search-query";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 
@@ -28,9 +29,7 @@ export async function runMemoryStep(args: {
       .limit(1);
     if (!run) throw new FatalError("找不到这次运行");
     const query = memory.query?.trim()
-      || (typeof args.input.question === "string" ? args.input.question.trim() : "")
-      || (typeof args.input.input === "string" ? args.input.input.trim() : "")
-      || JSON.stringify(args.input).slice(0, 500);
+      || searchQueryFromInput(args.input);
     const rows = await db
       .select({ content: agentMemories.content, createdAt: agentMemories.createdAt })
       .from(agentMemories)
