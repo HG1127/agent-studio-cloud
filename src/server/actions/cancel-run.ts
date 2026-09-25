@@ -8,7 +8,7 @@ import type { CancelRunResult } from "@/contracts/run";
 import { approvals, runs } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
-import { completeEvaluationForRun } from "@/server/services/evaluation-state";
+import { completeEvaluationForRun, reconcileTerminalEvaluationRun } from "@/server/services/evaluation-state";
 import { MAX_COLLABORATION_DEPTH, parseCollaborationParentId } from "@/server/domain/runtime/collaboration-chain";
 import { isRunStartLeaseExpired, RUN_START_LEASE_KEY } from "@/server/services/run-start-lease";
 
@@ -30,6 +30,13 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
       .where(and(eq(runs.id, runId), eq(runs.workspaceId, DEMO_WORKSPACE_ID)))
       .limit(1);
     if (!run) return { ok: false, error: "找不到这次运行" };
+    if (run.status === "cancelled") {
+      // 首次请求可能已写入取消终态、但在验收汇总时失败；重复请求负责把对账补齐。
+      await reconcileTerminalEvaluationRun(runId);
+      revalidatePath(`/runs/${runId}`);
+      revalidatePath("/runs");
+      return { ok: true };
+    }
     if (!LIVE_STATUSES.includes(run.status)) return { ok: false, error: "这次运行已经结束，无法取消" };
     let rootRunId = runId;
     let root = run;
@@ -117,7 +124,19 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
       }
       return rows;
     });
-    if (updated.length === 0) return { ok: false, error: "运行已在取消前结束，请刷新页面查看结果" };
+    if (updated.length === 0) {
+      const [current] = await db
+        .select({ status: runs.status })
+        .from(runs)
+        .where(and(eq(runs.id, rootRunId), eq(runs.workspaceId, DEMO_WORKSPACE_ID)))
+        .limit(1);
+      if (current?.status !== "cancelled") return { ok: false, error: "运行已在取消前结束，请刷新页面查看结果" };
+      await reconcileTerminalEvaluationRun(rootRunId);
+      revalidatePath(`/runs/${runId}`);
+      if (rootRunId !== runId) revalidatePath(`/runs/${rootRunId}`);
+      revalidatePath("/runs");
+      return { ok: true };
+    }
     await completeEvaluationForRun(rootRunId, null, "运行已取消");
     revalidatePath(`/runs/${runId}`);
     if (rootRunId !== runId) revalidatePath(`/runs/${rootRunId}`);
