@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Workflow 编译器产物由 SDK 生成，不参与手写源码规范检查。
+    ".workflow-vitest/**",
+    "src/app/.well-known/workflow/**",
   ]),
 ]);
 
