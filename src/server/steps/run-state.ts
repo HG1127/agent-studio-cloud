@@ -170,6 +170,7 @@ export async function persistContext(runId: string, outputs: Record<string, unkn
   if (updated.length > 0) return;
   const [run] = await db.select({ id: runs.id }).from(runs).where(eq(runs.id, runId)).limit(1);
   if (!run) throw new FatalError("运行记录不存在，无法继续执行");
+  throw new FatalError("运行已经结束，忽略迟到的上下文");
 }
 
 export async function finalizeRun(
