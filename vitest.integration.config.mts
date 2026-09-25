@@ -7,6 +7,7 @@ export default defineConfig({
     environment: "node",
     fileParallelism: false,
     include: ["tests/integration/**/*.test.{ts,tsx}"],
+    setupFiles: ["tests/workflow/env.ts"],
     testTimeout: 60_000,
     hookTimeout: 60_000,
   },
