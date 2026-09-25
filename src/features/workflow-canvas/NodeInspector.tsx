@@ -68,6 +68,11 @@ function changeInlineStepType(steps: Array<Record<string, unknown>>, index: numb
   });
 }
 
+function boundedNumber(value: string, fallback: number, min: number, max: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
+}
+
 function inlineToolSpec(toolId: string, currentAction: string, options: ToolRegistryOption[]) {
   const selected = options.find((item) => item.id === toolId);
   if (!selected) return {
@@ -95,6 +100,9 @@ function InlineStepEditor({ label, steps, index, toolOptions, removable, onChang
   const step = steps[index];
   const type = INLINE_STEP_TYPES.includes(step.type as InlineStepType) ? step.type as InlineStepType : "ai";
   const tool = step.tool && typeof step.tool === "object" ? step.tool as Record<string, unknown> : null;
+  const retry = step.retry && typeof step.retry === "object" ? step.retry as Record<string, unknown> : null;
+  const maxAttempts = Number(retry?.maxAttempts ?? tool?.maxRetries ?? 1);
+  const backoffMs = Number(retry?.backoffMs ?? 5_000);
   return <div className="grid gap-1 rounded-md bg-gray-50 p-2 md:grid-cols-[110px_1fr_2fr_auto]">
     <select aria-label={`${label} 类型`} value={type}
       onChange={(event) => onChange(changeInlineStepType(steps, index, event.target.value as InlineStepType))}
@@ -109,15 +117,33 @@ function InlineStepEditor({ label, steps, index, toolOptions, removable, onChang
       onChange={(event) => onChange(changeInlineStep(steps, index, "description", event.target.value))}
       className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
     {removable ? <button type="button" aria-label={`删除${label}`} onClick={onDelete} className="text-xs text-red-600">删除</button> : <span />}
-    {type === "tool" ? <select aria-label={`${label} 业务工具`} value={String(tool?.registryToolId ?? "demo")}
-      onChange={(event) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
-        ...item,
-        tool: inlineToolSpec(event.target.value, String(tool?.action ?? "demo"), toolOptions),
-      } : item))}
-      className="rounded-md border border-gray-300 px-2 py-1.5 text-xs md:col-span-4">
-      <option value="demo">演示工具（不连接业务系统）</option>
-      {toolOptions.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
-    </select> : null}
+    {type === "tool" ? <div className="grid gap-2 md:col-span-4 md:grid-cols-3">
+      <select aria-label={`${label} 业务工具`} value={String(tool?.registryToolId ?? "demo")}
+        onChange={(event) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
+          ...item,
+          tool: inlineToolSpec(event.target.value, String(tool?.action ?? "demo"), toolOptions),
+        } : item))}
+        className="rounded-md border border-gray-300 px-2 py-1.5 text-xs">
+        <option value="demo">演示工具（不连接业务系统）</option>
+        {toolOptions.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
+      </select>
+      <label className="flex items-center gap-2 text-xs text-gray-600">最多尝试
+        <input aria-label={`${label} 最多尝试次数`} type="number" min={1} max={8} value={maxAttempts}
+          onChange={(event) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
+            ...item,
+            retry: { maxAttempts: Math.round(boundedNumber(event.target.value, maxAttempts, 1, 8)), backoffMs },
+          } : item))}
+          className="min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />次
+      </label>
+      <label className="flex items-center gap-2 text-xs text-gray-600">失败后等待
+        <input aria-label={`${label} 重试间隔秒数`} type="number" min={0.05} max={60} step={0.05} value={backoffMs / 1_000}
+          onChange={(event) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
+            ...item,
+            retry: { maxAttempts, backoffMs: Math.round(boundedNumber(event.target.value, backoffMs / 1_000, 0.05, 60) * 1_000) },
+          } : item))}
+          className="min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />秒
+      </label>
+    </div> : null}
   </div>;
 }
 
@@ -208,7 +234,7 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
         />
       </div>
       {node.type === "tool" ? (
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-2">
           <label htmlFor="node-tool-target" className="text-sm font-medium">业务工具</label>
           <select
             id="node-tool-target"
@@ -245,6 +271,33 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
           {toolOptions.find((tool) => tool.id === node.tool?.registryToolId)?.description ? (
             <p className="text-xs text-gray-500">{toolOptions.find((tool) => tool.id === node.tool?.registryToolId)?.description}</p>
           ) : null}
+          <div className="grid grid-cols-2 gap-2">
+            <label className="flex flex-col gap-1 text-sm font-medium">最多尝试次数
+              <input aria-label="最多尝试次数" type="number" min={1} max={8}
+                value={node.retry?.maxAttempts ?? node.tool?.maxRetries ?? 1}
+                onChange={(event) => onNodeChange({
+                  ...node,
+                  retry: {
+                    maxAttempts: Math.round(boundedNumber(event.target.value, node.retry?.maxAttempts ?? node.tool?.maxRetries ?? 1, 1, 8)),
+                    backoffMs: node.retry?.backoffMs ?? 5_000,
+                  },
+                })}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm font-normal" />
+            </label>
+            <label className="flex flex-col gap-1 text-sm font-medium">失败后等待秒数
+              <input aria-label="失败后等待秒数" type="number" min={0.05} max={60} step={0.05}
+                value={(node.retry?.backoffMs ?? 5_000) / 1_000}
+                onChange={(event) => onNodeChange({
+                  ...node,
+                  retry: {
+                    maxAttempts: node.retry?.maxAttempts ?? node.tool?.maxRetries ?? 1,
+                    backoffMs: Math.round(boundedNumber(event.target.value, (node.retry?.backoffMs ?? 5_000) / 1_000, 0.05, 60) * 1_000),
+                  },
+                })}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm font-normal" />
+            </label>
+          </div>
+          <p className="text-xs text-gray-500">仅在连接超时、限流或业务系统临时故障时重试；字段或权限错误会立即停止。</p>
         </div>
       ) : null}
       {node.type === "knowledge" && knowledge ? (

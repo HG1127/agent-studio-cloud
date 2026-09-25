@@ -266,6 +266,39 @@ describe("NodeInspector", () => {
     }));
   });
 
+  it("工具节点可以设置总尝试次数与失败等待时间", () => {
+    const onNodeChange = vi.fn();
+    const { rerender } = render(<NodeInspector node={TOOL_NODE} onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("最多尝试次数"), { target: { value: "4" } });
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({ retry: { maxAttempts: 4, backoffMs: 5_000 } }));
+
+    const configured = WorkflowNode.parse({ ...TOOL_NODE, retry: { maxAttempts: 4, backoffMs: 5_000 } });
+    rerender(<NodeInspector node={configured} onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("失败后等待秒数"), { target: { value: "1.25" } });
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({ retry: { maxAttempts: 4, backoffMs: 1_250 } }));
+  });
+
+  it("内嵌工具步骤也可以设置重试策略", () => {
+    const toolParallel = WorkflowNode.parse({
+      ...PARALLEL_NODE,
+      parallel: {
+        ...PARALLEL_NODE.parallel!,
+        branches: PARALLEL_NODE.parallel!.branches.map((branch, index) => index === 0 ? {
+          ...branch,
+          steps: [{ id: "step_1", title: "更新客户", type: "tool", tool: { connector: "demo", action: "demo", scope: "demo", registryToolId: "demo", protocol: "demo" } }],
+        } : branch),
+      },
+    });
+    const onNodeChange = vi.fn();
+    render(<NodeInspector node={toolParallel} onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("并行工作 1 步骤 1 最多尝试次数"), { target: { value: "3" } });
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      parallel: expect.objectContaining({ branches: [expect.objectContaining({
+        steps: [expect.objectContaining({ retry: { maxAttempts: 3, backoffMs: 5_000 } })],
+      }), expect.anything()] }),
+    }));
+  });
+
   it("助手调用节点可选择已发布助手并冻结版本契约", async () => {
     const onNodeChange = vi.fn();
     const user = userEvent.setup();

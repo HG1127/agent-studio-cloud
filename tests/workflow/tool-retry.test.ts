@@ -27,7 +27,8 @@ describe("工具步骤重试", () => {
     const idempotencyKeys: Array<string | undefined> = [];
     server = createServer((request, response) => {
       calls += 1;
-      idempotencyKeys.push(request.headers["idempotency-key"]);
+      const idempotencyKey = request.headers["idempotency-key"];
+      idempotencyKeys.push(Array.isArray(idempotencyKey) ? idempotencyKey.join(",") : idempotencyKey);
       response.writeHead(503, { "content-type": "application/json" });
       response.end(JSON.stringify({ error: "temporary" }));
     });
