@@ -34,9 +34,9 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
       return { ok: false, error: "找不到这个助手，请刷新页面后重试", issues: [] };
     }
     const [definition] = await db
-      .select({ draft: workflowDefinitions.draft })
+      .select({ id: workflowDefinitions.id, draft: workflowDefinitions.draft, updatedAt: workflowDefinitions.updatedAt })
       .from(workflowDefinitions)
-      .where(eq(workflowDefinitions.agentId, agentId))
+      .where(and(eq(workflowDefinitions.agentId, agentId), eq(workflowDefinitions.workspaceId, agent.workspaceId)))
       .orderBy(desc(workflowDefinitions.createdAt))
       .limit(1);
     if (!definition) {
@@ -125,7 +125,27 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
     // 并发发布会撞 (agent_id, version) 唯一索引：整个事务重读 maxVersion 后重试一次
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        const publishedVersion = await db.transaction(async (tx) => {
+        const publishOutcome = await db.transaction(async (tx) => {
+          // 保存流程和修改基本信息都会先锁同一助手行；发布也拿这把锁并核对快照，
+          // 防止耗时的设计检查期间草稿已变化，却仍把旧内容发布成新版本。
+          const [lockedAgent] = await tx
+            .select({ updatedAt: agents.updatedAt })
+            .from(agents)
+            .where(and(eq(agents.id, agentId), eq(agents.workspaceId, agent.workspaceId), isNull(agents.archivedAt)))
+            .for("update")
+            .limit(1);
+          if (!lockedAgent || lockedAgent.updatedAt.getTime() !== agent.updatedAt.getTime()) {
+            return { kind: "stale" as const };
+          }
+          const [lockedDefinition] = await tx
+            .select({ updatedAt: workflowDefinitions.updatedAt })
+            .from(workflowDefinitions)
+            .where(and(eq(workflowDefinitions.id, definition.id), eq(workflowDefinitions.workspaceId, agent.workspaceId)))
+            .for("update")
+            .limit(1);
+          if (!lockedDefinition || lockedDefinition.updatedAt.getTime() !== definition.updatedAt.getTime()) {
+            return { kind: "stale" as const };
+          }
           const now = new Date();
           await tx
             .update(agentVersions)
@@ -163,10 +183,16 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
             summary: `发布助手「${agent.name}」的版本 ${created.version}`,
             data: { version: created.version, release },
           }));
-          return VersionSummary.parse({ ...created, createdAt: created.createdAt.toISOString() });
+          return {
+            kind: "published" as const,
+            version: VersionSummary.parse({ ...created, createdAt: created.createdAt.toISOString() }),
+          };
         });
+        if (publishOutcome.kind === "stale") {
+          return { ok: false, error: "助手或流程刚刚发生变化，请重新发布", issues: [] };
+        }
         revalidatePath(`/agents/${agentId}`);
-        return { ok: true, release, version: publishedVersion, exempted: exempted.map((issue) => ({ title: issue.title })) };
+        return { ok: true, release, version: publishOutcome.version, exempted: exempted.map((issue) => ({ title: issue.title })) };
       } catch (error) {
         if (!isUniqueViolation(error)) throw error;
         if (attempt > 0) {
