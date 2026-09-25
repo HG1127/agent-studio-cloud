@@ -12,7 +12,7 @@ function typeMatches(value: unknown, type: string): boolean {
 export function validateRunInput(input: Record<string, unknown>, fields: AgentInputField[]): string | null {
   for (const field of fields) {
     const value = input[field.name];
-    const missing = !(field.name in input) || value === null || value === undefined || (typeof value === "string" && !value.trim());
+    const missing = !Object.prototype.hasOwnProperty.call(input, field.name) || value === null || value === undefined || (typeof value === "string" && !value.trim());
     if (field.required && missing) return `运行输入“${field.label ?? field.name}”不能为空`;
     if (!missing && !typeMatches(value, field.type)) return `运行输入“${field.label ?? field.name}”的格式不正确`;
   }

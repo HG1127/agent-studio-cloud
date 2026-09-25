@@ -11,6 +11,10 @@ function normalizedTerms(node: WorkflowNode): string[] {
     .filter((term) => term.length >= 2);
 }
 
+function ownValue(source: Record<string, unknown>, key: string): unknown {
+  return Object.prototype.hasOwnProperty.call(source, key) ? source[key] : undefined;
+}
+
 export function sanitizeHandoffValue(
   value: unknown,
   mustNotInclude: string[],
@@ -60,7 +64,7 @@ export function buildHandoffInput(args: {
   const sourceOutputs = sanitizedOutputs.value as Record<string, unknown>;
   const fields = args.targetManifest.inputContract.fields;
   const fallbackCopies = fields.filter((field) => {
-    const value = sourceInput[field.name] ?? sourceOutputs[field.name];
+    const value = ownValue(sourceInput, field.name) ?? ownValue(sourceOutputs, field.name);
     return (value === undefined || value === null) && field.type === "string";
   }).length;
   const context = buildBoundedCollaborationContext({
@@ -73,7 +77,7 @@ export function buildHandoffInput(args: {
     },
   }, fallbackCopies || 1);
   const input = fields.length === 0 ? { brief: context } : Object.fromEntries(fields.flatMap((field) => {
-    const value = sourceInput[field.name] ?? sourceOutputs[field.name];
+    const value = ownValue(sourceInput, field.name) ?? ownValue(sourceOutputs, field.name);
     if (value !== undefined && value !== null) return [[field.name, value]];
     return field.type === "string" ? [[field.name, context]] : [];
   }));

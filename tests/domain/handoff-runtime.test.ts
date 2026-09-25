@@ -91,6 +91,16 @@ describe("助手交接运行逻辑", () => {
     expect(provided.input).toMatchObject({ count: 2, confirmed: false });
   });
 
+  it("交接输入不会从对象原型读取目标字段", () => {
+    const inheritedFieldManifest = AgentManifest.parse({
+      ...targetManifest,
+      inputContract: { fields: [{ name: "toString", type: "string", required: true }] },
+    });
+    const prepared = buildHandoffInput({ node: handoffNode(), targetManifest: inheritedFieldManifest, input: {}, outputs: {} });
+    expect(prepared.input.toString).toEqual(expect.any(String));
+    expect(prepared.input.toString).not.toBe(Object.prototype.toString);
+  });
+
   it("按冻结契约校验交接结果的必填字段和类型", () => {
     expect(validateHandoffOutput(handoffNode(), {})).toBe("交接结果缺少“result”");
     const typed = handoffNode();
