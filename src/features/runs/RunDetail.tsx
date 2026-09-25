@@ -35,6 +35,15 @@ function formatDateTime(iso: string): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
+function readResultPath(result: Record<string, unknown>, path: string): unknown {
+  return path.split(".").reduce<unknown>((current, segment) => {
+    if (!current || typeof current !== "object" || Array.isArray(current) || !Object.prototype.hasOwnProperty.call(current, segment)) {
+      return undefined;
+    }
+    return (current as Record<string, unknown>)[segment];
+  }, result);
+}
+
 export async function RunDetail({ runId }: { runId: string }) {
   const run = await getRunView(runId, DEMO_WORKSPACE_ID);
   if (!run) notFound();
@@ -49,8 +58,16 @@ export async function RunDetail({ runId }: { runId: string }) {
   // 待确认的置顶，已决定的按时间在后
   const pendingApprovals = live ? approvals.filter((approval) => approval.status === "pending") : [];
   const decidedApprovals = approvals.filter((approval) => approval.status !== "pending");
-  const outputs = Object.entries(run.result ?? {});
   const stepTitleByNode = new Map(steps.map((step) => [step.nodeId, step.nodeTitle]));
+  const resultRecord = run.result && typeof run.result === "object" && !Array.isArray(run.result)
+    ? run.result as Record<string, unknown>
+    : {};
+  const contractedOutputs = run.outputContract.fields
+    .map((field) => ({ key: field.path, label: field.label ?? field.path, output: readResultPath(resultRecord, field.path) }))
+    .filter((field) => field.output !== undefined);
+  const outputs = contractedOutputs.length > 0
+    ? contractedOutputs
+    : Object.entries(resultRecord).map(([key, output]) => ({ key, label: stepTitleByNode.get(key) ?? "步骤结果", output }));
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 p-8">
@@ -150,10 +167,10 @@ export async function RunDetail({ runId }: { runId: string }) {
           </div>
           {outputs.length > 0 ? (
             <ul className="flex flex-col gap-3">
-              {outputs.map(([nodeId, output]) => (
-                <li key={nodeId} className="flex flex-col gap-1">
+              {outputs.map(({ key, label, output }) => (
+                <li key={key} className="flex flex-col gap-1">
                   <p className="text-sm font-medium text-gray-700">
-                    {stepTitleByNode.get(nodeId) ?? "步骤结果"}
+                    {label}
                   </p>
                   <p className="whitespace-pre-wrap break-words text-sm text-gray-700">
                     {typeof output === "string" ? output : JSON.stringify(output, null, 2)}

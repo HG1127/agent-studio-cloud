@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { WorkflowDraft } from "./workflow";
 
 export const MAX_RUN_INPUT_BYTES = 100 * 1024;
 export const MAX_WAIT_EVENT_PAYLOAD_BYTES = 256 * 1024;
@@ -138,6 +139,7 @@ export const RunView = z.object({
   parentRunId: z.string().uuid().nullable().default(null),
   input: z.record(z.string(), z.unknown()),
   result: z.unknown().nullable(),
+  outputContract: WorkflowDraft.shape.outputContract.default({ fields: [] }),
   error: z.string().nullable(),
   startupRecoverable: z.boolean().default(false),
   startedAt: z.string().nullable(),

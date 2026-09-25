@@ -10,7 +10,8 @@ import {
   RunSummary,
   RunView,
 } from "@/contracts/run";
-import { agents, approvals, runSteps, runs, traceEvents, type Run, type RunStep } from "@/db/schema";
+import { AgentManifest } from "@/contracts/manifest";
+import { agentVersions, agents, approvals, runSteps, runs, traceEvents, type Run, type RunStep } from "@/db/schema";
 import { db } from "@/lib/db";
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
 import { isRunStartLeaseExpired } from "@/server/services/run-start-lease";
@@ -174,9 +175,14 @@ export async function getPendingWaitHook(runId: string, workspaceId: string): Pr
 export async function getRunView(runId: string, workspaceId: string): Promise<RunView | null> {
   if (!RUN_ID.safeParse(runId).success) return null;
   const [row] = await db
-    .select({ run: runs, agentName: agents.name, agentArchivedAt: agents.archivedAt })
+    .select({ run: runs, agentName: agents.name, agentArchivedAt: agents.archivedAt, manifest: agentVersions.manifest })
     .from(runs)
     .innerJoin(agents, eq(agents.id, runs.agentId))
+    .innerJoin(agentVersions, and(
+      eq(agentVersions.id, runs.versionId),
+      eq(agentVersions.agentId, runs.agentId),
+      eq(agentVersions.workspaceId, runs.workspaceId),
+    ))
     .where(and(eq(runs.id, runId), eq(runs.workspaceId, workspaceId), eq(agents.workspaceId, workspaceId)))
     .limit(1);
   if (!row) return null;
@@ -184,6 +190,7 @@ export async function getRunView(runId: string, workspaceId: string): Promise<Ru
     ? /^(?:agent-call|handoff):([0-9a-f-]{36}):/i.exec(row.run.sourceKey ?? "")?.[1] ?? null
     : null;
   // 读取再 safeParse 一次，坏数据降级为 404 而不是让页面崩掉
+  const manifest = AgentManifest.safeParse(row.manifest);
   const parsed = RunView.safeParse({
     id: row.run.id,
     agentId: row.run.agentId,
@@ -194,6 +201,7 @@ export async function getRunView(runId: string, workspaceId: string): Promise<Ru
     parentRunId,
     input: row.run.input,
     result: row.run.result ?? null,
+    outputContract: manifest.success ? manifest.data.outputContract : { fields: [] },
     error: row.run.error ?? null,
     startupRecoverable: row.agentArchivedAt === null
       && row.run.status === "queued"
