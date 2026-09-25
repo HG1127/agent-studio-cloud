@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { scoreChunks } from "@/server/domain/knowledge/search";
+import { scoreChunks, tokenize } from "@/server/domain/knowledge/search";
 
 const docs = [
   { sourceId: "s1", sourceName: "售后手册", chunkIndex: 0, content: "开头即说明退货政策：签收后 7 天内可退。" },
@@ -57,5 +57,13 @@ describe("scoreChunks", () => {
   it("limit 生效", () => {
     const many = Array.from({ length: 30 }, (_, i) => ({ sourceId: `s${i}`, sourceName: "n", chunkIndex: i, content: "退货政策说明" }));
     expect(scoreChunks("退货政策", many, { limit: 8 })).toHaveLength(8);
+  });
+
+  it("限制参与打分的查询词数量和单词长度", () => {
+    const tokens = tokenize(Array.from({ length: 40 }, (_, index) => `词${index}`).join(" "));
+    const [longToken] = tokenize("x".repeat(300));
+
+    expect(tokens).toHaveLength(32);
+    expect(longToken).toHaveLength(200);
   });
 });
