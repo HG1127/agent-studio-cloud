@@ -38,6 +38,17 @@ describe("等待消息面板", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("拒绝包含保留字段的消息并展示具体原因", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<WaitEventPanel runId="00000000-0000-4000-8000-000000000001" eventKey="customer.updated" title="等待客户补充资料" />);
+    const user = userEvent.setup();
+    fireEvent.change(screen.getByLabelText("消息内容"), { target: { value: '{"nested":{"constructor":"blocked"}}' } });
+    await user.click(screen.getByRole("button", { name: "提交并继续" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("等待消息不能使用保留字段名");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("展示等待消息的必填字段", () => {
     render(<WaitEventPanel
       runId="00000000-0000-4000-8000-000000000001"

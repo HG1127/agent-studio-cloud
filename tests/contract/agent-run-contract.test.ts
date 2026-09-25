@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AgentCreateInput } from "@/contracts/agent";
-import { ApprovalDecisionInput, MAX_RUN_INPUT_BYTES, RunStartInput } from "@/contracts/run";
+import { ApprovalDecisionInput, MAX_RUN_INPUT_BYTES, RunStartInput, WaitEventPayload } from "@/contracts/run";
 
 const uuid = "550e8400-e29b-41d4-a716-446655440000";
 
@@ -80,5 +80,20 @@ describe("ApprovalDecisionInput", () => {
   it("拒绝非枚举的决定值", () => {
     const result = ApprovalDecisionInput.safeParse({ decision: "maybe" });
     expect(result.success).toBe(false);
+  });
+});
+
+describe("WaitEventPayload", () => {
+  it("接受普通 JSON 对象", () => {
+    expect(WaitEventPayload.safeParse({ customerId: "C-100", complete: true }).success).toBe(true);
+  });
+
+  it("拒绝过深、过多和危险字段", () => {
+    let nested: Record<string, unknown> = {};
+    for (let index = 0; index < 14; index += 1) nested = { nested };
+    const reserved = JSON.parse('{"nested":{"__proto__":{"polluted":true}}}') as Record<string, unknown>;
+    expect(WaitEventPayload.safeParse(nested).success).toBe(false);
+    expect(WaitEventPayload.safeParse({ items: Array.from({ length: 2_001 }, (_, index) => index) }).success).toBe(false);
+    expect(WaitEventPayload.safeParse(reserved).success).toBe(false);
   });
 });

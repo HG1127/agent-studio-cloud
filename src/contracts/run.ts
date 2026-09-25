@@ -1,45 +1,60 @@
 import { z } from "zod";
 
 export const MAX_RUN_INPUT_BYTES = 100 * 1024;
+export const MAX_WAIT_EVENT_PAYLOAD_BYTES = 256 * 1024;
 const MAX_RUN_INPUT_DEPTH = 12;
 const MAX_RUN_INPUT_ENTRIES = 2_000;
 const MAX_RUN_INPUT_KEYS = 100;
 const RESERVED_INPUT_KEYS: ReadonlySet<string> = new Set(["__proto__", "prototype", "constructor"]);
 
-function runInputIssue(value: Record<string, unknown>): string | null {
-  if (Object.keys(value).length > MAX_RUN_INPUT_KEYS) return `运行输入最多包含 ${MAX_RUN_INPUT_KEYS} 个字段`;
+function jsonObjectIssue(value: Record<string, unknown>, options: {
+  label: string;
+  maxBytes: number;
+  maxDepth?: number;
+  maxEntries?: number;
+  maxKeys?: number;
+  maxKeyLength?: number;
+}): string | null {
+  const maxDepth = options.maxDepth ?? MAX_RUN_INPUT_DEPTH;
+  const maxEntries = options.maxEntries ?? MAX_RUN_INPUT_ENTRIES;
+  const maxKeys = options.maxKeys ?? MAX_RUN_INPUT_KEYS;
+  const maxKeyLength = options.maxKeyLength ?? 100;
+  if (Object.keys(value).length > maxKeys) return `${options.label}最多包含 ${maxKeys} 个字段`;
   const stack: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
   const visited = new WeakSet<object>();
   let entries = 0;
   while (stack.length > 0) {
     const current = stack.pop()!;
-    if (current.depth > MAX_RUN_INPUT_DEPTH) return `运行输入最多嵌套 ${MAX_RUN_INPUT_DEPTH} 层`;
+    if (current.depth > maxDepth) return `${options.label}最多嵌套 ${maxDepth} 层`;
     const item = current.value;
     if (item === null || typeof item === "string" || typeof item === "boolean") continue;
     if (typeof item === "number") {
-      if (!Number.isFinite(item)) return "运行输入中的数字必须是有限值";
+      if (!Number.isFinite(item)) return `${options.label}中的数字必须是有限值`;
       continue;
     }
-    if (typeof item !== "object") return "运行输入只能包含可序列化的 JSON 数据";
-    if (visited.has(item)) return "运行输入不能包含循环引用";
+    if (typeof item !== "object") return `${options.label}只能包含可序列化的 JSON 数据`;
+    if (visited.has(item)) return `${options.label}不能包含循环引用`;
     visited.add(item);
     if (!Array.isArray(item) && Object.getPrototypeOf(item) !== Object.prototype && Object.getPrototypeOf(item) !== null) {
-      return "运行输入只能包含普通对象和数组";
+      return `${options.label}只能包含普通对象和数组`;
     }
     const itemEntries = Array.isArray(item) ? item.map((child, index) => [String(index), child] as const) : Object.entries(item);
-    if (itemEntries.some(([key]) => RESERVED_INPUT_KEYS.has(key))) return "运行输入不能使用保留字段名";
+    if (itemEntries.some(([key]) => key.length > maxKeyLength)) return `${options.label}的字段名不能超过 ${maxKeyLength} 个字符`;
+    if (itemEntries.some(([key]) => RESERVED_INPUT_KEYS.has(key))) return `${options.label}不能使用保留字段名`;
     const children = itemEntries.map(([, child]) => child);
     entries += children.length;
-    if (entries > MAX_RUN_INPUT_ENTRIES) return `运行输入最多包含 ${MAX_RUN_INPUT_ENTRIES} 个数据项`;
+    if (entries > maxEntries) return `${options.label}最多包含 ${maxEntries} 个数据项`;
     for (const child of children) stack.push({ value: child, depth: current.depth + 1 });
   }
   const bytes = new TextEncoder().encode(JSON.stringify(value)).byteLength;
-  return bytes > MAX_RUN_INPUT_BYTES ? "运行输入不能超过 100 KB" : null;
+  if (bytes <= options.maxBytes) return null;
+  const limit = options.maxBytes % 1024 === 0 ? `${options.maxBytes / 1024} KB` : `${options.maxBytes} 字节`;
+  return `${options.label}不能超过 ${limit}`;
 }
 
 export const RunInputPayload = z.preprocess((value, ctx) => {
   if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-    const issue = runInputIssue(value as Record<string, unknown>);
+    const issue = jsonObjectIssue(value as Record<string, unknown>, { label: "运行输入", maxBytes: MAX_RUN_INPUT_BYTES });
     if (issue) ctx.addIssue({ code: "custom", message: issue });
   }
   return value;
@@ -74,7 +89,16 @@ export const RunListFilters = z.object({
 });
 export type RunListFilters = z.infer<typeof RunListFilters>;
 
-export const WaitEventPayload = z.record(z.string(), z.unknown());
+export const WaitEventPayload = z.preprocess((value, ctx) => {
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    const issue = jsonObjectIssue(value as Record<string, unknown>, {
+      label: "等待消息",
+      maxBytes: MAX_WAIT_EVENT_PAYLOAD_BYTES,
+    });
+    if (issue) ctx.addIssue({ code: "custom", message: issue });
+  }
+  return value;
+}, z.record(z.string().max(100), z.unknown()));
 export type WaitEventPayload = z.infer<typeof WaitEventPayload>;
 
 export const WaitEventResumeResult = z.discriminatedUnion("ok", [

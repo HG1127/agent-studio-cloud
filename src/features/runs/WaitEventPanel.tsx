@@ -58,7 +58,9 @@ export function WaitEventPanel({ runId, eventKey, title, payloadSchema = { type:
           }
           const payload = WaitEventPayload.safeParse(raw);
           if (!payload.success) {
-            setError("消息内容需要是一个对象，不能是文字或列表");
+            setError(raw !== null && typeof raw === "object" && !Array.isArray(raw)
+              ? payload.error.issues[0]?.message ?? "消息内容不正确"
+              : "消息内容需要是一个对象，不能是文字或列表");
             return;
           }
           startTransition(async () => {

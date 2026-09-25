@@ -93,6 +93,22 @@ describe("外部消息恢复接口", () => {
     expect(resumeHookMock).not.toHaveBeenCalled();
   });
 
+  it("拒绝包含保留字段的消息且不会恢复", async () => {
+    await insertWaitingRun();
+    const response = await POST(
+      new Request(`http://localhost/api/runs/${RUN_ID}/events/customer.profile.updated`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: '{"nested":{"__proto__":{"polluted":true}}}',
+      }),
+      { params: Promise.resolve({ runId: RUN_ID, eventKey: "customer.profile.updated" }) },
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ ok: false, error: "等待消息不能使用保留字段名" });
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
   it("非等待状态不接受外部消息", async () => {
     await db.insert(runs).values({
       id: RUN_ID,
