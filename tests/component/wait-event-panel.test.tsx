@@ -51,6 +51,33 @@ describe("等待消息面板", () => {
     expect(refresh).toHaveBeenCalledOnce();
   });
 
+  it("进入下一次等待时清空上一轮内容和成功提示", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = render(<WaitEventPanel
+      runId="00000000-0000-4000-8000-000000000001"
+      eventKey="customer.updated"
+      title="等待客户补充资料"
+      submissionToken="first-token"
+      payloadSchema={{ type: "object", required: ["complete"], properties: { complete: { type: "boolean" } } }}
+    />);
+    const user = userEvent.setup();
+    fireEvent.change(screen.getByLabelText("消息内容"), { target: { value: '{"complete":true}' } });
+    await user.click(screen.getByRole("button", { name: "提交并继续" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("消息已提交，运行将继续");
+
+    rerender(<WaitEventPanel
+      runId="00000000-0000-4000-8000-000000000001"
+      eventKey="order.ready"
+      title="等待订单就绪"
+      submissionToken="second-token"
+      payloadSchema={{ type: "object", required: ["orderId"], properties: { orderId: { type: "string" } } }}
+    />);
+
+    expect(screen.getByLabelText("消息内容")).toHaveValue(JSON.stringify({ orderId: "" }, null, 2));
+    expect(screen.queryByText("消息已提交，运行将继续")).not.toBeInTheDocument();
+  });
+
   it("拒绝文字和列表格式且不发送请求", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

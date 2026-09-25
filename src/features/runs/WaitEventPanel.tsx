@@ -24,13 +24,15 @@ function schemaExample(schema: unknown, depth = 0): unknown {
   return "";
 }
 
-export function WaitEventPanel({ runId, eventKey, title, submissionToken, payloadSchema = { type: "object" } }: {
+type WaitEventPanelProps = {
   runId: string;
   eventKey: string;
   title: string;
   submissionToken: string | null;
   payloadSchema?: Record<string, unknown>;
-}) {
+};
+
+function WaitEventPanelInstance({ runId, eventKey, title, submissionToken, payloadSchema = { type: "object" } }: WaitEventPanelProps) {
   const router = useRouter();
   const [content, setContent] = useState(() => JSON.stringify(schemaExample(payloadSchema), null, 2));
   const [error, setError] = useState<string | null>(null);
@@ -150,4 +152,9 @@ export function WaitEventPanel({ runId, eventKey, title, submissionToken, payloa
       ) : null}
     </section>
   );
+}
+
+export function WaitEventPanel(props: WaitEventPanelProps) {
+  const instanceKey = `${props.runId}:${props.eventKey}:${props.submissionToken ?? "legacy"}`;
+  return <WaitEventPanelInstance key={instanceKey} {...props} />;
 }
