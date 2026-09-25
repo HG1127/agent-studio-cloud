@@ -6,7 +6,7 @@ import { FatalError, getWritable } from "workflow";
 import { db } from "@/lib/db";
 import { runs, traceEvents } from "@/db/schema";
 import { writeTraceStreamBestEffort } from "@/server/domain/trace-stream";
-import { isUniqueViolation } from "@/server/unique-violation";
+import { canAppendTraceToRun } from "@/server/domain/trace-state";
 
 export type TraceLevel = "info" | "warn" | "error";
 
@@ -30,16 +30,6 @@ function boundedText(value: string | null | undefined, maxLength: number): strin
 
 export async function appendTrace(event: AppendTraceInput): Promise<void> {
   "use step";
-  const [run] = await db
-    .select({ workspaceId: runs.workspaceId, createdBy: runs.createdBy })
-    .from(runs)
-    .where(eq(runs.id, event.runId))
-    .limit(1);
-  if (!run) throw new FatalError("运行记录不存在，无法写入轨迹");
-  const [row] = await db
-    .select({ max: sql<number>`coalesce(max(${traceEvents.seq}), 0)`.mapWith(Number) })
-    .from(traceEvents)
-    .where(eq(traceEvents.runId, event.runId));
   const at = new Date();
   const base = {
     nodeId: event.nodeId ?? null,
@@ -49,30 +39,29 @@ export async function appendTrace(event: AppendTraceInput): Promise<void> {
     detail: boundedText(event.detail, MAX_TRACE_DETAIL_LENGTH),
     data: event.data ?? null,
   };
-  const insertWithSeq = (seq: number) =>
-    db
+  // 与取消、失败和完成共用运行行锁：终态检查与轨迹插入处于同一事务，
+  // 并行步骤也按运行串行分配 seq，不再依赖唯一键冲突重试。
+  const seq = await db.transaction(async (tx) => {
+    const [run] = await tx
+      .select({ workspaceId: runs.workspaceId, createdBy: runs.createdBy, status: runs.status })
+      .from(runs)
+      .where(eq(runs.id, event.runId))
+      .for("update")
+      .limit(1);
+    if (!run) throw new FatalError("运行记录不存在，无法写入轨迹");
+    if (!canAppendTraceToRun(run.status, event.kind)) return null;
+    const [row] = await tx
+      .select({ max: sql<number>`coalesce(max(${traceEvents.seq}), 0)`.mapWith(Number) })
+      .from(traceEvents)
+      .where(eq(traceEvents.runId, event.runId));
+    const [inserted] = await tx
       .insert(traceEvents)
-      .values({ runId: event.runId, workspaceId: run.workspaceId, createdBy: run.createdBy, seq, ...base, at })
+      .values({ runId: event.runId, workspaceId: run.workspaceId, createdBy: run.createdBy, seq: (row?.max ?? 0) + 1, ...base, at })
       .returning({ seq: traceEvents.seq });
-  let seq = (row?.max ?? 0) + 1;
-  let inserted: { seq: number }[] | null = null;
-  // 竞态是淘汰赛：每次失败至少有一个其他写者已提交，N 个并发写者最坏要输 N-1 次，
-  // 3 次必耗尽；上限 10 保证 8 并发内全员成功（当前最大并发即 8 个并行轨迹步骤）
-  for (let attempt = 0; attempt < 10 && !inserted; attempt += 1) {
-    try {
-      inserted = await insertWithSeq(seq);
-    } catch (error) {
-      if (!isUniqueViolation(error)) throw error;
-      const [fresh] = await db
-        .select({ max: sql<number>`coalesce(max(${traceEvents.seq}), 0)`.mapWith(Number) })
-        .from(traceEvents)
-        .where(eq(traceEvents.runId, event.runId));
-      seq = (fresh?.max ?? 0) + 1;
-    }
-  }
-  if (!inserted) throw new FatalError("轨迹写入冲突，请重试");
-  // 流写入的 seq 必须用插入成功后的实际值：重试后 seq 会变，用插入前的旧号会错号
-  const payload = { seq: inserted[0].seq, ...base, at: at.toISOString() };
+    return inserted.seq;
+  });
+  if (seq === null) return;
+  const payload = { seq, ...base, at: at.toISOString() };
   await writeTraceStreamBestEffort(async () => {
     const writer = getWritable({ namespace: "trace" }).getWriter();
     await writer.write(JSON.stringify(payload));
