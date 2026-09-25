@@ -167,6 +167,57 @@ describe("直测：结构性检查", () => {
     ]));
   });
 
+  it("运行输入声明与条件、循环实际用法冲突时阻止发布", () => {
+    const out = auditWorkflow(WorkflowDraft.parse({
+      id: "input-type-mismatch",
+      rootAgent: { id: "agent", name: "测试助手", role: "处理" },
+      memoryPolicy: { taskContext: true, longTerm: false },
+      variables: [
+        { name: "customer", type: "string", scope: "run" },
+        { name: "orders", type: "string", scope: "run" },
+      ],
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "condition" },
+        condition: {
+          id: "condition", title: "判断客户等级", type: "condition",
+          condition: { source: "input.customer.level", operator: "eq", branches: [{ label: "重点", value: "vip", next: "loop" }], defaultNext: "loop" },
+        },
+        loop: {
+          id: "loop", title: "逐项处理订单", type: "loop",
+          loop: { collectionPath: "input.orders", itemKey: "order", maxIterations: 10, bodyNext: "done", exitNext: "done" },
+        },
+        done: { id: "done", title: "结束", type: "end", next: null },
+      },
+    }));
+
+    expect(out.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "input_type_mismatch_customer", severity: "critical" }),
+      expect.objectContaining({ code: "input_type_mismatch_orders", severity: "critical" }),
+    ]));
+  });
+
+  it("同一隐式运行输入被按不同格式使用时阻止发布", () => {
+    const out = auditWorkflow(WorkflowDraft.parse({
+      id: "implicit-input-type-conflict",
+      rootAgent: { id: "agent", name: "测试助手", role: "处理" },
+      memoryPolicy: { taskContext: true, longTerm: false },
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "condition" },
+        condition: {
+          id: "condition", title: "判断任务", type: "condition",
+          condition: { source: "input.items", operator: "eq", branches: [{ label: "继续", value: "ready", next: "loop" }], defaultNext: "loop" },
+        },
+        loop: {
+          id: "loop", title: "逐项处理", type: "loop",
+          loop: { collectionPath: "input.items", itemKey: "item", maxIterations: 10, bodyNext: "done", exitNext: "done" },
+        },
+        done: { id: "done", title: "结束", type: "end", next: null },
+      },
+    }));
+
+    expect(out.issues).toContainEqual(expect.objectContaining({ code: "input_type_conflict_items", severity: "critical" }));
+  });
+
   it("未选择协作助手时作为发布阻塞问题", () => {
     const result = auditWorkflow(WorkflowDraft.parse({
       id: "missing-collaborator",

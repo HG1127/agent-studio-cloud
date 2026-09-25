@@ -327,6 +327,26 @@ function conditionSourceOk(source: string | null | undefined): boolean {
   return Boolean(parts && ["input", "variables", "context"].includes(parts[0]));
 }
 
+type RuntimeInputType = "string" | "number" | "boolean" | "object" | "array";
+
+function inputRequirement(
+  source: string | null | undefined,
+  operator?: string | null,
+  comparison?: unknown,
+): { name: string; type: RuntimeInputType } | null {
+  const parts = source ? safeDataPathSegments(source) : null;
+  if (!parts || !["input", "variables"].includes(parts[0]) || !parts[1]) return null;
+  if (parts.length > 2) return { name: parts[1], type: "object" };
+  if (["gt", "gte", "lt", "lte"].includes(operator || "") || typeof comparison === "number") {
+    return { name: parts[1], type: "number" };
+  }
+  if (typeof comparison === "boolean") return { name: parts[1], type: "boolean" };
+  if (typeof comparison === "string") return { name: parts[1], type: "string" };
+  if (Array.isArray(comparison)) return { name: parts[1], type: "array" };
+  if (comparison !== null && typeof comparison === "object") return { name: parts[1], type: "object" };
+  return null;
+}
+
 const SUPPORTED_INLINE_TYPES = new Set(["ai", "tool", "knowledge", "system", "memory", "agent_call", "handoff"]);
 
 function inlineRuntimeSettingIssue(step: AuditSubflowStep): { category: string; title: string; detail: string } | null {
@@ -743,6 +763,7 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
 
   const variables = Array.isArray(wf.variables) ? wf.variables : [];
   const varNames = new Set<string>();
+  const runVariableTypes = new Map<string, string>();
   for (const v of variables) {
     const name = String(v?.name || "").trim();
     if (!name) {
@@ -756,6 +777,7 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
       issues.push(issue("critical", "data", "业务变量名称重复", `「${name}」被定义了多次。`, { fixable: true, code: `variable_duplicate_${name}` }));
     }
     varNames.add(name);
+    if (v.scope === "run" && !runVariableTypes.has(name)) runVariableTypes.set(name, String(v.type || "string"));
     if (!["string", "number", "boolean", "object", "array", "any"].includes(v.type || "any")) {
       issues.push(issue("critical", "data", "业务变量类型不明确", `「${name}」使用了不支持的类型 ${v.type}。`, { fixable: true, code: `variable_type_${name}` }));
     }
@@ -764,6 +786,44 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
     }
     if (v.scope === "shared" && /secret|token|password|api.?key/i.test(name)) {
       issues.push(issue("critical", "memory", "敏感变量不能设为共享", `「${name}」看起来属于凭证/密钥，不能进入 Agent Team 共享状态。`, { fixable: true, code: `variable_sensitive_${name}` }));
+    }
+  }
+
+  const inputRequirements = new Map<string, Set<RuntimeInputType>>();
+  const requireInput = (requirement: { name: string; type: RuntimeInputType } | null) => {
+    if (!requirement) return;
+    const types = inputRequirements.get(requirement.name) ?? new Set<RuntimeInputType>();
+    types.add(requirement.type);
+    inputRequirements.set(requirement.name, types);
+  };
+  for (const n of Object.values(nodes)) {
+    if (n.type === "condition" && n.condition) {
+      for (const branch of n.condition.branches || []) {
+        if (!branch.rules?.length) requireInput(inputRequirement(n.condition.source, n.condition.operator, branch.value));
+        for (const rule of branch.rules || []) requireInput(inputRequirement(rule.source, rule.operator, rule.value));
+      }
+    }
+    if (n.type === "loop") {
+      const parts = typeof n.loop?.collectionPath === "string" ? safeDataPathSegments(n.loop.collectionPath) : null;
+      if (parts && ["input", "variables"].includes(parts[0]) && parts[1]) {
+        requireInput({ name: parts[1], type: parts.length > 2 ? "object" : "array" });
+      }
+    }
+  }
+  for (const [name, types] of inputRequirements) {
+    const declaredType = runVariableTypes.get(name);
+    const expected = [...types];
+    if (expected.length > 1) {
+      issues.push(issue("critical", "data", "运行输入被按不同格式使用", `「${name}」在流程中同时被当作${expected.map((type) => ({ string: "文字", number: "数字", boolean: "是或否", object: "对象", array: "列表" })[type]).join("、")}使用，无法生成可靠的运行表单。`, {
+        fixable: true,
+        code: `input_type_conflict_${name}`,
+      }));
+    } else if (declaredType && declaredType !== expected[0]) {
+      const labels: Record<string, string> = { string: "文字", number: "数字", boolean: "是或否", object: "对象", array: "列表" };
+      issues.push(issue("critical", "data", "运行输入类型与流程用法冲突", `「${name}」声明为${labels[declaredType] || declaredType}，但流程会把它当作${labels[expected[0]]}使用。`, {
+        fixable: true,
+        code: `input_type_mismatch_${name}`,
+      }));
     }
   }
 

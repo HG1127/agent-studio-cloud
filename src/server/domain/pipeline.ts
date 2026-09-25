@@ -292,6 +292,16 @@ function inputContractFor(draft: WorkflowDraft): AgentManifest["inputContract"] 
     seen.add(name);
     fields.push({ name, required: true, type: path.length > 1 ? "object" : type });
   };
+  const comparisonType = (
+    operator: string,
+    value: unknown,
+  ): AgentManifest["inputContract"]["fields"][number]["type"] => {
+    if (["gt", "gte", "lt", "lte"].includes(operator) || typeof value === "number") return "number";
+    if (typeof value === "boolean") return "boolean";
+    if (Array.isArray(value)) return "array";
+    if (value !== null && typeof value === "object") return "object";
+    return "string";
+  };
   for (const variable of draft.variables ?? []) {
     if (
       variable.scope !== "run"
@@ -309,21 +319,12 @@ function inputContractFor(draft: WorkflowDraft): AgentManifest["inputContract"] 
   }
   for (const node of Object.values(draft.nodes)) {
     if (node.type === "condition" && node.condition) {
-      const directType = ["gt", "gte", "lt", "lte"].includes(node.condition.operator)
-        ? "number"
-        : node.condition.branches.some((branch) => typeof branch.value === "boolean")
-          ? "boolean"
-          : "string";
-      if (node.condition.branches.some((branch) => !branch.rules?.length)) {
-        addInputSource(node.condition.source, directType);
+      const directBranch = node.condition.branches.find((branch) => !branch.rules?.length);
+      if (directBranch) {
+        addInputSource(node.condition.source, comparisonType(node.condition.operator, directBranch.value));
       }
       for (const rule of node.condition.branches.flatMap((branch) => branch.rules ?? [])) {
-        const ruleType = ["gt", "gte", "lt", "lte"].includes(rule.operator)
-          ? "number"
-          : typeof rule.value === "boolean"
-            ? "boolean"
-            : "string";
-        addInputSource(rule.source, ruleType);
+        addInputSource(rule.source, comparisonType(rule.operator, rule.value));
       }
     }
     if (node.type === "loop") {

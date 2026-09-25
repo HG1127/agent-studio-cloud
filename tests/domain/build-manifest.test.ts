@@ -121,6 +121,13 @@ describe("buildManifest", () => {
             branches: [{ label: "达到门槛", value: 100, next: "done" }], defaultNext: "done",
           },
         },
+        exact_count_condition: {
+          id: "exact_count_condition", title: "判断精确数量", type: "condition", next: null,
+          condition: {
+            source: "input.exactCount", operator: "eq",
+            branches: [{ label: "数量相同", value: 3, next: "done" }], defaultNext: "done",
+          },
+        },
         item_loop: {
           id: "item_loop", title: "逐项处理订单", type: "loop", next: null,
           loop: { collectionPath: "input.orders", itemKey: "order", maxIterations: 20, bodyNext: "done", exitNext: "done" },
@@ -143,6 +150,7 @@ describe("buildManifest", () => {
       { name: "customer", required: true, type: "object" },
       { name: "approved", required: true, type: "boolean" },
       { name: "amount", required: true, type: "number" },
+      { name: "exactCount", required: true, type: "number" },
       { name: "orders", required: true, type: "array" },
       { name: "records", required: true, type: "array" },
       { name: "region", required: true, type: "string" },
