@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CreateAgentForm } from "@/features/agents/CreateAgentForm";
+import { AGENT_BLUEPRINT_DRAFT_KEY, serializeAgentBlueprintDraft } from "@/features/agents/agent-blueprint";
 
 const { actionMock, pushMock } = vi.hoisted(() => ({
   actionMock: vi.fn(),
@@ -25,6 +26,8 @@ describe("CreateAgentForm", () => {
   afterEach(() => {
     actionMock.mockReset();
     pushMock.mockReset();
+    window.sessionStorage.clear();
+    vi.restoreAllMocks();
   });
 
   it("提交时调用创建动作并携带表单值，成功后跳转详情页", async () => {
@@ -79,5 +82,23 @@ describe("CreateAgentForm", () => {
     await fillAndSubmit();
     expect(await screen.findByRole("alert")).toHaveTextContent("创建请求失败，请检查网络后重试");
     expect(screen.getByRole("button", { name: "创建助手" })).toBeEnabled();
+  });
+
+  it("恢复当前标签页未提交的业务蓝图并可主动清空", async () => {
+    window.sessionStorage.setItem(AGENT_BLUEPRINT_DRAFT_KEY, serializeAgentBlueprintDraft({
+      name: "恢复助手",
+      objective: "恢复一段尚未提交的完整业务目标",
+      trigger: "收到消息后",
+      inputs: "消息内容",
+      outputs: "处理结果",
+      constraints: "不得泄露隐私",
+    }));
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<CreateAgentForm />);
+    expect(await screen.findByDisplayValue("恢复助手")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("已恢复本标签页中未提交的业务蓝图");
+    await userEvent.click(screen.getByRole("button", { name: "清空内容" }));
+    expect(screen.getByLabelText("助手名称")).toHaveValue("");
+    expect(window.sessionStorage.getItem(AGENT_BLUEPRINT_DRAFT_KEY)).toBeNull();
   });
 });

@@ -1,9 +1,17 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { createAgentAction } from "@/server/actions/create-agent";
-import { composeAgentBlueprintIntent, MAX_AGENT_INTENT_LENGTH } from "./agent-blueprint";
+import { notifyDraftState } from "@/lib/draft-state";
+import { readSessionValue, removeSessionValue, writeSessionValue } from "@/lib/session-storage";
+import {
+  AGENT_BLUEPRINT_DRAFT_KEY,
+  composeAgentBlueprintIntent,
+  MAX_AGENT_INTENT_LENGTH,
+  restoreAgentBlueprintDraft,
+  serializeAgentBlueprintDraft,
+} from "./agent-blueprint";
 
 const INTENT_PLACEHOLDER =
   "收到客户咨询后读取客户资料并生成回复方案，发送前由负责人确认，最后输出回复邮件";
@@ -18,10 +26,74 @@ export function CreateAgentForm() {
   const [constraints, setConstraints] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const dirty = [name, intentText, trigger, inputs, outputs, constraints].some((value) => value.trim());
+
+  useEffect(() => {
+    const raw = readSessionValue(AGENT_BLUEPRINT_DRAFT_KEY);
+    const recovered = restoreAgentBlueprintDraft(raw);
+    if (!recovered) {
+      if (raw) removeSessionValue(AGENT_BLUEPRINT_DRAFT_KEY);
+      return;
+    }
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setName(recovered.name);
+      setIntentText(recovered.objective);
+      setTrigger(recovered.trigger);
+      setInputs(recovered.inputs);
+      setOutputs(recovered.outputs);
+      setConstraints(recovered.constraints);
+      setNotice("已恢复本标签页中未提交的业务蓝图");
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (!dirty) {
+      removeSessionValue(AGENT_BLUEPRINT_DRAFT_KEY);
+      return;
+    }
+    writeSessionValue(AGENT_BLUEPRINT_DRAFT_KEY, serializeAgentBlueprintDraft({
+      name,
+      objective: intentText,
+      trigger,
+      inputs,
+      outputs,
+      constraints,
+    }));
+  }, [constraints, dirty, inputs, intentText, name, outputs, trigger]);
+  useEffect(() => notifyDraftState({ agentId: "create-agent", dirty: Boolean(dirty) }), [dirty]);
+  useEffect(() => () => notifyDraftState({ agentId: "create-agent", dirty: false }), []);
+  useEffect(() => {
+    if (!dirty) return;
+    const warnBeforeLeave = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeLeave);
+    return () => window.removeEventListener("beforeunload", warnBeforeLeave);
+  }, [dirty]);
+
+  function clearDraft() {
+    if (!window.confirm("确定清空当前还未创建的业务蓝图吗？")) return;
+    setName("");
+    setIntentText("");
+    setTrigger("");
+    setInputs("");
+    setOutputs("");
+    setConstraints("");
+    setError(null);
+    setNotice(null);
+    removeSessionValue(AGENT_BLUEPRINT_DRAFT_KEY);
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+    setNotice(null);
     const blueprintIntent = composeAgentBlueprintIntent({
       objective: intentText,
       trigger,
@@ -37,6 +109,7 @@ export function CreateAgentForm() {
     try {
       const result = await createAgentAction({ name, intentText: blueprintIntent });
       if (result.ok) {
+        removeSessionValue(AGENT_BLUEPRINT_DRAFT_KEY);
         router.push(`/agents/${result.agentId}`);
         return;
       }
@@ -108,13 +181,18 @@ export function CreateAgentForm() {
           {error}
         </p>
       ) : null}
-      <button
-        type="submit"
-        disabled={pending}
-        className="w-fit rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:bg-gray-400"
-      >
-        {pending ? "正在生成流程草稿…" : "创建助手"}
-      </button>
+      {notice ? <p role="status" className="text-sm text-emerald-700">{notice}</p> : null}
+      <div className="flex items-center gap-3">
+        <button
+          type="submit"
+          disabled={pending}
+          className="w-fit rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:bg-gray-400"
+        >
+          {pending ? "正在生成流程草稿…" : "创建助手"}
+        </button>
+        {dirty ? <button type="button" disabled={pending} onClick={clearDraft}
+          className="text-sm text-gray-500 hover:text-red-600 disabled:text-gray-300">清空内容</button> : null}
+      </div>
     </form>
   );
 }

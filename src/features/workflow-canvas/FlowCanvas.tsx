@@ -26,6 +26,7 @@ import { WorkflowInputEditor } from "./WorkflowInputEditor";
 import { WorkflowOutputEditor } from "./WorkflowOutputEditor";
 import { validateOutputFieldPaths } from "@/server/domain/runtime/output-contract";
 import { notifyDraftState } from "@/lib/draft-state";
+import { readSessionValue, removeSessionValue, writeSessionValue } from "@/lib/session-storage";
 import { draftRecoveryKey, restoreDraftRecovery, serializeDraftRecovery } from "./draft-recovery";
 
 interface FlowCanvasProps {
@@ -62,10 +63,10 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets, toolOpt
   useEffect(() => () => notifyDraftState({ agentId, dirty: false }), [agentId]);
   useEffect(() => {
     const key = draftRecoveryKey(agentId);
-    const raw = window.sessionStorage.getItem(key);
+    const raw = readSessionValue(key);
     const recovered = restoreDraftRecovery(raw, initialDraft);
     if (!recovered) {
-      if (raw) window.sessionStorage.removeItem(key);
+      if (raw) removeSessionValue(key);
       return;
     }
     let active = true;
@@ -81,11 +82,7 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets, toolOpt
   }, [agentId, initialDraft]);
   useEffect(() => {
     if (!dirty) return;
-    try {
-      window.sessionStorage.setItem(draftRecoveryKey(agentId), serializeDraftRecovery(initialDraft, draft));
-    } catch {
-      // 浏览器禁用或容量不足时仍可继续编辑，离开页面保护保持生效。
-    }
+    writeSessionValue(draftRecoveryKey(agentId), serializeDraftRecovery(initialDraft, draft));
   }, [agentId, dirty, draft, initialDraft]);
   useEffect(() => {
     if (!dirty) return;
@@ -224,7 +221,7 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets, toolOpt
       if (result.ok) {
         setFeedback({ ok: true, text: "草稿已保存" });
         setDirty(false);
-        window.sessionStorage.removeItem(draftRecoveryKey(agentId));
+        removeSessionValue(draftRecoveryKey(agentId));
         router.refresh();
       } else {
         setFeedback({ ok: false, text: result.error });
@@ -238,7 +235,7 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets, toolOpt
 
   function discardLocalChanges() {
     if (!window.confirm("确定放弃本标签页中所有未保存的流程修改吗？")) return;
-    window.sessionStorage.removeItem(draftRecoveryKey(agentId));
+    removeSessionValue(draftRecoveryKey(agentId));
     setDraft(initialDraft);
     setSelectedId(null);
     setDirty(false);

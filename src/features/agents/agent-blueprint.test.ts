@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { composeAgentBlueprintIntent } from "./agent-blueprint";
+import { composeAgentBlueprintIntent, restoreAgentBlueprintDraft, serializeAgentBlueprintDraft } from "./agent-blueprint";
 
 describe("composeAgentBlueprintIntent", () => {
   it("未填写可选蓝图时保持原始目标不变", () => {
@@ -26,5 +26,26 @@ describe("composeAgentBlueprintIntent", () => {
       "最终交付：回复邮件和处理记录",
       "必须遵守：发送前必须由负责人确认",
     ].join("\n"));
+  });
+});
+
+describe("业务蓝图标签页恢复", () => {
+  const draft = {
+    name: "售后助手",
+    objective: "收到售后问题后生成处理建议",
+    trigger: "收到新工单后",
+    inputs: "工单内容、客户等级",
+    outputs: "回复邮件和处理记录",
+    constraints: "发送前必须由负责人确认",
+  };
+
+  it("恢复当前格式的完整蓝图", () => {
+    expect(restoreAgentBlueprintDraft(serializeAgentBlueprintDraft(draft))).toEqual(draft);
+  });
+
+  it("拒绝损坏、过期或超长的本地副本", () => {
+    expect(restoreAgentBlueprintDraft("not-json")).toBeNull();
+    expect(restoreAgentBlueprintDraft(JSON.stringify({ formatVersion: 2, ...draft }))).toBeNull();
+    expect(restoreAgentBlueprintDraft(serializeAgentBlueprintDraft({ ...draft, name: "x".repeat(61) }))).toBeNull();
   });
 });
