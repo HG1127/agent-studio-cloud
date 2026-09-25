@@ -11,6 +11,22 @@ function safeFilename(value: string): string {
   return value.replace(/[^\p{L}\p{N}._-]+/gu, "-").slice(0, 50) || "run";
 }
 
+function streamedJson(value: unknown): ReadableStream<Uint8Array> {
+  const bytes = new TextEncoder().encode(JSON.stringify(value, null, 2));
+  let offset = 0;
+  return new ReadableStream({
+    pull(controller) {
+      if (offset >= bytes.byteLength) {
+        controller.close();
+        return;
+      }
+      const next = Math.min(offset + 64 * 1024, bytes.byteLength);
+      controller.enqueue(bytes.subarray(offset, next));
+      offset = next;
+    },
+  });
+}
+
 export async function GET(_request: Request, context: { params: Promise<{ runId: string }> }) {
   const { runId } = await context.params;
   const run = await getRunView(runId, DEMO_WORKSPACE_ID);
@@ -47,7 +63,8 @@ export async function GET(_request: Request, context: { params: Promise<{ runId:
   }
   const date = (run.finishedAt ?? run.startedAt ?? report.data.exportedAt).slice(0, 10);
   const filename = `${safeFilename(run.agentName)}-${date}-运行报告.json`;
-  return new Response(JSON.stringify(redactSensitiveData(report.data), null, 2), {
+  // 运行上下文与步骤结果可以超过函数的普通响应上限，下载必须保持流式传输。
+  return new Response(streamedJson(redactSensitiveData(report.data)), {
     headers: {
       "content-type": "application/json; charset=utf-8",
       "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,

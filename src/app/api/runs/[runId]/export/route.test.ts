@@ -60,6 +60,18 @@ describe("运行报告导出", () => {
     });
   });
 
+  it("大体积运行报告使用流式响应且内容保持完整", async () => {
+    const content = `开头-${"数".repeat(1_600_000)}-结尾`;
+    mocks.getRunContext.mockResolvedValueOnce({ outputs: { large: content } });
+
+    const response = await GET(new Request("http://localhost"), { params: Promise.resolve({ runId: RUN_ID }) });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toBeInstanceOf(ReadableStream);
+    expect(response.headers.get("content-length")).toBeNull();
+    expect((await response.json()).context.outputs.large).toBe(content);
+  });
+
   it("找不到运行时返回中文错误", async () => {
     mocks.getRunView.mockResolvedValue(null);
     const response = await GET(new Request("http://localhost"), { params: Promise.resolve({ runId: "bad" }) });
