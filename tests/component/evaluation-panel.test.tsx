@@ -3,8 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EvaluationPanel } from "@/features/agents/EvaluationPanel";
 
-const { createMock, updateMock, archiveMock, startMock, refreshMock } = vi.hoisted(() => ({
+const { createMock, generateMock, updateMock, archiveMock, startMock, refreshMock } = vi.hoisted(() => ({
   createMock: vi.fn(),
+  generateMock: vi.fn(),
   updateMock: vi.fn(),
   archiveMock: vi.fn(),
   startMock: vi.fn(),
@@ -13,6 +14,7 @@ const { createMock, updateMock, archiveMock, startMock, refreshMock } = vi.hoist
 
 vi.mock("@/server/actions/evaluations", () => ({
   createEvaluationCaseAction: createMock,
+  generateEvaluationCasesAction: generateMock,
   updateEvaluationCaseAction: updateMock,
   archiveEvaluationCaseAction: archiveMock,
   setEvaluationCaseArchivedAction: archiveMock,
@@ -32,6 +34,7 @@ const CASES = [{
 describe("EvaluationPanel", () => {
   afterEach(() => {
     createMock.mockReset();
+    generateMock.mockReset();
     updateMock.mockReset();
     archiveMock.mockReset();
     startMock.mockReset();
@@ -63,6 +66,15 @@ describe("EvaluationPanel", () => {
     await user.click(screen.getByRole("button", { name: "添加样例" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("对象格式");
     expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it("没有样例时可以从发布流程生成可编辑样例", async () => {
+    generateMock.mockResolvedValue({ ok: true, createdCount: 2 });
+    render(<EvaluationPanel agentId={AGENT_ID} cases={[]} runs={[]} />);
+    await userEvent.click(screen.getByRole("button", { name: "从流程生成样例" }));
+    await waitFor(() => expect(generateMock).toHaveBeenCalledWith(AGENT_ID));
+    expect(screen.getByRole("status")).toHaveTextContent("已从发布版本生成 2 条可编辑样例");
+    expect(refreshMock).toHaveBeenCalledOnce();
   });
 
   it("批量运行已有样例并展示验收汇总", async () => {

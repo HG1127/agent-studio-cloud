@@ -6,6 +6,7 @@ import Link from "next/link";
 import { EvaluationExpectation as EvaluationExpectationSchema, MAX_EVALUATION_CASES, type EvaluationCaseView, type EvaluationExpectation, type EvaluationRunView } from "@/contracts/evaluation";
 import {
   createEvaluationCaseAction,
+  generateEvaluationCasesAction,
   startEvaluationAction,
   setEvaluationCaseArchivedAction,
   updateEvaluationCaseAction,
@@ -75,6 +76,7 @@ export function EvaluationPanel({
   const [advancedExpectations, setAdvancedExpectations] = useState<AdvancedExpectationDraft[]>([]);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const evaluationRunning = runs.some((run) => run.status === "running");
 
   useEffect(() => {
@@ -93,6 +95,7 @@ export function EvaluationPanel({
 
   function editCase(testCase: EvaluationCaseView) {
     setError(null);
+    setNotice(null);
     setEditingId(testCase.id);
     setName(testCase.name);
     setInputText(JSON.stringify(testCase.input));
@@ -104,6 +107,7 @@ export function EvaluationPanel({
 
   async function saveCase() {
     setError(null);
+    setNotice(null);
     let input: Record<string, unknown>;
     try {
       const parsed = JSON.parse(inputText) as unknown;
@@ -147,6 +151,7 @@ export function EvaluationPanel({
   async function startEvaluation() {
     setPending(true);
     setError(null);
+    setNotice(null);
     try {
       const result = await startEvaluationAction(agentId);
       if (!result.ok) setError(result.error);
@@ -158,9 +163,28 @@ export function EvaluationPanel({
     }
   }
 
+  async function generateCases() {
+    setPending(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await generateEvaluationCasesAction(agentId);
+      if (!result.ok) setError(result.error);
+      else {
+        setNotice(`已从发布版本生成 ${result.createdCount} 条可编辑样例`);
+        router.refresh();
+      }
+    } catch {
+      setError("生成验收样例失败，请稍后重试");
+    } finally {
+      setPending(false);
+    }
+  }
+
   async function changeCaseState(caseId: string, archived: boolean) {
     setPending(true);
     setError(null);
+    setNotice(null);
     try {
       const result = await setEvaluationCaseArchivedAction({ agentId, caseId, archived });
       if (!result.ok) setError(result.error);
@@ -186,6 +210,12 @@ export function EvaluationPanel({
       </div>
       {evaluationRunning ? <p role="status" className="rounded-md bg-blue-50 p-2 text-sm text-blue-700">验收运行期间样例已锁定；若状态长时间不变化，可点“检查并继续”自动补启未完成样例。</p> : null}
       {error ? <p role="alert" className="rounded-md bg-red-50 p-2 text-sm text-red-700">{error}</p> : null}
+      {notice ? <p role="status" className="rounded-md bg-emerald-50 p-2 text-sm text-emerald-700">{notice}</p> : null}
+      {cases.length === 0 ? <div className="rounded-md border border-dashed border-gray-200 p-3">
+        <p className="text-xs text-gray-500">可从最新发布版本生成类型正确的示例输入和最终交付字段检查，生成后再按真实业务调整内容。</p>
+        <button type="button" disabled={pending || evaluationRunning} onClick={generateCases}
+          className="mt-2 rounded-md border border-gray-300 px-3 py-1.5 text-sm disabled:text-gray-400">从流程生成样例</button>
+      </div> : null}
       <div className="grid gap-2 md:grid-cols-[1fr_2fr_1fr_auto]">
         <input aria-label="样例名称" disabled={evaluationRunning} value={name} onChange={(event) => setName(event.target.value)} placeholder="样例名称"
           className="rounded-md border border-gray-300 px-3 py-2 text-sm" />

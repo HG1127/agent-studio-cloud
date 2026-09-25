@@ -1,6 +1,6 @@
 "use server";
 
-import { and, count, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import {
@@ -9,8 +9,10 @@ import {
   EvaluationCaseUpdateInput,
   MAX_EVALUATION_CASES,
   type EvaluationActionResult,
+  type EvaluationGenerateResult,
 } from "@/contracts/evaluation";
-import { agents, auditEvents, evaluationCaseResults, evaluationCases, evaluationRuns } from "@/db/schema";
+import { AgentManifest } from "@/contracts/manifest";
+import { agentVersions, agents, auditEvents, evaluationCaseResults, evaluationCases, evaluationRuns } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { markEvaluationStartFailure, reconcileTerminalEvaluationRun } from "@/server/services/evaluation-state";
@@ -19,8 +21,66 @@ import { startRunCore } from "@/server/services/start-run-core";
 import { runBounded } from "@/server/domain/run-bounded";
 import { validationMessage } from "@/server/domain/validation-message";
 import { auditEventValues } from "@/server/audit/event-values";
+import { generateEvaluationCases } from "@/server/domain/evaluation-cases";
 
 const EVALUATION_START_CONCURRENCY = 5;
+
+export async function generateEvaluationCasesAction(agentId: string): Promise<EvaluationGenerateResult> {
+  if (!z.string().uuid().safeParse(agentId).success) return { ok: false, error: "助手信息不正确" };
+  try {
+    const result = await db.transaction(async (tx) => {
+      const [agent] = await tx.select({ id: agents.id, name: agents.name }).from(agents).where(and(
+        eq(agents.id, agentId), eq(agents.workspaceId, DEMO_WORKSPACE_ID), isNull(agents.archivedAt),
+      )).for("update").limit(1);
+      if (!agent) return { ok: false as const, error: "找不到这个助手，请刷新页面后重试" };
+      const [running] = await tx.select({ id: evaluationRuns.id }).from(evaluationRuns).where(and(
+        eq(evaluationRuns.agentId, agentId),
+        eq(evaluationRuns.workspaceId, DEMO_WORKSPACE_ID),
+        eq(evaluationRuns.status, "running"),
+      )).limit(1);
+      if (running) return { ok: false as const, error: "自动验收运行期间不能生成验收样例" };
+      const [active] = await tx.select({ count: count() }).from(evaluationCases).where(and(
+        eq(evaluationCases.agentId, agentId),
+        eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID),
+        isNull(evaluationCases.archivedAt),
+      ));
+      if ((active?.count ?? 0) > 0) {
+        return { ok: false as const, error: "已有启用中的验收样例；如需重新生成，请先归档现有样例" };
+      }
+      const [version] = await tx.select({ manifest: agentVersions.manifest }).from(agentVersions).where(and(
+        eq(agentVersions.agentId, agentId),
+        eq(agentVersions.workspaceId, DEMO_WORKSPACE_ID),
+        inArray(agentVersions.status, ["candidate", "production"]),
+      )).orderBy(desc(agentVersions.version)).limit(1);
+      const manifest = version ? AgentManifest.safeParse(version.manifest) : null;
+      if (!manifest?.success) return { ok: false as const, error: "请先发布一个可验收版本" };
+      const generated = generateEvaluationCases(manifest.data).slice(0, MAX_EVALUATION_CASES);
+      await tx.insert(evaluationCases).values(generated.map((testCase) => ({
+        workspaceId: DEMO_WORKSPACE_ID,
+        createdBy: DEMO_USER_ID,
+        agentId,
+        name: testCase.name,
+        input: testCase.input,
+        expectations: testCase.expectations,
+      })));
+      await tx.insert(auditEvents).values(auditEventValues({
+        workspaceId: DEMO_WORKSPACE_ID,
+        createdBy: DEMO_USER_ID,
+        action: "evaluation_case.created",
+        targetType: "evaluation",
+        targetId: agent.id,
+        summary: `为助手「${agent.name}」从发布契约生成 ${generated.length} 条验收样例`,
+        data: { generated: true, caseCount: generated.length },
+      }));
+      return { ok: true as const, createdCount: generated.length };
+    });
+    if (result.ok) revalidatePath(`/agents/${agentId}`);
+    return result;
+  } catch (error) {
+    console.error("生成验收样例失败", error);
+    return { ok: false, error: "生成验收样例失败，请稍后重试" };
+  }
+}
 
 export async function createEvaluationCaseAction(input: unknown): Promise<EvaluationActionResult> {
   const parsed = EvaluationCaseCreateInput.safeParse(input);
