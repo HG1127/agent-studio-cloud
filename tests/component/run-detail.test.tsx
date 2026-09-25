@@ -86,7 +86,7 @@ describe("运行详情步骤数据", () => {
       status: "failed",
       input: { apiKey: "sk-input-secret-value", topic: "发货通知" },
       result: { authorization: "Bearer result-secret-value", status: "未发送" },
-      error: "步骤执行失败",
+      error: "联系 person@example.com，authorization: Bearer top-level-secret-value",
       startedAt: null,
       finishedAt: null,
     }));
@@ -98,6 +98,8 @@ describe("运行详情步骤数据", () => {
     expect(container.textContent).not.toContain("result-secret-value");
     expect(container.textContent).not.toContain("step-secret-value");
     expect(container.textContent).not.toContain("upstream-secret-value");
+    expect(container.textContent).not.toContain("person@example.com");
+    expect(container.textContent).not.toContain("top-level-secret-value");
     expect(screen.getAllByRole("alert").some((element) => element.textContent === "[已隐藏敏感信息]")).toBe(true);
   });
 

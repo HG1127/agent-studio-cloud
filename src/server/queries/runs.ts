@@ -15,7 +15,7 @@ import { agentVersions, agents, approvals, runSteps, runs, traceEvents, type Run
 import { db } from "@/lib/db";
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
 import { isRunStartLeaseExpired } from "@/server/services/run-start-lease";
-import { redactCredentialData, redactCredentialText } from "@/server/domain/security/redact-sensitive";
+import { redactCredentialData, redactCredentialText, redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 
 const RUN_ID = z.string().uuid();
 
@@ -202,7 +202,7 @@ export async function getRunView(runId: string, workspaceId: string): Promise<Ru
     inputContract: manifest.success ? manifest.data.inputContract : { fields: [] },
     result: row.run.result ?? null,
     outputContract: manifest.success ? manifest.data.outputContract : { fields: [] },
-    error: row.run.error ?? null,
+    error: row.run.error ? redactSensitiveText(row.run.error) : null,
     startupRecoverable: row.agentArchivedAt === null
       && row.run.status === "queued"
       && !row.run.workflowRunId

@@ -132,13 +132,13 @@ export async function RunDetail({ runId }: { runId: string }) {
 
       {run.status === "failed" && run.error ? (
         <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          <p>{run.error}</p>
+          <p>{redactSensitiveText(run.error)}</p>
         </div>
       ) : null}
 
       {run.status === "cancelled" && run.error ? (
         <div role="status" className="rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
-          <p>{run.error}</p>
+          <p>{redactSensitiveText(run.error)}</p>
         </div>
       ) : null}
 
