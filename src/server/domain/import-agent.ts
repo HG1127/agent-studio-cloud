@@ -1,4 +1,5 @@
 import { AgentImportFile } from "@/contracts/agent";
+import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowDraft } from "@/contracts/workflow";
 import { validateOutputContract } from "@/server/domain/runtime/output-contract";
 import { validateWaitContracts } from "@/server/domain/runtime/wait-contract";
@@ -30,6 +31,28 @@ export interface NormalizedAgentImport {
   description: string | null;
   intentText: string;
   workflow: WorkflowDraft;
+}
+
+function editableWorkflowFromVersion(
+  manifest: AgentManifest,
+  agentName: string,
+): WorkflowDraft {
+  const workflow = manifest.workflowSnapshot;
+  const nonRunVariables = workflow.variables.filter((variable) => variable.scope !== "run");
+  const runVariables = manifest.inputContract.fields.map((field) => ({
+    name: field.name,
+    label: field.label,
+    type: field.type,
+    scope: "run",
+    required: field.required,
+  }));
+  return {
+    ...workflow,
+    versionId: null,
+    rootAgent: { ...workflow.rootAgent, name: agentName },
+    variables: [...nonRunVariables, ...runVariables],
+    outputContract: manifest.outputContract ?? workflow.outputContract,
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -134,10 +157,6 @@ export function normalizeAgentImport(input: unknown): NormalizedAgentImport | nu
     name: parsed.data.agent.name,
     description: `从冻结版本 ${version} 导入的可编辑副本`,
     intentText: `从冻结版本 ${version} 导入，保留当时的流程、运行输入和最终交付。`,
-    workflow: {
-      ...parsed.data.manifest.workflowSnapshot,
-      versionId: null,
-      rootAgent: { ...parsed.data.manifest.workflowSnapshot.rootAgent, name: parsed.data.agent.name },
-    },
+    workflow: editableWorkflowFromVersion(parsed.data.manifest, parsed.data.agent.name),
   };
 }

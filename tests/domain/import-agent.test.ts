@@ -45,10 +45,25 @@ describe("助手导入格式归一化", () => {
   it("把冻结版本转换为脱离原版本状态的可编辑草稿", () => {
     const manifest = AgentManifest.parse({
       schemaVersion: "4.0",
-      workflowSnapshot: workflow,
+      workflowSnapshot: {
+        ...workflow,
+        nodes: {
+          start: { id: "start", title: "开始", type: "trigger", next: "deliver" },
+          deliver: { id: "deliver", title: "生成交付", type: "ai", next: "done" },
+          done: { id: "done", title: "结束", type: "end", next: null },
+        },
+        variables: [
+          { name: "stale_input", label: "旧输入", type: "string", scope: "run", required: true },
+          { name: "internal_note", label: "内部记录", type: "string", scope: "step", required: false },
+        ],
+        outputContract: { fields: [{ path: "stale", label: "旧交付", required: true, sourceNodeId: "deliver" }] },
+      },
       workflowFingerprint: "fingerprint",
-      inputContract: { fields: [] },
-      outputContract: { fields: [] },
+      inputContract: { fields: [
+        { name: "request", label: "业务需求", required: true, type: "string" },
+        { name: "priority", label: "优先级", required: false, type: "number" },
+      ] },
+      outputContract: { fields: [{ path: "delivery", label: "最终方案", required: true, sourceNodeId: "deliver" }] },
       resourceSelection: { model: { modelId: "mock", mock: true, connectionId: null } },
       designAudit: { status: "passed", issueCount: 0, criticalCount: 0 },
       knowledgeSnapshot: [],
@@ -64,8 +79,19 @@ describe("助手导入格式归一化", () => {
     expect(result).toMatchObject({
       name: "合同助手",
       description: "从冻结版本 7 导入的可编辑副本",
-      workflow: { versionId: null, rootAgent: { name: "合同助手" } },
+      workflow: {
+        versionId: null,
+        rootAgent: { name: "合同助手" },
+        variables: [
+          { name: "internal_note", label: "内部记录", type: "string", scope: "step", required: false },
+          { name: "request", label: "业务需求", type: "string", scope: "run", required: true },
+          { name: "priority", label: "优先级", type: "number", scope: "run", required: false },
+        ],
+        outputContract: { fields: [{ path: "delivery", label: "最终方案", required: true, sourceNodeId: "deliver" }] },
+      },
     });
+    expect(result?.workflow.variables.some((variable) => variable.name === "stale_input")).toBe(false);
+    expect(importedWorkflowIssue(result!.workflow)).toBeNull();
   });
 
   it("拒绝未知文件格式", () => {
