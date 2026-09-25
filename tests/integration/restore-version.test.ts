@@ -156,6 +156,18 @@ describe("恢复历史版本", () => {
     });
   });
 
+  it("重复恢复同一个历史版本时复用刚创建的正式版本", async () => {
+    await insertVersions("retired");
+
+    const first = await restoreVersionAction(AGENT_ID, SOURCE_ID);
+    const second = await restoreVersionAction(AGENT_ID, SOURCE_ID);
+
+    expect(first.ok).toBe(true);
+    expect(second).toEqual(first);
+    const versions = await db.select().from(agentVersions).where(eq(agentVersions.agentId, AGENT_ID));
+    expect(versions).toHaveLength(3);
+  });
+
   it("知识快照已经不可用时不会替换当前版本", async () => {
     const missingSourceId = "00000000-0000-4000-8000-0000000000e1";
     const knowledgeManifest = AgentManifest.parse({

@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { AgentManifest } from "@/contracts/manifest";
@@ -15,6 +15,7 @@ import { knowledgeStepTitles, validateKnowledgeSnapshot } from "@/server/domain/
 import { workflowCollaborationKeys } from "@/server/domain/import-agent";
 import { inspectCollaborationVersionGraph } from "@/server/domain/runtime/collaboration-dependencies";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { restorationMatchesSource } from "@/server/domain/restore-idempotency";
 
 export async function restoreVersionAction(agentId: string, versionId: string): Promise<RestoreVersionResult> {
   if (!z.string().uuid().safeParse(agentId).success || !z.string().uuid().safeParse(versionId).success) {
@@ -139,6 +140,43 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
             ...manifest.data,
             workflowSnapshot: bindWorkflowRootAgent(manifest.data.workflowSnapshot, agent),
           };
+          const [currentProduction] = await tx
+            .select({
+              id: agentVersions.id,
+              version: agentVersions.version,
+              status: agentVersions.status,
+              createdAt: agentVersions.createdAt,
+            })
+            .from(agentVersions)
+            .where(and(
+              eq(agentVersions.agentId, agentId),
+              eq(agentVersions.workspaceId, agent.workspaceId),
+              eq(agentVersions.status, "production"),
+            ))
+            .orderBy(desc(agentVersions.version))
+            .limit(1);
+          if (currentProduction) {
+            const [restoration] = await tx
+              .select({ data: auditEvents.data })
+              .from(auditEvents)
+              .where(and(
+                eq(auditEvents.workspaceId, agent.workspaceId),
+                eq(auditEvents.action, "version.restored"),
+                eq(auditEvents.targetType, "version"),
+                eq(auditEvents.targetId, currentProduction.id),
+              ))
+              .orderBy(desc(auditEvents.createdAt))
+              .limit(1);
+            if (restorationMatchesSource(restoration?.data, versionId)) {
+              return {
+                kind: "already-restored" as const,
+                version: VersionSummary.parse({
+                  ...currentProduction,
+                  createdAt: currentProduction.createdAt.toISOString(),
+                }),
+              };
+            }
+          }
           // 人工恢复是明确的上线决策：旧候选版本即使之后验收完成，也不应再覆盖本次恢复。
           await tx
             .update(agentVersions)
