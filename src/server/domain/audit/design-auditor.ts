@@ -328,23 +328,25 @@ function conditionSourceOk(source: string | null | undefined): boolean {
 }
 
 type RuntimeInputType = "string" | "number" | "boolean" | "object" | "array";
+const ALL_RUNTIME_INPUT_TYPES: readonly RuntimeInputType[] = ["string", "number", "boolean", "object", "array"];
 
 function inputRequirement(
   source: string | null | undefined,
   operator?: string | null,
   comparison?: unknown,
-): { name: string; type: RuntimeInputType } | null {
+): { name: string; types: readonly RuntimeInputType[] } | null {
   const parts = source ? safeDataPathSegments(source) : null;
   if (!parts || !["input", "variables"].includes(parts[0]) || !parts[1]) return null;
-  if (parts.length > 2) return { name: parts[1], type: "object" };
+  if (parts.length > 2) return { name: parts[1], types: ["object"] };
   if (["truthy", "exists"].includes(operator || "")) return null;
+  if (operator === "contains") return { name: parts[1], types: ["string", "array"] };
   if (["gt", "gte", "lt", "lte"].includes(operator || "") || typeof comparison === "number") {
-    return { name: parts[1], type: "number" };
+    return { name: parts[1], types: ["number"] };
   }
-  if (typeof comparison === "boolean") return { name: parts[1], type: "boolean" };
-  if (typeof comparison === "string") return { name: parts[1], type: "string" };
-  if (Array.isArray(comparison)) return { name: parts[1], type: "array" };
-  if (comparison !== null && typeof comparison === "object") return { name: parts[1], type: "object" };
+  if (typeof comparison === "boolean") return { name: parts[1], types: ["boolean"] };
+  if (typeof comparison === "string") return { name: parts[1], types: ["string"] };
+  if (Array.isArray(comparison)) return { name: parts[1], types: ["array"] };
+  if (comparison !== null && typeof comparison === "object") return { name: parts[1], types: ["object"] };
   return null;
 }
 
@@ -790,12 +792,12 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
     }
   }
 
-  const inputRequirements = new Map<string, Set<RuntimeInputType>>();
-  const requireInput = (requirement: { name: string; type: RuntimeInputType } | null) => {
+  const inputRequirements = new Map<string, Array<ReadonlySet<RuntimeInputType>>>();
+  const requireInput = (requirement: { name: string; types: readonly RuntimeInputType[] } | null) => {
     if (!requirement) return;
-    const types = inputRequirements.get(requirement.name) ?? new Set<RuntimeInputType>();
-    types.add(requirement.type);
-    inputRequirements.set(requirement.name, types);
+    const requirements = inputRequirements.get(requirement.name) ?? [];
+    requirements.push(new Set(requirement.types));
+    inputRequirements.set(requirement.name, requirements);
   };
   for (const n of Object.values(nodes)) {
     if (n.type === "condition" && n.condition) {
@@ -807,21 +809,22 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
     if (n.type === "loop") {
       const parts = typeof n.loop?.collectionPath === "string" ? safeDataPathSegments(n.loop.collectionPath) : null;
       if (parts && ["input", "variables"].includes(parts[0]) && parts[1]) {
-        requireInput({ name: parts[1], type: parts.length > 2 ? "object" : "array" });
+        requireInput({ name: parts[1], types: [parts.length > 2 ? "object" : "array"] });
       }
     }
   }
-  for (const [name, types] of inputRequirements) {
+  for (const [name, requirements] of inputRequirements) {
     const declaredType = runVariableTypes.get(name);
-    const expected = [...types];
-    if (expected.length > 1) {
-      issues.push(issue("critical", "data", "运行输入被按不同格式使用", `「${name}」在流程中同时被当作${expected.map((type) => ({ string: "文字", number: "数字", boolean: "是或否", object: "对象", array: "列表" })[type]).join("、")}使用，无法生成可靠的运行表单。`, {
+    const allowed = ALL_RUNTIME_INPUT_TYPES.filter((type) => requirements.every((types) => types.has(type)));
+    const mentioned = ALL_RUNTIME_INPUT_TYPES.filter((type) => requirements.some((types) => types.has(type)));
+    const labels: Record<string, string> = { string: "文字", number: "数字", boolean: "是或否", object: "对象", array: "列表" };
+    if (allowed.length === 0) {
+      issues.push(issue("critical", "data", "运行输入被按不同格式使用", `「${name}」在流程中存在互不兼容的${mentioned.map((type) => labels[type]).join("、")}用法，无法生成可靠的运行表单。`, {
         fixable: true,
         code: `input_type_conflict_${name}`,
       }));
-    } else if (declaredType && declaredType !== expected[0]) {
-      const labels: Record<string, string> = { string: "文字", number: "数字", boolean: "是或否", object: "对象", array: "列表" };
-      issues.push(issue("critical", "data", "运行输入类型与流程用法冲突", `「${name}」声明为${labels[declaredType] || declaredType}，但流程会把它当作${labels[expected[0]]}使用。`, {
+    } else if (declaredType && !allowed.includes(declaredType as RuntimeInputType)) {
+      issues.push(issue("critical", "data", "运行输入类型与流程用法冲突", `「${name}」声明为${labels[declaredType] || declaredType}，但这里需要${allowed.map((type) => labels[type]).join("或")}。`, {
         fixable: true,
         code: `input_type_mismatch_${name}`,
       }));

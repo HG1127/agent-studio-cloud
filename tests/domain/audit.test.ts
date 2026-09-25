@@ -215,6 +215,29 @@ describe("直测：结构性检查", () => {
     expect(out.issues.some((issue) => issue.code === "input_type_mismatch_task")).toBe(false);
   });
 
+  it("包含条件允许列表输入并可与逐项处理共用", () => {
+    const out = auditWorkflow(WorkflowDraft.parse({
+      id: "contains-array-input",
+      rootAgent: { id: "agent", name: "测试助手", role: "处理" },
+      memoryPolicy: { taskContext: true, longTerm: false },
+      variables: [{ name: "tags", type: "array", scope: "run" }],
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "condition" },
+        condition: {
+          id: "condition", title: "判断标签", type: "condition",
+          condition: { source: "input.tags", operator: "contains", branches: [{ label: "紧急", value: "urgent", next: "loop" }], defaultNext: "done" },
+        },
+        loop: {
+          id: "loop", title: "逐项处理标签", type: "loop",
+          loop: { collectionPath: "input.tags", itemKey: "tag", maxIterations: 10, bodyNext: "done", exitNext: "done" },
+        },
+        done: { id: "done", title: "结束", type: "end", next: null },
+      },
+    }));
+
+    expect(out.issues.some((issue) => ["input_type_mismatch_tags", "input_type_conflict_tags"].includes(issue.code))).toBe(false);
+  });
+
   it("同一隐式运行输入被按不同格式使用时阻止发布", () => {
     const out = auditWorkflow(WorkflowDraft.parse({
       id: "implicit-input-type-conflict",
