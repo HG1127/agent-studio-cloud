@@ -4,6 +4,7 @@ import { RunList, RunPagination } from "@/features/runs/RunList";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { firstSearchParam, pageFromSearchParam } from "@/lib/search-params";
 import { listRunAgentOptions, listRuns } from "@/server/queries/runs";
+import { withSafeQueryError } from "@/server/security/query-error";
 
 export const dynamic = "force-dynamic";
 const PAGE_SIZE = 25;
@@ -19,10 +20,10 @@ export default async function RunsPage({ searchParams }: {
   });
   const filters = parsed.success ? parsed.data : {};
   const page = pageFromSearchParam(params.page);
-  const [runs, agentOptions] = await Promise.all([
+  const [runs, agentOptions] = await withSafeQueryError(() => Promise.all([
     listRuns(DEMO_WORKSPACE_ID, filters, { limit: PAGE_SIZE + 1, offset: (page - 1) * PAGE_SIZE }),
     listRunAgentOptions(DEMO_WORKSPACE_ID),
-  ]);
+  ]), "runs-page");
   const hasNext = runs.length > PAGE_SIZE;
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-8 p-8">

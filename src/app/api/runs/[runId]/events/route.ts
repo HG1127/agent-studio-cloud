@@ -9,6 +9,7 @@ import { hasRunTraceKind, listTraceSince } from "@/server/queries/trace";
 import { resolveSseCursor } from "@/server/domain/sse-cursor";
 import { terminalTraceKindForStatus } from "@/server/domain/trace-state";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { queryUnavailableResponse, SafeQueryError, withSafeQueryError } from "@/server/security/query-error";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,13 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
   if (!z.string().uuid().safeParse(runId).success) {
     return Response.json({ error: "运行标识不正确" }, { status: 400 });
   }
-  const run = await getRunRow(runId, DEMO_WORKSPACE_ID);
+  let run: Awaited<ReturnType<typeof getRunRow>>;
+  try {
+    run = await withSafeQueryError(() => getRunRow(runId, DEMO_WORKSPACE_ID), "run-events-open");
+  } catch (error) {
+    if (error instanceof SafeQueryError) return queryUnavailableResponse();
+    throw error;
+  }
   if (!run) {
     return Response.json({ error: "找不到这次运行" }, { status: 404 });
   }

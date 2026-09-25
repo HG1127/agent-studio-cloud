@@ -4,6 +4,7 @@ import { AuditEventList, AuditEventPagination } from "@/features/activity/AuditE
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { firstSearchParam, pageFromSearchParam } from "@/lib/search-params";
 import { listAuditEvents } from "@/server/queries/audit-events";
+import { withSafeQueryError } from "@/server/security/query-error";
 
 export const dynamic = "force-dynamic";
 const PAGE_SIZE = 25;
@@ -18,10 +19,10 @@ export default async function ActivityPage({ searchParams }: {
   });
   const filters = parsedFilters.success ? parsedFilters.data : {};
   const page = pageFromSearchParam(params.page);
-  const rows = await listAuditEvents(DEMO_WORKSPACE_ID, filters, {
+  const rows = await withSafeQueryError(() => listAuditEvents(DEMO_WORKSPACE_ID, filters, {
     limit: PAGE_SIZE + 1,
     offset: (page - 1) * PAGE_SIZE,
-  });
+  }), "activity-page");
   const hasNext = rows.length > PAGE_SIZE;
   const filtered = Boolean(filters.targetType || filters.query);
   return <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 p-8">

@@ -7,7 +7,7 @@ const PRIVATE_KEY = /-----BEGIN [^-\r\n]{0,40}PRIVATE KEY-----[\s\S]*?-----END [
 const JWT = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g;
 const BEARER = /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi;
 const PROVIDER_KEY = /\b(?:sk|rk|pk|ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{12,}\b/g;
-const LABELED_SECRET = /\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password|passcode|authorization)\s*[:=]\s*(?!\[已隐藏敏感信息\])["']?(?:Bearer\s+)?[^\s,"'}）】》」』>]{6,}["']?/gi;
+const LABELED_SECRET = /\b(?:api[_-]?key|(?:access[_-]?|refresh[_-]?)?token|secret|password|passcode|authorization)\s*[:=]\s*(?!\[已隐藏敏感信息\])["']?(?:Bearer\s+)?[^\s,"'}）】》」』>]{6,}["']?/gi;
 const CHINESE_LABELED_SECRET = /(?:(?:访问|刷新)?令牌|密钥|密码|凭据|授权)\s*[：:=]\s*(?!\[已隐藏敏感信息\])["']?(?:Bearer\s+)?[^\s，,。；;）】》」』>]{4,}["']?/gi;
 const EMAIL = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const CHINESE_PHONE = /(?<!\d)1[3-9]\d{9}(?!\d)/g;

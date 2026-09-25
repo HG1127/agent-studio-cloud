@@ -3,14 +3,15 @@ import { HealthCard } from "@/features/dashboard/HealthCard";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { getDashboardSummary } from "@/server/queries/dashboard";
 import { listRuns } from "@/server/queries/runs";
+import { withSafeQueryError } from "@/server/security/query-error";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const [summary, recentRuns] = await Promise.all([
+  const [summary, recentRuns] = await withSafeQueryError(() => Promise.all([
     getDashboardSummary(),
     listRuns(DEMO_WORKSPACE_ID, {}, { limit: 5 }),
-  ]);
+  ]), "dashboard");
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-8 p-8">
       <header>

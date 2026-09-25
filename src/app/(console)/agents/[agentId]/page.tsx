@@ -17,6 +17,7 @@ import { listKnowledgeSources } from "@/server/queries/knowledge";
 import { AgentManifest } from "@/contracts/manifest";
 import { listToolRegistryOptions } from "@/server/tools/tool-registry";
 import { pageFromSearchParam } from "@/lib/search-params";
+import { withSafeQueryError } from "@/server/security/query-error";
 
 export const dynamic = "force-dynamic";
 
@@ -43,10 +44,10 @@ export default async function AgentDetailPage({
   const versionPageSize = 50;
   const archivedCasesPage = pageFromSearchParam(query.archivedCasesPage);
   const archivedCasesPageSize = 25;
-  const detail = await getAgentDetail(agentId, DEMO_WORKSPACE_ID);
+  const detail = await withSafeQueryError(() => getAgentDetail(agentId, DEMO_WORKSPACE_ID), "agent-detail");
   if (!detail) notFound();
   const audit = detail.draft ? auditWorkflow(detail.draft) : null;
-  const [versions, connections, agentTargets, evaluationCases, archivedEvaluationCases, evaluationRuns, knowledgeSources] = await Promise.all([
+  const [versions, connections, agentTargets, evaluationCases, archivedEvaluationCases, evaluationRuns, knowledgeSources] = await withSafeQueryError(() => Promise.all([
     listVersions(agentId, DEMO_WORKSPACE_ID, { limit: versionPageSize + 1, offset: (versionPage - 1) * versionPageSize }),
     listModelConnections(),
     listAgentTargets(DEMO_WORKSPACE_ID, agentId),
@@ -58,7 +59,7 @@ export default async function AgentDetailPage({
     }),
     listEvaluationRuns(agentId, DEMO_WORKSPACE_ID),
     listKnowledgeSources(false, { limit: 100 }),
-  ]);
+  ]), "agent-detail-related");
   const defaultModelLabel = process.env.MODEL_MOCK === "1" ? "演示模式" : process.env.MODEL_ID?.trim() ? "服务端默认模型" : "尚未配置默认模型";
   const currentVersion = detail.currentVersion;
   const toolOptions = listToolRegistryOptions();

@@ -4,6 +4,7 @@ import { AgentManifest } from "@/contracts/manifest";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { compareAgentVersions, type VersionDiff } from "@/server/domain/version-diff";
 import { getVersionComparisonSource } from "@/server/queries/versions";
+import { withSafeQueryError } from "@/server/security/query-error";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +41,10 @@ export default async function VersionComparePage({ params, searchParams }: {
   const from = one(query.from);
   const to = one(query.to);
   if (!from || !to) notFound();
-  const source = await getVersionComparisonSource(agentId, [from, to], DEMO_WORKSPACE_ID);
+  const source = await withSafeQueryError(
+    () => getVersionComparisonSource(agentId, [from, to], DEMO_WORKSPACE_ID),
+    "version-compare-page",
+  );
   if (!source) notFound();
   const before = AgentManifest.safeParse(source.before.manifest);
   const after = AgentManifest.safeParse(source.after.manifest);

@@ -5,6 +5,7 @@ import { ImportAgentForm } from "@/features/agents/ImportAgentForm";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { firstSearchParam, pageFromSearchParam } from "@/lib/search-params";
 import { listAgents, listArchivedAgents } from "@/server/queries/agents";
+import { withSafeQueryError } from "@/server/security/query-error";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -37,10 +38,10 @@ export default async function AgentsPage({ searchParams }: {
   const query = firstSearchParam(params.q)?.trim().slice(0, 200) ?? "";
   const page = pageFromSearchParam(params.page);
   const archivedPage = pageFromSearchParam(params.archivedPage);
-  const [agentRows, archivedRows] = await Promise.all([
+  const [agentRows, archivedRows] = await withSafeQueryError(() => Promise.all([
     listAgents(DEMO_WORKSPACE_ID, { query, limit: PAGE_SIZE + 1, offset: (page - 1) * PAGE_SIZE }),
     listArchivedAgents(DEMO_WORKSPACE_ID, { query, limit: PAGE_SIZE + 1, offset: (archivedPage - 1) * PAGE_SIZE }),
-  ]);
+  ]), "agents-page");
   const agents = agentRows.slice(0, PAGE_SIZE);
   const archivedAgents = archivedRows.slice(0, PAGE_SIZE);
   const hasNext = agentRows.length > PAGE_SIZE;

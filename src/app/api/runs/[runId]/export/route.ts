@@ -5,6 +5,7 @@ import { getRunContext, getRunView, listApprovals, listRunSteps } from "@/server
 import { listTraceSince } from "@/server/queries/trace";
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
 import { getRunFeedback } from "@/server/queries/run-feedback";
+import { queryUnavailableResponse, SafeQueryError, withSafeQueryError } from "@/server/security/query-error";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +43,10 @@ function streamedRunReport(
       }
       cursor = batch.nextCursor;
       if (batch.scannedCount > 0) {
-        batch = await listTraceSince(report.run.id, DEMO_WORKSPACE_ID, cursor);
+        batch = await withSafeQueryError(
+          () => listTraceSince(report.run.id, DEMO_WORKSPACE_ID, cursor),
+          "run-export-trace",
+        );
         return;
       }
       if (!finished) {
@@ -60,16 +64,35 @@ function streamedRunReport(
 
 export async function GET(_request: Request, context: { params: Promise<{ runId: string }> }) {
   const { runId } = await context.params;
-  const run = await getRunView(runId, DEMO_WORKSPACE_ID);
+  let run: Awaited<ReturnType<typeof getRunView>>;
+  try {
+    run = await withSafeQueryError(() => getRunView(runId, DEMO_WORKSPACE_ID), "run-export");
+  } catch (error) {
+    if (error instanceof SafeQueryError) return queryUnavailableResponse();
+    throw error;
+  }
   if (!run) return Response.json({ ok: false, error: "找不到这次运行" }, { status: 404 });
 
-  const [runContext, steps, firstTraceBatch, approvals, feedback] = await Promise.all([
-    getRunContext(runId, DEMO_WORKSPACE_ID),
-    listRunSteps(runId, DEMO_WORKSPACE_ID),
-    listTraceSince(runId, DEMO_WORKSPACE_ID, 0),
-    listApprovals(runId, DEMO_WORKSPACE_ID),
-    getRunFeedback(runId, DEMO_WORKSPACE_ID),
-  ]);
+  let reportSource: Awaited<ReturnType<typeof Promise.all<[
+    ReturnType<typeof getRunContext>,
+    ReturnType<typeof listRunSteps>,
+    ReturnType<typeof listTraceSince>,
+    ReturnType<typeof listApprovals>,
+    ReturnType<typeof getRunFeedback>,
+  ]>>>;
+  try {
+    reportSource = await withSafeQueryError(() => Promise.all([
+      getRunContext(runId, DEMO_WORKSPACE_ID),
+      listRunSteps(runId, DEMO_WORKSPACE_ID),
+      listTraceSince(runId, DEMO_WORKSPACE_ID, 0),
+      listApprovals(runId, DEMO_WORKSPACE_ID),
+      getRunFeedback(runId, DEMO_WORKSPACE_ID),
+    ]), "run-export-related");
+  } catch (error) {
+    if (error instanceof SafeQueryError) return queryUnavailableResponse();
+    throw error;
+  }
+  const [runContext, steps, firstTraceBatch, approvals, feedback] = reportSource;
   const report = RunReportFile.safeParse({
     format: "agent-studio-cloud-run",
     formatVersion: 1,

@@ -15,6 +15,7 @@ import { getPendingWait, getRunView, listApprovals, listChildRuns, listRunSteps 
 import { listRecentTrace } from "@/server/queries/trace";
 import { getRunFeedback } from "@/server/queries/run-feedback";
 import { redactSensitiveData, redactSensitiveText } from "@/server/domain/security/redact-sensitive";
+import { withSafeQueryError } from "@/server/security/query-error";
 
 const LIVE_STATUSES: ReadonlySet<RunStatus> = new Set(["queued", "running", "waiting_approval", "waiting_event"]);
 
@@ -56,16 +57,16 @@ function fallbackResultLabel(key: string, stepTitleByNode: ReadonlyMap<string, s
 }
 
 export async function RunDetail({ runId }: { runId: string }) {
-  const run = await getRunView(runId, DEMO_WORKSPACE_ID);
+  const run = await withSafeQueryError(() => getRunView(runId, DEMO_WORKSPACE_ID), "run-detail");
   if (!run) notFound();
-  const [steps, approvals, trace, pendingWait, childRuns, feedback] = await Promise.all([
+  const [steps, approvals, trace, pendingWait, childRuns, feedback] = await withSafeQueryError(() => Promise.all([
     listRunSteps(runId, DEMO_WORKSPACE_ID),
     listApprovals(runId, DEMO_WORKSPACE_ID),
     listRecentTrace(runId, DEMO_WORKSPACE_ID),
     getPendingWait(runId, DEMO_WORKSPACE_ID),
     listChildRuns(runId, DEMO_WORKSPACE_ID),
     getRunFeedback(runId, DEMO_WORKSPACE_ID),
-  ]);
+  ]), "run-detail-related");
   const live = LIVE_STATUSES.has(run.status);
   // 待确认的置顶，已决定的按时间在后
   const pendingApprovals = live ? approvals.filter((approval) => approval.status === "pending") : [];

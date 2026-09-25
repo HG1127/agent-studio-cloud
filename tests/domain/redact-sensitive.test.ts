@@ -54,6 +54,12 @@ describe("敏感数据脱敏", () => {
     expect(redactSensitiveText("Authorization: Bearer abcdefghijklmnop")).toBe("[已隐藏敏感信息]");
   });
 
+  it("隐藏带普通 token 标签的凭据", () => {
+    const redacted = redactCredentialText("请求失败 token=secret-value");
+    expect(redacted).toBe("请求失败 [已隐藏敏感信息]");
+    expect(redacted).not.toContain("secret-value");
+  });
+
   it("隐藏带标签的凭据时保留业务文本的结束标点", () => {
     expect(redactCredentialText("资料「authorization: Bearer abcdefghijklmnop」")).toBe("资料「[已隐藏敏感信息]」");
     expect(redactCredentialText("说明（访问令牌：abcdefghijklmnop）")).toBe("说明（[已隐藏敏感信息]）");

@@ -3,6 +3,7 @@ import { KnowledgeList, UploadSourceForm } from "@/features/knowledge/KnowledgeL
 import { KnowledgeSearch } from "@/features/knowledge/KnowledgeSearch";
 import { listKnowledgeSources, searchKnowledgeChunks } from "@/server/queries/knowledge";
 import { firstSearchParam, pageFromSearchParam } from "@/lib/search-params";
+import { withSafeQueryError } from "@/server/security/query-error";
 
 export const dynamic = "force-dynamic";
 const PAGE_SIZE = 20;
@@ -36,11 +37,11 @@ export default async function KnowledgePage({ searchParams }: {
   const sourceQuery = firstSearchParam(params.source)?.trim().slice(0, 200) ?? "";
   const page = pageFromSearchParam(params.page);
   const archivedPage = pageFromSearchParam(params.archivedPage);
-  const [sourceRows, archivedRows, searchResult] = await Promise.all([
+  const [sourceRows, archivedRows, searchResult] = await withSafeQueryError(() => Promise.all([
     listKnowledgeSources(false, { query: sourceQuery, limit: PAGE_SIZE + 1, offset: (page - 1) * PAGE_SIZE }),
     listKnowledgeSources(true, { query: sourceQuery, limit: PAGE_SIZE + 1, offset: (archivedPage - 1) * PAGE_SIZE }),
     query ? searchKnowledgeChunks(query) : null,
-  ]);
+  ]), "knowledge-page");
   const sources = sourceRows.slice(0, PAGE_SIZE);
   const archivedSources = archivedRows.slice(0, PAGE_SIZE);
   const hasNext = sourceRows.length > PAGE_SIZE;

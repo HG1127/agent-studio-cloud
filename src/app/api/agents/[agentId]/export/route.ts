@@ -1,12 +1,19 @@
 import { AgentExportFile } from "@/contracts/agent";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { getAgentDetail } from "@/server/queries/agents";
+import { queryUnavailableResponse, SafeQueryError, withSafeQueryError } from "@/server/security/query-error";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(_request: Request, context: { params: Promise<{ agentId: string }> }) {
   const { agentId } = await context.params;
-  const detail = await getAgentDetail(agentId, DEMO_WORKSPACE_ID);
+  let detail: Awaited<ReturnType<typeof getAgentDetail>>;
+  try {
+    detail = await withSafeQueryError(() => getAgentDetail(agentId, DEMO_WORKSPACE_ID), "agent-export");
+  } catch (error) {
+    if (error instanceof SafeQueryError) return queryUnavailableResponse();
+    throw error;
+  }
   if (!detail?.draft) return Response.json({ ok: false, error: "找不到可导出的助手流程" }, { status: 404 });
   const payload = AgentExportFile.safeParse({
     format: "agent-studio-cloud",

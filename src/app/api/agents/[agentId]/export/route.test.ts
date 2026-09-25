@@ -62,4 +62,19 @@ describe("助手定义导出", () => {
       error: "助手资料不符合当前导出格式，请先检查名称、说明和业务目标",
     });
   });
+
+  it("数据库暂不可用时返回稳定的中文错误", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    getDetail.mockRejectedValueOnce(new Error("token=private-export-token"));
+
+    const response = await GET(new Request("http://localhost"), {
+      params: Promise.resolve({ agentId: AGENT_ID }),
+    });
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: false, error: "暂时无法读取数据，请稍后重试" });
+    expect(JSON.stringify(log.mock.calls)).not.toContain("private-export-token");
+    log.mockRestore();
+  });
 });

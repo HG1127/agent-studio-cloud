@@ -72,4 +72,18 @@ describe("运行轨迹流终态收尾", () => {
     expect(body).toContain("event: done");
     expect(body).toContain('"status":"completed"');
   });
+
+  it("首次查询失败时返回可重试错误且不泄露原始异常", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.getRunRow.mockRejectedValueOnce(new Error("token=private-events-token"));
+
+    const response = await GET(new Request(`http://localhost/api/runs/${RUN_ID}/events`), {
+      params: Promise.resolve({ runId: RUN_ID }),
+    });
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ ok: false, error: "暂时无法读取数据，请稍后重试" });
+    expect(JSON.stringify(log.mock.calls)).not.toContain("private-events-token");
+    log.mockRestore();
+  });
 });

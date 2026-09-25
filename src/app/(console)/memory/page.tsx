@@ -4,6 +4,7 @@ import { ImprovementFeedbackList } from "@/features/memory/ImprovementFeedbackLi
 import { listMemories, listMemoryAgentOptions } from "@/server/queries/memory";
 import { listImprovementFeedback } from "@/server/queries/run-feedback";
 import { firstSearchParam, pageFromSearchParam } from "@/lib/search-params";
+import { withSafeQueryError } from "@/server/security/query-error";
 
 export const dynamic = "force-dynamic";
 
@@ -27,12 +28,12 @@ export default async function MemoryPage({ searchParams }: {
   const query = firstSearchParam(params.q)?.trim().slice(0, 200);
   const page = pageFromSearchParam(params.page);
   const archivedPage = pageFromSearchParam(params.archivedPage);
-  const [memoryRows, archivedRows, agents, improvementFeedback] = await Promise.all([
+  const [memoryRows, archivedRows, agents, improvementFeedback] = await withSafeQueryError(() => Promise.all([
     listMemories({ agentId, query, limit: PAGE_SIZE + 1, offset: (page - 1) * PAGE_SIZE }),
     listMemories({ agentId, query, archived: true, limit: PAGE_SIZE + 1, offset: (archivedPage - 1) * PAGE_SIZE }),
     listMemoryAgentOptions(),
     listImprovementFeedback({ agentId, query, limit: 20 }),
-  ]);
+  ]), "memory-page");
   const memories = memoryRows.slice(0, PAGE_SIZE);
   const archivedMemories = archivedRows.slice(0, PAGE_SIZE);
   const hasNext = memoryRows.length > PAGE_SIZE;
