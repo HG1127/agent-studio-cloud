@@ -70,6 +70,20 @@ describe("并行分支运行准备", () => {
     expect(prepareParallelBranches(duplicateSteps)).toMatchObject({ ok: false, error: expect.stringContaining("重复的步骤标识") });
   });
 
+  it("拒绝不同分支拼接后发生冲突的运行标识", () => {
+    const collision = parallelNode({
+      parallel: {
+        strategy: "all",
+        failurePolicy: "fail_fast",
+        branches: [
+          { id: "a.b", label: "工作一", steps: [{ id: "c", title: "步骤一", type: "system" }] },
+          { id: "a", label: "工作二", steps: [{ id: "b.c", title: "步骤二", type: "system" }] },
+        ],
+      },
+    });
+    expect(prepareParallelBranches(collision)).toMatchObject({ ok: false, error: expect.stringContaining("冲突") });
+  });
+
   it("任一成功时继续并选中成功分支，全部失败时进入失败路径", () => {
     expect(resolveParallelOutcome({ strategy: "any", failurePolicy: "fail_fast", statuses: ["failed", "completed"] })).toEqual({
       status: "completed",

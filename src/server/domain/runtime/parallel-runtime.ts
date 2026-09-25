@@ -34,6 +34,7 @@ export function prepareParallelBranches(node: WorkflowNode): PreparedParallel {
     return { ok: false, error: `步骤「${node.title}」最多允许 ${MAX_PARALLEL_BRANCHES} 项并行工作` };
   }
   const ids = new Set<string>();
+  const runtimeIds = new Set<string>();
   const branches: PreparedParallelBranch[] = [];
   for (const branch of parallel.branches) {
     if (ids.has(branch.id)) return { ok: false, error: `步骤「${node.title}」存在重复的并行工作标识` };
@@ -47,9 +48,12 @@ export function prepareParallelBranches(node: WorkflowNode): PreparedParallel {
       const sourceId = String(raw.id || `step_${stepIndex + 1}`);
       if (stepIds.has(sourceId)) return { ok: false, error: `并行工作「${branch.label}」存在重复的步骤标识` };
       stepIds.add(sourceId);
+      const runtimeId = `${node.id}.${branch.id}.${sourceId}`;
+      if (runtimeIds.has(runtimeId)) return { ok: false, error: `步骤「${node.title}」存在冲突的并行步骤标识` };
+      runtimeIds.add(runtimeId);
       const parsed = WorkflowNode.safeParse({
         ...raw,
-        id: `${node.id}.${branch.id}.${sourceId}`,
+        id: runtimeId,
         title: String(raw.title || `并行步骤 ${stepIndex + 1}`),
         next: null,
         requirementIds: Array.isArray(raw.requirementIds) ? raw.requirementIds : [],

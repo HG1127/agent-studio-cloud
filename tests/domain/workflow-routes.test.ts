@@ -58,4 +58,20 @@ describe("工作流路线校验", () => {
     });
     expect(validateWorkflowRoutes(missingReject)).toContain("安全处理路径");
   });
+
+  it("拒绝可能污染运行结果对象的危险节点标识", () => {
+    const unsafe = draft();
+    Object.defineProperty(unsafe.nodes, "constructor", {
+      configurable: true,
+      enumerable: true,
+      value: WorkflowNode.parse({ id: "constructor", title: "危险步骤", type: "system", next: "done" }),
+    });
+    expect(validateWorkflowRoutes(unsafe)).toContain("不安全字符");
+
+    const dotted = draft();
+    dotted.nodes["unsafe.node"] = WorkflowNode.parse({
+      id: "unsafe.node", title: "含点步骤", type: "system", next: "done",
+    });
+    expect(validateWorkflowRoutes(dotted)).toContain("不安全字符");
+  });
 });

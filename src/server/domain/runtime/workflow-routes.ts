@@ -1,4 +1,5 @@
 import type { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
+import { isSafeDataPathSegment } from "@/server/domain/runtime/data-path";
 
 type RouteRef = { target: string | null | undefined; label: string };
 
@@ -27,12 +28,15 @@ function nodeRoutes(node: WorkflowNode): RouteRef[] {
 
 export function validateWorkflowRoutes(draft: Pick<WorkflowDraft, "startNodeId" | "nodes">): string | null {
   const nodes = draft.nodes;
-  const start = nodes[draft.startNodeId];
+  const start = Object.prototype.hasOwnProperty.call(nodes, draft.startNodeId) ? nodes[draft.startNodeId] : undefined;
   if (!start) return "流程的启动步骤不存在，请重新连接后保存";
   if (start.type !== "trigger") return "流程必须从启动步骤开始";
 
   for (const [nodeKey, node] of Object.entries(nodes)) {
     if (!node.id.trim() || node.id !== nodeKey) return `步骤“${node.title || nodeKey}”的标识与画布记录不一致`;
+    if (nodeKey.length > 200 || !/^[A-Za-z0-9_-]+$/.test(nodeKey) || !isSafeDataPathSegment(nodeKey)) {
+      return `步骤“${node.title || nodeKey}”的标识包含不安全字符`;
+    }
     for (const route of nodeRoutes(node)) {
       if (route.target && !nodes[route.target]) return `步骤“${node.title}”的${route.label}指向了不存在的步骤`;
     }
