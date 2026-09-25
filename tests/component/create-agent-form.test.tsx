@@ -50,6 +50,30 @@ describe("CreateAgentForm", () => {
     expect(pushMock).not.toHaveBeenCalled();
   });
 
+  it("把可选业务蓝图并入需求后提交", async () => {
+    actionMock.mockResolvedValue({ ok: true, agentId: "00000000-0000-4000-8000-000000000009" });
+    const user = userEvent.setup();
+    render(<CreateAgentForm />);
+    await user.type(screen.getByLabelText("助手名称"), "售后助手");
+    await user.type(screen.getByLabelText(/想让助手完成什么/), "收到售后问题后生成处理建议");
+    await user.click(screen.getByText("补充业务蓝图（推荐）"));
+    await user.type(screen.getByLabelText("什么时候开始"), "收到新工单后");
+    await user.type(screen.getByLabelText("需要哪些资料"), "工单内容、客户等级");
+    await user.type(screen.getByLabelText("最终要交付什么"), "回复邮件和处理记录");
+    await user.type(screen.getByLabelText("有哪些限制"), "发送前必须由负责人确认");
+    await user.click(screen.getByRole("button", { name: "创建助手" }));
+    await waitFor(() => expect(actionMock).toHaveBeenCalledWith({
+      name: "售后助手",
+      intentText: [
+        "收到售后问题后生成处理建议",
+        "触发条件：收到新工单后",
+        "需要的业务输入：工单内容、客户等级",
+        "最终交付：回复邮件和处理记录",
+        "必须遵守：发送前必须由负责人确认",
+      ].join("\n"),
+    }));
+  });
+
   it("创建请求中断时显示网络错误并允许重试", async () => {
     actionMock.mockRejectedValue(new Error("offline"));
     await fillAndSubmit();
