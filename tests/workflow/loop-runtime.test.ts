@@ -89,7 +89,17 @@ describe("逐项处理运行", () => {
       const [run] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
       expect(run?.status).toBe("completed");
       expect(run?.result).toMatchObject({
-        loop: { processedCount: 3, sourceCount: 3, limited: false },
+        loop: {
+          processedCount: 3,
+          sourceCount: 3,
+          limited: false,
+          iterations: [
+            { iteration: 1, bodyOutput: { matched: "高优先级", next: "handle" } },
+            { iteration: 2, bodyOutput: { matched: "默认分支", next: "loop" } },
+            { iteration: 3, bodyOutput: { matched: "高优先级", next: "handle" } },
+          ],
+        },
+        check: { matched: "高优先级", next: "handle" },
       });
       const [loopStep] = await db.select().from(runSteps).where(and(eq(runSteps.runId, runId), eq(runSteps.nodeId, "loop"))).limit(1);
       const [conditionStep] = await db.select().from(runSteps).where(and(eq(runSteps.runId, runId), eq(runSteps.nodeId, "check"))).limit(1);

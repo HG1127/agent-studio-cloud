@@ -9,6 +9,7 @@ import { ApprovalPayload } from "@/contracts/run";
 import { approvals, runs } from "@/db/schema";
 import { db } from "@/lib/db";
 import { selectApprovalReview } from "@/server/domain/approval/select-review";
+import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 
 export interface RequestApprovalInput {
@@ -86,10 +87,21 @@ export async function requestApproval(args: RequestApprovalInput): Promise<Appro
       data: { approvalId: result.row.id, role },
     });
   }
+  await persistStep({
+    runId: args.runId,
+    nodeId: node.id,
+    nodeTitle: node.title,
+    nodeType: node.type,
+    status: "running",
+  });
   return { approvalId: result.row.id, token: `approval:${result.row.id}` };
 }
 
-export async function recordDecision(args: RecordDecisionInput): Promise<void> {
+export async function recordDecision(args: RecordDecisionInput): Promise<{
+  approvalId: string;
+  decision: "approved" | "rejected";
+  note: string | null;
+}> {
   "use step";
   const approved = args.decision.decision === "approved";
   const decisionStatus = approved ? "approved" : "rejected";
@@ -130,4 +142,18 @@ export async function recordDecision(args: RecordDecisionInput): Promise<void> {
     title: approved ? `「${args.node.title}」已确认` : `「${args.node.title}」未获确认`,
     detail: args.decision.note ?? null,
   });
+  const output = {
+    approvalId: args.approvalId,
+    decision: args.decision.decision,
+    note: args.decision.note ?? null,
+  };
+  await persistStep({
+    runId: args.runId,
+    nodeId: args.node.id,
+    nodeTitle: args.node.title,
+    nodeType: args.node.type,
+    status: "succeeded",
+    output,
+  });
+  return output;
 }

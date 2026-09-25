@@ -114,6 +114,9 @@ describe("人工审批暂停与恢复", () => {
     expect(decidedRow?.status).toBe("approved");
     expect(decidedRow?.note).toBe("同意执行");
     expect(decidedRow?.decidedAt).not.toBeNull();
+    expect(runAfter?.result).toMatchObject({
+      confirm: { approvalId: pendingRow?.id, decision: "approved", note: "同意执行" },
+    });
   }, 240_000);
 
   it("拒绝：经 not_approved 走质量门禁后 completed，approval 行为 rejected", async () => {

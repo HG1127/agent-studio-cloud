@@ -34,6 +34,7 @@ export interface RunQualityGateInput {
 export interface QualityGateResult {
   next: string | null;
   repair: (QualityRepairPlan & { feedback: string }) | null;
+  output: { passed: true; rejectedStop?: true } | null;
 }
 
 export async function runQualityGate(args: RunQualityGateInput): Promise<QualityGateResult> {
@@ -103,7 +104,7 @@ export async function runQualityGate(args: RunQualityGateInput): Promise<Quality
         kind: "quality.passed",
         title: `「${node.title}」检查通过（未获确认，保留当前结果并停止高影响动作）`,
       });
-      return { next: node.next, repair: null };
+      return { next: node.next, repair: null, output: { passed: true, rejectedStop: true } };
     }
     const missingOutputs = quality.requiredOutputTitles.filter((title) => {
       const sourceNode = Object.values(args.nodes).find((item) => item.title === title);
@@ -126,7 +127,7 @@ export async function runQualityGate(args: RunQualityGateInput): Promise<Quality
         detail: `${reason}；正在进行第 ${repair.nextRepairAttempt} 次返工`,
         data: { repairNodeId: repair.nodeId, repairAttempt: repair.nextRepairAttempt, maxAttempts: repair.maxAttempts },
       });
-      return { next: node.id, repair: { ...repair, feedback: reason } };
+      return { next: node.id, repair: { ...repair, feedback: reason }, output: null };
     }
     if (quality.checkToolReceipts) {
       const missingReceipts = Object.values(args.nodes)
@@ -162,5 +163,5 @@ export async function runQualityGate(args: RunQualityGateInput): Promise<Quality
     kind: "quality.passed",
     title: `「${node.title}」检查通过`,
   });
-  return { next: node.next, repair: null };
+  return { next: node.next, repair: null, output: { passed: true } };
 }

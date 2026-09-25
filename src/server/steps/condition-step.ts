@@ -14,7 +14,10 @@ export interface EvaluateConditionInput {
   currentItem?: unknown;
 }
 
-export async function evaluateCondition(args: EvaluateConditionInput): Promise<string | null> {
+export async function evaluateCondition(args: EvaluateConditionInput): Promise<{
+  next: string | null;
+  output: { matched: string; next: string | null };
+}> {
   "use step";
   const { node } = args;
   const reject = async (reason: string): Promise<never> => {
@@ -70,13 +73,14 @@ export async function evaluateCondition(args: EvaluateConditionInput): Promise<s
       break;
     }
   }
+  const output = { matched: matchedLabel ?? "默认分支", next: nextId };
   await persistStep({
     runId: args.runId,
     nodeId: node.id,
     nodeTitle: node.title,
     nodeType: node.type,
     status: "succeeded",
-    output: { matched: matchedLabel ?? "默认分支", next: nextId },
+    output,
   });
   await appendTrace({
     runId: args.runId,
@@ -85,5 +89,5 @@ export async function evaluateCondition(args: EvaluateConditionInput): Promise<s
     title: matchedLabel ? `条件命中分支「${matchedLabel}」` : "条件未命中，走默认分支",
     data: { source: condition.source ?? null, next: nextId },
   });
-  return nextId;
+  return { next: nextId, output };
 }

@@ -321,7 +321,9 @@ export async function agentRunWorkflow(
       }
       if (node.type === "condition") {
         try {
-          currentId = await evaluateCondition({ runId, node, outputs, input, currentItem: activeLoops.at(-1)?.item });
+          const result = await evaluateCondition({ runId, node, outputs, input, currentItem: activeLoops.at(-1)?.item });
+          outputs[node.id] = result.output;
+          currentId = result.next;
         } catch (error) {
           const handled = await recordHandledNodeFailure({ runId, node, error, fallback: `步骤「${node.title}」判断条件失败` });
           outputs[node.id] = handled.output;
@@ -348,6 +350,7 @@ export async function agentRunWorkflow(
             currentId = node.id;
             continue;
           }
+          outputs[node.id] = quality.output;
           currentId = quality.next;
         } catch (error) {
           const handled = await recordHandledNodeFailure({ runId, node, error, fallback: `步骤「${node.title}」检查结果失败` });
@@ -372,7 +375,7 @@ export async function agentRunWorkflow(
         const { approvalId, token } = await requestApproval({ runId, node, outputs, nodes: draft.nodes });
         const hook = createHook<{ decision: "approved" | "rejected"; note?: string }>({ token });
         const decision = await hook;
-        await recordDecision({ runId, node, approvalId, decision });
+        outputs[node.id] = await recordDecision({ runId, node, approvalId, decision });
         const resumed = await markRunRunning(runId);
         if (!resumed) throw new FatalError("运行已经结束，不能继续确认后的步骤");
         if (decision.decision === "rejected") {
