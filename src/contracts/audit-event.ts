@@ -21,6 +21,8 @@ export const AuditEventAction = z.enum([
   "evaluation_case.archived",
   "evaluation_case.restored",
   "evaluation.started",
+  "evaluation.completed",
+  "version.promoted",
 ]);
 export type AuditEventAction = z.infer<typeof AuditEventAction>;
 
