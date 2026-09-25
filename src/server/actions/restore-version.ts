@@ -1,16 +1,17 @@
 "use server";
 
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { AgentManifest } from "@/contracts/manifest";
 import { VersionSummary, type RestoreVersionResult } from "@/contracts/version";
-import { agentVersions, agents, auditEvents } from "@/db/schema";
+import { agentVersions, agents, auditEvents, knowledgeSources } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { isUniqueViolation } from "@/server/unique-violation";
 import { auditEventValues } from "@/server/audit/event-values";
 import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
+import { knowledgeStepTitles, validateKnowledgeSnapshot } from "@/server/domain/runtime/knowledge-snapshot";
 
 export async function restoreVersionAction(agentId: string, versionId: string): Promise<RestoreVersionResult> {
   if (!z.string().uuid().safeParse(agentId).success || !z.string().uuid().safeParse(versionId).success) {
@@ -43,6 +44,28 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
           if (source.status !== "retired") return { kind: "source-not-retired" as const };
           const manifest = AgentManifest.safeParse(source.manifest);
           if (!manifest.success) return { kind: "manifest-invalid" as const };
+          const knowledgeTitles = knowledgeStepTitles(manifest.data.workflowSnapshot.nodes);
+          if (knowledgeTitles.length > 0) {
+            const snapshotSourceIds = manifest.data.knowledgeSnapshot;
+            const availableSources = snapshotSourceIds.length > 0
+              ? await tx
+                  .select({ id: knowledgeSources.id })
+                  .from(knowledgeSources)
+                  .where(and(
+                    inArray(knowledgeSources.id, snapshotSourceIds),
+                    eq(knowledgeSources.workspaceId, agent.workspaceId),
+                    eq(knowledgeSources.status, "indexed"),
+                    isNull(knowledgeSources.archivedAt),
+                  ))
+                  .for("share")
+              : [];
+            const knowledgeError = validateKnowledgeSnapshot({
+              knowledgeTitles,
+              snapshotSourceIds,
+              availableSourceIds: new Set(availableSources.map((row) => row.id)),
+            });
+            if (knowledgeError) return { kind: "knowledge-unavailable" as const, error: knowledgeError };
+          }
           const restoredManifest = {
             ...manifest.data,
             workflowSnapshot: bindWorkflowRootAgent(manifest.data.workflowSnapshot, agent),
@@ -100,6 +123,7 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
         if (restoreOutcome.kind === "already-production") return { ok: false, error: "这个版本已经是当前版本" };
         if (restoreOutcome.kind === "source-not-retired") return { ok: false, error: "只有曾经上线的历史版本才能恢复为当前版本" };
         if (restoreOutcome.kind === "manifest-invalid") return { ok: false, error: "历史版本格式过旧，无法直接恢复" };
+        if (restoreOutcome.kind === "knowledge-unavailable") return { ok: false, error: restoreOutcome.error };
         revalidatePath(`/agents/${agentId}`);
         return { ok: true, version: restoreOutcome.version };
       } catch (error) {

@@ -45,7 +45,10 @@ afterEach(async () => {
   await db.delete(agents).where(eq(agents.id, AGENT_ID));
 });
 
-async function insertVersions(sourceStatus: "candidate" | "superseded" | "retired") {
+async function insertVersions(
+  sourceStatus: "candidate" | "superseded" | "retired",
+  sourceManifest = manifest,
+) {
   await db.insert(agents).values({
     id: AGENT_ID,
     workspaceId: DEMO_WORKSPACE_ID,
@@ -70,7 +73,7 @@ async function insertVersions(sourceStatus: "candidate" | "superseded" | "retire
       createdBy: DEMO_USER_ID,
       version: 1,
       status: sourceStatus,
-      manifest,
+      manifest: sourceManifest,
     },
   ]);
 }
@@ -128,5 +131,38 @@ describe("恢复历史版本", () => {
       name: "恢复测试助手",
       role: "owner",
     });
+  });
+
+  it("知识快照已经不可用时不会替换当前版本", async () => {
+    const missingSourceId = "00000000-0000-4000-8000-0000000000e1";
+    const knowledgeManifest = AgentManifest.parse({
+      ...manifest,
+      workflowFingerprint: "restore-knowledge-test",
+      workflowSnapshot: {
+        ...manifest.workflowSnapshot,
+        nodes: {
+          start: { id: "start", title: "开始", type: "trigger", next: "knowledge" },
+          knowledge: {
+            id: "knowledge",
+            title: "查询业务资料",
+            type: "knowledge",
+            next: "end",
+            knowledge: { space: "业务资料库", sourceIds: [missingSourceId] },
+          },
+          end: { id: "end", title: "结束", type: "end", next: null },
+        },
+      },
+      knowledgeSnapshot: [missingSourceId],
+    });
+    await insertVersions("retired", knowledgeManifest);
+
+    const result = await restoreVersionAction(AGENT_ID, SOURCE_ID);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain("需要知识资料");
+    const versions = await db.select().from(agentVersions).where(eq(agentVersions.agentId, AGENT_ID));
+    expect(versions).toHaveLength(2);
+    expect(versions.find((version) => version.id === CURRENT_ID)?.status).toBe("production");
   });
 });
