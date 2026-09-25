@@ -19,6 +19,7 @@ export interface RunToolStepInput {
 export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Record<string, unknown> }> {
   "use step";
   const { node } = args;
+  const stepMetadata = getStepMetadata();
   const reject = async (reason: string, retryable = false): Promise<never> => {
     await persistStep({
       runId: args.runId,
@@ -37,9 +38,8 @@ export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Re
       detail: reason,
     });
     if (retryable) {
-      const { attempt } = getStepMetadata();
       const policy = resolveToolRetryPolicy(node);
-      if (canRetryStep(attempt, policy.maxAttempts)) {
+      if (canRetryStep(stepMetadata.attempt, policy.maxAttempts)) {
         throw new RetryableError(reason, { retryAfter: policy.backoffMs });
       }
     }
@@ -77,7 +77,8 @@ export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Re
     if (inputSchemaError) return reject(`工具输入不符合字段契约：${inputSchemaError}`);
     const invoked = await invokeHttpTool({
       tool: registration,
-      idempotencyKey: `${args.runId}:${node.id}`,
+      // 同一次步骤重试时 stepId 稳定；循环再次调用同一节点时 stepId 会变化。
+      idempotencyKey: `${args.runId}:${node.id}:${stepMetadata.stepId}`,
       action: requestPayload.action,
       input: args.input,
       outputs: args.outputs,

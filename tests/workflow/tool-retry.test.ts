@@ -100,7 +100,8 @@ describe("工具步骤重试", () => {
     await expect(handle.returnValue).resolves.toEqual({ status: "completed" });
 
     expect(calls).toBe(2);
-    expect(new Set(idempotencyKeys)).toEqual(new Set([`${run.id}:retry_tool`]));
+    expect(new Set(idempotencyKeys).size).toBe(1);
+    expect(idempotencyKeys[0]).toMatch(new RegExp(`^${run.id}:retry_tool:`));
     const [step] = await db.select().from(runSteps).where(and(
       eq(runSteps.runId, run.id),
       eq(runSteps.nodeId, "retry_tool"),
