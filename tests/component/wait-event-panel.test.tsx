@@ -12,6 +12,26 @@ afterEach(() => {
 });
 
 describe("等待消息面板", () => {
+  it("复制外部系统接入地址和一次性提交凭据", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    render(<WaitEventPanel runId="00000000-0000-4000-8000-000000000001" eventKey="customer.updated" title="等待客户补充资料" submissionToken="submit-token" />);
+
+    fireEvent.click(screen.getByText("让外部系统继续这次运行"));
+    fireEvent.click(screen.getByRole("button", { name: "复制接入地址" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("接入地址已复制");
+    expect(writeText).toHaveBeenLastCalledWith("http://localhost:3000/api/runs/00000000-0000-4000-8000-000000000001/events/customer.updated");
+
+    fireEvent.click(screen.getByRole("button", { name: "复制提交凭据" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("提交凭据已复制");
+    expect(writeText).toHaveBeenLastCalledWith("submit-token");
+  });
+
+  it("旧运行没有安全提交凭据时不展示外部接入入口", () => {
+    render(<WaitEventPanel runId="00000000-0000-4000-8000-000000000001" eventKey="customer.updated" title="等待客户补充资料" submissionToken={null} />);
+    expect(screen.queryByText("让外部系统继续这次运行")).not.toBeInTheDocument();
+  });
+
   it("提交对象消息后继续运行", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);

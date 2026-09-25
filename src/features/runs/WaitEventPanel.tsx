@@ -35,6 +35,7 @@ export function WaitEventPanel({ runId, eventKey, title, submissionToken, payloa
   const [content, setContent] = useState(() => JSON.stringify(schemaExample(payloadSchema), null, 2));
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [integrationNotice, setIntegrationNotice] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const requiredFields = Array.isArray(payloadSchema.required)
     ? payloadSchema.required.filter((field): field is string => typeof field === "string")
@@ -107,6 +108,46 @@ export function WaitEventPanel({ runId, eventKey, title, submissionToken, payloa
       </form>
       {error ? <p role="alert" className="mt-2 text-sm text-red-700">{error}</p> : null}
       {notice ? <p role="status" className="mt-2 text-sm text-emerald-700">{notice}</p> : null}
+      {submissionToken ? (
+        <details className="mt-4 border-t border-cyan-200 pt-3">
+          <summary className="cursor-pointer text-sm font-medium text-cyan-900">让外部系统继续这次运行</summary>
+          <p className="mt-2 text-xs text-cyan-800">
+            把接入地址和一次性提交凭据交给负责接入的开发人员。凭据只用于这次等待，请勿公开。
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="rounded-md border border-cyan-300 bg-white px-3 py-1.5 text-sm text-cyan-900"
+              onClick={async () => {
+                try {
+                  const path = `/api/runs/${runId}/events/${encodeURIComponent(eventKey)}`;
+                  await navigator.clipboard.writeText(new URL(path, window.location.origin).toString());
+                  setIntegrationNotice("接入地址已复制");
+                } catch {
+                  setIntegrationNotice("无法复制接入地址，请检查浏览器权限");
+                }
+              }}
+            >
+              复制接入地址
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-cyan-300 bg-white px-3 py-1.5 text-sm text-cyan-900"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(submissionToken);
+                  setIntegrationNotice("提交凭据已复制");
+                } catch {
+                  setIntegrationNotice("无法复制提交凭据，请检查浏览器权限");
+                }
+              }}
+            >
+              复制提交凭据
+            </button>
+          </div>
+          {integrationNotice ? <p role="status" className="mt-2 text-xs text-cyan-800">{integrationNotice}</p> : null}
+        </details>
+      ) : null}
     </section>
   );
 }
