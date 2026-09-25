@@ -47,6 +47,15 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
             ...manifest.data,
             workflowSnapshot: bindWorkflowRootAgent(manifest.data.workflowSnapshot, agent),
           };
+          // 人工恢复是明确的上线决策：旧候选版本即使之后验收完成，也不应再覆盖本次恢复。
+          await tx
+            .update(agentVersions)
+            .set({ status: "superseded", updatedAt: new Date() })
+            .where(and(
+              eq(agentVersions.agentId, agentId),
+              eq(agentVersions.workspaceId, agent.workspaceId),
+              eq(agentVersions.status, "candidate"),
+            ));
           await tx
             .update(agentVersions)
             .set({ status: "retired", updatedAt: new Date() })

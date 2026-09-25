@@ -13,6 +13,7 @@ const AGENT_ID = "00000000-0000-4000-8000-0000000000d1";
 const CURRENT_ID = "00000000-0000-4000-8000-0000000000d2";
 const SOURCE_ID = "00000000-0000-4000-8000-0000000000d3";
 const CROSS_VERSION_ID = "00000000-0000-4000-8000-0000000000d4";
+const PENDING_ID = "00000000-0000-4000-8000-0000000000d5";
 const OTHER_WS = "00000000-0000-4000-8000-0000000000df";
 
 const manifest = AgentManifest.parse({
@@ -89,6 +90,15 @@ describe("恢复历史版本", () => {
   it("恢复已退役版本时创建新的正式版本并退役原当前版本", async () => {
     await insertVersions("retired");
     await db.insert(agentVersions).values({
+      id: PENDING_ID,
+      agentId: AGENT_ID,
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
+      version: 3,
+      status: "candidate",
+      manifest,
+    });
+    await db.insert(agentVersions).values({
       id: CROSS_VERSION_ID,
       agentId: AGENT_ID,
       workspaceId: OTHER_WS,
@@ -102,12 +112,14 @@ describe("恢复历史版本", () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.version).toMatchObject({ version: 3, status: "production" });
+    expect(result.version).toMatchObject({ version: 4, status: "production" });
     const [oldCurrent] = await db
       .select()
       .from(agentVersions)
       .where(and(eq(agentVersions.id, CURRENT_ID), eq(agentVersions.agentId, AGENT_ID)));
     expect(oldCurrent.status).toBe("retired");
+    const [pending] = await db.select().from(agentVersions).where(eq(agentVersions.id, PENDING_ID));
+    expect(pending.status).toBe("superseded");
     const [restored] = await db.select().from(agentVersions).where(eq(agentVersions.id, result.version.id));
     const [crossVersion] = await db.select().from(agentVersions).where(eq(agentVersions.id, CROSS_VERSION_ID));
     expect(crossVersion.status).toBe("production");
