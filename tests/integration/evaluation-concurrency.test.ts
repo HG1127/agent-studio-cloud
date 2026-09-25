@@ -17,6 +17,8 @@ const CASE_ID = "00000000-0000-4000-8000-0000000000a3";
 const RUN_ID = "00000000-0000-4000-8000-0000000000a4";
 const CASE_ID_2 = "00000000-0000-4000-8000-0000000000a5";
 const RUN_ID_2 = "00000000-0000-4000-8000-0000000000a6";
+const CROSS_VERSION_ID = "00000000-0000-4000-8000-0000000000a7";
+const OTHER_WS = "00000000-0000-4000-8000-0000000000af";
 
 const manifest = AgentManifest.parse({
   schemaVersion: "4.0",
@@ -145,6 +147,15 @@ describe("自动验收并发启动", () => {
 
   it("多个样例同时完成时汇总不会被较早的部分结果覆盖", async () => {
     await insertFixture();
+    await db.insert(agentVersions).values({
+      id: CROSS_VERSION_ID,
+      agentId: AGENT_ID,
+      workspaceId: OTHER_WS,
+      createdBy: DEMO_USER_ID,
+      version: 99,
+      status: "production",
+      manifest,
+    });
     await db.update(evaluationCases)
       .set({ expectations: [{ path: "answer", operator: "equals", value: "通过" }] })
       .where(eq(evaluationCases.id, CASE_ID));
@@ -194,8 +205,10 @@ describe("自动验收并发启动", () => {
 
     const [evaluation] = await db.select().from(evaluationRuns).where(eq(evaluationRuns.id, prepared.evaluationId));
     const [version] = await db.select().from(agentVersions).where(eq(agentVersions.id, VERSION_ID));
+    const [crossVersion] = await db.select().from(agentVersions).where(eq(agentVersions.id, CROSS_VERSION_ID));
     expect(evaluation).toMatchObject({ status: "completed", passedCount: 2, failedCount: 0, totalCount: 2 });
     expect(evaluation.finishedAt).not.toBeNull();
     expect(version.status).toBe("production");
+    expect(crossVersion.status).toBe("production");
   });
 });

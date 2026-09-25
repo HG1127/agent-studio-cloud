@@ -12,6 +12,8 @@ import { restoreVersionAction } from "@/server/actions/restore-version";
 const AGENT_ID = "00000000-0000-4000-8000-0000000000d1";
 const CURRENT_ID = "00000000-0000-4000-8000-0000000000d2";
 const SOURCE_ID = "00000000-0000-4000-8000-0000000000d3";
+const CROSS_VERSION_ID = "00000000-0000-4000-8000-0000000000d4";
+const OTHER_WS = "00000000-0000-4000-8000-0000000000df";
 
 const manifest = AgentManifest.parse({
   schemaVersion: "4.0",
@@ -86,6 +88,15 @@ describe("恢复历史版本", () => {
 
   it("恢复已退役版本时创建新的正式版本并退役原当前版本", async () => {
     await insertVersions("retired");
+    await db.insert(agentVersions).values({
+      id: CROSS_VERSION_ID,
+      agentId: AGENT_ID,
+      workspaceId: OTHER_WS,
+      createdBy: DEMO_USER_ID,
+      version: 99,
+      status: "production",
+      manifest,
+    });
 
     const result = await restoreVersionAction(AGENT_ID, SOURCE_ID);
 
@@ -98,6 +109,8 @@ describe("恢复历史版本", () => {
       .where(and(eq(agentVersions.id, CURRENT_ID), eq(agentVersions.agentId, AGENT_ID)));
     expect(oldCurrent.status).toBe("retired");
     const [restored] = await db.select().from(agentVersions).where(eq(agentVersions.id, result.version.id));
+    const [crossVersion] = await db.select().from(agentVersions).where(eq(agentVersions.id, CROSS_VERSION_ID));
+    expect(crossVersion.status).toBe("production");
     expect(restored.manifest.workflowSnapshot.rootAgent).toMatchObject({
       id: AGENT_ID,
       name: "恢复测试助手",

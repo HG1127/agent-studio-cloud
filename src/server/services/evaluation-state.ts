@@ -10,7 +10,7 @@ const EvaluationSourceKey = z.string().regex(/^evaluation:[0-9a-f-]{36}:[0-9a-f-
 async function refreshEvaluationSummary(evaluationRunId: string): Promise<void> {
   await db.transaction(async (tx) => {
     const [evaluation] = await tx
-      .select({ agentId: evaluationRuns.agentId, versionId: evaluationRuns.versionId })
+      .select({ agentId: evaluationRuns.agentId, versionId: evaluationRuns.versionId, workspaceId: evaluationRuns.workspaceId })
       .from(evaluationRuns)
       .where(eq(evaluationRuns.id, evaluationRunId))
       .for("update")
@@ -19,7 +19,10 @@ async function refreshEvaluationSummary(evaluationRunId: string): Promise<void> 
     const rows = await tx
       .select({ status: evaluationCaseResults.status })
       .from(evaluationCaseResults)
-      .where(eq(evaluationCaseResults.evaluationRunId, evaluationRunId));
+      .where(and(
+        eq(evaluationCaseResults.evaluationRunId, evaluationRunId),
+        eq(evaluationCaseResults.workspaceId, evaluation.workspaceId),
+      ));
     const passedCount = rows.filter((row) => row.status === "passed").length;
     const failedCount = rows.filter((row) => row.status === "failed").length;
     const complete = rows.length > 0 && passedCount + failedCount === rows.length;
@@ -32,12 +35,16 @@ async function refreshEvaluationSummary(evaluationRunId: string): Promise<void> 
         finishedAt: complete ? new Date() : null,
         updatedAt: new Date(),
       })
-      .where(eq(evaluationRuns.id, evaluationRunId));
+      .where(and(eq(evaluationRuns.id, evaluationRunId), eq(evaluationRuns.workspaceId, evaluation.workspaceId)));
     if (!complete || !shouldPromoteEvaluation({ totalCount: rows.length, passedCount, failedCount })) return;
     const promoted = await tx
       .update(agentVersions)
       .set({ status: "production", updatedAt: new Date() })
-      .where(and(eq(agentVersions.id, evaluation.versionId), eq(agentVersions.status, "candidate")))
+      .where(and(
+        eq(agentVersions.id, evaluation.versionId),
+        eq(agentVersions.workspaceId, evaluation.workspaceId),
+        eq(agentVersions.status, "candidate"),
+      ))
       .returning({ id: agentVersions.id });
     if (promoted.length === 0) return;
     await tx
@@ -45,6 +52,7 @@ async function refreshEvaluationSummary(evaluationRunId: string): Promise<void> 
       .set({ status: "retired", updatedAt: new Date() })
       .where(and(
         eq(agentVersions.agentId, evaluation.agentId),
+        eq(agentVersions.workspaceId, evaluation.workspaceId),
         eq(agentVersions.status, "production"),
         ne(agentVersions.id, evaluation.versionId),
       ));
@@ -79,6 +87,7 @@ export async function completeEvaluationForRun(
     .where(and(
       eq(evaluationCaseResults.evaluationRunId, evaluationRunId),
       eq(evaluationCaseResults.evaluationCaseId, evaluationCaseId),
+      eq(evaluationCaseResults.workspaceId, run.workspaceId),
       eq(evaluationCaseResults.status, "running"),
     ))
     .returning({ id: evaluationCaseResults.id });

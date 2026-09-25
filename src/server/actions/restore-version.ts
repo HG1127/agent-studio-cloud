@@ -50,11 +50,15 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
           await tx
             .update(agentVersions)
             .set({ status: "retired", updatedAt: new Date() })
-            .where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.status, "production")));
+            .where(and(
+              eq(agentVersions.agentId, agentId),
+              eq(agentVersions.workspaceId, agent.workspaceId),
+              eq(agentVersions.status, "production"),
+            ));
           const [row] = await tx
             .select({ maxVersion: sql<number>`coalesce(max(${agentVersions.version}), 0)`.mapWith(Number) })
             .from(agentVersions)
-            .where(eq(agentVersions.agentId, agentId));
+            .where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.workspaceId, agent.workspaceId)));
           const [created] = await tx.insert(agentVersions).values({
             agentId,
             workspaceId: agent.workspaceId,
