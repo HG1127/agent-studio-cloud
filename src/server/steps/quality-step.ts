@@ -9,6 +9,7 @@ import { approvals } from "@/db/schema";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 import { selectQualityRepair, type QualityRepairPlan } from "@/server/domain/runtime/quality-repair";
+import { hasExecutedHumanStep, missingExecutedToolReceipts } from "@/server/domain/runtime/quality-checks";
 
 function hasContent(value: unknown): boolean {
   if (value === undefined || value === null) return false;
@@ -129,14 +130,12 @@ export async function runQualityGate(args: RunQualityGateInput): Promise<Quality
       return { next: node.id, repair: { ...repair, feedback: reason }, output: null };
     }
     if (quality.checkToolReceipts) {
-      const missingReceipts = Object.values(args.nodes)
-        .filter((item) => item.type === "tool" && !isReceiptOk(args.outputs[item.id]))
-        .map((item) => item.title);
+      const missingReceipts = missingExecutedToolReceipts(args.nodes, args.outputs);
       if (missingReceipts.length > 0) {
         return reject(`交付前检查未通过：以下工具步骤缺少系统回执：${missingReceipts.join("、")}`);
       }
     }
-    if (quality.checkHumanBoundary) {
+    if (quality.checkHumanBoundary && hasExecutedHumanStep(args.nodes, args.outputs)) {
       // approved 与 rejected 都算人工责任已履行：拒绝路径经 not_approved 仍要到质量门禁，若只认 approved 会永远 failRun
       const [decided] = await db
         .select({ id: approvals.id })

@@ -33,6 +33,36 @@ const manifest = AgentManifest.parse({
   },
 });
 
+const branchManifest = AgentManifest.parse({
+  ...manifest,
+  workflowFingerprint: "f".repeat(64),
+  workflowSnapshot: {
+    ...manifest.workflowSnapshot,
+    id: "draft-quality-branch-test",
+    nodes: {
+      start: { id: "start", title: "收到任务", type: "trigger", next: "route" },
+      route: {
+        id: "route", title: "是否发送", type: "condition",
+        condition: {
+          source: "input.send", operator: "eq",
+          branches: [{ label: "需要发送", value: true, next: "send" }],
+          defaultNext: "skip",
+        },
+      },
+      send: {
+        id: "send", title: "发送通知", type: "tool", next: "quality",
+        tool: { connector: "demo", action: "send", scope: "message", registryToolId: "demo", protocol: "demo" },
+      },
+      skip: { id: "skip", title: "保留当前结果", type: "system", next: "quality" },
+      quality: {
+        id: "quality", title: "交付前检查", type: "rule", next: "done",
+        quality: { requiredOutputTitles: ["保留当前结果"], minOutputCount: 1, checkToolReceipts: true, checkHumanBoundary: false },
+      },
+      done: { id: "done", title: "完成", type: "end", next: null },
+    },
+  },
+});
+
 async function cleanup(runId: string) {
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -58,6 +88,22 @@ describe("质量检查自动返工", () => {
     try {
       const handle = await start(agentRunWorkflow, [row.id, manifest, { input: "生成方案" }]);
       await expect(handle.returnValue).resolves.toEqual({ status: "completed" });
+    } finally {
+      await cleanup(row.id);
+    }
+  }, 240_000);
+
+  it("不要求未选条件分支中的工具提供回执", async () => {
+    const [row] = await db.insert(runs).values({
+      workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, agentId: AGENT_ID,
+      versionId: VERSION_ID, status: "queued", input: { send: false },
+    }).returning({ id: runs.id });
+    try {
+      const handle = await start(agentRunWorkflow, [row.id, branchManifest, { send: false }]);
+      await expect(handle.returnValue).resolves.toEqual({ status: "completed" });
+      const [finished] = await db.select().from(runs).where(eq(runs.id, row.id)).limit(1);
+      expect(finished?.status).toBe("completed");
+      expect(finished?.result).toMatchObject({ skip: expect.anything(), quality: { passed: true } });
     } finally {
       await cleanup(row.id);
     }
