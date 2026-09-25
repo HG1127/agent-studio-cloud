@@ -35,6 +35,7 @@ export function RunFeedbackPanel({
       if (!result.ok) setError(result.error);
       else {
         setFeedback(result.feedback);
+        setNote(result.feedback.note ?? "");
         setNotice(rating === "useful" ? "已记录这次结果有用" : "已记录改进意见");
       }
     } catch {

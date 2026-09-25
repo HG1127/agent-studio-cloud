@@ -57,6 +57,23 @@ describe("运行结果反馈", () => {
     expect(screen.queryByRole("button", { name: "加入验收样例" })).not.toBeInTheDocument();
   });
 
+  it("服务端隐藏误贴的凭据后立即更新输入框", async () => {
+    mocks.save.mockResolvedValue({
+      ok: true,
+      feedback: {
+        id: FEEDBACK_ID, runId: RUN_ID, rating: "needs_improvement", note: "请检查 [已隐藏敏感信息]",
+        evaluationCaseId: null, updatedAt: "2026-09-26T00:00:00.000Z",
+      },
+    });
+    const user = userEvent.setup();
+    render(<RunFeedbackPanel runId={RUN_ID} agentId={AGENT_ID} agentArchived={false} initialFeedback={null} />);
+
+    await user.type(screen.getByLabelText("结果反馈说明"), "请检查 authorization: Bearer private-feedback-token");
+    await user.click(screen.getByRole("button", { name: "需要改进" }));
+
+    await waitFor(() => expect(screen.getByLabelText("结果反馈说明")).toHaveValue("请检查 [已隐藏敏感信息]"));
+  });
+
   it("助手停用后保留反馈但不展示失效的验收入口", () => {
     render(<RunFeedbackPanel runId={RUN_ID} agentId={AGENT_ID} agentArchived initialFeedback={{
       id: FEEDBACK_ID, runId: RUN_ID, rating: "needs_improvement", note: "缺少依据",

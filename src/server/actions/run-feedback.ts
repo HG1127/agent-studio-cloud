@@ -15,7 +15,7 @@ import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { auditEventValues } from "@/server/audit/event-values";
 import { validationMessage } from "@/server/domain/validation-message";
-import { redactCredentialData } from "@/server/domain/security/redact-sensitive";
+import { redactCredentialData, redactCredentialText } from "@/server/domain/security/redact-sensitive";
 
 export async function saveRunFeedbackAction(input: unknown): Promise<RunFeedbackSaveResult> {
   const parsed = RunFeedbackSaveInput.safeParse(input);
@@ -36,7 +36,7 @@ export async function saveRunFeedbackAction(input: unknown): Promise<RunFeedback
       const now = new Date();
       const values = {
         rating: parsed.data.rating,
-        note: parsed.data.note || null,
+        note: parsed.data.note ? redactCredentialText(parsed.data.note) : null,
         updatedAt: now,
       };
       const [saved] = existing

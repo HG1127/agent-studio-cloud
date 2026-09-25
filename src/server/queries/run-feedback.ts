@@ -10,6 +10,7 @@ import { agents, runFeedback } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { escapeLikePattern } from "@/server/domain/search-pattern";
+import { redactCredentialText } from "@/server/domain/security/redact-sensitive";
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
 
 export async function getRunFeedback(runId: string, workspaceId: string): Promise<RunFeedbackViewType | null> {
@@ -20,7 +21,11 @@ export async function getRunFeedback(runId: string, workspaceId: string): Promis
     .where(and(eq(runFeedback.runId, runId), eq(runFeedback.workspaceId, workspaceId)))
     .limit(1);
   if (!row) return null;
-  const parsed = RunFeedbackView.safeParse({ ...row, updatedAt: row.updatedAt.toISOString() });
+  const parsed = RunFeedbackView.safeParse({
+    ...row,
+    note: row.note ? redactCredentialText(row.note) : null,
+    updatedAt: row.updatedAt.toISOString(),
+  });
   return parsed.success ? parsed.data : null;
 }
 
@@ -50,7 +55,7 @@ export async function listImprovementFeedback(options: {
     agentId: feedback.agentId,
     agentName,
     agentArchived: agentArchivedAt !== null,
-    note: feedback.note,
+    note: feedback.note ? redactCredentialText(feedback.note) : feedback.note,
     evaluationCaseId: feedback.evaluationCaseId,
     updatedAt: feedback.updatedAt.toISOString(),
   })));

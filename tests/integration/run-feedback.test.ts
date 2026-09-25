@@ -8,7 +8,7 @@ import { agents, agentVersions, auditEvents, evaluationCases, runFeedback, runs 
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { createRegressionCaseFromRunFeedbackAction, saveRunFeedbackAction } from "@/server/actions/run-feedback";
-import { listImprovementFeedback } from "@/server/queries/run-feedback";
+import { getRunFeedback, listImprovementFeedback } from "@/server/queries/run-feedback";
 import { listMemoryAgentOptions } from "@/server/queries/memory";
 
 const AGENT_ID = "00000000-0000-4000-8000-0000000000f1";
@@ -87,6 +87,32 @@ describe("运行反馈闭环", () => {
       input: { request: "检查合同", apiKey: "[已隐藏敏感信息]" },
       expectations: [],
     });
+  });
+
+  it("写入和读取反馈时隐藏误贴的服务凭据", async () => {
+    await insertFixture();
+    const result = await saveRunFeedbackAction({
+      runId: RUN_ID,
+      rating: "needs_improvement",
+      note: "缺少依据，authorization: Bearer private-feedback-token",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      feedback: { note: "缺少依据，[已隐藏敏感信息]" },
+    });
+    const [stored] = await db.select({ note: runFeedback.note }).from(runFeedback).where(eq(runFeedback.runId, RUN_ID));
+    expect(stored?.note).toBe("缺少依据，[已隐藏敏感信息]");
+
+    await db.update(runFeedback)
+      .set({ note: "历史反馈 secret=legacy-private-value" })
+      .where(eq(runFeedback.runId, RUN_ID));
+    expect(await listImprovementFeedback({ agentId: AGENT_ID })).toEqual([
+      expect.objectContaining({ note: "历史反馈 [已隐藏敏感信息]" }),
+    ]);
+    expect(await getRunFeedback(RUN_ID, DEMO_WORKSPACE_ID)).toEqual(
+      expect.objectContaining({ note: "历史反馈 [已隐藏敏感信息]" }),
+    );
   });
 
   it("运行未完成时拒绝提交结果反馈", async () => {
