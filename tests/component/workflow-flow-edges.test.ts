@@ -57,4 +57,46 @@ describe("画布等待超时连线", () => {
     });
     expect(removeNode(connected, "fallback").nodes.wait.wait?.onTimeoutNext).toBeNull();
   });
+
+  it("删除工具时同步清理隐藏门禁、回执检查和业务结果引用", () => {
+    const value = WorkflowDraft.parse({
+      id: "tool-delete",
+      startNodeId: "start",
+      rootAgent: { id: "agent", name: "测试助手", role: "处理" },
+      memoryPolicy: { taskContext: true, longTerm: true },
+      outputContract: { fields: [{ path: "receipt", label: "业务回执", required: true, sourceNodeId: "send" }] },
+      ui: { positions: { approval_send: { x: 0, y: 0 }, send: { x: 100, y: 0 }, verify_send: { x: 200, y: 0 } } },
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "approval_send" },
+        approval_send: {
+          id: "approval_send", title: "负责人确认发送", type: "human", next: "send", rejectNext: "done",
+          approval: { role: "负责人", reason: "确认发送" },
+          controlPlane: { kind: "governance", hiddenByDefault: true }, ui: { visibility: "control" },
+        },
+        send: {
+          id: "send", title: "发送通知", type: "tool", next: "verify_send",
+          tool: { connector: "demo", action: "send", scope: "message.write", registryToolId: "demo", protocol: "demo" },
+        },
+        verify_send: {
+          id: "verify_send", title: "确认系统回执", type: "rule", next: "remember",
+          rule: { kind: "tool_result", sourceNodeId: "send" },
+          controlPlane: { kind: "receipt", hiddenByDefault: true }, ui: { visibility: "control" },
+        },
+        remember: { id: "remember", title: "保存经验", type: "memory", next: "quality", memory: { mode: "write", contentFrom: "send" } },
+        quality: {
+          id: "quality", title: "交付检查", type: "rule", next: "done",
+          quality: { requiredOutputTitles: ["发送通知"], minOutputCount: 1 },
+        },
+        done: { id: "done", title: "完成", type: "end" },
+      },
+    });
+
+    const removed = removeNode(value, "send");
+    expect(Object.keys(removed.nodes)).not.toEqual(expect.arrayContaining(["approval_send", "send", "verify_send"]));
+    expect(removed.nodes.start.next).toBeNull();
+    expect(removed.nodes.remember.memory?.contentFrom).toBe("run_summary");
+    expect(removed.nodes.quality.quality?.requiredOutputTitles).toEqual([]);
+    expect(removed.outputContract?.fields).toEqual([]);
+    expect(removed.ui.positions).toEqual({});
+  });
 });

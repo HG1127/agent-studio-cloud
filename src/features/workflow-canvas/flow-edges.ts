@@ -48,37 +48,60 @@ function patchNode(draft: WorkflowDraft, nodeId: string, node: WorkflowNode): Wo
 export function removeNode(draft: WorkflowDraft, nodeId: string): WorkflowDraft {
   const target = draft.nodes[nodeId];
   if (!target || target.type === "trigger" || target.type === "end" || draft.startNodeId === nodeId) return draft;
+  const removedIds = new Set([nodeId]);
+  for (const [id, node] of Object.entries(draft.nodes)) {
+    const hiddenControl = node.ui?.visibility === "control" || node.controlPlane?.hiddenByDefault === true;
+    if (!hiddenControl) continue;
+    if (node.type === "rule" && node.rule?.sourceNodeId === nodeId) removedIds.add(id);
+    if (node.type === "human" && node.controlPlane?.kind === "governance" && node.next === nodeId) removedIds.add(id);
+  }
+  const titleStillExists = Object.entries(draft.nodes).some(([id, node]) => !removedIds.has(id) && node.title === target.title);
   const nodes: Record<string, WorkflowNode> = {};
   for (const [id, node] of Object.entries(draft.nodes)) {
-    if (id === nodeId) continue;
+    if (removedIds.has(id)) continue;
     const cleaned: WorkflowNode = {
       ...node,
-      next: node.next === nodeId ? null : node.next,
-      rejectNext: node.rejectNext === nodeId ? null : node.rejectNext,
-      onErrorNext: node.onErrorNext === nodeId ? null : node.onErrorNext,
+      next: node.next && removedIds.has(node.next) ? null : node.next,
+      rejectNext: node.rejectNext && removedIds.has(node.rejectNext) ? null : node.rejectNext,
+      onErrorNext: node.onErrorNext && removedIds.has(node.onErrorNext) ? null : node.onErrorNext,
     };
     if (node.condition) {
       cleaned.condition = {
         ...node.condition,
-        branches: node.condition.branches.map((branch) => branch.next === nodeId ? { ...branch, next: null } : branch),
-        defaultNext: node.condition.defaultNext === nodeId ? null : node.condition.defaultNext,
+        branches: node.condition.branches.map((branch) => branch.next && removedIds.has(branch.next) ? { ...branch, next: null } : branch),
+        defaultNext: node.condition.defaultNext && removedIds.has(node.condition.defaultNext) ? null : node.condition.defaultNext,
       };
     }
     if (node.loop) {
       cleaned.loop = {
         ...node.loop,
-        bodyNext: node.loop.bodyNext === nodeId ? null : node.loop.bodyNext,
-        exitNext: node.loop.exitNext === nodeId ? null : node.loop.exitNext,
+        bodyNext: node.loop.bodyNext && removedIds.has(node.loop.bodyNext) ? null : node.loop.bodyNext,
+        exitNext: node.loop.exitNext && removedIds.has(node.loop.exitNext) ? null : node.loop.exitNext,
       };
     }
     if (node.wait) {
-      cleaned.wait = { ...node.wait, onTimeoutNext: node.wait.onTimeoutNext === nodeId ? null : node.wait.onTimeoutNext };
+      cleaned.wait = { ...node.wait, onTimeoutNext: node.wait.onTimeoutNext && removedIds.has(node.wait.onTimeoutNext) ? null : node.wait.onTimeoutNext };
+    }
+    if (node.memory?.mode === "write" && node.memory.contentFrom && removedIds.has(node.memory.contentFrom)) {
+      cleaned.memory = { ...node.memory, contentFrom: "run_summary" };
+    }
+    if (node.quality && !titleStillExists && node.quality.requiredOutputTitles.includes(target.title)) {
+      cleaned.quality = {
+        ...node.quality,
+        requiredOutputTitles: node.quality.requiredOutputTitles.filter((title) => title !== target.title),
+      };
     }
     nodes[id] = cleaned;
   }
   const positions = { ...draft.ui.positions };
-  delete positions[nodeId];
-  return { ...draft, nodes, ui: { ...draft.ui, positions } };
+  for (const id of removedIds) delete positions[id];
+  const outputFields = draft.outputContract?.fields.filter((field) => !field.sourceNodeId || !removedIds.has(field.sourceNodeId));
+  return {
+    ...draft,
+    nodes,
+    ...(draft.outputContract ? { outputContract: { fields: outputFields! } } : {}),
+    ui: { ...draft.ui, positions },
+  };
 }
 
 export function applyConnection(draft: WorkflowDraft, connection: Connection): WorkflowDraft {
