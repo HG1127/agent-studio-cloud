@@ -27,7 +27,7 @@ export default async function ActivityPage({ searchParams }: {
   return <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 p-8">
     <header>
       <h1 className="text-2xl font-bold">操作记录</h1>
-      <p className="mt-1 text-sm text-gray-500">查看助手创建、流程修改和版本发布等关键设计变更。</p>
+      <p className="mt-1 text-sm text-gray-500">查看助手、流程、版本、知识资料和经验的关键变更。</p>
     </header>
     <form method="get" className="flex flex-wrap items-end gap-3 rounded-lg border border-gray-200 bg-white p-4">
       <label className="flex min-w-40 flex-1 flex-col gap-1 text-xs text-gray-600">记录类型
@@ -36,6 +36,8 @@ export default async function ActivityPage({ searchParams }: {
           <option value="agent">助手</option>
           <option value="workflow">流程</option>
           <option value="version">版本</option>
+          <option value="knowledge">知识资料</option>
+          <option value="memory">长期经验</option>
         </select>
       </label>
       <label className="flex min-w-56 flex-[2] flex-col gap-1 text-xs text-gray-600">操作关键词

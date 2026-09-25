@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   rows: [] as unknown[][],
   updates: [] as Array<Record<string, unknown>>,
+  auditEvents: [] as Array<Record<string, unknown>>,
   lock: vi.fn(),
   revalidatePath: vi.fn(),
 }));
@@ -30,6 +31,9 @@ const tx = {
       }),
     }),
   }),
+  insert: () => ({
+    values: async (value: Record<string, unknown>) => { mocks.auditEvents.push(value); },
+  }),
 };
 
 vi.mock("@/lib/db", () => ({ db: { transaction: async (run: (client: typeof tx) => unknown) => run(tx) } }));
@@ -42,19 +46,26 @@ const SOURCE_ID = "00000000-0000-4000-8000-000000000091";
 beforeEach(() => {
   mocks.rows = [];
   mocks.updates = [];
+  mocks.auditEvents = [];
   mocks.lock.mockReset();
   mocks.revalidatePath.mockReset();
 });
 
 describe("知识资料归档并发保护", () => {
   it("持有来源行锁后按最新分片状态恢复资料", async () => {
-    mocks.rows = [[{ status: "archived", chunkCount: 3, error: null }]];
+    mocks.rows = [[{ id: SOURCE_ID, name: "退款规则.md", status: "archived", chunkCount: 3, error: null }]];
 
     await expect(setKnowledgeSourceArchivedAction({ sourceId: SOURCE_ID, archived: false }))
       .resolves.toEqual({ ok: true });
     expect(mocks.lock).toHaveBeenCalledOnce();
     expect(mocks.updates).toHaveLength(1);
     expect(mocks.updates[0]).toMatchObject({ archivedAt: null, status: "indexed" });
+    expect(mocks.auditEvents).toContainEqual(expect.objectContaining({
+      action: "knowledge.restored",
+      targetType: "knowledge",
+      targetId: SOURCE_ID,
+      summary: "恢复知识资料「退款规则.md」",
+    }));
   });
 
   it("锁内状态已变化时不再覆盖资料", async () => {

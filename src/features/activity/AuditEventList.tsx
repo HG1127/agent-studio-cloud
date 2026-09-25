@@ -11,6 +11,10 @@ const ACTION_LABELS: Record<AuditEventAction, string> = {
   "workflow.auto_fixed": "自动修复流程",
   "version.published": "发布版本",
   "version.restored": "恢复版本",
+  "knowledge.archived": "归档资料",
+  "knowledge.restored": "恢复资料",
+  "memory.archived": "停用经验",
+  "memory.restored": "恢复经验",
 };
 
 function formatTime(iso: string): string {

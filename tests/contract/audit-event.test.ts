@@ -25,4 +25,16 @@ describe("操作记录契约", () => {
     }).success).toBe(false);
     expect(AuditEventFilters.safeParse({ query: "字".repeat(201) }).success).toBe(false);
   });
+
+  it("接受知识资料与经验的关键状态变更", () => {
+    expect(AuditEventCreate.safeParse({
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
+      action: "knowledge.archived",
+      targetType: "knowledge",
+      targetId: "00000000-0000-4000-8000-000000000101",
+      summary: "归档知识资料",
+    }).success).toBe(true);
+    expect(AuditEventFilters.safeParse({ targetType: "memory" }).success).toBe(true);
+  });
 });

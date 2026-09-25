@@ -2,9 +2,10 @@
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { KnowledgeArchiveInput, type KnowledgeArchiveResult } from "@/contracts/knowledge";
-import { knowledgeSources } from "@/db/schema";
-import { DEMO_WORKSPACE_ID } from "@/lib/constants";
+import { auditEvents, knowledgeSources } from "@/db/schema";
+import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
+import { auditEventValues } from "@/server/audit/event-values";
 import { restoredKnowledgeStatus } from "@/server/domain/knowledge/source-state";
 
 export async function setKnowledgeSourceArchivedAction(input: unknown): Promise<KnowledgeArchiveResult> {
@@ -16,7 +17,13 @@ export async function setKnowledgeSourceArchivedAction(input: unknown): Promise<
     const updated = await db.transaction(async (tx) => {
       // 与解析入库步骤锁同一来源行，恢复状态必须使用锁内最新的分片数和错误。
       const [source] = await tx
-        .select({ status: knowledgeSources.status, chunkCount: knowledgeSources.chunkCount, error: knowledgeSources.error })
+        .select({
+          id: knowledgeSources.id,
+          name: knowledgeSources.name,
+          status: knowledgeSources.status,
+          chunkCount: knowledgeSources.chunkCount,
+          error: knowledgeSources.error,
+        })
         .from(knowledgeSources)
         .where(and(
           eq(knowledgeSources.id, parsed.data.sourceId),
@@ -40,6 +47,17 @@ export async function setKnowledgeSourceArchivedAction(input: unknown): Promise<
           parsed.data.archived ? isNull(knowledgeSources.archivedAt) : isNotNull(knowledgeSources.archivedAt),
         ))
         .returning({ id: knowledgeSources.id });
+      if (rows.length > 0) {
+        await tx.insert(auditEvents).values(auditEventValues({
+          workspaceId: DEMO_WORKSPACE_ID,
+          createdBy: DEMO_USER_ID,
+          action: parsed.data.archived ? "knowledge.archived" : "knowledge.restored",
+          targetType: "knowledge",
+          targetId: source.id,
+          summary: `${parsed.data.archived ? "归档" : "恢复"}知识资料「${source.name}」`,
+          data: {},
+        }));
+      }
       return rows.length > 0;
     });
     if (!updated) return { ok: false, error: "知识资料状态已经变化，请刷新页面后重试" };

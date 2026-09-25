@@ -10,10 +10,14 @@ export const AuditEventAction = z.enum([
   "workflow.auto_fixed",
   "version.published",
   "version.restored",
+  "knowledge.archived",
+  "knowledge.restored",
+  "memory.archived",
+  "memory.restored",
 ]);
 export type AuditEventAction = z.infer<typeof AuditEventAction>;
 
-export const AuditTargetType = z.enum(["agent", "workflow", "version"]);
+export const AuditTargetType = z.enum(["agent", "workflow", "version", "knowledge", "memory"]);
 export type AuditTargetType = z.infer<typeof AuditTargetType>;
 
 export const AuditEventCreate = z.object({
