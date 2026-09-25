@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   startRun: vi.fn(),
   markFailure: vi.fn(),
   reconcile: vi.fn(),
+  reconcileSummary: vi.fn(),
   revalidatePath: vi.fn(),
   updates: 0,
 }));
@@ -15,6 +16,7 @@ vi.mock("@/server/services/start-run-core", () => ({ startRunCore: mocks.startRu
 vi.mock("@/server/services/evaluation-state", () => ({
   markEvaluationStartFailure: mocks.markFailure,
   reconcileTerminalEvaluationRun: mocks.reconcile,
+  reconcileEvaluationSummary: mocks.reconcileSummary,
 }));
 vi.mock("@/lib/db", () => ({
   db: {
@@ -37,6 +39,7 @@ beforeEach(() => {
   mocks.startRun.mockReset();
   mocks.markFailure.mockReset().mockResolvedValue(undefined);
   mocks.reconcile.mockReset().mockResolvedValue(undefined);
+  mocks.reconcileSummary.mockReset().mockResolvedValue(undefined);
   mocks.revalidatePath.mockReset();
   mocks.updates = 0;
 });
@@ -72,6 +75,23 @@ describe("批量启动自动验收", () => {
     expect(mocks.startRun).toHaveBeenCalledTimes(8);
     expect(mocks.markFailure).toHaveBeenCalledTimes(2);
     expect(mocks.reconcile).toHaveBeenCalledTimes(6);
+    expect(mocks.reconcileSummary).toHaveBeenCalledWith(EVALUATION_ID);
     expect(mocks.updates).toBe(6);
+  });
+
+  it("没有待补启样例时仍重新汇总已落定结果", async () => {
+    mocks.prepare.mockResolvedValue({
+      ok: true,
+      evaluationId: EVALUATION_ID,
+      versionId: VERSION_ID,
+      cases: [],
+      resumed: true,
+    });
+
+    await expect(startEvaluationAction(AGENT_ID)).resolves.toEqual({ ok: true });
+
+    expect(mocks.startRun).not.toHaveBeenCalled();
+    expect(mocks.reconcileSummary).toHaveBeenCalledOnce();
+    expect(mocks.reconcileSummary).toHaveBeenCalledWith(EVALUATION_ID);
   });
 });

@@ -15,7 +15,7 @@ import { AgentManifest } from "@/contracts/manifest";
 import { agentVersions, agents, auditEvents, evaluationCaseResults, evaluationCases, evaluationRuns } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
-import { markEvaluationStartFailure, reconcileTerminalEvaluationRun } from "@/server/services/evaluation-state";
+import { markEvaluationStartFailure, reconcileEvaluationSummary, reconcileTerminalEvaluationRun } from "@/server/services/evaluation-state";
 import { prepareEvaluationRun } from "@/server/services/evaluation-start";
 import { startRunCore } from "@/server/services/start-run-core";
 import { runBounded } from "@/server/domain/run-bounded";
@@ -268,6 +268,8 @@ export async function startEvaluationAction(agentId: string): Promise<Evaluation
         );
       }
     });
+    // 进程可能在“最后一条结果已落库、整轮汇总未完成”之间中断；即使没有待补启样例也要重新对账。
+    await reconcileEvaluationSummary(prepared.evaluationId);
     revalidatePath(`/agents/${agentId}`);
     revalidatePath("/runs");
     return { ok: true };

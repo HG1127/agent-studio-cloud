@@ -8,7 +8,7 @@ import { auditEventValues } from "@/server/audit/event-values";
 
 const EvaluationSourceKey = z.string().regex(/^evaluation:[0-9a-f-]{36}:[0-9a-f-]{36}$/i);
 
-async function refreshEvaluationSummary(evaluationRunId: string): Promise<void> {
+export async function reconcileEvaluationSummary(evaluationRunId: string): Promise<void> {
   await db.transaction(async (tx) => {
     const [evaluation] = await tx
       .select({
@@ -120,7 +120,7 @@ export async function completeEvaluationForRun(
       eq(evaluationCaseResults.status, "running"),
     ));
   // 即使结果已由上一次调用写入，也要重新对账汇总；这样汇总事务的瞬时失败可以被重试修复。
-  await refreshEvaluationSummary(evaluationRunId);
+  await reconcileEvaluationSummary(evaluationRunId);
 }
 
 export async function reconcileTerminalEvaluationRun(runId: string): Promise<void> {
@@ -155,5 +155,5 @@ export async function markEvaluationStartFailure(
       eq(evaluationCaseResults.status, "running"),
     ));
   // 与正常完成回调一致：结果写入与汇总之间若曾失败，重复调用仍可修复整轮状态。
-  await refreshEvaluationSummary(evaluationRunId);
+  await reconcileEvaluationSummary(evaluationRunId);
 }
