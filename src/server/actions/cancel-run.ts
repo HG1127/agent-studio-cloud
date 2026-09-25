@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, inArray, like, or } from "drizzle-orm";
+import { and, eq, inArray, like, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getRun } from "workflow/api";
 import { z } from "zod";
@@ -10,6 +10,7 @@ import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { completeEvaluationForRun } from "@/server/services/evaluation-state";
 import { MAX_COLLABORATION_DEPTH, parseCollaborationParentId } from "@/server/domain/runtime/collaboration-chain";
+import { isRunStartLeaseExpired, RUN_START_LEASE_KEY } from "@/server/services/run-start-lease";
 
 const LIVE_STATUSES = ["queued", "running", "waiting_approval", "waiting_event"];
 
@@ -17,7 +18,14 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
   if (!z.string().uuid().safeParse(runId).success) return { ok: false, error: "运行信息不正确，请刷新页面后重试" };
   try {
     const [run] = await db
-      .select({ status: runs.status, workflowRunId: runs.workflowRunId, sourceType: runs.sourceType, sourceKey: runs.sourceKey })
+      .select({
+        status: runs.status,
+        workflowRunId: runs.workflowRunId,
+        sourceType: runs.sourceType,
+        sourceKey: runs.sourceKey,
+        stepStates: runs.stepStates,
+        updatedAt: runs.updatedAt,
+      })
       .from(runs)
       .where(and(eq(runs.id, runId), eq(runs.workspaceId, DEMO_WORKSPACE_ID)))
       .limit(1);
@@ -30,7 +38,14 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
       const parentId = parseCollaborationParentId(root);
       if (!parentId) break;
       const [parent] = await db
-        .select({ status: runs.status, workflowRunId: runs.workflowRunId, sourceType: runs.sourceType, sourceKey: runs.sourceKey })
+        .select({
+          status: runs.status,
+          workflowRunId: runs.workflowRunId,
+          sourceType: runs.sourceType,
+          sourceKey: runs.sourceKey,
+          stepStates: runs.stepStates,
+          updatedAt: runs.updatedAt,
+        })
         .from(runs)
         .where(and(eq(runs.id, parentId), eq(runs.workspaceId, DEMO_WORKSPACE_ID)))
         .limit(1);
@@ -39,14 +54,23 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
       rootRunId = parentId;
       root = parent;
     }
-    if (!root.workflowRunId) return { ok: false, error: "运行尚未完成启动，请稍后再试" };
+    const orphanedStart = !root.workflowRunId
+      && root.status === "queued"
+      && isRunStartLeaseExpired(root.stepStates, root.updatedAt);
+    if (!root.workflowRunId && !orphanedStart) return { ok: false, error: "运行尚未完成启动，请稍后再试" };
 
-    await getRun(root.workflowRunId).cancel();
+    if (root.workflowRunId) await getRun(root.workflowRunId).cancel();
     const now = new Date();
     const updated = await db.transaction(async (tx) => {
       const rows = await tx
         .update(runs)
-        .set({ status: "cancelled", error: "已由员工取消", finishedAt: now, updatedAt: now })
+        .set({
+          status: "cancelled",
+          error: "已由员工取消",
+          stepStates: sql`${runs.stepStates} - ${RUN_START_LEASE_KEY}`,
+          finishedAt: now,
+          updatedAt: now,
+        })
         .where(and(
           eq(runs.id, rootRunId),
           eq(runs.workspaceId, DEMO_WORKSPACE_ID),

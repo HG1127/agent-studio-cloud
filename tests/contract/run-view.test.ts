@@ -31,6 +31,7 @@ describe("RunView", () => {
     const parsed = RunView.parse(runFixture);
     expect(parsed.status).toBe("completed");
     expect(parsed.agentName).toBe("客户咨询回复助手");
+    expect(parsed.startupRecoverable).toBe(false);
     expect(parsed.finishedAt).toBe("2026-09-21T08:30:12.345Z");
   });
   it("排队中的 run 允许 result/startedAt/finishedAt 为空", () => {

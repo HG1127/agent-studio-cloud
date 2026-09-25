@@ -165,11 +165,11 @@ export async function agentRunWorkflow(
   runId: string,
   manifest: AgentManifest,
   input: Record<string, unknown>,
-  executionContext: { depth: number } = { depth: 0 },
+  executionContext: { depth: number; startToken?: string } = { depth: 0 },
 ) {
   "use workflow";
   const draft = manifest.workflowSnapshot;
-  await initializeRun(runId, draft);
+  await initializeRun(runId, draft, executionContext.startToken);
   let currentId: string | null = draft.startNodeId;
   const outputs: Record<string, unknown> = {};
   const loopStates: Record<string, {

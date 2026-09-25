@@ -17,6 +17,7 @@ vi.mock("@/features/runs/TraceTimeline", () => ({ TraceTimeline: () => null }));
 vi.mock("@/features/runs/ApprovalPanel", () => ({ ApprovalPanel: () => null }));
 vi.mock("@/features/runs/CancelRunButton", () => ({ CancelRunButton: () => null }));
 vi.mock("@/features/runs/RetryRunButton", () => ({ RetryRunButton: () => <button type="button">重新运行</button> }));
+vi.mock("@/features/runs/ResumeRunStartButton", () => ({ ResumeRunStartButton: () => <button type="button">继续启动</button> }));
 vi.mock("@/features/runs/WaitEventPanel", () => ({ WaitEventPanel: () => null }));
 
 import { RunDetail } from "@/features/runs/RunDetail";
@@ -124,5 +125,26 @@ describe("运行详情步骤数据", () => {
     expect(screen.getByText("这个助手已停用，历史运行仍保留。")).toBeVisible();
     expect(screen.queryByRole("link", { name: "查看这个助手" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "重新运行" })).not.toBeInTheDocument();
+  });
+
+  it("失联的排队运行展示继续启动入口", async () => {
+    mocks.steps.mockResolvedValue([]);
+    mocks.runView.mockResolvedValue(RunView.parse({
+      id: "00000000-0000-4000-8000-000000000001",
+      agentId: "00000000-0000-4000-8000-000000000002",
+      agentName: "待恢复助手",
+      status: "queued",
+      sourceType: "manual",
+      input: {},
+      result: null,
+      error: null,
+      startupRecoverable: true,
+      startedAt: null,
+      finishedAt: null,
+    }));
+
+    render(await RunDetail({ runId: "00000000-0000-4000-8000-000000000001" }));
+
+    expect(screen.getByRole("button", { name: "继续启动" })).toBeVisible();
   });
 });

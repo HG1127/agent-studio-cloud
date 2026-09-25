@@ -7,6 +7,7 @@ import { WaitEventPanel } from "@/features/runs/WaitEventPanel";
 import { CancelRunButton } from "@/features/runs/CancelRunButton";
 import { RetryRunButton } from "@/features/runs/RetryRunButton";
 import { CopyResultButton } from "@/features/runs/CopyResultButton";
+import { ResumeRunStartButton } from "@/features/runs/ResumeRunStartButton";
 import type { RunStatus } from "@/contracts/run";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { getPendingWait, getRunView, listApprovals, listChildRuns, listRunSteps } from "@/server/queries/runs";
@@ -85,6 +86,7 @@ export async function RunDetail({ runId }: { runId: string }) {
           下载运行报告
         </a>
         {live ? <CancelRunButton runId={runId} cancelsChain={["agent_call", "handoff"].includes(run.sourceType)} /> : null}
+        {run.startupRecoverable ? <ResumeRunStartButton runId={runId} /> : null}
         {!live && !run.agentArchived ? <RetryRunButton runId={runId} /> : null}
       </header>
 

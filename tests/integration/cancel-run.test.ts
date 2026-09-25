@@ -18,6 +18,7 @@ import { db } from "@/lib/db";
 import { cancelRunAction } from "@/server/actions/cancel-run";
 import { recordDecision, requestApproval } from "@/server/steps/approval-step";
 import { failRun, finalizeRun, initializeRun, markRunRunning, persistContext, persistStep } from "@/server/steps/run-state";
+import { createRunStartLease, RUN_START_LEASE_KEY, RUN_START_LEASE_MS, withRunStartLease } from "@/server/services/run-start-lease";
 
 const RUN_ID = "00000000-0000-4000-8000-0000000000c1";
 const CHILD_RUN_ID = "00000000-0000-4000-8000-0000000000c4";
@@ -89,6 +90,29 @@ async function insertWaitingRun() {
 }
 
 describe("取消运行", () => {
+  it("允许取消租约已过期且没有工作流句柄的排队运行", async () => {
+    const staleAt = new Date(Date.now() - RUN_START_LEASE_MS * 2);
+    const lease = createRunStartLease(staleAt);
+    await db.insert(runs).values({
+      id: RUN_ID,
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
+      agentId: "00000000-0000-4000-8000-0000000000c2",
+      versionId: "00000000-0000-4000-8000-0000000000c3",
+      status: "queued",
+      input: {},
+      stepStates: withRunStartLease({}, lease),
+      updatedAt: staleAt,
+    });
+
+    await expect(cancelRunAction(RUN_ID)).resolves.toEqual({ ok: true });
+
+    expect(getRunMock).not.toHaveBeenCalled();
+    const [run] = await db.select().from(runs).where(eq(runs.id, RUN_ID));
+    expect(run).toMatchObject({ status: "cancelled", error: "已由员工取消" });
+    expect(run.stepStates).not.toHaveProperty(RUN_START_LEASE_KEY);
+  });
+
   it("取消等待确认的运行时同步关闭尚未处理的确认", async () => {
     await insertWaitingRun();
     cancelMock.mockResolvedValue(undefined);

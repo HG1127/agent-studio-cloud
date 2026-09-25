@@ -13,6 +13,7 @@ import {
 import { agents, approvals, runSteps, runs, traceEvents, type Run, type RunStep } from "@/db/schema";
 import { db } from "@/lib/db";
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
+import { isRunStartLeaseExpired } from "@/server/services/run-start-lease";
 
 const RUN_ID = z.string().uuid();
 
@@ -194,6 +195,10 @@ export async function getRunView(runId: string, workspaceId: string): Promise<Ru
     input: row.run.input,
     result: row.run.result ?? null,
     error: row.run.error ?? null,
+    startupRecoverable: row.agentArchivedAt === null
+      && row.run.status === "queued"
+      && !row.run.workflowRunId
+      && isRunStartLeaseExpired(row.run.stepStates, row.run.updatedAt),
     startedAt: row.run.startedAt?.toISOString() ?? null,
     finishedAt: row.run.finishedAt?.toISOString() ?? null,
   });

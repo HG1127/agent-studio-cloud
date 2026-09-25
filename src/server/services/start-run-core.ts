@@ -1,4 +1,5 @@
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { z } from "zod";
 import { start } from "workflow/api";
 import { AgentManifest } from "@/contracts/manifest";
 import { RunInputPayload, type StartRunResult } from "@/contracts/run";
@@ -14,6 +15,13 @@ import { validateRunInput } from "@/server/domain/runtime/run-input";
 import { validateWaitContracts } from "@/server/domain/runtime/wait-contract";
 import { validateWorkflowRoutes } from "@/server/domain/runtime/workflow-routes";
 import { completeEvaluationForRun } from "@/server/services/evaluation-state";
+import {
+  createRunStartLease,
+  isRunStartLeaseExpired,
+  RUN_START_LEASE_KEY,
+  withRunStartLease,
+  type RunStartLease,
+} from "@/server/services/run-start-lease";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
 import { getToolRegistration } from "@/server/tools/tool-registry";
 
@@ -37,14 +45,137 @@ const SUPPORTED_NODE_TYPES: ReadonlySet<string> = new Set([
   "handoff",
 ]);
 
-async function markRunStartFailed(runId: string): Promise<void> {
+function ownsRunStartLease(token: string) {
+  return sql<boolean>`${runs.stepStates} -> ${RUN_START_LEASE_KEY} ->> 'token' = ${token}`;
+}
+
+async function markRunStartFailed(runId: string, token: string, error = "运行启动失败，请稍后重试"): Promise<void> {
   const updated = await db
     .update(runs)
-    .set({ status: "failed", error: "运行启动失败，请稍后重试", finishedAt: new Date(), updatedAt: new Date() })
-    .where(and(eq(runs.id, runId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])))
+    .set({
+      status: "failed",
+      error,
+      stepStates: sql`${runs.stepStates} - ${RUN_START_LEASE_KEY}`,
+      finishedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(and(
+      eq(runs.id, runId),
+      eq(runs.workspaceId, DEMO_WORKSPACE_ID),
+      inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"]),
+      ownsRunStartLease(token),
+    ))
     .returning({ id: runs.id });
   if (updated.length > 0) {
-    await completeEvaluationForRun(runId, null, "运行启动失败，请稍后重试");
+    await completeEvaluationForRun(runId, null, error);
+  }
+}
+
+async function launchClaimedRun(args: {
+  runId: string;
+  manifest: AgentManifest;
+  input: Record<string, unknown>;
+  lease: RunStartLease;
+}): Promise<StartRunResult> {
+  let workflowRun: Awaited<ReturnType<typeof start>>;
+  try {
+    workflowRun = await start(agentRunWorkflow, [
+      args.runId,
+      args.manifest,
+      args.input,
+      { depth: 0, startToken: args.lease.token },
+    ]);
+  } catch (error) {
+    console.error("运行启动失败", error);
+    await markRunStartFailed(args.runId, args.lease.token);
+    return { ok: false, error: "运行启动失败，请稍后重试" };
+  }
+  try {
+    const updated = await db
+      .update(runs)
+      .set({
+        workflowRunId: workflowRun.runId,
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(runs.id, args.runId),
+        eq(runs.workspaceId, DEMO_WORKSPACE_ID),
+        ownsRunStartLease(args.lease.token),
+      ))
+      .returning({ id: runs.id });
+    if (updated.length > 0) return { ok: true, runId: args.runId };
+    await workflowRun.cancel();
+    return { ok: false, error: "运行启动已由新的请求接管，请刷新页面查看状态" };
+  } catch (error) {
+    console.error("运行启动句柄保存失败", error);
+    try {
+      await workflowRun.cancel();
+    } catch (cancelError) {
+      console.error("取消失联的工作流失败", cancelError);
+    }
+    await markRunStartFailed(args.runId, args.lease.token);
+    return { ok: false, error: "运行启动失败，请稍后重试" };
+  }
+}
+
+export async function resumeQueuedRunStartCore(runId: string): Promise<StartRunResult> {
+  if (!z.string().uuid().safeParse(runId).success) {
+    return { ok: false, error: "运行信息不正确，请刷新页面后重试" };
+  }
+  try {
+    const [candidate] = await db
+      .select({
+        id: runs.id,
+        input: runs.input,
+        stepStates: runs.stepStates,
+        updatedAt: runs.updatedAt,
+        manifest: agentVersions.manifest,
+      })
+      .from(runs)
+      .innerJoin(agentVersions, and(
+        eq(agentVersions.id, runs.versionId),
+        eq(agentVersions.agentId, runs.agentId),
+        eq(agentVersions.workspaceId, runs.workspaceId),
+      ))
+      .innerJoin(agents, and(
+        eq(agents.id, runs.agentId),
+        eq(agents.workspaceId, runs.workspaceId),
+        isNull(agents.archivedAt),
+      ))
+      .where(and(
+        eq(runs.id, runId),
+        eq(runs.workspaceId, DEMO_WORKSPACE_ID),
+        eq(runs.status, "queued"),
+        isNull(runs.workflowRunId),
+      ))
+      .limit(1);
+    if (!candidate) return { ok: false, error: "这次运行已经开始或结束，请刷新页面查看状态" };
+    if (!isRunStartLeaseExpired(candidate.stepStates, candidate.updatedAt)) {
+      return { ok: false, error: "运行仍在启动中，请稍后刷新页面" };
+    }
+    const lease = createRunStartLease();
+    const [claimed] = await db
+      .update(runs)
+      .set({ stepStates: withRunStartLease(candidate.stepStates, lease), updatedAt: new Date() })
+      .where(and(
+        eq(runs.id, candidate.id),
+        eq(runs.workspaceId, DEMO_WORKSPACE_ID),
+        eq(runs.status, "queued"),
+        isNull(runs.workflowRunId),
+        eq(runs.updatedAt, candidate.updatedAt),
+      ))
+      .returning({ id: runs.id });
+    if (!claimed) return { ok: true, runId: candidate.id };
+    const manifest = AgentManifest.safeParse(candidate.manifest);
+    const input = RunInputPayload.safeParse(candidate.input);
+    if (!manifest.success || !input.success) {
+      await markRunStartFailed(candidate.id, lease.token, "运行信息不完整，无法继续启动");
+      return { ok: false, error: "运行信息不完整，无法继续启动" };
+    }
+    return launchClaimedRun({ runId: candidate.id, manifest: manifest.data, input: input.data, lease });
+  } catch (error) {
+    console.error("继续启动运行失败", error);
+    return { ok: false, error: "继续启动失败，请稍后重试" };
   }
 }
 
@@ -199,6 +330,7 @@ export async function startRunCore(args: {
       const names = [...new Set(unsupported)].join("、");
       return { ok: false, error: `以下步骤暂不支持自动执行：${names}，请调整流程后再运行` };
     }
+    const lease = createRunStartLease();
     const [run] = await db
       .insert(runs)
       .values({
@@ -208,6 +340,7 @@ export async function startRunCore(args: {
         versionId: version.id,
         status: "queued",
         input: runInput,
+        stepStates: withRunStartLease({}, lease),
         sourceType: args.sourceType ?? "manual",
         sourceKey: args.sourceKey ?? null,
       })
@@ -215,7 +348,14 @@ export async function startRunCore(args: {
       .returning({ id: runs.id });
     if (!run && args.sourceKey) {
       const [existing] = await db
-        .select({ id: runs.id, status: runs.status, workflowRunId: runs.workflowRunId, error: runs.error })
+        .select({
+          id: runs.id,
+          status: runs.status,
+          workflowRunId: runs.workflowRunId,
+          stepStates: runs.stepStates,
+          updatedAt: runs.updatedAt,
+          error: runs.error,
+        })
         .from(runs)
         .where(and(eq(runs.workspaceId, agent.workspaceId), eq(runs.sourceKey, args.sourceKey)))
         .limit(1);
@@ -223,34 +363,14 @@ export async function startRunCore(args: {
       if (existing.status === "failed" && !existing.workflowRunId) {
         return { ok: false, error: existing.error ?? "运行启动失败，请稍后重试" };
       }
+      if (existing.status === "queued" && !existing.workflowRunId
+        && isRunStartLeaseExpired(existing.stepStates, existing.updatedAt)) {
+        return resumeQueuedRunStartCore(existing.id);
+      }
       return { ok: true, runId: existing.id };
     }
     if (!run) return { ok: false, error: "运行启动冲突，请稍后重试" };
-    const runId = run.id;
-    let workflowRun: Awaited<ReturnType<typeof start>>;
-    try {
-      workflowRun = await start(agentRunWorkflow, [runId, manifest, runInput]);
-    } catch (error) {
-      console.error("运行启动失败", error);
-      await markRunStartFailed(runId);
-      return { ok: false, error: "运行启动失败，请稍后重试" };
-    }
-    try {
-      await db
-        .update(runs)
-        .set({ workflowRunId: workflowRun.runId, updatedAt: new Date() })
-        .where(eq(runs.id, runId));
-    } catch (error) {
-      console.error("运行启动句柄保存失败", error);
-      try {
-        await workflowRun.cancel();
-      } catch (cancelError) {
-        console.error("取消失联的工作流失败", cancelError);
-      }
-      await markRunStartFailed(runId);
-      return { ok: false, error: "运行启动失败，请稍后重试" };
-    }
-    return { ok: true, runId };
+    return launchClaimedRun({ runId: run.id, manifest, input: runInput, lease });
   } catch (error) {
     console.error("运行启动失败：", error);
     return { ok: false, error: "运行启动失败，请稍后重试" };

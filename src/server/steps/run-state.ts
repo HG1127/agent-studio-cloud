@@ -8,6 +8,7 @@ import { db } from "@/lib/db";
 import { approvals, runSteps, runs } from "@/db/schema";
 import { appendTrace } from "@/server/steps/trace-step";
 import { completeEvaluationForRun } from "@/server/services/evaluation-state";
+import { readRunStartLease, RUN_START_LEASE_KEY } from "@/server/services/run-start-lease";
 import {
   jsonStorageIssue,
   MAX_RUN_CONTEXT_BYTES,
@@ -16,27 +17,41 @@ import {
   MAX_STEP_OUTPUT_BYTES,
 } from "@/server/domain/runtime/json-storage";
 
-async function requireRun(runId: string) {
+export async function initializeRun(runId: string, draft: WorkflowDraft, startToken?: string): Promise<void> {
+  "use step";
   const [run] = await db
-    .select({ id: runs.id, workspaceId: runs.workspaceId, status: runs.status })
+    .select({ id: runs.id, workspaceId: runs.workspaceId, status: runs.status, stepStates: runs.stepStates })
     .from(runs)
     .where(eq(runs.id, runId))
     .limit(1);
   if (!run) throw new FatalError("运行记录不存在，无法继续执行");
-  return run;
-}
-
-export async function initializeRun(runId: string, draft: WorkflowDraft): Promise<void> {
-  "use step";
-  const run = await requireRun(runId);
+  const lease = readRunStartLease(run.stepStates);
+  if ((lease && lease.token !== startToken) || (!lease && startToken) || (lease && !startToken)) {
+    throw new FatalError("运行启动已由新的请求接管");
+  }
   const now = new Date();
   const updated = await db
     .update(runs)
     .set({ status: "running", startedAt: now, updatedAt: now })
-    .where(and(eq(runs.id, runId), eq(runs.status, "queued")))
+    .where(and(
+      eq(runs.id, runId),
+      eq(runs.status, "queued"),
+      startToken
+        ? sql<boolean>`${runs.stepStates} -> ${RUN_START_LEASE_KEY} ->> 'token' = ${startToken}`
+        : sql<boolean>`${runs.stepStates} -> ${RUN_START_LEASE_KEY} is null`,
+    ))
     .returning({ id: runs.id });
   if (updated.length === 0) {
-    if (run.status === "running") return;
+    const [current] = await db
+      .select({ status: runs.status, stepStates: runs.stepStates })
+      .from(runs)
+      .where(eq(runs.id, runId))
+      .limit(1);
+    const currentLease = readRunStartLease(current?.stepStates);
+    if (current?.status === "running" && (
+      (startToken && currentLease?.token === startToken)
+      || (!startToken && !currentLease)
+    )) return;
     throw new FatalError("运行已经结束，不能重新启动");
   }
   await appendTrace({

@@ -9,6 +9,8 @@ import { agents, agentVersions, evaluationCaseResults, evaluationCases, evaluati
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { startRunCore } from "@/server/services/start-run-core";
+import { createRunStartLease, readRunStartLease, RUN_START_LEASE_MS, withRunStartLease } from "@/server/services/run-start-lease";
+import { initializeRun } from "@/server/steps/run-state";
 
 const AGENT_ID = "00000000-0000-4000-8000-0000000007a1";
 const VERSION_ID = "00000000-0000-4000-8000-0000000007a2";
@@ -70,6 +72,57 @@ describe("运行启动句柄恢复", () => {
     expect(first.ok).toBe(true);
     expect(second).toEqual(first);
     expect(startMock).toHaveBeenCalledOnce();
+    const [stored] = await db.select().from(runs).where(eq(runs.id, first.ok ? first.runId : ""));
+    expect(stored.workflowRunId).toBe("wrun_test_handle");
+    expect(readRunStartLease(stored.stepStates)?.token).toBe(startMock.mock.calls[0]?.[1]?.[3]?.startToken);
+  });
+
+  it("相同来源键遇到过期排队记录时接管原运行而不新建记录", async () => {
+    const sourceKey = "evaluation:00000000-0000-4000-8000-000000000703:00000000-0000-4000-8000-000000000704";
+    const staleAt = new Date(Date.now() - RUN_START_LEASE_MS * 2);
+    const staleLease = createRunStartLease(staleAt);
+    const [existing] = await db.insert(runs).values({
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
+      agentId: AGENT_ID,
+      versionId: VERSION_ID,
+      status: "queued",
+      input: { request: "原始输入" },
+      stepStates: withRunStartLease({}, staleLease),
+      sourceType: "evaluation",
+      sourceKey,
+      updatedAt: staleAt,
+    }).returning({ id: runs.id });
+
+    const result = await startRunCore({ agentId: AGENT_ID, input: { request: "重复触发" }, sourceType: "evaluation", sourceKey });
+
+    expect(result).toEqual({ ok: true, runId: existing.id });
+    expect(startMock).toHaveBeenCalledOnce();
+    expect(startMock.mock.calls[0]?.[1]).toEqual(expect.arrayContaining([
+      existing.id,
+      expect.any(Object),
+      { request: "原始输入" },
+      expect.objectContaining({ startToken: expect.not.stringMatching(staleLease.token) }),
+    ]));
+    expect(await db.select().from(runs).where(eq(runs.sourceKey, sourceKey))).toHaveLength(1);
+  });
+
+  it("旧启动请求的租约失效后不能初始化同一运行", async () => {
+    const currentLease = createRunStartLease();
+    const [run] = await db.insert(runs).values({
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
+      agentId: AGENT_ID,
+      versionId: VERSION_ID,
+      status: "queued",
+      input: {},
+      stepStates: withRunStartLease({}, currentLease),
+    }).returning({ id: runs.id });
+
+    await expect(initializeRun(run.id, manifest.workflowSnapshot, crypto.randomUUID()))
+      .rejects.toThrow("运行启动已由新的请求接管");
+    const [unchanged] = await db.select().from(runs).where(eq(runs.id, run.id));
+    expect(unchanged.status).toBe("queued");
   });
 
   it("默认运行只选择助手本工作区的生产版本", async () => {

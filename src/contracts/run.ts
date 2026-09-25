@@ -139,6 +139,7 @@ export const RunView = z.object({
   input: z.record(z.string(), z.unknown()),
   result: z.unknown().nullable(),
   error: z.string().nullable(),
+  startupRecoverable: z.boolean().default(false),
   startedAt: z.string().nullable(),
   finishedAt: z.string().nullable(),
 });
