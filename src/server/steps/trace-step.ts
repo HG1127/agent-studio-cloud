@@ -8,6 +8,7 @@ import { runs, traceEvents } from "@/db/schema";
 import { writeTraceStreamBestEffort } from "@/server/domain/trace-stream";
 import { canAppendTraceToRun, isTerminalTraceKind } from "@/server/domain/trace-state";
 import { redactSensitiveData, redactSensitiveText } from "@/server/domain/security/redact-sensitive";
+import { withSafeWorkflowError } from "@/server/security/workflow-error";
 
 export type TraceLevel = "info" | "warn" | "error";
 
@@ -49,7 +50,7 @@ export async function appendTrace(event: AppendTraceInput): Promise<void> {
   };
   // 与取消、失败和完成共用运行行锁：终态检查与轨迹插入处于同一事务，
   // 并行步骤也按运行串行分配 seq，不再依赖唯一键冲突重试。
-  const seq = await db.transaction(async (tx) => {
+  const seq = await withSafeWorkflowError(() => db.transaction(async (tx) => {
     const [run] = await tx
       .select({ workspaceId: runs.workspaceId, createdBy: runs.createdBy, status: runs.status })
       .from(runs)
@@ -87,7 +88,7 @@ export async function appendTrace(event: AppendTraceInput): Promise<void> {
       .values({ runId: event.runId, workspaceId: run.workspaceId, createdBy: run.createdBy, seq: (row?.max ?? 0) + 1, ...base, at })
       .returning({ seq: traceEvents.seq });
     return inserted.seq;
-  });
+  }), "运行轨迹暂时无法保存，请稍后重试");
   if (seq === null) return;
   const payload = { seq, ...base, at: at.toISOString() };
   const observablePayload = redactSensitiveData(payload);

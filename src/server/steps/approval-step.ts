@@ -13,6 +13,7 @@ import { selectApprovalReview } from "@/server/domain/approval/select-review";
 import { redactCredentialData, redactCredentialText } from "@/server/domain/security/redact-sensitive";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
+import { withSafeWorkflowError } from "@/server/security/workflow-error";
 
 export interface RequestApprovalInput {
   runId: string;
@@ -51,7 +52,7 @@ export async function requestApproval(args: RequestApprovalInput): Promise<Appro
   const reason = redactCredentialText(node.approval?.reason ?? `确认「${node.title}」后流程才会继续`);
   const payload = ApprovalPayload.parse(redactCredentialData({ review: selectApprovalReview(args.outputs, args.nodes) }));
   const now = new Date();
-  const result = await db.transaction(async (tx) => {
+  const result = await withSafeWorkflowError(() => db.transaction(async (tx) => {
     const [run] = await tx
       .select({ workspaceId: runs.workspaceId, createdBy: runs.createdBy, status: runs.status })
       .from(runs)
@@ -97,7 +98,7 @@ export async function requestApproval(args: RequestApprovalInput): Promise<Appro
       .returning({ id: approvals.id, status: approvals.status, note: approvals.note });
     await tx.update(runs).set({ status: "waiting_approval", updatedAt: now }).where(eq(runs.id, args.runId));
     return { row: created };
-  });
+  }), "确认内容暂时无法保存，请稍后重试");
   if (result.row.status === "pending") {
     await appendTrace({
       runId: args.runId,
@@ -136,7 +137,7 @@ export async function recordDecision(args: RecordDecisionInput): Promise<{
   const approved = args.decision.decision === "approved";
   const decisionStatus = approved ? "approved" : "rejected";
   const note = args.decision.note ? redactCredentialText(args.decision.note) : null;
-  await db.transaction(async (tx) => {
+  await withSafeWorkflowError(() => db.transaction(async (tx) => {
     const [run] = await tx
       .select({ status: runs.status })
       .from(runs)
@@ -164,7 +165,7 @@ export async function recordDecision(args: RecordDecisionInput): Promise<{
         updatedAt: sql`now()`,
       })
       .where(and(eq(approvals.id, args.approvalId), eq(approvals.status, "pending")));
-  });
+  }), "确认结果暂时无法保存，请稍后重试");
   await appendTrace({
     runId: args.runId,
     nodeId: args.node.id,

@@ -16,6 +16,7 @@ import {
 } from "@/server/domain/knowledge/text-limits";
 import { processedKnowledgeStatus } from "@/server/domain/knowledge/source-state";
 import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
+import { withSafeWorkflowError } from "@/server/security/workflow-error";
 
 interface ParseArgs {
   sourceId: string;
@@ -83,7 +84,7 @@ export async function indexKnowledgeChunks(args: { sourceId: string; text: strin
   "use step";
   const chunks = chunkText(args.text);
   const charCount = chunks.at(-1)?.charEnd ?? 0;
-  await db.transaction(async (tx) => {
+  await withSafeWorkflowError(() => db.transaction(async (tx) => {
     const [source] = await tx
       .select({ workspaceId: knowledgeSources.workspaceId, createdBy: knowledgeSources.createdBy, archivedAt: knowledgeSources.archivedAt, parseEngine: knowledgeSources.parseEngine })
       .from(knowledgeSources)
@@ -118,14 +119,14 @@ export async function indexKnowledgeChunks(args: { sourceId: string; text: strin
         eq(knowledgeSources.id, args.sourceId),
         eq(knowledgeSources.workspaceId, source.workspaceId),
       ));
-  });
+  }), "知识资料暂时无法写入，请稍后重试");
   return { chunkCount: chunks.length };
 }
 
 export async function markKnowledgeFailed(args: { sourceId: string; error: string; ingestToken: string }): Promise<void> {
   "use step";
   const safeError = redactSensitiveText(args.error);
-  await db.transaction(async (tx) => {
+  await withSafeWorkflowError(() => db.transaction(async (tx) => {
     const [source] = await tx
       .select({ workspaceId: knowledgeSources.workspaceId, archivedAt: knowledgeSources.archivedAt, parseEngine: knowledgeSources.parseEngine })
       .from(knowledgeSources)
@@ -141,5 +142,5 @@ export async function markKnowledgeFailed(args: { sourceId: string; error: strin
         eq(knowledgeSources.id, args.sourceId),
         eq(knowledgeSources.workspaceId, source.workspaceId),
       ));
-  });
+  }), "知识资料状态暂时无法保存，请稍后重试");
 }

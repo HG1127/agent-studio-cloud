@@ -10,6 +10,7 @@ import { searchQueryFromInput } from "@/server/domain/runtime/search-query";
 import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
+import { withSafeWorkflowError } from "@/server/security/workflow-error";
 
 export async function runMemoryStep(args: {
   runId: string;
@@ -67,7 +68,7 @@ export async function runMemoryStep(args: {
     throw new FatalError(`步骤「${args.node.title}」指定的经验内容来源“${memory.contentFrom}”不存在`);
   }
   const sourceNodeId = `${args.node.id}:${getStepMetadata().stepId}`;
-  await db.transaction(async (tx) => {
+  await withSafeWorkflowError(() => db.transaction(async (tx) => {
     const [run] = await tx
       .select({ workspaceId: runs.workspaceId, createdBy: runs.createdBy, agentId: runs.agentId, status: runs.status })
       .from(runs)
@@ -93,7 +94,7 @@ export async function runMemoryStep(args: {
         target: [agentMemories.sourceRunId, agentMemories.sourceNodeId],
         set: { content, metadata: { nodeTitle: args.node.title }, updatedAt: new Date() },
       });
-  });
+  }), "经验内容暂时无法保存，请稍后重试");
   const output = { mode: "write", saved: true, contentLength: content.length };
   await persistStep({ runId: args.runId, nodeId: args.node.id, nodeTitle: args.node.title, nodeType: args.node.type, status: "succeeded", output });
   await appendTrace({ runId: args.runId, nodeId: args.node.id, kind: "memory.saved", title: `「${args.node.title}」已保存可复用经验`, data: output });

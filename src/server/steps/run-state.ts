@@ -18,6 +18,7 @@ import {
 } from "@/server/domain/runtime/json-storage";
 import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { withSafeWorkflowError } from "@/server/security/workflow-error";
 
 function workflowStepId(): string {
   try {
@@ -140,7 +141,7 @@ export async function persistStep(step: PersistStepInput): Promise<void> {
     : safeStep;
   const now = new Date();
   let starting = storedStep.status === "running";
-  await db.transaction(async (tx) => {
+  await withSafeWorkflowError(() => db.transaction(async (tx) => {
     // 锁住运行状态直到步骤与摘要一起落库，取消操作要么在前、要么在后，不能插进检查与写入之间。
     const [run] = await tx
       .select({ workspaceId: runs.workspaceId, createdBy: runs.createdBy, status: runs.status, stepStates: runs.stepStates })
@@ -191,7 +192,7 @@ export async function persistStep(step: PersistStepInput): Promise<void> {
       [storedStep.nodeId]: { status: storedStep.status, updatedAt: now.toISOString() },
     };
     await tx.update(runs).set({ stepStates: states, updatedAt: now }).where(eq(runs.id, storedStep.runId));
-  });
+  }), "步骤状态暂时无法保存，请稍后重试");
   if (storedStep.emitTrace !== false) {
     await appendCommittedStepTrace(storedStep, stepId);
   }
@@ -202,11 +203,11 @@ export async function persistContext(runId: string, outputs: Record<string, unkn
   "use step";
   const contextIssue = jsonStorageIssue({ outputs }, MAX_RUN_CONTEXT_BYTES, "运行完整上下文");
   if (contextIssue) throw new FatalError(contextIssue);
-  const updated = await db
+  const updated = await withSafeWorkflowError(() => db
     .update(runs)
     .set({ context: { outputs }, updatedAt: new Date() })
     .where(and(eq(runs.id, runId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])))
-    .returning({ id: runs.id });
+    .returning({ id: runs.id }), "运行上下文暂时无法保存，请稍后重试");
   if (updated.length > 0) return;
   const [run] = await db.select({ id: runs.id }).from(runs).where(eq(runs.id, runId)).limit(1);
   if (!run) throw new FatalError("运行记录不存在，无法继续执行");
@@ -224,11 +225,11 @@ export async function finalizeRun(
   const contextIssue = jsonStorageIssue({ outputs: contextOutputs }, MAX_RUN_CONTEXT_BYTES, "运行完整上下文");
   if (contextIssue) throw new FatalError(contextIssue);
   const now = new Date();
-  const updated = await db
+  const updated = await withSafeWorkflowError(() => db
     .update(runs)
     .set({ status: "completed", result, context: { outputs: contextOutputs }, finishedAt: now, updatedAt: now })
     .where(and(eq(runs.id, runId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])))
-    .returning({ id: runs.id });
+    .returning({ id: runs.id }), "运行结果暂时无法保存，请稍后重试");
   if (updated.length === 0) {
     // 终态写入后若验收汇总瞬时失败，Workflow 会重试本步骤；重入时仍需完成对账。
     await appendTrace({ runId, kind: "run.completed", title: "流程执行完成", detail: `共 ${Object.keys(result).length} 个步骤产出` });

@@ -12,6 +12,7 @@ import { loadCollaborationChain } from "@/server/services/collaboration-chain";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
+import { withSafeWorkflowError } from "@/server/security/workflow-error";
 
 export async function beginAgentCall(args: {
   runId: string;
@@ -56,7 +57,7 @@ export async function beginAgentCall(args: {
   const input = validatedInput.data;
   await persistStep({ runId: args.runId, nodeId: args.node.id, nodeTitle: args.node.title, nodeType: args.node.type, status: "running" });
   const sourceKey = `agent-call:${args.runId}:${args.node.id}:${getStepMetadata().stepId}`;
-  const childRunId = await db.transaction(async (tx) => {
+  const childRunId = await withSafeWorkflowError(() => db.transaction(async (tx) => {
     const [lockedParent] = await tx
       .select({ id: runs.id })
       .from(runs)
@@ -84,7 +85,7 @@ export async function beginAgentCall(args: {
         eq(runs.sourceKey, sourceKey),
       )).limit(1)
     )[0]?.id ?? null;
-  });
+  }), "协作任务暂时无法创建，请稍后重试");
   if (!childRunId) throw new FatalError(`步骤「${args.node.title}」无法创建协作任务`);
   await appendTrace({ runId: args.runId, nodeId: args.node.id, kind: "agent_call.started", title: `「${args.node.title}」已交给「${target.name}」处理` });
   return { childRunId, targetName: target.name, manifest: parsedManifest.data, input };
