@@ -12,6 +12,7 @@ import { applySafeAuditFixes } from "@/server/domain/audit/safe-audit-fixes";
 import { auditEventValues } from "@/server/audit/event-values";
 import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
 import { validateInlineWorkflows } from "@/server/domain/runtime/inline-workflow";
+import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 export async function applyAuditFixesAction(agentId: string): Promise<AuditFixActionResult> {
   if (!z.string().uuid().safeParse(agentId).success) return { ok: false, error: "助手信息不正确，请刷新页面后重试" };
@@ -68,7 +69,7 @@ export async function applyAuditFixesAction(agentId: string): Promise<AuditFixAc
       remainingWarnings: outcome.result.remainingWarnings,
     };
   } catch (error) {
-    console.error("自动修复流程失败", error);
+    console.error("自动修复流程失败", safeErrorForLog(error));
     return { ok: false, error: "自动修复失败，请稍后重试" };
   }
 }

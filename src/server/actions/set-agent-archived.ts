@@ -8,6 +8,7 @@ import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { auditEventValues } from "@/server/audit/event-values";
 import { activeVersionDependingOnAgent } from "@/server/domain/runtime/collaboration-dependencies";
+import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 export async function setAgentArchivedAction(input: unknown): Promise<AgentArchiveResult> {
   const parsed = AgentArchiveInput.safeParse(input);
@@ -104,7 +105,7 @@ export async function setAgentArchivedAction(input: unknown): Promise<AgentArchi
     revalidatePath("/schedules");
     return { ok: true };
   } catch (error) {
-    console.error("更新助手状态失败", error);
+    console.error("更新助手状态失败", safeErrorForLog(error));
     return { ok: false, error: "更新助手状态失败，请稍后重试" };
   }
 }

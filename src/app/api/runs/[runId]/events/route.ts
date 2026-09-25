@@ -8,6 +8,7 @@ import { getRunRow } from "@/server/queries/runs";
 import { hasRunTraceKind, listTraceSince } from "@/server/queries/trace";
 import { resolveSseCursor } from "@/server/domain/sse-cursor";
 import { terminalTraceKindForStatus } from "@/server/domain/trace-state";
+import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 export const dynamic = "force-dynamic";
 
@@ -58,7 +59,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
             current = await getRunRow(runId, DEMO_WORKSPACE_ID);
           } catch (error) {
             // 静默关流会让客户端收不到 done 而无限重连重放，必须先显式告知
-            console.error(`[events] 轮询数据库异常，通知客户端后关流 run=${runId}`, error);
+            console.error(`[events] 轮询数据库异常，通知客户端后关流 run=${runId}`, safeErrorForLog(error));
             pushEvent("done", { status: "error" });
             break;
           }
@@ -79,7 +80,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
               try {
                 terminalTraceObserved = await hasRunTraceKind(runId, DEMO_WORKSPACE_ID, terminalKind);
               } catch (error) {
-                console.error(`[events] 检查终态轨迹失败 run=${runId}`, error);
+                console.error(`[events] 检查终态轨迹失败 run=${runId}`, safeErrorForLog(error));
               }
             }
             terminalSince ??= Date.now();

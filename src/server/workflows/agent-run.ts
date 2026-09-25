@@ -24,6 +24,7 @@ import { appendTrace } from "@/server/steps/trace-step";
 import { runToolStep } from "@/server/steps/tool-step";
 import { beginWait, completeWait } from "@/server/steps/wait-step";
 import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
+import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 type ParallelBranchResult = {
   id: string;
@@ -653,17 +654,17 @@ export async function agentRunWorkflow(
   } catch (err) {
     const fallback = "执行步骤时发生错误，已停止";
     const reason = executionFailureReason(err, fallback);
-    if (reason === fallback) console.error(`运行 ${runId} 步骤执行失败：`, err);
+    if (reason === fallback) console.error(`运行 ${runId} 步骤执行失败：`, safeErrorForLog(err));
     try {
       await persistContext(runId, outputs);
     } catch (contextError) {
-      console.error(`运行 ${runId} 保存失败前上下文时出错：`, contextError);
+      console.error(`运行 ${runId} 保存失败前上下文时出错：`, safeErrorForLog(contextError));
     }
     try {
       await failRun(runId, reason);
     } catch (failErr) {
       // 兜底写终态失败不得掩盖原错误
-      console.error(`运行 ${runId} 写入失败终态时出错：`, failErr);
+      console.error(`运行 ${runId} 写入失败终态时出错：`, safeErrorForLog(failErr));
     }
     throw err;
   }

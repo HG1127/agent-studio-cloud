@@ -2,6 +2,7 @@ const SENSITIVE_KEY = /(?:password|passcode|secret|token|api[_-]?key|(?:private|
 const CREDENTIAL_KEY = /(?:password|passcode|secret|token|api[_-]?key|(?:private|access|secret)[_-]?key|authorization|cookie|credential|session[_-]?id|密码|密钥|令牌|凭据)/i;
 const TOKEN_USAGE_KEY = /^(?:input|output|total|prompt|completion)[_-]?tokens?$/i;
 const REDACTED = "[已隐藏敏感信息]";
+const URI_CREDENTIALS = /\b([a-z][a-z0-9+.-]*:\/\/)[^@\s/]+@/gi;
 const PRIVATE_KEY = /-----BEGIN [^-\r\n]{0,40}PRIVATE KEY-----[\s\S]*?-----END [^-\r\n]{0,40}PRIVATE KEY-----/g;
 const JWT = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g;
 const BEARER = /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi;
@@ -31,6 +32,7 @@ function luhnValid(value: string): boolean {
 
 export function redactCredentialText(value: string): string {
   return value
+    .replace(URI_CREDENTIALS, `$1${REDACTED}@`)
     .replace(PRIVATE_KEY, REDACTED)
     .replace(JWT, REDACTED)
     .replace(LABELED_SECRET, REDACTED)

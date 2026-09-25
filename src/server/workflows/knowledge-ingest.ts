@@ -1,4 +1,5 @@
 import { indexKnowledgeChunks, markKnowledgeFailed, parseKnowledgeFile } from "@/server/steps/knowledge-ingest";
+import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 export interface KnowledgeIngestArgs {
   sourceId: string;
@@ -20,7 +21,7 @@ export async function knowledgeIngestWorkflow(args: KnowledgeIngestArgs): Promis
     try {
       await markKnowledgeFailed({ sourceId: args.sourceId, error: reason, ingestToken: args.ingestToken });
     } catch (failErr) {
-      console.error(`知识来源 ${args.sourceId} 写失败状态时出错：`, failErr);
+      console.error(`知识来源 ${args.sourceId} 写失败状态时出错：`, safeErrorForLog(failErr));
     }
     throw err;
   }

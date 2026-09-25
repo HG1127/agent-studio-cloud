@@ -9,6 +9,7 @@ import { validateJsonObjectSchema } from "@/server/domain/json-schema";
 import { getPendingWait, getPendingWaitHook } from "@/server/queries/runs";
 import { hasCrossSiteOrigin, hasSameOrigin } from "@/server/security/request-origin";
 import { matchesWaitEventToken } from "@/server/security/wait-event-token";
+import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 export const dynamic = "force-dynamic";
 
@@ -64,7 +65,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ runId: 
     pendingWait = run?.status === "waiting_event" ? await getPendingWait(runId, DEMO_WORKSPACE_ID) : null;
     pendingHook = run?.status === "waiting_event" ? await getPendingWaitHook(runId, DEMO_WORKSPACE_ID) : null;
   } catch (error) {
-    console.error("读取等待消息状态失败", error);
+    console.error("读取等待消息状态失败", safeErrorForLog(error));
     return Response.json({ ok: false, error: "暂时无法读取等待状态，请稍后重试" }, { status: 500 });
   }
   if (!run) return Response.json({ ok: false, error: "找不到这次运行" }, { status: 404 });
@@ -88,7 +89,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ runId: 
     await resumeHook(pendingHook?.hookToken ?? `wait:${runId}:${eventKey}`, payload.data);
     return Response.json({ ok: true });
   } catch (error) {
-    console.error("恢复等待中的运行失败", error);
+    console.error("恢复等待中的运行失败", safeErrorForLog(error));
     return Response.json({ ok: false, error: "消息未匹配到等待步骤，或已经处理过" }, { status: 409 });
   }
 }

@@ -12,6 +12,7 @@ import { MAX_COLLABORATION_DEPTH, parseCollaborationParentId } from "@/server/do
 import { isRunStartLeaseExpired, RUN_START_LEASE_KEY } from "@/server/services/run-start-lease";
 import { cancelWorkflowRunIfPresent } from "@/server/services/cancel-workflow-run";
 import { appendTrace } from "@/server/steps/trace-step";
+import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 const LIVE_STATUSES = ["queued", "running", "waiting_approval", "waiting_event"];
 
@@ -188,7 +189,7 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
         await cancelWorkflowRuns(lateWorkflowRunIds);
       } catch (error) {
         // 数据库终态已经阻止后续步骤落库；这里仍尽力停止事务锁定期间刚创建的极小竞态任务。
-        console.error("停止新发现的协作子任务失败：", error);
+        console.error("停止新发现的协作子任务失败：", safeErrorForLog(error));
       }
     }
     await appendCancellationTrace(rootRunId);
@@ -198,7 +199,7 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
     revalidatePath("/runs");
     return { ok: true };
   } catch (error) {
-    console.error("取消运行失败：", error);
+    console.error("取消运行失败：", safeErrorForLog(error));
     return { ok: false, error: "取消失败，请稍后重试" };
   }
 }
@@ -214,6 +215,6 @@ async function appendCancellationTrace(runId: string): Promise<void> {
     });
   } catch (traceError) {
     // 取消终态已经提交；轨迹故障不能把成功取消误报成失败。
-    console.error("记录取消轨迹失败：", traceError);
+    console.error("记录取消轨迹失败：", safeErrorForLog(traceError));
   }
 }

@@ -13,6 +13,7 @@ import { db } from "@/lib/db";
 import { auditEventValues } from "@/server/audit/event-values";
 import { knowledgeIngestWorkflow } from "@/server/workflows/knowledge-ingest";
 import { isKnowledgeParsingStalled } from "@/server/domain/knowledge/source-state";
+import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 async function cancelBlobStream(stream: ReadableStream<Uint8Array>): Promise<void> {
   try {
@@ -55,7 +56,7 @@ export async function retryKnowledgeSourceAction(sourceId: string): Promise<Know
     try {
       blob = await get(source.blobPathname, { access: "private", token: blobToken });
     } catch (error) {
-      console.error("读取知识原文件以重新解析失败", error);
+      console.error("读取知识原文件以重新解析失败", safeErrorForLog(error));
       return { ok: false, error: "原文件暂时无法读取，请稍后重试或重新上传同一文件" };
     }
     if (!blob?.stream) return { ok: false, error: "原文件不存在或暂时无法读取，请重新上传同一文件" };
@@ -109,7 +110,7 @@ export async function retryKnowledgeSourceAction(sourceId: string): Promise<Know
         ingestToken,
       }]);
     } catch (error) {
-      console.error("知识重新解析工作流启动失败", error);
+      console.error("知识重新解析工作流启动失败", safeErrorForLog(error));
       await cancelBlobStream(blob.stream);
       await db
         .update(knowledgeSources)
@@ -124,7 +125,7 @@ export async function retryKnowledgeSourceAction(sourceId: string): Promise<Know
     revalidatePath("/knowledge");
     return { ok: true };
   } catch (error) {
-    console.error("重新解析知识资料失败", error);
+    console.error("重新解析知识资料失败", safeErrorForLog(error));
     return { ok: false, error: "重新解析失败，请稍后重试" };
   }
 }

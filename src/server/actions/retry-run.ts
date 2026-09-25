@@ -8,6 +8,7 @@ import { runs } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { startRunCore } from "@/server/services/start-run-core";
+import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 export async function retryRunAction(runId: string): Promise<StartRunResult> {
   if (!z.string().uuid().safeParse(runId).success) return { ok: false, error: "运行信息不正确，请刷新页面后重试" };
@@ -35,7 +36,7 @@ export async function retryRunAction(runId: string): Promise<StartRunResult> {
     }
     return result;
   } catch (error) {
-    console.error("再次运行失败", error);
+    console.error("再次运行失败", safeErrorForLog(error));
     return { ok: false, error: "再次运行失败，请稍后重试" };
   }
 }

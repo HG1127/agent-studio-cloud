@@ -8,6 +8,7 @@ import { db } from "@/lib/db";
 import { auditEventValues } from "@/server/audit/event-values";
 import { restoredKnowledgeStatus } from "@/server/domain/knowledge/source-state";
 import { activeVersionDependingOnKnowledgeSource } from "@/server/domain/runtime/collaboration-dependencies";
+import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 export async function setKnowledgeSourceArchivedAction(input: unknown): Promise<KnowledgeArchiveResult> {
   const parsed = KnowledgeArchiveInput.safeParse(input);
@@ -87,7 +88,7 @@ export async function setKnowledgeSourceArchivedAction(input: unknown): Promise<
     revalidatePath("/knowledge");
     return { ok: true };
   } catch (error) {
-    console.error("更新知识资料状态失败", error);
+    console.error("更新知识资料状态失败", safeErrorForLog(error));
     return { ok: false, error: "更新知识资料状态失败，请稍后重试" };
   }
 }

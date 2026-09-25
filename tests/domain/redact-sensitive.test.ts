@@ -59,6 +59,13 @@ describe("敏感数据脱敏", () => {
     expect(redactCredentialText("说明（访问令牌：abcdefghijklmnop）")).toBe("说明（[已隐藏敏感信息]）");
   });
 
+  it("隐藏连接地址中的用户信息", () => {
+    const value = redactCredentialText("连接 postgresql://service:private-password@db.example.com/app 失败");
+    expect(value).toBe("连接 postgresql://[已隐藏敏感信息]@db.example.com/app 失败");
+    expect(value).not.toContain("service");
+    expect(value).not.toContain("private-password");
+  });
+
   it("验收输入只隐藏凭据并保留业务联系信息", () => {
     expect(redactCredentialData({
       apiKey: "sk-abcdefghijklmnop",

@@ -16,6 +16,7 @@ import { db } from "@/lib/db";
 import { auditEventValues } from "@/server/audit/event-values";
 import { validationMessage } from "@/server/domain/validation-message";
 import { redactCredentialData, redactCredentialText } from "@/server/domain/security/redact-sensitive";
+import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 export async function saveRunFeedbackAction(input: unknown): Promise<RunFeedbackSaveResult> {
   const parsed = RunFeedbackSaveInput.safeParse(input);
@@ -67,7 +68,7 @@ export async function saveRunFeedbackAction(input: unknown): Promise<RunFeedback
     revalidatePath(`/runs/${parsed.data.runId}`);
     return { ok: true, feedback };
   } catch (error) {
-    console.error("保存运行反馈失败", error);
+    console.error("保存运行反馈失败", safeErrorForLog(error));
     return { ok: false, error: "保存运行反馈失败，请稍后重试" };
   }
 }
@@ -149,7 +150,7 @@ export async function createRegressionCaseFromRunFeedbackAction(runId: string): 
     revalidatePath(`/runs/${runId}`);
     return { ok: true, evaluationCaseId: outcome.id, created: outcome.created };
   } catch (error) {
-    console.error("从运行反馈创建验收样例失败", error);
+    console.error("从运行反馈创建验收样例失败", safeErrorForLog(error));
     return { ok: false, error: "加入验收样例失败，请稍后重试" };
   }
 }

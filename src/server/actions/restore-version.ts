@@ -14,6 +14,7 @@ import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
 import { knowledgeStepTitles, validateKnowledgeSnapshot } from "@/server/domain/runtime/knowledge-snapshot";
 import { workflowCollaborationKeys } from "@/server/domain/import-agent";
 import { inspectCollaborationVersionGraph } from "@/server/domain/runtime/collaboration-dependencies";
+import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 export async function restoreVersionAction(agentId: string, versionId: string): Promise<RestoreVersionResult> {
   if (!z.string().uuid().safeParse(agentId).success || !z.string().uuid().safeParse(versionId).success) {
@@ -210,7 +211,7 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
     }
     return { ok: false, error: "版本恢复冲突，请重试" };
   } catch (error) {
-    console.error("恢复版本失败：", error);
+    console.error("恢复版本失败：", safeErrorForLog(error));
     return { ok: false, error: "恢复失败，请稍后重试" };
   }
 }

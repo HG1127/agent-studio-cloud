@@ -4,6 +4,7 @@ import { z } from "zod";
 import { knowledgeSources } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
+import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,7 @@ export async function GET(_request: Request, context: { params: Promise<{ source
       headers,
     });
   } catch (error) {
-    console.error("读取知识原文件失败", error);
+    console.error("读取知识原文件失败", safeErrorForLog(error));
     return Response.json({ ok: false, error: "原文件暂时无法读取，请稍后重试" }, { status: 503 });
   }
 }

@@ -9,6 +9,7 @@ import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { auditEventValues } from "@/server/audit/event-values";
 import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
+import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 export async function updateAgentAction(input: unknown): Promise<AgentUpdateResult> {
   const parsed = AgentUpdateInput.safeParse(input);
@@ -65,7 +66,7 @@ export async function updateAgentAction(input: unknown): Promise<AgentUpdateResu
     revalidatePath("/schedules");
     return { ok: true, updatedAt: result.updatedAt };
   } catch (error) {
-    console.error("更新助手信息失败", error);
+    console.error("更新助手信息失败", safeErrorForLog(error));
     return { ok: false, error: "更新助手信息失败，请稍后重试" };
   }
 }

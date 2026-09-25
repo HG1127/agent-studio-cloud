@@ -2,6 +2,7 @@ import { getRun } from "workflow/api";
 import { WorkflowRunNotFoundError } from "workflow/errors";
 import { HealthResponse } from "@/contracts/health";
 import { isDatabaseReady } from "@/server/queries/system-health";
+import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ async function probeDatabase(): Promise<boolean> {
   try {
     return await withinProbeTimeout(isDatabaseReady());
   } catch (error) {
-    console.error("[health-db] 探针失败：", error);
+    console.error("[health-db] 探针失败：", safeErrorForLog(error));
     return false;
   }
 }
@@ -43,7 +44,7 @@ async function probeWorkflow(): Promise<boolean> {
       // 平台对不存在的 run 抛「未找到」——确定的否定回答同样是探针通过
       return true;
     }
-    console.error("[health-workflow] 探针失败：", error, {
+    console.error("[health-workflow] 探针失败：", safeErrorForLog(error), {
       VERCEL_DEPLOYMENT_ID: process.env.VERCEL_DEPLOYMENT_ID ?? null,
       VERCEL_URL: process.env.VERCEL_URL ?? null,
     });

@@ -23,6 +23,7 @@ import { knowledgeStepTitles, prepareKnowledgeSnapshot } from "@/server/domain/r
 import { workflowCollaborationKeys } from "@/server/domain/import-agent";
 import { inspectCollaborationVersionGraph } from "@/server/domain/runtime/collaboration-dependencies";
 import { validateInlineWorkflows } from "@/server/domain/runtime/inline-workflow";
+import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 export async function publishVersionAction(agentId: string, modelSelection?: PublishModelSelection): Promise<PublishVersionResult> {
   if (!z.string().uuid().safeParse(agentId).success) {
@@ -305,7 +306,7 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
     }
     return { ok: false, error: "发布冲突，请重试", issues: [] };
   } catch (error) {
-    console.error("发布失败：", error);
+    console.error("发布失败：", safeErrorForLog(error));
     return { ok: false, error: "发布失败，请稍后重试", issues: [] };
   }
 }

@@ -15,6 +15,7 @@ import { auditEventValues } from "@/server/audit/event-values";
 import { isKnowledgeParsingStalled } from "@/server/domain/knowledge/source-state";
 import { hasCrossSiteOrigin } from "@/server/security/request-origin";
 import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
+import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 export const dynamic = "force-dynamic";
 
@@ -45,7 +46,7 @@ async function removeUnusedOriginal(pathname: string | null, retainedPathname: s
   try {
     await del(pathname, { token });
   } catch (error) {
-    console.error("[knowledge-upload] 清理未采用的并发上传文件失败", error);
+    console.error("[knowledge-upload] 清理未采用的并发上传文件失败", safeErrorForLog(error));
   }
 }
 
@@ -183,7 +184,7 @@ export async function POST(req: Request) {
           ingestToken: reconciled.ingestToken!,
         }]);
       } catch (startError) {
-        console.error("知识重新入库工作流启动失败：", startError);
+        console.error("知识重新入库工作流启动失败：", safeErrorForLog(startError));
         await db.update(knowledgeSources).set({ status: "failed", error: "解析任务启动失败，请重新上传", parseEngine: null, updatedAt: new Date() }).where(and(
           eq(knowledgeSources.id, duplicate.id), eq(knowledgeSources.parseEngine, reconciled.ingestToken!),
         ));
@@ -284,7 +285,7 @@ export async function POST(req: Request) {
   try {
     await start(knowledgeIngestWorkflow, [{ sourceId: row.id, filename: file.name, mime: row.mime, content: new Blob([bytes]).stream(), ingestToken }]);
   } catch (error) {
-    console.error("知识入库工作流启动失败：", error);
+    console.error("知识入库工作流启动失败：", safeErrorForLog(error));
     await db.update(knowledgeSources).set({ status: "failed", error: "解析任务启动失败，请重试上传", parseEngine: null, updatedAt: new Date() }).where(and(
       eq(knowledgeSources.id, row.id), eq(knowledgeSources.parseEngine, ingestToken),
     ));

@@ -23,6 +23,7 @@ import { validationMessage } from "@/server/domain/validation-message";
 import { auditEventValues } from "@/server/audit/event-values";
 import { generateEvaluationCases } from "@/server/domain/evaluation-cases";
 import { redactCredentialData } from "@/server/domain/security/redact-sensitive";
+import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 const EVALUATION_START_CONCURRENCY = 5;
 
@@ -78,7 +79,7 @@ export async function generateEvaluationCasesAction(agentId: string): Promise<Ev
     if (result.ok) revalidatePath(`/agents/${agentId}`);
     return result;
   } catch (error) {
-    console.error("生成验收样例失败", error);
+    console.error("生成验收样例失败", safeErrorForLog(error));
     return { ok: false, error: "生成验收样例失败，请稍后重试" };
   }
 }
@@ -129,7 +130,7 @@ export async function createEvaluationCaseAction(input: unknown): Promise<Evalua
     revalidatePath(`/agents/${parsed.data.agentId}`);
     return result;
   } catch (error) {
-    console.error("创建验收样例失败", error);
+    console.error("创建验收样例失败", safeErrorForLog(error));
     return { ok: false, error: "创建验收样例失败，请稍后重试" };
   }
 }
@@ -180,7 +181,7 @@ export async function updateEvaluationCaseAction(input: unknown): Promise<Evalua
     revalidatePath(`/agents/${parsed.data.agentId}`);
     return { ok: true };
   } catch (error) {
-    console.error("更新验收样例失败", error);
+    console.error("更新验收样例失败", safeErrorForLog(error));
     return { ok: false, error: "更新验收样例失败，请稍后重试" };
   }
 }
@@ -231,7 +232,7 @@ export async function setEvaluationCaseArchivedAction(input: unknown): Promise<E
     revalidatePath(`/agents/${parsed.data.agentId}`);
     return { ok: true };
   } catch (error) {
-    console.error("更新验收样例状态失败", error);
+    console.error("更新验收样例状态失败", safeErrorForLog(error));
     return { ok: false, error: "更新验收样例状态失败，请稍后重试" };
   }
 }
@@ -264,7 +265,7 @@ export async function startEvaluationAction(agentId: string): Promise<Evaluation
         }
         await markEvaluationStartFailure(prepared.evaluationId, testCase.id, started.error, DEMO_WORKSPACE_ID);
       } catch (error) {
-        console.error("启动单条验收运行失败", error);
+        console.error("启动单条验收运行失败", safeErrorForLog(error));
         await markEvaluationStartFailure(
           prepared.evaluationId,
           testCase.id,
@@ -279,7 +280,7 @@ export async function startEvaluationAction(agentId: string): Promise<Evaluation
     revalidatePath("/runs");
     return { ok: true };
   } catch (error) {
-    console.error("启动自动验收失败", error);
+    console.error("启动自动验收失败", safeErrorForLog(error));
     return { ok: false, error: "启动自动验收失败，请稍后重试" };
   }
 }

@@ -17,6 +17,7 @@ import {
   MAX_STEP_OUTPUT_BYTES,
 } from "@/server/domain/runtime/json-storage";
 import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
+import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 function workflowStepId(): string {
   try {
@@ -123,7 +124,7 @@ async function appendCommittedStepTrace(step: PersistStepInput, stepId: string):
     }
   }
   // 步骤结果已经提交；此时重抛会让模型或外部动作整体重放，轨迹降级不能制造重复业务副作用。
-  console.error(`步骤 ${step.runId}/${step.nodeId} 的运行轨迹写入失败`, lastError);
+  console.error(`步骤 ${step.runId}/${step.nodeId} 的运行轨迹写入失败`, safeErrorForLog(lastError));
 }
 
 // upsert run_steps（run_id+node_id 唯一）+ runs.stepStates + trace step.*；running 计一次尝试

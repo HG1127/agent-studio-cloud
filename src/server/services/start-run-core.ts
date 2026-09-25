@@ -29,6 +29,7 @@ import { getToolRegistration } from "@/server/tools/tool-registry";
 import { qualityOutputReferenceIssue } from "@/server/domain/runtime/quality-checks";
 import { workflowCollaborationKeys } from "@/server/domain/import-agent";
 import { inspectCollaborationVersionGraph } from "@/server/domain/runtime/collaboration-dependencies";
+import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 // 发布快照允许进入运行引擎的完整节点类型；未知类型必须在创建 run 前拒绝。
 const SUPPORTED_NODE_TYPES: ReadonlySet<string> = new Set([
@@ -97,7 +98,7 @@ async function launchClaimedRun(args: {
       { depth: 0, startToken: args.lease.token },
     ]);
   } catch (error) {
-    console.error("运行启动失败", error);
+    console.error("运行启动失败", safeErrorForLog(error));
     await markRunStartFailed(args.runId, args.lease.token);
     return { ok: false, error: "运行启动失败，请稍后重试" };
   }
@@ -118,11 +119,11 @@ async function launchClaimedRun(args: {
     await workflowRun.cancel();
     return { ok: false, error: "运行启动已由新的请求接管，请刷新页面查看状态" };
   } catch (error) {
-    console.error("运行启动句柄保存失败", error);
+    console.error("运行启动句柄保存失败", safeErrorForLog(error));
     try {
       await workflowRun.cancel();
     } catch (cancelError) {
-      console.error("取消失联的工作流失败", cancelError);
+      console.error("取消失联的工作流失败", safeErrorForLog(cancelError));
     }
     await markRunStartFailed(args.runId, args.lease.token);
     return { ok: false, error: "运行启动失败，请稍后重试" };
@@ -199,12 +200,12 @@ export async function resumeQueuedRunStartCore(runId: string): Promise<StartRunR
     }
     return launchClaimedRun({ runId: candidate.id, manifest: manifest.data, input: input.data, lease });
   } catch (error) {
-    console.error("继续启动运行失败", error);
+    console.error("继续启动运行失败", safeErrorForLog(error));
     if (claimedRun) {
       try {
         await markRunStartFailed(claimedRun.id, claimedRun.token, "继续启动失败，请稍后再次运行");
       } catch (markError) {
-        console.error("记录继续启动失败状态时出错", markError);
+        console.error("记录继续启动失败状态时出错", safeErrorForLog(markError));
       }
     }
     return { ok: false, error: "继续启动失败，请稍后重试" };
@@ -511,7 +512,7 @@ export async function startRunCore(args: {
     if (!run) return { ok: false, error: "运行启动冲突，请稍后重试" };
     return launchClaimedRun({ runId: run.id, manifest, input: runInput, lease });
   } catch (error) {
-    console.error("运行启动失败：", error);
+    console.error("运行启动失败：", safeErrorForLog(error));
     return { ok: false, error: "运行启动失败，请稍后重试" };
   }
 }
