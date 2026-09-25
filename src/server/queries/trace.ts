@@ -3,6 +3,7 @@ import { z } from "zod";
 import { MAX_VISIBLE_TRACE_EVENTS, TraceEventView } from "@/contracts/run";
 import { traceEvents, type TraceEvent } from "@/db/schema";
 import { db } from "@/lib/db";
+import { parseTraceSinceBatch, type TraceSinceBatch } from "@/server/domain/trace-batch";
 
 const RUN_ID = z.string().uuid();
 const TRACE_STREAM_BATCH_SIZE = 200;
@@ -60,13 +61,13 @@ export async function listTraceSince(
   runId: string,
   workspaceId: string,
   cursor: number,
-): Promise<TraceEventView[]> {
-  if (!RUN_ID.safeParse(runId).success) return [];
+): Promise<TraceSinceBatch> {
+  if (!RUN_ID.safeParse(runId).success) return { events: [], nextCursor: cursor, scannedCount: 0 };
   const rows = await db
     .select(TRACE_VIEW_COLUMNS)
     .from(traceEvents)
     .where(and(eq(traceEvents.runId, runId), eq(traceEvents.workspaceId, workspaceId), gt(traceEvents.seq, cursor)))
     .orderBy(asc(traceEvents.seq))
     .limit(TRACE_STREAM_BATCH_SIZE);
-  return rows.map(parseTraceEvent).filter((event): event is TraceEventView => event !== null);
+  return parseTraceSinceBatch(rows, cursor);
 }

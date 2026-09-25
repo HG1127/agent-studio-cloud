@@ -7,7 +7,7 @@ vi.mock("@/server/queries/trace", () => ({
   listTraceSince: vi.fn(async () => {
     calls += 1;
     if (calls >= 2) throw new Error("ECONNRESET: 连接被重置");
-    return [];
+    return { events: [], nextCursor: 0, scannedCount: 0 };
   }),
 }));
 vi.mock("@/server/queries/runs", () => ({

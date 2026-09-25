@@ -47,10 +47,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
         let lastHeartbeat = Date.now();
         for (;;) {
           // 先追平轨迹，再判定终态：终态当轮没有新事件才发 done，保证不漏最后一批
-          let rows: Awaited<ReturnType<typeof listTraceSince>>;
+          let batch: Awaited<ReturnType<typeof listTraceSince>>;
           let current: Awaited<ReturnType<typeof getRunRow>>;
           try {
-            rows = await listTraceSince(runId, DEMO_WORKSPACE_ID, cursor);
+            batch = await listTraceSince(runId, DEMO_WORKSPACE_ID, cursor);
             current = await getRunRow(runId, DEMO_WORKSPACE_ID);
           } catch (error) {
             // 静默关流会让客户端收不到 done 而无限重连重放，必须先显式告知
@@ -58,16 +58,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
             pushEvent("done", { status: "error" });
             break;
           }
-          for (const row of rows) {
-            cursor = row.seq;
+          for (const row of batch.events) {
             pushEvent("trace", row, row.seq);
           }
+          cursor = batch.nextCursor;
           if (closed) break;
           if (!current) {
             pushEvent("done", { status: "gone" });
             break;
           }
-          if (TERMINAL_STATUSES.has(current.status) && rows.length === 0) {
+          if (TERMINAL_STATUSES.has(current.status) && batch.scannedCount === 0) {
             pushEvent("done", { status: current.status });
             break;
           }
