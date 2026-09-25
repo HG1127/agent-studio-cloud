@@ -12,12 +12,12 @@ import {
 } from "@/server/domain/knowledge/text-limits";
 import { knowledgeIngestWorkflow } from "@/server/workflows/knowledge-ingest";
 import { auditEventValues } from "@/server/audit/event-values";
+import { isKnowledgeParsingStalled } from "@/server/domain/knowledge/source-state";
 
 export const dynamic = "force-dynamic";
 
 const ALLOWED_EXT = new Set(["pdf", "docx", "txt", "md", "html", "json", "csv", "xml"]);
 const MAX_MULTIPART_BYTES = 5 * 1024 * 1024;
-const STALE_PARSING_MS = 5 * 60 * 1000;
 
 function toView(row: typeof knowledgeSources.$inferSelect) {
   return {
@@ -25,6 +25,7 @@ function toView(row: typeof knowledgeSources.$inferSelect) {
     status: row.status as "parsing" | "indexed" | "failed" | "archived",
     chunkCount: row.chunkCount, charCount: row.charCount, error: row.error,
     hasOriginal: Boolean(row.blobPathname),
+    parsingStalled: isKnowledgeParsingStalled(row),
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -61,8 +62,7 @@ async function reconcileDuplicateSource(sourceId: string, suppliedBlobPathname: 
       .for("update")
       .limit(1);
     if (!current) return null;
-    const lastUpdatedAt = current.updatedAt ?? current.createdAt;
-    const staleParsing = current.status === "parsing" && lastUpdatedAt.getTime() < Date.now() - STALE_PARSING_MS;
+    const staleParsing = isKnowledgeParsingStalled(current);
     const retrying = current.status === "failed" || staleParsing
       || (current.status === "archived" && current.chunkCount === 0);
     const status = retrying

@@ -84,6 +84,22 @@ describe("知识库列表", () => {
     expect(refresh).toHaveBeenCalled();
   });
 
+  it("解析任务中断后停止等待并提供恢复入口", async () => {
+    const sourceId = "00000000-0000-4000-8000-0000000000f3";
+    render(<KnowledgeList initial={[{
+      id: sourceId, name: "合同库.pdf", mime: "application/pdf", hasOriginal: true, parsingStalled: true,
+      sizeBytes: 100, status: "parsing", chunkCount: 0, charCount: 0, error: null,
+      createdAt: "2026-09-23T00:00:00.000Z",
+    }]} />);
+
+    expect(screen.getByText(/解析已中断/)).toBeInTheDocument();
+    expect(screen.getByText(/可直接重新解析/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "重新解析" }));
+
+    expect(retryKnowledgeSourceAction).toHaveBeenCalledWith(sourceId);
+    expect(refresh).toHaveBeenCalled();
+  });
+
   it("已保存原文件时提供下载入口，未保存时明确说明", () => {
     const source = {
       id: "00000000-0000-4000-8000-0000000000f3", name: "售后手册.txt", mime: "text/plain",

@@ -15,6 +15,7 @@ export const KnowledgeSourceView = z.object({
   charCount: z.number().int(),
   error: z.string().nullable(),
   hasOriginal: z.boolean().optional(),
+  parsingStalled: z.boolean().optional(),
   createdAt: z.string(),
 });
 export type KnowledgeSourceView = z.infer<typeof KnowledgeSourceView>;

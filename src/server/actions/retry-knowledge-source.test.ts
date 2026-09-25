@@ -44,6 +44,7 @@ const source = {
   mime: "text/markdown",
   status: "failed",
   blobPathname: "knowledge/refund.md",
+  updatedAt: new Date("2026-09-25T12:00:00.000Z"),
 };
 
 beforeEach(() => {
@@ -97,8 +98,34 @@ describe("重新解析知识资料", () => {
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/knowledge");
   });
 
+  it("解析任务长时间没有更新时允许从原文件恢复", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(new Date("2026-09-25T12:10:01.000Z").getTime());
+    const stalled = { ...source, status: "parsing", updatedAt: new Date("2026-09-25T12:05:00.000Z") };
+    mocks.rows = [[stalled], [stalled]];
+
+    await expect(retryKnowledgeSourceAction(SOURCE_ID)).resolves.toEqual({ ok: true });
+
+    expect(mocks.start).toHaveBeenCalledOnce();
+    expect(mocks.audits).toContainEqual(expect.objectContaining({
+      action: "knowledge.reingested",
+      data: { previousStatus: "parsing" },
+    }));
+  });
+
+  it("仍在正常解析的任务不能重复启动", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(new Date("2026-09-25T12:09:59.000Z").getTime());
+    mocks.rows = [[{ ...source, status: "parsing", updatedAt: new Date("2026-09-25T12:05:00.000Z") }]];
+
+    await expect(retryKnowledgeSourceAction(SOURCE_ID)).resolves.toEqual({
+      ok: false,
+      error: "资料状态已经变化，请刷新页面查看最新状态",
+    });
+    expect(mocks.get).not.toHaveBeenCalled();
+    expect(mocks.start).not.toHaveBeenCalled();
+  });
+
   it("锁内状态已变化时不重复启动解析", async () => {
-    mocks.rows = [[source], [{ ...source, status: "parsing" }]];
+    mocks.rows = [[source], [{ ...source, status: "parsing", updatedAt: new Date() }]];
 
     await expect(retryKnowledgeSourceAction(SOURCE_ID)).resolves.toEqual({
       ok: false,

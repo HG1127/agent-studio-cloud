@@ -12,6 +12,7 @@ import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { auditEventValues } from "@/server/audit/event-values";
 import { knowledgeIngestWorkflow } from "@/server/workflows/knowledge-ingest";
+import { isKnowledgeParsingStalled } from "@/server/domain/knowledge/source-state";
 
 export async function retryKnowledgeSourceAction(sourceId: string): Promise<KnowledgeRetryResult> {
   if (!z.string().uuid().safeParse(sourceId).success) {
@@ -27,6 +28,7 @@ export async function retryKnowledgeSourceAction(sourceId: string): Promise<Know
         mime: knowledgeSources.mime,
         status: knowledgeSources.status,
         blobPathname: knowledgeSources.blobPathname,
+        updatedAt: knowledgeSources.updatedAt,
       })
       .from(knowledgeSources)
       .where(and(
@@ -36,7 +38,9 @@ export async function retryKnowledgeSourceAction(sourceId: string): Promise<Know
       ))
       .limit(1);
     if (!source) return { ok: false, error: "找不到这份知识资料，请刷新页面后重试" };
-    if (source.status !== "failed") return { ok: false, error: "资料状态已经变化，请刷新页面查看最新状态" };
+    if (source.status !== "failed" && !isKnowledgeParsingStalled(source)) {
+      return { ok: false, error: "资料状态已经变化，请刷新页面查看最新状态" };
+    }
     if (!source.blobPathname) return { ok: false, error: "这份资料没有保留原文件，请重新上传同一文件" };
 
     let blob: Awaited<ReturnType<typeof get>>;
@@ -56,6 +60,7 @@ export async function retryKnowledgeSourceAction(sourceId: string): Promise<Know
           mime: knowledgeSources.mime,
           status: knowledgeSources.status,
           blobPathname: knowledgeSources.blobPathname,
+          updatedAt: knowledgeSources.updatedAt,
         })
         .from(knowledgeSources)
         .where(and(
@@ -65,7 +70,9 @@ export async function retryKnowledgeSourceAction(sourceId: string): Promise<Know
         ))
         .for("update")
         .limit(1);
-      if (!current || current.status !== "failed" || current.blobPathname !== source.blobPathname) return null;
+      if (!current
+        || (current.status !== "failed" && !isKnowledgeParsingStalled(current))
+        || current.blobPathname !== source.blobPathname) return null;
       await tx
         .update(knowledgeSources)
         .set({ status: "parsing", error: null, parseEngine: ingestToken, updatedAt: new Date() })

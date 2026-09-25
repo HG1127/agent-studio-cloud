@@ -91,7 +91,7 @@ export function KnowledgeList({ initial, archived = false, serverManaged = false
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
-  const hasParsing = initial.some((source) => source.status === "parsing");
+  const hasParsing = initial.some((source) => source.status === "parsing" && !source.parsingStalled);
   const filtered = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase("zh-CN");
     if (!normalized) return initial;
@@ -134,14 +134,16 @@ export function KnowledgeList({ initial, archived = false, serverManaged = false
             <div>
               <p className="text-sm font-medium text-gray-900">{source.name}</p>
               <p className="mt-0.5 text-xs text-gray-500">
-                {STATUS_LABELS[source.status]} · {(source.sizeBytes / 1024).toFixed(1)} KB · {source.chunkCount} 段 · 上传于 {source.createdAt.slice(0, 10)}
+                {source.parsingStalled ? "解析已中断" : STATUS_LABELS[source.status]} · {(source.sizeBytes / 1024).toFixed(1)} KB · {source.chunkCount} 段 · 上传于 {source.createdAt.slice(0, 10)}
               {source.status === "failed" && source.error
                 ? ` · ${source.error} · ${source.hasOriginal ? "可直接重新解析" : "重新上传同一文件即可重试"}`
+                : source.parsingStalled
+                  ? ` · ${source.hasOriginal ? "可直接重新解析" : "重新上传同一文件即可重试"}`
                 : ""}
               </p>
             </div>
             <span className="flex shrink-0 items-center gap-3">
-              {!archived && source.status === "failed" && source.hasOriginal ? (
+              {!archived && (source.status === "failed" || source.parsingStalled) && source.hasOriginal ? (
                 <button
                   type="button"
                   disabled={pending}

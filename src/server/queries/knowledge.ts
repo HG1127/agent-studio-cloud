@@ -5,6 +5,7 @@ import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { MAX_KNOWLEDGE_SCAN_CHUNKS, scoreChunks } from "@/server/domain/knowledge/search";
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
+import { isKnowledgeParsingStalled } from "@/server/domain/knowledge/source-state";
 
 export async function listKnowledgeSources(
   archived = false,
@@ -29,6 +30,7 @@ export async function listKnowledgeSources(
     status: archived ? "archived" : row.status,
     chunkCount: row.chunkCount, charCount: row.charCount, error: row.error,
     hasOriginal: Boolean(row.blobPathname),
+    parsingStalled: isKnowledgeParsingStalled(row),
     createdAt: row.createdAt.toISOString(),
   })));
 }
