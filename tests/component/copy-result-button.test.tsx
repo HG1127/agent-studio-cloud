@@ -24,4 +24,12 @@ describe("复制最终结果", () => {
     await userEvent.click(screen.getByRole("button", { name: "复制最终结果" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("手动复制");
   });
+
+  it("有业务展示文本时优先复制业务名称而非内部字段", async () => {
+    writeText.mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    render(<CopyResultButton result={{ output_1: "已生成" }} text={"回复邮件\n已生成"} />);
+    await userEvent.click(screen.getByRole("button", { name: "复制最终结果" }));
+    expect(writeText).toHaveBeenCalledWith("回复邮件\n已生成");
+  });
 });

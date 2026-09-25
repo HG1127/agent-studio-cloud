@@ -75,6 +75,9 @@ export async function RunDetail({ runId }: { runId: string }) {
   const outputs = contractedOutputs.length > 0
     ? contractedOutputs
     : Object.entries(resultRecord).map(([key, output]) => ({ key, label: stepTitleByNode.get(key) ?? "步骤结果", output }));
+  const copyText = contractedOutputs.length > 0
+    ? contractedOutputs.map((field) => `${field.label}\n${displayValue(field.output)}`).join("\n\n")
+    : undefined;
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 p-8">
@@ -185,7 +188,7 @@ export async function RunDetail({ runId }: { runId: string }) {
         <section className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-sm font-semibold">最终结果</h2>
-            <CopyResultButton result={run.result} />
+            <CopyResultButton result={run.result} text={copyText} />
           </div>
           {outputs.length > 0 ? (
             <ul className="flex flex-col gap-3">

@@ -2,13 +2,13 @@
 
 import { useState } from "react";
 
-export function CopyResultButton({ result }: { result: unknown }) {
+export function CopyResultButton({ result, text }: { result: unknown; text?: string }) {
   const [status, setStatus] = useState<"idle" | "copied" | "failed">("idle");
 
   async function copy() {
     setStatus("idle");
     try {
-      const content = typeof result === "string" ? result : JSON.stringify(result, null, 2);
+      const content = text || (typeof result === "string" ? result : JSON.stringify(result, null, 2));
       if (!content) throw new Error("empty result");
       await navigator.clipboard.writeText(content);
       setStatus("copied");
