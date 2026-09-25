@@ -77,13 +77,13 @@ export async function RunDetail({ runId }: { runId: string }) {
   const redactedInput = redactSensitiveData(run.input) as Record<string, unknown>;
   const contractedInputs = run.inputContract.fields
     .filter((field) => Object.prototype.hasOwnProperty.call(run.input, field.name))
-    .map((field) => ({ name: field.name, label: field.label ?? field.name, value: run.input[field.name] }));
+    .map((field) => ({ name: field.name, label: field.label ?? field.name, value: redactedInput[field.name] }));
   const resultRecord = run.result && typeof run.result === "object" && !Array.isArray(run.result)
     ? run.result as Record<string, unknown>
     : {};
   const redactedResult = redactSensitiveData(resultRecord) as Record<string, unknown>;
   const contractedOutputs = run.outputContract.fields
-    .map((field) => ({ key: field.path, label: field.label ?? field.path, output: readResultPath(resultRecord, field.path) }))
+    .map((field) => ({ key: field.path, label: field.label ?? field.path, output: readResultPath(redactedResult, field.path) }))
     .filter((field) => field.output !== undefined);
   const outputs = contractedOutputs.length > 0
     ? contractedOutputs

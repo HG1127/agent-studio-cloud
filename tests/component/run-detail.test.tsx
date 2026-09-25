@@ -74,6 +74,8 @@ describe("运行详情步骤数据", () => {
   });
 
   it("开发者数据、复制内容和步骤错误不会暴露敏感信息", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
     mocks.steps.mockResolvedValue([{
       id: "step-id", nodeId: "deliver", nodeTitle: "发送结果", status: "failed",
       output: { token: "step-secret-value", result: "发送失败" },
@@ -85,7 +87,15 @@ describe("运行详情步骤数据", () => {
       agentName: "通知助手",
       status: "failed",
       input: { apiKey: "sk-input-secret-value", topic: "发货通知" },
-      result: { authorization: "Bearer result-secret-value", status: "未发送" },
+      inputContract: { fields: [
+        { name: "apiKey", label: "接口密钥", required: true, type: "string" },
+        { name: "topic", label: "通知主题", required: true, type: "string" },
+      ] },
+      result: { delivery: { authorization: "Bearer result-secret-value", status: "未发送" } },
+      outputContract: { fields: [
+        { path: "delivery.authorization", label: "调用凭据", required: true, sourceNodeId: "deliver" },
+        { path: "delivery.status", label: "发送状态", required: true, sourceNodeId: "deliver" },
+      ] },
       error: "联系 person@example.com，authorization: Bearer top-level-secret-value",
       startedAt: null,
       finishedAt: null,
@@ -101,6 +111,9 @@ describe("运行详情步骤数据", () => {
     expect(container.textContent).not.toContain("person@example.com");
     expect(container.textContent).not.toContain("top-level-secret-value");
     expect(screen.getAllByRole("alert").some((element) => element.textContent === "[已隐藏敏感信息]")).toBe(true);
+    await userEvent.click(screen.getByRole("button", { name: "复制最终结果" }));
+    expect(writeText).toHaveBeenCalledOnce();
+    expect(writeText.mock.calls[0]?.[0]).not.toContain("result-secret-value");
   });
 
   it("按该次运行的冻结交付契约展示业务名称", async () => {
