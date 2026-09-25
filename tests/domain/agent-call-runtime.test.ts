@@ -55,6 +55,39 @@ describe("助手调用运行逻辑", () => {
     expect(buildAgentCallInput({ node, targetManifest: typedManifest, input: { count: 3, confirmed: false }, outputs: {} })).toMatchObject({ count: 3, confirmed: false });
   });
 
+  it("协作上下文隐藏敏感字段且不读取对象原型", () => {
+    const node = WorkflowNode.parse({ id: "call", title: "调用助手", type: "agent_call", agentCall: { targetAgentId: "target", versionId: "version" } });
+    const inheritedManifest = AgentManifest.parse({ ...targetManifest, inputContract: { fields: [{ name: "toString", type: "string", required: true }] } });
+    const input = buildAgentCallInput({
+      node,
+      targetManifest: inheritedManifest,
+      input: { customer: "甲公司", apiKey: "sk-private" },
+      outputs: { authorization: "Bearer private" },
+    });
+    expect(input.toString).toEqual(expect.any(String));
+    expect(input.toString).not.toBe(Object.prototype.toString);
+    expect(String(input.toString)).toContain("[已隐藏敏感信息]");
+    expect(String(input.toString)).not.toContain("sk-private");
+    expect(String(input.toString)).not.toContain("Bearer private");
+  });
+
+  it("只有团队共享模式会把长期经验放进协作上下文", () => {
+    const noInputManifest = AgentManifest.parse({ ...targetManifest, inputContract: { fields: [] } });
+    const memoryOutput = { mode: "read", foundCount: 1, memories: [{ content: "仅团队可见经验" }] };
+    const privateNode = WorkflowNode.parse({
+      id: "private", title: "私有协作", type: "agent_call",
+      agentCall: { targetAgentId: "target", versionId: "version", memoryAccess: { mode: "none" } },
+    });
+    const teamNode = WorkflowNode.parse({
+      id: "team", title: "团队协作", type: "agent_call",
+      agentCall: { targetAgentId: "target", versionId: "version", memoryAccess: { mode: "team" } },
+    });
+    expect(String(buildAgentCallInput({ node: privateNode, targetManifest: noInputManifest, input: {}, outputs: { memory: memoryOutput } }).context))
+      .not.toContain("仅团队可见经验");
+    expect(String(buildAgentCallInput({ node: teamNode, targetManifest: noInputManifest, input: {}, outputs: { memory: memoryOutput } }).context))
+      .toContain("仅团队可见经验");
+  });
+
   it("大量上游结果不会让多个上下文字段重复撑大协作输入", () => {
     const node = WorkflowNode.parse({ id: "call", title: "调用助手", type: "agent_call", agentCall: { targetAgentId: "target", versionId: "version" } });
     const input = buildAgentCallInput({

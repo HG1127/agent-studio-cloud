@@ -1,6 +1,18 @@
 import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { buildBoundedCollaborationContext } from "@/server/domain/runtime/collaboration-input";
+import { redactSensitiveData } from "@/server/domain/security/redact-sensitive";
+
+function ownValue(source: Record<string, unknown>, key: string): unknown {
+  return Object.prototype.hasOwnProperty.call(source, key) ? source[key] : undefined;
+}
+
+function isMemoryOutput(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return record.mode === "read" && Array.isArray(record.memories)
+    || record.mode === "write" && typeof record.saved === "boolean";
+}
 
 export function buildAgentCallInput(args: {
   node: WorkflowNode;
@@ -9,18 +21,23 @@ export function buildAgentCallInput(args: {
   outputs: Record<string, unknown>;
 }): Record<string, unknown> {
   const fields = args.targetManifest.inputContract.fields;
+  const input = redactSensitiveData(args.input) as Record<string, unknown>;
+  const accessibleOutputs = args.node.agentCall?.memoryAccess?.mode === "team"
+    ? args.outputs
+    : Object.fromEntries(Object.entries(args.outputs).filter(([, value]) => !isMemoryOutput(value)));
+  const outputs = redactSensitiveData(accessibleOutputs) as Record<string, unknown>;
   const fallbackCopies = fields.filter((field) => {
-    const value = args.input[field.name] ?? args.outputs[field.name];
+    const value = ownValue(input, field.name) ?? ownValue(outputs, field.name);
     return (value === undefined || value === null) && field.type === "string";
   }).length;
   const context = buildBoundedCollaborationContext({
-    task: args.input,
-    previousResults: Object.values(args.outputs),
+    task: input,
+    previousResults: Object.values(outputs),
     request: args.node.description || args.node.title,
   }, fallbackCopies || 1);
   if (fields.length === 0) return { context };
   return Object.fromEntries(fields.flatMap((field) => {
-    const value = args.input[field.name] ?? args.outputs[field.name];
+    const value = ownValue(input, field.name) ?? ownValue(outputs, field.name);
     if (value !== undefined && value !== null) return [[field.name, value]];
     return field.type === "string" ? [[field.name, context]] : [];
   }));

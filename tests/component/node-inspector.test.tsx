@@ -293,6 +293,13 @@ describe("NodeInspector", () => {
         }) })],
       }), expect.anything()] }),
     }));
+    onNodeChange.mockClear();
+    await user.selectOptions(screen.getByLabelText("并行工作 1 步骤 1 经验共享范围"), "team");
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      parallel: expect.objectContaining({ branches: [expect.objectContaining({
+        steps: [expect.objectContaining({ agentCall: expect.objectContaining({ memoryAccess: { mode: "team" } }) })],
+      }), expect.anything()] }),
+    }));
   });
 
   it("顺序步骤组可以修改名称、输出和内部步骤", async () => {
@@ -431,6 +438,11 @@ describe("NodeInspector", () => {
         versionId: "00000000-0000-4000-8000-000000000012",
         inputContract: { fields: [{ name: "brief" }] },
       }),
+    }));
+    onNodeChange.mockClear();
+    await user.selectOptions(screen.getByLabelText("经验共享范围"), "self");
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      agentCall: expect.objectContaining({ memoryAccess: { mode: "self" } }),
     }));
   });
 

@@ -192,6 +192,20 @@ function InlineStepEditor({ label, steps, index, toolOptions, agentTargets, remo
       <option value="">请选择已发布助手</option>
       {agentTargets.map((target) => <option key={target.versionId} value={target.versionId}>{target.agentName}（版本 {target.version}）</option>)}
     </select> : null}
+    {type === "agent_call" ? <select aria-label={`${label} 经验共享范围`}
+      value={String(((step.agentCall as Record<string, unknown> | undefined)?.memoryAccess as Record<string, unknown> | undefined)?.mode ?? "none")}
+      onChange={(event) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
+        ...item,
+        agentCall: {
+          ...(item.agentCall as Record<string, unknown> | undefined),
+          memoryAccess: { mode: event.target.value as "none" | "self" | "team" },
+        },
+      } : item))}
+      className="rounded-md border border-gray-300 px-2 py-1.5 text-xs md:col-span-4">
+      <option value="none">不传递长期经验</option>
+      <option value="self">仅使用目标助手自身经验</option>
+      <option value="team">共享当前助手已读取的经验</option>
+    </select> : null}
     {type === "handoff" ? <select aria-label={`${label} 接收助手`}
       value={String((step.toAgent as Record<string, unknown> | undefined)?.versionId ?? "")}
       onChange={(event) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
@@ -662,7 +676,7 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
         </>
       ) : null}
       {node.type === "agent_call" ? (
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-2">
           <label htmlFor="node-agent-target" className="text-sm font-medium">协作助手</label>
           <select
             id="node-agent-target"
@@ -680,6 +694,18 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
             {agentTargets.map((target) => (
               <option key={target.versionId} value={target.versionId}>{target.agentName}（版本 {target.version}）</option>
             ))}
+          </select>
+          <label htmlFor="agent-call-memory" className="text-sm font-medium">经验共享范围</label>
+          <select id="agent-call-memory" aria-label="经验共享范围"
+            value={node.agentCall?.memoryAccess?.mode ?? "none"}
+            onChange={(event) => onNodeChange({
+              ...node,
+              agentCall: { ...node.agentCall!, memoryAccess: { mode: event.target.value as "none" | "self" | "team" } },
+            })}
+            className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none">
+            <option value="none">不传递长期经验</option>
+            <option value="self">仅使用目标助手自身经验</option>
+            <option value="team">共享当前助手已读取的经验</option>
           </select>
           {agentTargets.length === 0 ? <p className="text-xs text-gray-500">还没有其他已发布助手可供选择</p> : null}
         </div>
