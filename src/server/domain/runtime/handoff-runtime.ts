@@ -2,6 +2,7 @@ import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { buildBoundedCollaborationContext, isCollaborationMemoryOutput } from "@/server/domain/runtime/collaboration-input";
 import { isSafeDataPathSegment, safeDataPathSegments } from "@/server/domain/runtime/data-path";
+import { hasMeaningfulResult } from "@/server/domain/runtime/result-content";
 import { redactSensitiveData } from "@/server/domain/security/redact-sensitive";
 
 const SECRET_KEY = /password|passcode|secret|token|api[_-]?key|credential|cookie|authorization|private[_-]?key|密码|密钥|令牌|凭证|授权|私钥/i;
@@ -133,12 +134,16 @@ function validateHandoffSchema(
   fields: NonNullable<WorkflowNode["contract"]>["inputSchema"],
   value: Record<string, unknown>,
   label: "交接内容" | "交接结果",
+  requireMeaningful = false,
 ): string | null {
   for (const field of fields) {
     const fieldValue = readHandoffPath(value, field.name);
     if (fieldValue === undefined || fieldValue === null) {
       if (field.required) return `${label}缺少“${field.label || field.name}”`;
       continue;
+    }
+    if (field.required && requireMeaningful && !hasMeaningfulResult(fieldValue)) {
+      return `${label}缺少“${field.label || field.name}”`;
     }
     if (!handoffTypeMatches(fieldValue, field.type)) {
       return `${label}“${field.label || field.name}”的格式不正确`;
@@ -152,5 +157,5 @@ export function validateHandoffInput(node: WorkflowNode, input: Record<string, u
 }
 
 export function validateHandoffOutput(node: WorkflowNode, result: Record<string, unknown>): string | null {
-  return validateHandoffSchema(node.contract?.outputSchema ?? [], result, "交接结果");
+  return validateHandoffSchema(node.contract?.outputSchema ?? [], result, "交接结果", true);
 }

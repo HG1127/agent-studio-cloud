@@ -134,6 +134,7 @@ describe("助手交接运行逻辑", () => {
 
   it("按冻结契约校验交接结果的必填字段和类型", () => {
     expect(validateHandoffOutput(handoffNode(), {})).toBe("交接结果缺少“result”");
+    expect(validateHandoffOutput(handoffNode(), { result: "" })).toBe("交接结果缺少“result”");
     const typed = handoffNode();
     typed.contract!.outputSchema = [{ name: "result.score", label: "评分", type: "number", required: true }];
     expect(validateHandoffOutput(typed, { result: { score: "高" } })).toBe("交接结果“评分”的格式不正确");
