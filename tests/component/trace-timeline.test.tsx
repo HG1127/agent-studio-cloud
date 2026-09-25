@@ -111,6 +111,30 @@ describe("TraceTimeline", () => {
     expect(refreshMock).not.toHaveBeenCalled();
   });
 
+  it("切换到另一条运行时立即丢弃上一条运行的实时轨迹", () => {
+    (globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
+    const { rerender } = render(<TraceTimeline runId={RUN_ID} initialEvents={EVENTS} live />);
+    const previousSource = FakeEventSource.instances[0];
+    act(() => {
+      previousSource.emit("trace", makeEvent({ seq: 4, title: "上一条运行的实时进展" }));
+    });
+    expect(screen.getByText("上一条运行的实时进展")).toBeInTheDocument();
+
+    const nextRunId = "3f0d2c9e-8a7b-4c1d-9e2f-1a2b3c4d5e70";
+    const nextEvents = [makeEvent({ seq: 1, title: "新运行开始" })];
+    rerender(<TraceTimeline runId={nextRunId} initialEvents={nextEvents} live />);
+
+    expect(screen.getByText("新运行开始")).toBeInTheDocument();
+    expect(screen.queryByText("上一条运行的实时进展")).not.toBeInTheDocument();
+    expect(previousSource.closed).toBe(true);
+    expect(FakeEventSource.instances.at(-1)?.url).toBe(`/api/runs/${nextRunId}/events?after=1`);
+
+    act(() => {
+      previousSource.emit("trace", makeEvent({ seq: 5, title: "迟到的旧运行消息" }));
+    });
+    expect(screen.queryByText("迟到的旧运行消息")).not.toBeInTheDocument();
+  });
+
   it("收到等待确认轨迹事件后刷新页面（状态卡与审批面板由服务端渲染）", () => {
     (globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
     render(<TraceTimeline runId={RUN_ID} initialEvents={EVENTS} live />);

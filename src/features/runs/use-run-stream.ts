@@ -14,11 +14,12 @@ function mergeEvents(groups: ReadonlyArray<ReadonlyArray<TraceEventView>>): Trac
 }
 
 export function useRunStream(runId: string, initialEvents: TraceEventView[], live: boolean): TraceEventView[] {
-  const [streamed, setStreamed] = useState<TraceEventView[]>([]);
+  const [streamState, setStreamState] = useState<{ runId: string; events: TraceEventView[] }>({ runId, events: [] });
   const router = useRouter();
 
   useEffect(() => {
     if (!live || typeof window === "undefined") return;
+    let active = true;
     let fallbackTimer: number | null = null;
     const stopFallback = () => {
       if (fallbackTimer === null) return;
@@ -37,11 +38,15 @@ export function useRunStream(runId: string, initialEvents: TraceEventView[], liv
     const source = new EventSource(`/api/runs/${runId}/events?after=${after}`);
     let closedByDone = false;
     const onTrace = (event: MessageEvent<string>) => {
+      if (!active) return;
       try {
         const parsed = TraceEventView.safeParse(JSON.parse(event.data));
         if (parsed.success) {
           stopFallback();
-          setStreamed((prev) => mergeEvents([prev, [parsed.data]]));
+          setStreamState((prev) => ({
+            runId,
+            events: mergeEvents([prev.runId === runId ? prev.events : [], [parsed.data]]),
+          }));
           // 状态卡与审批面板不在客户端组件里，进入或离开等待态时须刷新服务端渲染层
           if (["approval.requested", "wait.started", "run.resumed"].includes(parsed.data.kind)) router.refresh();
         }
@@ -62,11 +67,15 @@ export function useRunStream(runId: string, initialEvents: TraceEventView[], liv
     source.addEventListener("open", onOpen);
     source.addEventListener("error", onError);
     return () => {
+      active = false;
       stopFallback();
       // EventSource 出错时会自动重连，这里只在卸载或终态后主动断开
       if (!closedByDone) source.close();
     };
   }, [initialEvents, live, router, runId]);
 
-  return useMemo(() => mergeEvents([initialEvents, streamed]), [initialEvents, streamed]);
+  return useMemo(
+    () => mergeEvents([initialEvents, streamState.runId === runId ? streamState.events : []]),
+    [initialEvents, runId, streamState],
+  );
 }
