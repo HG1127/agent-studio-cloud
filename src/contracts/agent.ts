@@ -12,11 +12,12 @@ export const AgentUpdateInput = z.object({
   agentId: z.string().uuid(),
   name: z.string().trim().min(1).max(60),
   description: z.string().trim().max(200).nullable(),
+  expectedUpdatedAt: z.iso.datetime(),
 });
 export type AgentUpdateInput = z.infer<typeof AgentUpdateInput>;
 
 export const AgentUpdateResult = z.discriminatedUnion("ok", [
-  z.object({ ok: z.literal(true) }),
+  z.object({ ok: z.literal(true), updatedAt: z.iso.datetime() }),
   z.object({ ok: z.literal(false), error: z.string() }),
 ]);
 export type AgentUpdateResult = z.infer<typeof AgentUpdateResult>;

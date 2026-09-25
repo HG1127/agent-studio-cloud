@@ -8,15 +8,16 @@ vi.mock("@/server/actions/update-agent", () => ({ updateAgentAction: actionMock 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: refreshMock }) }));
 
 describe("助手基本信息编辑", () => {
+  const initialUpdatedAt = "2026-09-25T01:00:00.000Z";
   afterEach(() => {
     actionMock.mockReset();
     refreshMock.mockReset();
   });
 
   it("保存名称和说明后刷新详情", async () => {
-    actionMock.mockResolvedValue({ ok: true });
+    actionMock.mockResolvedValue({ ok: true, updatedAt: "2026-09-25T01:05:00.000Z" });
     const user = userEvent.setup();
-    render(<AgentMetadataEditor agentId="00000000-0000-4000-8000-000000000071" initialName="旧名称" initialDescription={null} />);
+    render(<AgentMetadataEditor agentId="00000000-0000-4000-8000-000000000071" initialName="旧名称" initialDescription={null} initialUpdatedAt={initialUpdatedAt} />);
     await user.click(screen.getByRole("button", { name: "编辑名称和说明" }));
     await user.clear(screen.getByLabelText("编辑助手名称"));
     await user.type(screen.getByLabelText("编辑助手名称"), "续约助手");
@@ -26,6 +27,7 @@ describe("助手基本信息编辑", () => {
       agentId: "00000000-0000-4000-8000-000000000071",
       name: "续约助手",
       description: "生成续约方案",
+      expectedUpdatedAt: initialUpdatedAt,
     }));
     expect(refreshMock).toHaveBeenCalledTimes(1);
   });
@@ -33,7 +35,7 @@ describe("助手基本信息编辑", () => {
   it("保存失败时显示原因并保留编辑内容", async () => {
     actionMock.mockResolvedValue({ ok: false, error: "更新助手信息失败，请稍后重试" });
     const user = userEvent.setup();
-    render(<AgentMetadataEditor agentId="00000000-0000-4000-8000-000000000071" initialName="旧名称" initialDescription="旧说明" />);
+    render(<AgentMetadataEditor agentId="00000000-0000-4000-8000-000000000071" initialName="旧名称" initialDescription="旧说明" initialUpdatedAt={initialUpdatedAt} />);
     await user.click(screen.getByRole("button", { name: "编辑名称和说明" }));
     await user.click(screen.getByRole("button", { name: "保存信息" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("更新助手信息失败");

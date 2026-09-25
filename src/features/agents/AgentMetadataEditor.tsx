@@ -4,15 +4,17 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { updateAgentAction } from "@/server/actions/update-agent";
 
-export function AgentMetadataEditor({ agentId, initialName, initialDescription }: {
+export function AgentMetadataEditor({ agentId, initialName, initialDescription, initialUpdatedAt }: {
   agentId: string;
   initialName: string;
   initialDescription: string | null;
+  initialUpdatedAt: string;
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(initialName);
   const [description, setDescription] = useState(initialDescription ?? "");
+  const [updatedAt, setUpdatedAt] = useState(initialUpdatedAt);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,8 +26,14 @@ export function AgentMetadataEditor({ agentId, initialName, initialDescription }
     setPending(true);
     setError(null);
     try {
-      const result = await updateAgentAction({ agentId, name, description: description.trim() || null });
+      const result = await updateAgentAction({
+        agentId,
+        name,
+        description: description.trim() || null,
+        expectedUpdatedAt: updatedAt,
+      });
       if (result.ok) {
+        setUpdatedAt(result.updatedAt);
         setEditing(false);
         router.refresh();
       } else setError(result.error);

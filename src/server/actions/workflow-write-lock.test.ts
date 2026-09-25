@@ -49,6 +49,7 @@ import { updateAgentAction } from "@/server/actions/update-agent";
 const AGENT_ID = "00000000-0000-4000-8000-000000000071";
 const DEFINITION_ID = "00000000-0000-4000-8000-000000000072";
 const DEFINITION_UPDATED_AT = new Date("2026-09-25T01:00:00.000Z");
+const AGENT_UPDATED_AT = new Date("2026-09-25T00:30:00.000Z");
 const draft = WorkflowDraft.parse({
   id: "draft-1",
   versionId: null,
@@ -129,15 +130,42 @@ describe("助手与流程并发写入", () => {
   });
 
   it("修改名称时使用同一助手行锁并同步流程名称", async () => {
-    mocks.selectRows = [[{ id: AGENT_ID, name: "旧名称" }], [{ id: DEFINITION_ID, draft }]];
+    mocks.selectRows = [[{ id: AGENT_ID, name: "旧名称", updatedAt: AGENT_UPDATED_AT }], [{ id: DEFINITION_ID, draft }]];
 
-    const result = await updateAgentAction({ agentId: AGENT_ID, name: "新名称", description: "新说明" });
+    const result = await updateAgentAction({
+      agentId: AGENT_ID,
+      name: "新名称",
+      description: "新说明",
+      expectedUpdatedAt: AGENT_UPDATED_AT.toISOString(),
+    });
 
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ ok: true, updatedAt: expect.any(String) });
     expect(mocks.lock).toHaveBeenCalledOnce();
     expect(mocks.updates).toHaveLength(2);
     expect(mocks.updates[1].value.draft).toMatchObject({ rootAgent: { id: AGENT_ID, name: "新名称" } });
     expect(mocks.inserts).toHaveLength(1);
+  });
+
+  it("旧页面不会覆盖其他页面刚保存的助手信息", async () => {
+    mocks.selectRows = [[{
+      id: AGENT_ID,
+      name: "已更新名称",
+      updatedAt: new Date(AGENT_UPDATED_AT.getTime() + 1_000),
+    }]];
+
+    const result = await updateAgentAction({
+      agentId: AGENT_ID,
+      name: "旧页面名称",
+      description: "旧页面说明",
+      expectedUpdatedAt: AGENT_UPDATED_AT.toISOString(),
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "助手信息已在其他页面发生变化；你的修改仍保留在本页，请刷新核对后再保存",
+    });
+    expect(mocks.updates).toHaveLength(0);
+    expect(mocks.inserts).toHaveLength(0);
   });
 
   it("自动修复也锁定助手后再写入最新草稿", async () => {

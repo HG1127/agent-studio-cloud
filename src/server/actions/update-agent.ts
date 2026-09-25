@@ -17,12 +17,15 @@ export async function updateAgentAction(input: unknown): Promise<AgentUpdateResu
     const result = await db.transaction(async (tx) => {
       // 与流程保存共用同一把助手行锁，避免名称与整份草稿并发写入时互相覆盖。
       const [agent] = await tx
-        .select({ id: agents.id })
+        .select({ id: agents.id, updatedAt: agents.updatedAt })
         .from(agents)
         .where(and(eq(agents.id, parsed.data.agentId), eq(agents.workspaceId, DEMO_WORKSPACE_ID), isNull(agents.archivedAt)))
         .for("update")
         .limit(1);
       if (!agent) return { kind: "agent-missing" as const };
+      if (agent.updatedAt.getTime() !== new Date(parsed.data.expectedUpdatedAt).getTime()) {
+        return { kind: "stale" as const };
+      }
       const [definition] = await tx
         .select({ id: workflowDefinitions.id, draft: workflowDefinitions.draft })
         .from(workflowDefinitions)
@@ -50,16 +53,17 @@ export async function updateAgentAction(input: unknown): Promise<AgentUpdateResu
         summary: `修改助手「${parsed.data.name}」的基本信息`,
         data: {},
       }));
-      return { kind: "updated" as const, agentId: agent.id };
+      return { kind: "updated" as const, agentId: agent.id, updatedAt: now.toISOString() };
     });
     if (result.kind === "agent-missing") return { ok: false, error: "找不到这个助手，请刷新页面后重试" };
+    if (result.kind === "stale") return { ok: false, error: "助手信息已在其他页面发生变化；你的修改仍保留在本页，请刷新核对后再保存" };
     if (result.kind === "definition-missing") return { ok: false, error: "找不到这个助手的流程草稿" };
     if (result.kind === "definition-invalid") return { ok: false, error: "流程草稿格式不完整，暂时无法修改名称" };
     revalidatePath("/agents");
     revalidatePath(`/agents/${result.agentId}`);
     revalidatePath("/runs");
     revalidatePath("/schedules");
-    return { ok: true };
+    return { ok: true, updatedAt: result.updatedAt };
   } catch (error) {
     console.error("更新助手信息失败", error);
     return { ok: false, error: "更新助手信息失败，请稍后重试" };

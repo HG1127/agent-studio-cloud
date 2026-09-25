@@ -77,7 +77,12 @@ export default async function AgentDetailPage({
         {detail.agent.description ? (
           <p className="text-sm text-gray-500">{detail.agent.description}</p>
         ) : null}
-        <AgentMetadataEditor agentId={agentId} initialName={detail.agent.name} initialDescription={detail.agent.description} />
+        <AgentMetadataEditor
+          agentId={agentId}
+          initialName={detail.agent.name}
+          initialDescription={detail.agent.description}
+          initialUpdatedAt={detail.agent.updatedAt.toISOString()}
+        />
         <p className="text-sm text-gray-500">{auditStatusLine(audit)}</p>
       </header>
       {detail.draft ? (
