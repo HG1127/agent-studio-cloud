@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { createWaitEventToken } from "@/server/security/wait-event-token";
 import { markRunRunning, persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
+import { withSafeWorkflowError } from "@/server/security/workflow-error";
 
 function waitDescription(node: WorkflowNode): string {
   const wait = node.wait;
@@ -35,11 +36,11 @@ export async function beginWait(args: { runId: string; node: WorkflowNode; hookT
     nodeType: args.node.type,
     status: "running",
   });
-  const updated = await db
+  const updated = await withSafeWorkflowError(() => db
     .update(runs)
     .set({ status: "waiting_event", updatedAt: new Date() })
     .where(and(eq(runs.id, args.runId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])))
-    .returning({ id: runs.id });
+    .returning({ id: runs.id }), "等待状态暂时无法保存，请稍后重试");
   if (updated.length === 0) throw new FatalError("运行已经结束，不能再进入等待状态");
   const submissionToken = args.node.wait.mode === "event" ? createWaitEventToken() : undefined;
   await appendTrace({

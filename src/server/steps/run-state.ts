@@ -31,18 +31,18 @@ function workflowStepId(): string {
 export async function initializeRun(runId: string, draft: WorkflowDraft, startToken?: string): Promise<void> {
   "use step";
   const stepId = workflowStepId();
-  const [run] = await db
+  const [run] = await withSafeWorkflowError(() => db
     .select({ id: runs.id, workspaceId: runs.workspaceId, status: runs.status, stepStates: runs.stepStates })
     .from(runs)
     .where(eq(runs.id, runId))
-    .limit(1);
+    .limit(1), "运行状态暂时无法读取，请稍后重试");
   if (!run) throw new FatalError("运行记录不存在，无法继续执行");
   const lease = readRunStartLease(run.stepStates);
   if ((lease && lease.token !== startToken) || (!lease && startToken) || (lease && !startToken)) {
     throw new FatalError("运行启动已由新的请求接管");
   }
   const now = new Date();
-  const updated = await db
+  const updated = await withSafeWorkflowError(() => db
     .update(runs)
     .set({ status: "running", startedAt: now, updatedAt: now })
     .where(and(
@@ -52,13 +52,13 @@ export async function initializeRun(runId: string, draft: WorkflowDraft, startTo
         ? sql<boolean>`${runs.stepStates} -> ${RUN_START_LEASE_KEY} ->> 'token' = ${startToken}`
         : sql<boolean>`${runs.stepStates} -> ${RUN_START_LEASE_KEY} is null`,
     ))
-    .returning({ id: runs.id });
+    .returning({ id: runs.id }), "运行状态暂时无法更新，请稍后重试");
   if (updated.length === 0) {
-    const [current] = await db
+    const [current] = await withSafeWorkflowError(() => db
       .select({ status: runs.status, stepStates: runs.stepStates })
       .from(runs)
       .where(eq(runs.id, runId))
-      .limit(1);
+      .limit(1), "运行状态暂时无法读取，请稍后重试");
     const currentLease = readRunStartLease(current?.stepStates);
     if (current?.status === "running" && (
       (startToken && currentLease?.token === startToken)
@@ -209,7 +209,10 @@ export async function persistContext(runId: string, outputs: Record<string, unkn
     .where(and(eq(runs.id, runId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])))
     .returning({ id: runs.id }), "运行上下文暂时无法保存，请稍后重试");
   if (updated.length > 0) return;
-  const [run] = await db.select({ id: runs.id }).from(runs).where(eq(runs.id, runId)).limit(1);
+  const [run] = await withSafeWorkflowError(
+    () => db.select({ id: runs.id }).from(runs).where(eq(runs.id, runId)).limit(1),
+    "运行状态暂时无法读取，请稍后重试",
+  );
   if (!run) throw new FatalError("运行记录不存在，无法继续执行");
   throw new FatalError("运行已经结束，忽略迟到的上下文");
 }
@@ -233,7 +236,10 @@ export async function finalizeRun(
   if (updated.length === 0) {
     // 终态写入后若验收汇总瞬时失败，Workflow 会重试本步骤；重入时仍需完成对账。
     await appendTrace({ runId, kind: "run.completed", title: "流程执行完成", detail: `共 ${Object.keys(result).length} 个步骤产出` });
-    await reconcileTerminalEvaluationRun(runId);
+    await withSafeWorkflowError(
+      () => reconcileTerminalEvaluationRun(runId),
+      "验收结果暂时无法汇总，请稍后重试",
+    );
     return;
   }
   await appendTrace({
@@ -242,7 +248,10 @@ export async function finalizeRun(
     title: "流程执行完成",
     detail: `共 ${Object.keys(result).length} 个步骤产出`,
   });
-  await completeEvaluationForRun(runId, result);
+  await withSafeWorkflowError(
+    () => completeEvaluationForRun(runId, result),
+    "验收结果暂时无法汇总，请稍后重试",
+  );
 }
 
 export async function failRun(runId: string, error: string): Promise<void> {
@@ -250,7 +259,7 @@ export async function failRun(runId: string, error: string): Promise<void> {
   const safeError = redactSensitiveText(error);
   console.error(`运行 ${runId} 失败：${safeError}`);
   const now = new Date();
-  const updated = await db.transaction(async (tx) => {
+  const updated = await withSafeWorkflowError(() => db.transaction(async (tx) => {
     const rows = await tx
       .update(runs)
       .set({ status: "failed", error: safeError, finishedAt: now, updatedAt: now })
@@ -264,15 +273,21 @@ export async function failRun(runId: string, error: string): Promise<void> {
         .where(and(eq(approvals.runId, runId), eq(approvals.status, "pending")));
     }
     return rows;
-  });
+  }), "运行失败状态暂时无法保存，请稍后重试");
   if (updated.length === 0) {
     // 已是终态时不改写运行结果，但要修复上一次可能未完成的验收汇总。
     await appendTrace({ runId, kind: "run.failed", level: "error", title: "流程执行失败", detail: safeError });
-    await reconcileTerminalEvaluationRun(runId);
+    await withSafeWorkflowError(
+      () => reconcileTerminalEvaluationRun(runId),
+      "验收结果暂时无法汇总，请稍后重试",
+    );
     return;
   }
   await appendTrace({ runId, kind: "run.failed", level: "error", title: "流程执行失败", detail: safeError });
-  await completeEvaluationForRun(runId, null, safeError);
+  await withSafeWorkflowError(
+    () => completeEvaluationForRun(runId, null, safeError),
+    "验收结果暂时无法汇总，请稍后重试",
+  );
 }
 
 // 等待结束后把 run 拉回 running 并留下持久轨迹（瞬态状态不可断言，轨迹可）
@@ -280,17 +295,17 @@ export async function markRunRunning(runId: string): Promise<boolean> {
   "use step";
   const stepId = workflowStepId();
   const now = new Date();
-  const updated = await db
+  const updated = await withSafeWorkflowError(() => db
     .update(runs)
     .set({ status: "running", updatedAt: now })
     .where(and(eq(runs.id, runId), inArray(runs.status, ["waiting_approval", "waiting_event"])))
-    .returning({ id: runs.id });
+    .returning({ id: runs.id }), "运行状态暂时无法更新，请稍后重试");
   if (updated.length === 0) {
-    const [current] = await db
+    const [current] = await withSafeWorkflowError(() => db
       .select({ status: runs.status })
       .from(runs)
       .where(eq(runs.id, runId))
-      .limit(1);
+      .limit(1), "运行状态暂时无法读取，请稍后重试");
     // 状态已由本步骤的上一次尝试切换成功时，继续补齐轨迹；终态仍严格拒绝恢复。
     if (current?.status !== "running") return false;
   }

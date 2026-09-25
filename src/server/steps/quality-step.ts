@@ -16,6 +16,7 @@ import {
   qualityOutputReferenceIssue,
 } from "@/server/domain/runtime/quality-checks";
 import { hasMeaningfulResult } from "@/server/domain/runtime/result-content";
+import { withSafeWorkflowError } from "@/server/security/workflow-error";
 
 function isReceiptOk(value: unknown): boolean {
   return (
@@ -85,11 +86,11 @@ export async function runQualityGate(args: RunQualityGateInput): Promise<Quality
     if (referenceIssue) return reject(referenceIssue);
     // 拒绝收尾：run 已有 rejected 决定即走 not_approved 语义（保留当前结果并停止高影响动作），
     // 被拒绝分支的交付物/回执按设计不会产生，完整核对不适用，只要求人工决定记录存在
-    const [rejectedStop] = await db
+    const [rejectedStop] = await withSafeWorkflowError(() => db
       .select({ id: approvals.id })
       .from(approvals)
       .where(and(eq(approvals.runId, args.runId), eq(approvals.status, "rejected")))
-      .limit(1);
+      .limit(1), "确认记录暂时无法读取，请稍后重试");
     if (rejectedStop) {
       await persistStep({
         runId: args.runId,
@@ -142,11 +143,11 @@ export async function runQualityGate(args: RunQualityGateInput): Promise<Quality
     }
     if (quality.checkHumanBoundary && hasExecutedHumanStep(args.nodes, args.outputs)) {
       // approved 与 rejected 都算人工责任已履行：拒绝路径经 not_approved 仍要到质量门禁，若只认 approved 会永远 failRun
-      const [decided] = await db
+      const [decided] = await withSafeWorkflowError(() => db
         .select({ id: approvals.id })
         .from(approvals)
         .where(and(eq(approvals.runId, args.runId), inArray(approvals.status, ["approved", "rejected"])))
-        .limit(1);
+        .limit(1), "确认记录暂时无法读取，请稍后重试");
       if (!decided) {
         return reject("交付前检查未通过：需要人工确认的步骤还没有确认记录");
       }

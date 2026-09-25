@@ -24,15 +24,15 @@ export async function runMemoryStep(args: {
   await persistStep({ runId: args.runId, nodeId: args.node.id, nodeTitle: args.node.title, nodeType: args.node.type, status: "running" });
 
   if (memory.mode === "read") {
-    const [run] = await db
+    const [run] = await withSafeWorkflowError(() => db
       .select({ workspaceId: runs.workspaceId, agentId: runs.agentId })
       .from(runs)
       .where(eq(runs.id, args.runId))
-      .limit(1);
+      .limit(1), "经验内容暂时无法读取，请稍后重试");
     if (!run) throw new FatalError("找不到这次运行");
     const query = memory.query?.trim()
       || searchQueryFromInput(args.input);
-    const rows = await db
+    const rows = await withSafeWorkflowError(() => db
       .select({ content: agentMemories.content, createdAt: agentMemories.createdAt })
       .from(agentMemories)
       .where(and(
@@ -41,7 +41,7 @@ export async function runMemoryStep(args: {
         isNull(agentMemories.archivedAt),
       ))
       .orderBy(desc(agentMemories.createdAt))
-      .limit(100);
+      .limit(100), "经验内容暂时无法读取，请稍后重试");
     const selected = selectRelevantMemories(query, rows, memory.limit ?? 5);
     const output = {
       mode: "read",

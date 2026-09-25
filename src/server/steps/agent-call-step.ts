@@ -23,11 +23,11 @@ export async function beginAgentCall(args: {
   "use step";
   const call = args.node.agentCall;
   if (!call?.targetAgentId || !call.versionId) throw new FatalError(`步骤「${args.node.title}」还没有选择协作助手`);
-  const [parent] = await db
+  const [parent] = await withSafeWorkflowError(() => db
     .select({ workspaceId: runs.workspaceId, createdBy: runs.createdBy, agentId: runs.agentId })
     .from(runs)
     .where(eq(runs.id, args.runId))
-    .limit(1);
+    .limit(1), "协作任务暂时无法读取，请稍后重试");
   if (!parent) throw new FatalError("找不到这次运行");
   let chain;
   try {
@@ -37,7 +37,7 @@ export async function beginAgentCall(args: {
   }
   const chainIssue = validateCollaborationTarget(chain, call.targetAgentId);
   if (chainIssue) throw new FatalError(`步骤「${args.node.title}」${chainIssue}`);
-  const [target] = await db
+  const [target] = await withSafeWorkflowError(() => db
     .select({ name: agents.name, manifest: agentVersions.manifest })
     .from(agentVersions)
     .innerJoin(agents, eq(agents.id, agentVersions.agentId))
@@ -48,7 +48,7 @@ export async function beginAgentCall(args: {
       eq(agents.workspaceId, parent.workspaceId),
       isNull(agents.archivedAt),
     ))
-    .limit(1);
+    .limit(1), "协作助手暂时无法读取，请稍后重试");
   const parsedManifest = target ? AgentManifest.safeParse(target.manifest) : null;
   if (!target || !parsedManifest?.success) throw new FatalError(`步骤「${args.node.title}」绑定的协作助手版本不可用`);
   const derivedInput = buildAgentCallInput({ node: args.node, targetManifest: parsedManifest.data, input: args.parentInput, outputs: args.outputs });
@@ -101,7 +101,10 @@ export async function finishAgentCall(args: {
   error?: string;
 }): Promise<{ output: Record<string, unknown>; failed: boolean; error: string | null }> {
   "use step";
-  const [child] = await db.select({ status: runs.status, result: runs.result, error: runs.error }).from(runs).where(eq(runs.id, args.childRunId)).limit(1);
+  const [child] = await withSafeWorkflowError(
+    () => db.select({ status: runs.status, result: runs.result, error: runs.error }).from(runs).where(eq(runs.id, args.childRunId)).limit(1),
+    "协作结果暂时无法读取，请稍后重试",
+  );
   const contractError = child?.status === "completed" ? validateAgentCallOutput(args.node, child.result ?? {}) : null;
   const failed = Boolean(args.failed || child?.status !== "completed" || contractError);
   const reason = redactSensitiveText(args.error || child?.error || contractError || "协作助手未能完成任务");

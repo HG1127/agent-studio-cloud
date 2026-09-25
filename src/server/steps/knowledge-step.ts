@@ -12,6 +12,7 @@ import { knowledgeSourceIdsForStep } from "@/server/domain/runtime/knowledge-sna
 import { searchQueryFromInput } from "@/server/domain/runtime/search-query";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
+import { withSafeWorkflowError } from "@/server/security/workflow-error";
 
 export interface RunKnowledgeStepInput {
   runId: string;
@@ -54,9 +55,12 @@ export async function runKnowledgeStep(args: RunKnowledgeStepInput): Promise<{ r
   if (selectedSourceIds.length === 0) {
     return reject(`步骤「${node.title}」选择的知识来源不在这个发布版本中，请重新发布`);
   }
-  const [run] = await db.select({ workspaceId: runs.workspaceId }).from(runs).where(eq(runs.id, args.runId)).limit(1);
+  const [run] = await withSafeWorkflowError(
+    () => db.select({ workspaceId: runs.workspaceId }).from(runs).where(eq(runs.id, args.runId)).limit(1),
+    "知识检索暂时不可用，请稍后重试",
+  );
   if (!run) return reject("找不到这次运行");
-  const rows = await db
+  const rows = await withSafeWorkflowError(() => db
     .select({ sourceId: knowledgeChunks.sourceId, sourceName: knowledgeSources.name, chunkIndex: knowledgeChunks.chunkIndex, content: knowledgeChunks.content })
     .from(knowledgeChunks)
     .innerJoin(knowledgeSources, eq(knowledgeChunks.sourceId, knowledgeSources.id))
@@ -70,7 +74,7 @@ export async function runKnowledgeStep(args: RunKnowledgeStepInput): Promise<{ r
       ),
     )
     .orderBy(desc(knowledgeSources.createdAt), asc(knowledgeSources.id), asc(knowledgeChunks.chunkIndex))
-    .limit(MAX_KNOWLEDGE_SCAN_CHUNKS + 1);
+    .limit(MAX_KNOWLEDGE_SCAN_CHUNKS + 1), "知识检索暂时不可用，请稍后重试");
   const truncated = rows.length > MAX_KNOWLEDGE_SCAN_CHUNKS;
   const scannedRows = rows.slice(0, MAX_KNOWLEDGE_SCAN_CHUNKS);
   const hits = scoreChunks(query, scannedRows, { limit: 8 });

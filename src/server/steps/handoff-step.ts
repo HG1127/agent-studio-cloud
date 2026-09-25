@@ -24,11 +24,11 @@ export async function beginHandoff(args: {
   const targetRef = args.node.toAgent;
   if (!targetRef?.id || !targetRef.versionId) throw new FatalError(`步骤「${args.node.title}」还没有选择接收助手`);
   const targetVersionId = targetRef.versionId;
-  const [parent] = await db
+  const [parent] = await withSafeWorkflowError(() => db
     .select({ workspaceId: runs.workspaceId, createdBy: runs.createdBy, agentId: runs.agentId })
     .from(runs)
     .where(eq(runs.id, args.runId))
-    .limit(1);
+    .limit(1), "交接任务暂时无法读取，请稍后重试");
   if (!parent) throw new FatalError("找不到这次运行");
   let chain;
   try {
@@ -38,7 +38,7 @@ export async function beginHandoff(args: {
   }
   const chainIssue = validateCollaborationTarget(chain, targetRef.id);
   if (chainIssue) throw new FatalError(`步骤「${args.node.title}」${chainIssue}`);
-  const [target] = await db
+  const [target] = await withSafeWorkflowError(() => db
     .select({ name: agents.name, manifest: agentVersions.manifest })
     .from(agentVersions)
     .innerJoin(agents, eq(agents.id, agentVersions.agentId))
@@ -49,7 +49,7 @@ export async function beginHandoff(args: {
       eq(agents.workspaceId, parent.workspaceId),
       isNull(agents.archivedAt),
     ))
-    .limit(1);
+    .limit(1), "接收助手暂时无法读取，请稍后重试");
   const parsedManifest = target ? AgentManifest.safeParse(target.manifest) : null;
   if (!target || !parsedManifest?.success) throw new FatalError(`步骤「${args.node.title}」绑定的接收助手版本不可用`);
   const prepared = buildHandoffInput({ node: args.node, targetManifest: parsedManifest.data, input: args.parentInput, outputs: args.outputs });
@@ -110,7 +110,10 @@ export async function finishHandoff(args: {
   error?: string;
 }): Promise<{ output: Record<string, unknown>; failed: boolean; error: string | null }> {
   "use step";
-  const [child] = await db.select({ status: runs.status, result: runs.result, error: runs.error }).from(runs).where(eq(runs.id, args.childRunId)).limit(1);
+  const [child] = await withSafeWorkflowError(
+    () => db.select({ status: runs.status, result: runs.result, error: runs.error }).from(runs).where(eq(runs.id, args.childRunId)).limit(1),
+    "交接结果暂时无法读取，请稍后重试",
+  );
   const contractError = child?.status === "completed" ? validateHandoffOutput(args.node, child.result ?? {}) : null;
   const failed = Boolean(args.failed || child?.status !== "completed" || contractError);
   const reason = redactSensitiveText(args.error || child?.error || contractError || "接收助手未能完成交接任务");
