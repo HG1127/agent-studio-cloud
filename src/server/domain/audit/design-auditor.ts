@@ -572,13 +572,13 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
         issues.push(issue("critical", "handoff", "交接没有禁止传递边界", `「${n.title}」没有声明密钥、隐私或内部草稿等禁止传递内容。`, { nodeId: id, fixable: true, code: "handoff_prohibited" }));
       }
       if (!fieldSchemaOk(c.inputSchema)) {
-        issues.push(issue("warning", "handoff", "交接输入 Schema 未定义", `「${n.title}」缺少结构化输入字段，运行时只能依赖自然语言。`, { nodeId: id, fixable: true, code: "handoff_input_schema" }));
+        issues.push(issue("critical", "handoff", "交接输入 Schema 未定义", `「${n.title}」缺少结构化输入字段，无法安全执行交接。`, { nodeId: id, fixable: true, code: "handoff_input_schema" }));
       }
       if (!fieldSchemaOk(c.outputSchema)) {
-        issues.push(issue("warning", "handoff", "交接输出 Schema 未定义", `「${n.title}」缺少下游可验证的输出结构。`, { nodeId: id, fixable: true, code: "handoff_output_schema" }));
+        issues.push(issue("critical", "handoff", "交接输出 Schema 未定义", `「${n.title}」缺少下游可验证的输出结构，无法确认交接完成。`, { nodeId: id, fixable: true, code: "handoff_output_schema" }));
       }
       if (!c.memoryPolicy) {
-        issues.push(issue("warning", "memory", "交接没有记忆边界", `「${n.title}」没有声明哪些上下文可以共享、哪些必须保持私有。`, { nodeId: id, fixable: true, code: "handoff_memory" }));
+        issues.push(issue("critical", "memory", "交接没有记忆边界", `「${n.title}」没有声明哪些上下文可以共享、哪些必须保持私有，无法安全执行交接。`, { nodeId: id, fixable: true, code: "handoff_memory" }));
       }
     }
   }

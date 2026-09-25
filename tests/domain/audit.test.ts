@@ -152,6 +152,29 @@ describe("直测：结构性检查", () => {
     expect(result.issues).toContainEqual(expect.objectContaining({ code: "agent_call_target", severity: "critical" }));
   });
 
+  it("交接契约不完整时作为发布阻塞问题", () => {
+    const result = auditWorkflow(WorkflowDraft.parse({
+      id: "incomplete-handoff",
+      rootAgent: { id: "agent", name: "测试助手", role: "处理" },
+      memoryPolicy: { taskContext: true, longTerm: false },
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "handoff" },
+        handoff: {
+          id: "handoff", title: "交给履约助手", type: "handoff", next: "done",
+          toAgent: { id: "target", versionId: "version" },
+          contract: { deliverables: ["处理结果"], mustNotInclude: ["密钥"], inputSchema: [], outputSchema: [] },
+        },
+        done: { id: "done", title: "结束", type: "end", next: null },
+      },
+    }));
+
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "handoff_input_schema", severity: "critical" }),
+      expect.objectContaining({ code: "handoff_output_schema", severity: "critical" }),
+      expect.objectContaining({ code: "handoff_memory", severity: "critical" }),
+    ]));
+  });
+
   it("隐藏的质量控制节点不会被误判为业务目标声明", () => {
     const out = auditWorkflow({
       ...deadEndDraft,
