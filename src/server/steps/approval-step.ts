@@ -77,7 +77,7 @@ export async function requestApproval(args: RequestApprovalInput): Promise<Appro
       if (existing.status === "pending" && run.status !== "waiting_approval") {
         await tx.update(runs).set({ status: "waiting_approval", updatedAt: now }).where(eq(runs.id, args.runId));
       }
-      return { row: existing, created: false };
+      return { row: existing };
     }
     const [created] = await tx
       .insert(approvals)
@@ -95,9 +95,9 @@ export async function requestApproval(args: RequestApprovalInput): Promise<Appro
       })
       .returning({ id: approvals.id, status: approvals.status, note: approvals.note });
     await tx.update(runs).set({ status: "waiting_approval", updatedAt: now }).where(eq(runs.id, args.runId));
-    return { row: created, created: true };
+    return { row: created };
   });
-  if (result.created) {
+  if (result.row.status === "pending") {
     await appendTrace({
       runId: args.runId,
       nodeId: node.id,
@@ -105,6 +105,7 @@ export async function requestApproval(args: RequestApprovalInput): Promise<Appro
       title: `等待「${node.title}」确认`,
       detail: reason,
       data: { approvalId: result.row.id, role },
+      dedupeKey: `approval-requested:${result.row.id}`,
     });
   }
   const recordedDecision: ApprovalHandle["recordedDecision"] = result.row.status === "approved" || result.row.status === "rejected"
@@ -169,6 +170,7 @@ export async function recordDecision(args: RecordDecisionInput): Promise<{
     level: approved ? "info" : "warn",
     title: approved ? `「${args.node.title}」已确认` : `「${args.node.title}」未获确认`,
     detail: args.decision.note ?? null,
+    dedupeKey: `approval-decided:${args.approvalId}:${decisionStatus}`,
   });
   const output = {
     approvalId: args.approvalId,

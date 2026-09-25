@@ -48,4 +48,22 @@ describe("终态轨迹幂等写入", () => {
     expect(mocks.insert).not.toHaveBeenCalled();
     expect(mocks.getWritable).not.toHaveBeenCalled();
   });
+
+  it("同一个业务幂等键已经存在时不再插入或写实时流", async () => {
+    mocks.selectResults.push(
+      [{ workspaceId: "workspace-1", createdBy: "user-1", status: "waiting_approval" }],
+      [{ seq: 4 }],
+    );
+
+    await appendTrace({
+      runId: "run-1",
+      kind: "approval.requested",
+      title: "等待确认",
+      dedupeKey: "approval-requested:approval-1",
+    });
+
+    expect(mocks.select).toHaveBeenCalledTimes(2);
+    expect(mocks.insert).not.toHaveBeenCalled();
+    expect(mocks.getWritable).not.toHaveBeenCalled();
+  });
 });

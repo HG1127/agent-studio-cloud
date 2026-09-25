@@ -341,7 +341,7 @@ describe("取消运行", () => {
     expect(appendTraceMock).not.toHaveBeenCalled();
   });
 
-  it("确认步骤重试时复用已有记录而不重复通知", async () => {
+  it("确认步骤重试时复用已有记录并幂等补写通知", async () => {
     await insertWaitingRun();
     const args = { runId: RUN_ID, node: draft.nodes.confirm, outputs: {}, nodes: draft.nodes };
 
@@ -353,7 +353,10 @@ describe("取消运行", () => {
       eq(approvals.runId, RUN_ID), eq(approvals.nodeId, "confirm"),
     ));
     expect(rows).toHaveLength(1);
-    expect(appendTraceMock.mock.calls.filter(([event]) => event.kind === "approval.requested")).toHaveLength(1);
+    const requestedTraces = appendTraceMock.mock.calls.filter(([event]) => event.kind === "approval.requested");
+    expect(requestedTraces).toHaveLength(2);
+    expect(requestedTraces[0][0].dedupeKey).toBe(`approval-requested:${first.approvalId}`);
+    expect(requestedTraces[1][0].dedupeKey).toBe(requestedTraces[0][0].dedupeKey);
   });
 
   it("确认已被处理后发起步骤重试仍复用原记录", async () => {

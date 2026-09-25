@@ -18,10 +18,12 @@ export interface AppendTraceInput {
   title: string;
   detail?: string | null;
   data?: Record<string, unknown> | null;
+  dedupeKey?: string;
 }
 
 const MAX_TRACE_TITLE_LENGTH = 500;
 const MAX_TRACE_DETAIL_LENGTH = 4_000;
+const MAX_TRACE_DEDUPE_KEY_LENGTH = 500;
 
 function boundedText(value: string | null | undefined, maxLength: number): string | null {
   if (value === null || value === undefined) return null;
@@ -31,13 +33,18 @@ function boundedText(value: string | null | undefined, maxLength: number): strin
 export async function appendTrace(event: AppendTraceInput): Promise<void> {
   "use step";
   const at = new Date();
+  const dedupeKey = event.dedupeKey
+    ? boundedText(event.dedupeKey, MAX_TRACE_DEDUPE_KEY_LENGTH)
+    : null;
   const base = {
     nodeId: event.nodeId ?? null,
     kind: event.kind,
     level: event.level ?? "info",
     title: boundedText(event.title, MAX_TRACE_TITLE_LENGTH)!,
     detail: boundedText(event.detail, MAX_TRACE_DETAIL_LENGTH),
-    data: event.data ?? null,
+    data: dedupeKey
+      ? { ...(event.data ?? {}), _dedupeKey: dedupeKey }
+      : event.data ?? null,
   };
   // 与取消、失败和完成共用运行行锁：终态检查与轨迹插入处于同一事务，
   // 并行步骤也按运行串行分配 seq，不再依赖唯一键冲突重试。
@@ -50,6 +57,18 @@ export async function appendTrace(event: AppendTraceInput): Promise<void> {
       .limit(1);
     if (!run) throw new FatalError("运行记录不存在，无法写入轨迹");
     if (!canAppendTraceToRun(run.status, event.kind)) return null;
+    if (dedupeKey) {
+      const [existing] = await tx
+        .select({ seq: traceEvents.seq })
+        .from(traceEvents)
+        .where(and(
+          eq(traceEvents.runId, event.runId),
+          eq(traceEvents.kind, event.kind),
+          sql`${traceEvents.data} ->> '_dedupeKey' = ${dedupeKey}`,
+        ))
+        .limit(1);
+      if (existing) return null;
+    }
     if (isTerminalTraceKind(event.kind)) {
       const [existing] = await tx
         .select({ seq: traceEvents.seq })
