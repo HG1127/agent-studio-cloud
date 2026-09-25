@@ -14,10 +14,10 @@ describe("最终交付结果", () => {
   });
 
   it("把人工拒绝转换为不泄露内部标识的受控终态", () => {
-    expect(rejectedWorkflowResult({ confirm: { decision: "approved", note: "可以" } })).toBeNull();
+    expect(rejectedWorkflowResult({ decision: "approved", note: "可以" })).toBeNull();
+    expect(rejectedWorkflowResult(null)).toBeNull();
     expect(rejectedWorkflowResult({
-      draft: { text: "尚未批准的草稿" },
-      confirm: { approvalId: "internal-id", decision: "rejected", note: "  需要补充依据  " },
+      approvalId: "internal-id", decision: "rejected", note: "  需要补充依据  ",
     })).toEqual({
       处理状态: "未获确认",
       说明: "负责人未批准，本次运行已安全停止，后续交付没有执行",

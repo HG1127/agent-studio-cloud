@@ -4,15 +4,11 @@ import { hasMeaningfulResult } from "@/server/domain/runtime/result-content";
 
 type OutputField = NonNullable<WorkflowDraft["outputContract"]>["fields"][number];
 
-export function rejectedWorkflowResult(outputs: Record<string, unknown>): Record<string, unknown> | null {
-  const rejected = Object.values(outputs).reverse().find((output) => (
-    output
-    && typeof output === "object"
-    && !Array.isArray(output)
-    && (output as Record<string, unknown>).decision === "rejected"
-  ));
-  if (!rejected || typeof rejected !== "object" || Array.isArray(rejected)) return null;
-  const note = (rejected as Record<string, unknown>).note;
+export function rejectedWorkflowResult(decision: unknown): Record<string, unknown> | null {
+  if (!decision || typeof decision !== "object" || Array.isArray(decision)) return null;
+  const record = decision as Record<string, unknown>;
+  if (record.decision !== "rejected") return null;
+  const note = record.note;
   return {
     处理状态: "未获确认",
     说明: "负责人未批准，本次运行已安全停止，后续交付没有执行",

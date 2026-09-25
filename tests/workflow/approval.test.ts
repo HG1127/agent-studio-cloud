@@ -82,6 +82,8 @@ describe("人工审批暂停与恢复", () => {
     expect(pending?.payload).toMatchObject({
       review: { sourceNodeId: "draft", sourceTitle: "生成回复草稿", content: expect.stringContaining("[模拟输出]") },
     });
+    const [waiting] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(waiting?.context).toMatchObject({ outputs: { draft: expect.stringContaining("[模拟输出]") } });
     await resumeHook(token, { decision: "approved" });
     expect(await handle.returnValue).toEqual({ status: "completed" });
   }, 240_000);

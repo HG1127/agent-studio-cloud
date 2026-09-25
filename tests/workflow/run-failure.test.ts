@@ -27,7 +27,8 @@ const badManifest = {
     rootAgent: { id: "agt_failure_test", name: "失败兜底演示助手", role: "通用业务助手" },
     memoryPolicy: { taskContext: true, longTerm: false },
     nodes: {
-      start: { id: "start", title: "收到任务", type: "trigger", next: "boom", requirementIds: [] },
+      start: { id: "start", title: "收到任务", type: "trigger", next: "prepared", requirementIds: [] },
+      prepared: { id: "prepared", title: "保存已有结果", type: "system", next: "boom", requirementIds: [] },
       boom: { id: "boom", title: "编排器不支持的步骤", type: "teleport", next: "done", requirementIds: [] },
       done: { id: "done", title: "流程结束", type: "end", next: null, requirementIds: [] },
     },
@@ -204,5 +205,6 @@ describe("运行失败兜底", () => {
     expect(runAfter?.status).toBe("failed");
     expect(runAfter?.error).toBe("步骤「编排器不支持的步骤」暂不支持自动执行");
     expect(runAfter?.finishedAt).not.toBeNull();
+    expect(runAfter?.context).toMatchObject({ outputs: { prepared: { summary: "保存已有结果已完成" } } });
   }, 240_000);
 });

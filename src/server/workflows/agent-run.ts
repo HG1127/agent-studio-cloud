@@ -17,7 +17,7 @@ import { beginLoopIteration, completeLoop } from "@/server/steps/loop-step";
 import { runMemoryStep } from "@/server/steps/memory-step";
 import { runModelStep } from "@/server/steps/model-step";
 import { beginParallel, finishParallel } from "@/server/steps/parallel-step";
-import { failRun, finalizeRun, initializeRun, markRunRunning } from "@/server/steps/run-state";
+import { failRun, finalizeRun, initializeRun, markRunRunning, persistContext } from "@/server/steps/run-state";
 import { beginSubflow, finishSubflow } from "@/server/steps/subflow-step";
 import { runQualityGate } from "@/server/steps/quality-step";
 import { appendTrace } from "@/server/steps/trace-step";
@@ -182,6 +182,7 @@ export async function agentRunWorkflow(
   }> = {};
   const activeLoops: Array<{ loopId: string; iteration: number; total: number; item: unknown }> = [];
   const qualityRepairAttempts: Record<string, number> = {};
+  let lastHumanDecision: unknown = null;
   const executionLimit = workflowExecutionLimit(draft.nodes);
   let guard = 0;
   try {
@@ -195,7 +196,7 @@ export async function agentRunWorkflow(
         continue;
       }
       if (node.type === "end") {
-        const rejected = rejectedWorkflowResult(outputs);
+        const rejected = rejectedWorkflowResult(lastHumanDecision);
         if (rejected) {
           await finalizeRun(runId, rejected, outputs);
           return { status: "completed" };
@@ -393,10 +394,13 @@ export async function agentRunWorkflow(
         continue;
       }
       if (node.type === "human") {
+        await persistContext(runId, outputs);
         const { approvalId, token } = await requestApproval({ runId, node, outputs, nodes: draft.nodes });
         const hook = createHook<{ decision: "approved" | "rejected"; note?: string }>({ token });
         const decision = await hook;
-        outputs[node.id] = await recordDecision({ runId, node, approvalId, decision });
+        const recordedDecision = await recordDecision({ runId, node, approvalId, decision });
+        outputs[node.id] = recordedDecision;
+        lastHumanDecision = decision.decision === "rejected" ? recordedDecision : null;
         const resumed = await markRunRunning(runId);
         if (!resumed) throw new FatalError("运行已经结束，不能继续确认后的步骤");
         if (decision.decision === "rejected") {
@@ -412,6 +416,7 @@ export async function agentRunWorkflow(
         const wait = node.wait;
         if (!wait) throw new FatalError(`步骤「${node.title}」的等待设置不完整`);
         const hookToken = wait.mode === "event" ? `wait:${runId}:${node.id}:${guard}` : undefined;
+        await persistContext(runId, outputs);
         await beginWait({ runId, node, hookToken });
         if (wait.mode === "delay") {
           if (wait.durationMs > 0) await sleep(wait.durationMs);
@@ -615,6 +620,11 @@ export async function agentRunWorkflow(
     const fallback = "执行步骤时发生错误，已停止";
     const reason = executionFailureReason(err, fallback);
     if (reason === fallback) console.error(`运行 ${runId} 步骤执行失败：`, err);
+    try {
+      await persistContext(runId, outputs);
+    } catch (contextError) {
+      console.error(`运行 ${runId} 保存失败前上下文时出错：`, contextError);
+    }
     try {
       await failRun(runId, reason);
     } catch (failErr) {
