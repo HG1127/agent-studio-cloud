@@ -2,12 +2,13 @@
 // 审批步骤：requestApproval 落 approvals pending 行并把 run 置 waiting_approval；
 // recordDecision 把审批决定写回 approvals 行。token 为确定性格式，供 createHook/resumeHook 服务端配对，
 // 不下发给前端（前端只拿 approvalId）。
-import { and, desc, eq, sql } from "drizzle-orm";
-import { FatalError } from "workflow";
+import { and, desc, eq, or, sql } from "drizzle-orm";
+import { FatalError, getStepMetadata } from "workflow";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { ApprovalPayload } from "@/contracts/run";
 import { approvals, runs } from "@/db/schema";
 import { db } from "@/lib/db";
+import { approvalRecordId } from "@/server/domain/approval/approval-id";
 import { selectApprovalReview } from "@/server/domain/approval/select-review";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
@@ -34,6 +35,13 @@ export interface RecordDecisionInput {
 export async function requestApproval(args: RequestApprovalInput): Promise<ApprovalHandle> {
   "use step";
   const node = args.node;
+  let workflowStepId = "direct-call";
+  try {
+    workflowStepId = getStepMetadata().stepId;
+  } catch {
+    // 集成测试和运维直调不在 Workflow 上下文中，仍需得到稳定标识。
+  }
+  const stableApprovalId = approvalRecordId(args.runId, node.id, workflowStepId);
   const role = node.approval?.role ?? "业务负责人";
   const reason = node.approval?.reason ?? `确认「${node.title}」后流程才会继续`;
   const payload = ApprovalPayload.parse({ review: selectApprovalReview(args.outputs, args.nodes) });
@@ -52,10 +60,16 @@ export async function requestApproval(args: RequestApprovalInput): Promise<Appro
     const [existing] = await tx
       .select({ id: approvals.id, status: approvals.status })
       .from(approvals)
-      .where(and(eq(approvals.runId, args.runId), eq(approvals.nodeId, node.id)))
+      .where(and(
+        eq(approvals.runId, args.runId),
+        or(
+          eq(approvals.id, stableApprovalId),
+          and(eq(approvals.nodeId, node.id), eq(approvals.status, "pending")),
+        ),
+      ))
       .orderBy(desc(approvals.createdAt))
       .limit(1);
-    if (existing?.status === "pending") {
+    if (existing) {
       if (run.status !== "waiting_approval") {
         await tx.update(runs).set({ status: "waiting_approval", updatedAt: now }).where(eq(runs.id, args.runId));
       }
@@ -64,6 +78,7 @@ export async function requestApproval(args: RequestApprovalInput): Promise<Appro
     const [created] = await tx
       .insert(approvals)
       .values({
+        id: stableApprovalId,
         runId: args.runId,
         workspaceId: run.workspaceId,
         createdBy: run.createdBy,

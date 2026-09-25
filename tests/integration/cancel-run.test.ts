@@ -325,6 +325,23 @@ describe("取消运行", () => {
     expect(appendTraceMock.mock.calls.filter(([event]) => event.kind === "approval.requested")).toHaveLength(1);
   });
 
+  it("确认已被处理后发起步骤重试仍复用原记录", async () => {
+    await insertWaitingRun();
+    const args = { runId: RUN_ID, node: draft.nodes.confirm, outputs: {}, nodes: draft.nodes };
+
+    const first = await requestApproval(args);
+    await db.update(approvals).set({ status: "approved", decidedAt: new Date() }).where(eq(approvals.id, first.approvalId));
+    const retried = await requestApproval(args);
+
+    expect(retried.approvalId).toBe(first.approvalId);
+    const rows = await db.select().from(approvals).where(and(
+      eq(approvals.runId, RUN_ID), eq(approvals.nodeId, "confirm"),
+    ));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe("approved");
+    expect(appendTraceMock.mock.calls.filter(([event]) => event.kind === "approval.requested")).toHaveLength(1);
+  });
+
   it("运行取消后恢复动作明确失败且不写继续轨迹", async () => {
     await insertWaitingRun();
     await db.update(runs).set({ status: "cancelled", error: "已由员工取消" }).where(eq(runs.id, RUN_ID));
