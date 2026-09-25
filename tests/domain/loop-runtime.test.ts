@@ -52,6 +52,15 @@ describe("resolveLoopCollection", () => {
       outputs: {},
     })).toEqual({ items: [], sourceCount: 0, limited: false, sourceMissing: true });
   });
+
+  it("含空段的集合路径不会误读成有效输入", () => {
+    expect(resolveLoopCollection({
+      collectionPath: "input..items",
+      maxIterations: 10,
+      input: { items: ["不应读取"] },
+      outputs: {},
+    })).toEqual({ items: [], sourceCount: 0, limited: false, sourceMissing: true });
+  });
 });
 
 describe("workflowExecutionLimit", () => {

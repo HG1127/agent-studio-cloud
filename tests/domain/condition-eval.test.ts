@@ -43,6 +43,11 @@ describe("resolvePath", () => {
   it("空路径返回 undefined", () => {
     expect(resolvePath("", ctx)).toBeUndefined();
   });
+  it("不自动修正含空段的错误路径", () => {
+    expect(resolvePath("input..city", ctx)).toBeUndefined();
+    expect(resolvePath(".input.city", ctx)).toBeUndefined();
+    expect(resolvePath("input.city.", ctx)).toBeUndefined();
+  });
   it("路径穿过非对象值时返回 undefined", () => {
     expect(resolvePath("input.city.deeper", ctx)).toBeUndefined();
   });

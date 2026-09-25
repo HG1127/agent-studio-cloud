@@ -5,7 +5,7 @@ export function isSafeDataPathSegment(segment: string): boolean {
 }
 
 export function safeDataPathSegments(path: string): string[] | null {
-  const segments = path.split(".").filter(Boolean);
+  const segments = path.split(".");
   return segments.length > 0 && segments.every(isSafeDataPathSegment)
     ? segments
     : null;
