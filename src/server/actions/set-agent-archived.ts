@@ -1,12 +1,13 @@
 "use server";
 
-import { and, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, ne } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { AgentArchiveInput, type AgentArchiveResult } from "@/contracts/agent";
 import { agents, agentVersions, auditEvents, schedules } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { auditEventValues } from "@/server/audit/event-values";
+import { activeVersionDependingOnAgent } from "@/server/domain/runtime/collaboration-dependencies";
 
 export async function setAgentArchivedAction(input: unknown): Promise<AgentArchiveResult> {
   const parsed = AgentArchiveInput.safeParse(input);
@@ -28,24 +29,24 @@ export async function setAgentArchivedAction(input: unknown): Promise<AgentArchi
       if (!agent) return false;
 
       if (parsed.data.archived) {
-        const [dependent] = await tx
-          .select({ name: agents.name })
+        const dependencyVersions = await tx
+          .select({
+            versionId: agentVersions.id,
+            agentId: agentVersions.agentId,
+            agentName: agents.name,
+            status: agentVersions.status,
+            agentArchivedAt: agents.archivedAt,
+            manifest: agentVersions.manifest,
+          })
           .from(agentVersions)
           .innerJoin(agents, eq(agents.id, agentVersions.agentId))
           .where(and(
             eq(agentVersions.workspaceId, DEMO_WORKSPACE_ID),
             eq(agents.workspaceId, DEMO_WORKSPACE_ID),
-            isNull(agents.archivedAt),
             ne(agentVersions.agentId, parsed.data.agentId),
-            inArray(agentVersions.status, ["production", "candidate"]),
-            sql<boolean>`jsonb_path_exists(
-              ${agentVersions.manifest},
-              '$.workflowSnapshot.nodes.** ? (@.agentCall.targetAgentId == $target || @.toAgent.id == $target)',
-              jsonb_build_object('target', to_jsonb(${parsed.data.agentId}::text))
-            )`,
-          ))
-          .limit(1);
-        if (dependent) return { inUseBy: dependent.name };
+          ));
+        const dependent = activeVersionDependingOnAgent(dependencyVersions, parsed.data.agentId);
+        if (dependent) return { inUseBy: dependent.agentName };
       }
 
       const rows = await tx

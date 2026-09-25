@@ -14,6 +14,7 @@ function takeRows() {
 
 const selectTail = {
   where: () => ({
+    then: (resolve: (value: unknown[]) => unknown) => takeRows().then(resolve),
     limit: takeRows,
     for: () => ({
       limit: () => {
@@ -22,7 +23,7 @@ const selectTail = {
       },
     }),
   }),
-  innerJoin: () => ({ where: () => ({ limit: takeRows }) }),
+  innerJoin: () => ({ where: () => ({ then: (resolve: (value: unknown[]) => unknown) => takeRows().then(resolve) }) }),
 };
 
 const tx = {
@@ -59,7 +60,29 @@ describe("助手停用依赖保护", () => {
   it("被其他在线版本使用时拒绝停用", async () => {
     mocks.rows = [
       [{ id: AGENT_ID, name: "资料整理助手" }],
-      [{ name: "客户服务助手" }],
+      [{
+        versionId: "00000000-0000-4000-8000-000000000083",
+        agentId: "00000000-0000-4000-8000-000000000082",
+        agentName: "客户服务助手",
+        status: "production",
+        agentArchivedAt: null,
+        manifest: {
+          schemaVersion: "4.0",
+          workflowSnapshot: {
+            id: "workflow", versionId: null, startNodeId: "start",
+            rootAgent: { id: "00000000-0000-4000-8000-000000000082", name: "客户服务助手", role: "处理" },
+            nodes: {
+              start: { id: "start", title: "开始", type: "trigger", next: "call" },
+              call: { id: "call", title: "协作", type: "agent_call", next: "done", agentCall: { targetAgentId: AGENT_ID, versionId: "00000000-0000-4000-8000-000000000084" } },
+              done: { id: "done", title: "完成", type: "end", next: null },
+            },
+            memoryPolicy: { taskContext: true, longTerm: false },
+          },
+          workflowFingerprint: "fingerprint", inputContract: { fields: [] }, outputContract: { fields: [] },
+          resourceSelection: { model: { modelId: "mock", mock: true, connectionId: null } },
+          designAudit: { status: "passed", issueCount: 0, criticalCount: 0 }, knowledgeSnapshot: [],
+        },
+      }],
     ];
 
     await expect(setAgentArchivedAction({ agentId: AGENT_ID, archived: true })).resolves.toEqual({
