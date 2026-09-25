@@ -1,6 +1,6 @@
 "use step";
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { FatalError } from "workflow";
+import { FatalError, getStepMetadata } from "workflow";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { agentMemories, runs } from "@/db/schema";
 import { db } from "@/lib/db";
@@ -63,6 +63,7 @@ export async function runMemoryStep(args: {
   if (content === null) {
     throw new FatalError(`步骤「${args.node.title}」指定的经验内容来源“${memory.contentFrom}”不存在`);
   }
+  const sourceNodeId = `${args.node.id}:${getStepMetadata().stepId}`;
   await db
     .insert(agentMemories)
     .values({
@@ -70,7 +71,7 @@ export async function runMemoryStep(args: {
       createdBy: run.createdBy,
       agentId: run.agentId,
       sourceRunId: args.runId,
-      sourceNodeId: args.node.id,
+      sourceNodeId,
       content,
       metadata: { nodeTitle: args.node.title },
     })
