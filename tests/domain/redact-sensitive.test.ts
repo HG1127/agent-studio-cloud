@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { redactSensitiveData } from "@/server/domain/security/redact-sensitive";
+import { redactSensitiveData, redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 
 describe("敏感数据脱敏", () => {
   it("递归隐藏中英文敏感字段并保留业务数据", () => {
@@ -42,9 +42,15 @@ describe("敏感数据脱敏", () => {
     expect(redactSensitiveData({
       runId: "00000000-0000-4000-8000-000000000011",
       reference: "202609250001",
+      usage: { inputTokens: 12, output_tokens: 6, totalTokens: 18 },
     })).toEqual({
       runId: "00000000-0000-4000-8000-000000000011",
       reference: "202609250001",
+      usage: { inputTokens: 12, output_tokens: 6, totalTokens: 18 },
     });
+  });
+
+  it("可直接清理轨迹和错误中的敏感文本", () => {
+    expect(redactSensitiveText("Authorization: Bearer abcdefghijklmnop")).toBe("[已隐藏敏感信息]");
   });
 });

@@ -9,8 +9,10 @@ import { isDatabaseReady, REQUIRED_DATABASE_OBJECTS } from "@/server/queries/sys
 describe("数据库就绪检查", () => {
   beforeEach(() => mocks.execute.mockReset());
 
-  it("覆盖运行反馈表及其完整性和检索索引", () => {
+  it("覆盖基础租户表、运行反馈表及其关键索引", () => {
     expect(REQUIRED_DATABASE_OBJECTS).toEqual(expect.arrayContaining([
+      "public.workspaces",
+      "public.users",
       "public.run_feedback",
       "public.run_feedback_workspace_run_unique",
       "public.run_feedback_workspace_agent_updated_idx",

@@ -1,4 +1,5 @@
 const SENSITIVE_KEY = /(?:password|passcode|secret|token|api[_-]?key|(?:private|access|secret)[_-]?key|authorization|cookie|credential|session[_-]?id|e-?mail|phone|mobile|ssn|social[_-]?security|credit[_-]?card|card[_-]?number|address|street|postal[_-]?code|密码|密钥|令牌|凭据|身份证|银行卡|手机号|邮箱|电话|住址|地址)/i;
+const TOKEN_USAGE_KEY = /^(?:input|output|total|prompt|completion)[_-]?tokens?$/i;
 const REDACTED = "[已隐藏敏感信息]";
 const PRIVATE_KEY = /-----BEGIN [^-\r\n]{0,40}PRIVATE KEY-----[\s\S]*?-----END [^-\r\n]{0,40}PRIVATE KEY-----/g;
 const JWT = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g;
@@ -27,7 +28,7 @@ function luhnValid(value: string): boolean {
   return sum % 10 === 0;
 }
 
-function redactSensitiveText(value: string): string {
+export function redactSensitiveText(value: string): string {
   const redacted = value
     .replace(PRIVATE_KEY, REDACTED)
     .replace(JWT, REDACTED)
@@ -54,7 +55,7 @@ export function redactSensitiveData(value: unknown, depth = 0): unknown {
   if (value && typeof value === "object") {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [
       key,
-      SENSITIVE_KEY.test(key) ? REDACTED : redactSensitiveData(item, depth + 1),
+      SENSITIVE_KEY.test(key) && !TOKEN_USAGE_KEY.test(key) ? REDACTED : redactSensitiveData(item, depth + 1),
     ]));
   }
   return value;

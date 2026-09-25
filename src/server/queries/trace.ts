@@ -4,6 +4,7 @@ import { MAX_VISIBLE_TRACE_EVENTS, TraceEventView } from "@/contracts/run";
 import { traceEvents, type TraceEvent } from "@/db/schema";
 import { db } from "@/lib/db";
 import { parseTraceSinceBatch, type TraceSinceBatch } from "@/server/domain/trace-batch";
+import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 
 const RUN_ID = z.string().uuid();
 const TRACE_STREAM_BATCH_SIZE = 200;
@@ -28,8 +29,8 @@ function parseTraceEvent(row: TraceViewRow): TraceEventView | null {
     nodeId: row.nodeId,
     kind: row.kind,
     level: row.level,
-    title: row.title,
-    detail: row.detail,
+    title: redactSensitiveText(row.title),
+    detail: row.detail === null ? null : redactSensitiveText(row.detail),
     at: row.at.toISOString(),
   });
   return parsed.success ? parsed.data : null;
@@ -69,7 +70,15 @@ export async function listTraceSince(
     .where(and(eq(traceEvents.runId, runId), eq(traceEvents.workspaceId, workspaceId), gt(traceEvents.seq, cursor)))
     .orderBy(asc(traceEvents.seq))
     .limit(TRACE_STREAM_BATCH_SIZE);
-  return parseTraceSinceBatch(rows, cursor);
+  const batch = parseTraceSinceBatch(rows, cursor);
+  return {
+    ...batch,
+    events: batch.events.map((event) => ({
+      ...event,
+      title: redactSensitiveText(event.title),
+      detail: event.detail === null ? null : redactSensitiveText(event.detail),
+    })),
+  };
 }
 
 export async function hasRunTraceKind(runId: string, workspaceId: string, kind: string): Promise<boolean> {

@@ -2,6 +2,8 @@ import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 
 export const REQUIRED_DATABASE_OBJECTS = [
+  "public.workspaces",
+  "public.users",
   "public.agents",
   "public.agent_versions",
   "public.workflow_definitions",

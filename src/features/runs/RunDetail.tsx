@@ -14,6 +14,7 @@ import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { getPendingWait, getRunView, listApprovals, listChildRuns, listRunSteps } from "@/server/queries/runs";
 import { listRecentTrace } from "@/server/queries/trace";
 import { getRunFeedback } from "@/server/queries/run-feedback";
+import { redactSensitiveData, redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 
 const LIVE_STATUSES: ReadonlySet<RunStatus> = new Set(["queued", "running", "waiting_approval", "waiting_event"]);
 
@@ -73,18 +74,20 @@ export async function RunDetail({ runId }: { runId: string }) {
     ? decidedApprovals.at(-1)?.id ?? null
     : null;
   const stepTitleByNode = new Map(steps.map((step) => [step.nodeId, step.nodeTitle]));
+  const redactedInput = redactSensitiveData(run.input) as Record<string, unknown>;
   const contractedInputs = run.inputContract.fields
     .filter((field) => Object.prototype.hasOwnProperty.call(run.input, field.name))
     .map((field) => ({ name: field.name, label: field.label ?? field.name, value: run.input[field.name] }));
   const resultRecord = run.result && typeof run.result === "object" && !Array.isArray(run.result)
     ? run.result as Record<string, unknown>
     : {};
+  const redactedResult = redactSensitiveData(resultRecord) as Record<string, unknown>;
   const contractedOutputs = run.outputContract.fields
     .map((field) => ({ key: field.path, label: field.label ?? field.path, output: readResultPath(resultRecord, field.path) }))
     .filter((field) => field.output !== undefined);
   const outputs = contractedOutputs.length > 0
     ? contractedOutputs
-    : Object.entries(resultRecord).map(([key, output]) => ({ key, label: fallbackResultLabel(key, stepTitleByNode), output }));
+    : Object.entries(redactedResult).map(([key, output]) => ({ key, label: fallbackResultLabel(key, stepTitleByNode), output }));
   const copyText = contractedOutputs.length > 0
     ? contractedOutputs.map((field) => `${field.label}\n${displayValue(field.output)}`).join("\n\n")
     : undefined;
@@ -184,12 +187,12 @@ export async function RunDetail({ runId }: { runId: string }) {
             ))}
           </ul>
         ) : (
-          <pre className="overflow-auto rounded-md bg-gray-50 p-3 text-xs">{JSON.stringify(run.input, null, 2)}</pre>
+          <pre className="overflow-auto rounded-md bg-gray-50 p-3 text-xs">{JSON.stringify(redactedInput, null, 2)}</pre>
         )}
         {contractedInputs.length > 0 ? (
           <details>
             <summary className="cursor-pointer text-sm text-gray-500">查看输入数据（开发者数据）</summary>
-            <pre className="mt-2 max-h-80 overflow-auto rounded-md bg-gray-50 p-3 text-xs">{JSON.stringify(run.input, null, 2)}</pre>
+            <pre className="mt-2 max-h-80 overflow-auto rounded-md bg-gray-50 p-3 text-xs">{JSON.stringify(redactedInput, null, 2)}</pre>
           </details>
         ) : null}
       </section>
@@ -198,7 +201,7 @@ export async function RunDetail({ runId }: { runId: string }) {
         <section className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-sm font-semibold">最终结果</h2>
-            <CopyResultButton result={run.result} text={copyText} />
+            <CopyResultButton result={redactedResult} text={copyText} />
           </div>
           {outputs.length > 0 ? (
             <ul className="flex flex-col gap-3">
@@ -219,7 +222,7 @@ export async function RunDetail({ runId }: { runId: string }) {
           <details className="mt-1">
             <summary className="cursor-pointer text-sm text-gray-500">查看结果数据（开发者数据）</summary>
             <pre className="mt-2 max-h-80 overflow-auto rounded-md bg-gray-50 p-3 text-xs">
-              {JSON.stringify(run.result, null, 2)}
+              {JSON.stringify(redactedResult, null, 2)}
             </pre>
           </details>
         </section>
@@ -243,9 +246,14 @@ export async function RunDetail({ runId }: { runId: string }) {
                   <details className="w-full min-w-0">
                     <summary className="cursor-pointer text-sm text-gray-500">查看步骤数据（开发者数据）</summary>
                     <pre className="mt-2 max-h-80 overflow-auto rounded-md bg-gray-50 p-3 text-xs">
-                      {JSON.stringify(step.output, null, 2)}
+                      {JSON.stringify(redactSensitiveData(step.output), null, 2)}
                     </pre>
                   </details>
+                ) : null}
+                {step.error ? (
+                  <p role="alert" className="w-full whitespace-pre-wrap break-words text-sm text-red-700">
+                    {redactSensitiveText(step.error)}
+                  </p>
                 ) : null}
               </li>
             ))}

@@ -73,6 +73,34 @@ describe("运行详情步骤数据", () => {
     expect(screen.queryByText(/inputTokens/)).not.toBeInTheDocument();
   });
 
+  it("开发者数据、复制内容和步骤错误不会暴露敏感信息", async () => {
+    mocks.steps.mockResolvedValue([{
+      id: "step-id", nodeId: "deliver", nodeTitle: "发送结果", status: "failed",
+      output: { token: "step-secret-value", result: "发送失败" },
+      error: "Authorization: Bearer upstream-secret-value",
+    }]);
+    mocks.runView.mockResolvedValue(RunView.parse({
+      id: "00000000-0000-4000-8000-000000000001",
+      agentId: "00000000-0000-4000-8000-000000000002",
+      agentName: "通知助手",
+      status: "failed",
+      input: { apiKey: "sk-input-secret-value", topic: "发货通知" },
+      result: { authorization: "Bearer result-secret-value", status: "未发送" },
+      error: "步骤执行失败",
+      startedAt: null,
+      finishedAt: null,
+    }));
+
+    const { container } = render(await RunDetail({ runId: "00000000-0000-4000-8000-000000000001" }));
+
+    expect(container.textContent).toContain("[已隐藏敏感信息]");
+    expect(container.textContent).not.toContain("input-secret-value");
+    expect(container.textContent).not.toContain("result-secret-value");
+    expect(container.textContent).not.toContain("step-secret-value");
+    expect(container.textContent).not.toContain("upstream-secret-value");
+    expect(screen.getAllByRole("alert").some((element) => element.textContent === "[已隐藏敏感信息]")).toBe(true);
+  });
+
   it("按该次运行的冻结交付契约展示业务名称", async () => {
     mocks.steps.mockResolvedValue([]);
     mocks.runView.mockResolvedValue(RunView.parse({
