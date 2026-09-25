@@ -97,6 +97,7 @@ pnpm exec tsc --noEmit
 pnpm lint
 pnpm test
 pnpm build
+pnpm audit --prod --audit-level high
 ```
 
 带 Neon 临时分支的 CI 还会执行数据库迁移、Workflow 集成测试和 Playwright E2E。项目分层、迁移与 UI 文案约束见 [`AGENTS.md`](./AGENTS.md)。

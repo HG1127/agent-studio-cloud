@@ -17,6 +17,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --prod --audit-level high
       # Next 16 的 LayoutProps 等路由类型由 typegen 生成（.next/ 不入库），tsc 前必须先生成
       - run: pnpm exec next typegen
       - run: pnpm exec tsc --noEmit
