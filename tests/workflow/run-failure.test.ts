@@ -71,6 +71,33 @@ const fallbackManifest = AgentManifest.parse({
   },
 });
 
+const loopFallbackManifest = AgentManifest.parse({
+  schemaVersion: "4.0",
+  workflowFingerprint: "l".repeat(64),
+  inputContract: { fields: [] },
+  resourceSelection: { model: { modelId: "mock", mock: true } },
+  designAudit: { status: "passed", issueCount: 0, criticalCount: 0 },
+  workflowSnapshot: {
+    id: "draft-loop-fallback",
+    startNodeId: "start",
+    rootAgent: { id: "agt_failure_test", name: "循环备用路径助手", role: "通用业务助手" },
+    memoryPolicy: { taskContext: true, longTerm: false },
+    nodes: {
+      start: { id: "start", title: "收到任务", type: "trigger", next: "loop" },
+      loop: {
+        id: "loop",
+        title: "逐项处理订单",
+        type: "loop",
+        onErrorNext: "fallback",
+        loop: { collectionPath: "input.orders", itemKey: "order", maxIterations: 10, bodyNext: "body", exitNext: "done" },
+      },
+      body: { id: "body", title: "处理订单", type: "system", next: "loop" },
+      fallback: { id: "fallback", title: "转员工补充订单", type: "system", next: "done" },
+      done: { id: "done", title: "流程结束", type: "end", next: null },
+    },
+  },
+});
+
 async function insertRun(): Promise<string> {
   const [row] = await db
     .insert(runs)
@@ -88,10 +115,27 @@ describe("运行失败兜底", () => {
     const [runAfter] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
     expect(runAfter).toMatchObject({
       status: "completed",
-      result: { broken_tool: { status: "failed", error: expect.stringContaining("暂不支持") } },
+      result: { broken_tool: { status: "failed", error: expect.stringContaining("未在服务端配置") } },
     });
     const handled = await db.select().from(traceEvents).where(eq(traceEvents.runId, runId));
     expect(handled.some((event) => event.kind === "step.failed_handled" && event.nodeId === "broken_tool")).toBe(true);
+  }, 240_000);
+
+  it("逐项处理找不到列表时按未完成路径继续", async () => {
+    const runId = await insertRun();
+    const handle = await start(agentRunWorkflow, [runId, loopFallbackManifest, {}]);
+
+    await expect(handle.returnValue).resolves.toEqual({ status: "completed" });
+    const [runAfter] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(runAfter).toMatchObject({
+      status: "completed",
+      result: {
+        loop: { status: "failed", error: expect.stringContaining("没有在") },
+        fallback: { summary: "转员工补充订单已完成" },
+      },
+    });
+    const trace = await db.select().from(traceEvents).where(eq(traceEvents.runId, runId));
+    expect(trace.some((event) => event.kind === "step.failed_handled" && event.nodeId === "loop")).toBe(true);
   }, 240_000);
 
   it("步骤抛错时 runs 写入失败终态与中文原因，SDK 侧 run 同步失败", async () => {

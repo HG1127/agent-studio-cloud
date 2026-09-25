@@ -25,7 +25,10 @@ function draft() {
 
 describe("画布等待超时连线", () => {
   it("为运行时支持备用处理的步骤开放未完成句柄", () => {
-    for (const type of ["ai", "tool", "agent_call", "handoff", "parallel", "subflow"] as const) {
+    for (const type of [
+      "ai", "tool", "knowledge", "condition", "system", "rule", "loop", "memory",
+      "agent_call", "handoff", "parallel", "subflow",
+    ] as const) {
       expect(supportsErrorRoute({ type }), type).toBe(true);
     }
     expect(supportsErrorRoute({ type: "wait" })).toBe(false);

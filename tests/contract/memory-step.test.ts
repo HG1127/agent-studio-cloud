@@ -7,8 +7,13 @@ const mocks = vi.hoisted(() => ({
   onConflictDoUpdate: vi.fn(),
   persistStep: vi.fn(),
   appendTrace: vi.fn(),
+  stepId: "contract-step",
 }));
 
+vi.mock("workflow", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("workflow")>();
+  return { ...actual, getStepMetadata: () => ({ stepId: mocks.stepId }) };
+});
 vi.mock("@/lib/db", () => ({
   db: {
     select: () => {
@@ -70,7 +75,7 @@ describe("长期经验步骤", () => {
     expect(mocks.insertValues).toHaveBeenCalledWith(expect.objectContaining({
       workspaceId: runContext.workspaceId,
       agentId: runContext.agentId,
-      sourceNodeId: "memory_write",
+      sourceNodeId: "memory_write:contract-step",
       content: expect.stringContaining("续约方案已完成"),
     }));
     expect(JSON.stringify(mocks.insertValues.mock.calls)).not.toContain("sk-private");

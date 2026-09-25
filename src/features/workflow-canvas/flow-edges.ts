@@ -11,7 +11,10 @@ export interface EdgeSpec {
   label?: string;
 }
 
-const ERROR_ROUTE_TYPES = new Set(["ai", "tool", "agent_call", "handoff", "parallel", "subflow"]);
+const ERROR_ROUTE_TYPES = new Set([
+  "ai", "tool", "knowledge", "condition", "system", "rule", "loop", "memory",
+  "agent_call", "handoff", "parallel", "subflow",
+]);
 
 export function supportsErrorRoute(node: Pick<WorkflowNode, "type">) {
   return ERROR_ROUTE_TYPES.has(node.type);

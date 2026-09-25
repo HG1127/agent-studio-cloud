@@ -41,6 +41,25 @@ function executionFailureReason(error: unknown, fallback: string): string {
   return /[\u4e00-\u9fff]/.test(message) ? message : fallback;
 }
 
+async function recordHandledNodeFailure(args: {
+  runId: string;
+  node: WorkflowNode;
+  error: unknown;
+  fallback: string;
+}): Promise<{ next: string; output: { status: "failed"; error: string } }> {
+  if (!args.node.onErrorNext) throw args.error;
+  const reason = executionFailureReason(args.error, args.fallback);
+  await appendTrace({
+    runId: args.runId,
+    nodeId: args.node.id,
+    kind: "step.failed_handled",
+    level: "warn",
+    title: `「${args.node.title}」未完成，转入备用处理`,
+    detail: reason,
+  });
+  return { next: args.node.onErrorNext, output: { status: "failed", error: reason } };
+}
+
 async function executeAutomaticNode(args: {
   runId: string;
   node: WorkflowNode;
@@ -208,15 +227,27 @@ export async function agentRunWorkflow(
         continue;
       }
       if (node.type === "knowledge") {
-        const r = await runKnowledgeStep({ runId, node, manifest, input });
-        outputs[node.id] = r.receipt;
-        currentId = node.next;
+        try {
+          const r = await runKnowledgeStep({ runId, node, manifest, input });
+          outputs[node.id] = r.receipt;
+          currentId = node.next;
+        } catch (error) {
+          const handled = await recordHandledNodeFailure({ runId, node, error, fallback: `步骤「${node.title}」读取资料失败` });
+          outputs[node.id] = handled.output;
+          currentId = handled.next;
+        }
         continue;
       }
       if (node.type === "memory") {
-        const result = await runMemoryStep({ runId, node, input, outputs });
-        outputs[node.id] = result.output;
-        currentId = node.next;
+        try {
+          const result = await runMemoryStep({ runId, node, input, outputs });
+          outputs[node.id] = result.output;
+          currentId = node.next;
+        } catch (error) {
+          const handled = await recordHandledNodeFailure({ runId, node, error, fallback: `步骤「${node.title}」处理经验失败` });
+          outputs[node.id] = handled.output;
+          currentId = handled.next;
+        }
         continue;
       }
       if (node.type === "agent_call") {
@@ -280,34 +311,52 @@ export async function agentRunWorkflow(
         throw new FatalError(`步骤「${node.title}」未能完成`);
       }
       if (node.type === "condition") {
-        currentId = await evaluateCondition({ runId, node, outputs, input, currentItem: activeLoops.at(-1)?.item });
+        try {
+          currentId = await evaluateCondition({ runId, node, outputs, input, currentItem: activeLoops.at(-1)?.item });
+        } catch (error) {
+          const handled = await recordHandledNodeFailure({ runId, node, error, fallback: `步骤「${node.title}」判断条件失败` });
+          outputs[node.id] = handled.output;
+          currentId = handled.next;
+        }
         continue;
       }
       if (node.type === "rule") {
-        const quality = await runQualityGate({ runId, node, outputs, nodes: draft.nodes, repairAttempts: qualityRepairAttempts });
-        if (quality.repair) {
-          const repairNode = draft.nodes[quality.repair.nodeId];
-          if (!repairNode || repairNode.type !== "ai") throw new FatalError("质量返工目标不存在或不支持自动重写");
-          qualityRepairAttempts[repairNode.id] = quality.repair.nextRepairAttempt;
-          const repaired = await runModelStep({
-            runId,
-            node: repairNode,
-            manifest,
-            outputs,
-            input,
-            qualityFeedback: quality.repair.feedback,
-          });
-          outputs[repairNode.id] = repaired.output;
-          currentId = node.id;
-          continue;
+        try {
+          const quality = await runQualityGate({ runId, node, outputs, nodes: draft.nodes, repairAttempts: qualityRepairAttempts });
+          if (quality.repair) {
+            const repairNode = draft.nodes[quality.repair.nodeId];
+            if (!repairNode || repairNode.type !== "ai") throw new FatalError("质量返工目标不存在或不支持自动重写");
+            qualityRepairAttempts[repairNode.id] = quality.repair.nextRepairAttempt;
+            const repaired = await runModelStep({
+              runId,
+              node: repairNode,
+              manifest,
+              outputs,
+              input,
+              qualityFeedback: quality.repair.feedback,
+            });
+            outputs[repairNode.id] = repaired.output;
+            currentId = node.id;
+            continue;
+          }
+          currentId = quality.next;
+        } catch (error) {
+          const handled = await recordHandledNodeFailure({ runId, node, error, fallback: `步骤「${node.title}」检查结果失败` });
+          outputs[node.id] = handled.output;
+          currentId = handled.next;
         }
-        currentId = quality.next;
         continue;
       }
       if (node.type === "system") {
-        const result = await runInlineSystemStep({ runId, node });
-        outputs[node.id] = result.output;
-        currentId = node.next;
+        try {
+          const result = await runInlineSystemStep({ runId, node });
+          outputs[node.id] = result.output;
+          currentId = node.next;
+        } catch (error) {
+          const handled = await recordHandledNodeFailure({ runId, node, error, fallback: `步骤「${node.title}」自动记录失败` });
+          outputs[node.id] = handled.output;
+          currentId = handled.next;
+        }
         continue;
       }
       if (node.type === "human") {
@@ -375,7 +424,8 @@ export async function agentRunWorkflow(
       if (node.type === "loop") {
         const loop = node.loop;
         if (!loop?.bodyNext || !loop.exitNext) throw new FatalError(`步骤「${node.title}」的逐项处理路径不完整`);
-        const state = loopStates[node.id] ?? (() => {
+        let state = loopStates[node.id];
+        if (!state) {
           const collection = resolveLoopCollection({
             collectionPath: loop.collectionPath,
             maxIterations: loop.maxIterations,
@@ -383,10 +433,14 @@ export async function agentRunWorkflow(
             outputs,
           });
           if (collection.sourceMissing) {
-            throw new FatalError(`步骤「${node.title}」没有在“${loop.collectionPath}”找到可逐项处理的列表`);
+            const error = new FatalError(`步骤「${node.title}」没有在“${loop.collectionPath}”找到可逐项处理的列表`);
+            const handled = await recordHandledNodeFailure({ runId, node, error, fallback: `步骤「${node.title}」无法开始逐项处理` });
+            outputs[node.id] = handled.output;
+            currentId = handled.next;
+            continue;
           }
-          return (loopStates[node.id] = { ...collection, index: 0, iterations: [] });
-        })();
+          state = loopStates[node.id] = { ...collection, index: 0, iterations: [] };
+        }
         const active = activeLoops.at(-1);
         if (active?.loopId === node.id && active.iteration > state.iterations.length) {
           state.iterations.push({
