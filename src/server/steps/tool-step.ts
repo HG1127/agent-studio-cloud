@@ -86,7 +86,7 @@ export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Re
     if (!invoked.ok) return reject(invoked.error, invoked.retryable);
     const schemaError = validateJsonObjectSchema(invoked.output, tool.outputSchema);
     if (schemaError) return reject(`业务系统回执不符合字段契约：${schemaError}`);
-    receipt = invoked.output;
+    receipt = { ok: true, ...invoked.output };
   }
   await persistStep({
     runId: args.runId,

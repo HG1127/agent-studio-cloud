@@ -40,13 +40,19 @@ describe("真实工具步骤", () => {
   it("执行注册工具并持久化经过契约校验的业务回执", async () => {
     mocks.invokeHttpTool.mockResolvedValue({ ok: true, output: { receiptId: "receipt-1" } });
     await expect(runToolStep({ runId: "run-1", node, input: { customerId: "c1" }, outputs: {} }))
-      .resolves.toEqual({ receipt: { receiptId: "receipt-1" } });
+      .resolves.toEqual({ receipt: { ok: true, receiptId: "receipt-1" } });
     expect(mocks.invokeHttpTool).toHaveBeenCalledWith(expect.objectContaining({
       idempotencyKey: "run-1:update_customer:step-1", action: "update_customer", input: { customerId: "c1" },
     }));
     expect(mocks.persistStep).toHaveBeenLastCalledWith(expect.objectContaining({
-      status: "succeeded", output: { receiptId: "receipt-1" },
+      status: "succeeded", output: { ok: true, receiptId: "receipt-1" },
     }));
+  });
+
+  it("保留业务系统显式返回的不成功回执供门禁拦截", async () => {
+    mocks.invokeHttpTool.mockResolvedValue({ ok: true, output: { ok: false, receiptId: "receipt-rejected" } });
+    await expect(runToolStep({ runId: "run-1", node, input: {}, outputs: {} }))
+      .resolves.toEqual({ receipt: { ok: false, receiptId: "receipt-rejected" } });
   });
 
   it("拒绝不符合冻结契约的业务回执", async () => {
