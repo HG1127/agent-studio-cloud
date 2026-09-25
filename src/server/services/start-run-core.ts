@@ -27,6 +27,8 @@ import {
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
 import { getToolRegistration } from "@/server/tools/tool-registry";
 import { qualityOutputReferenceIssue } from "@/server/domain/runtime/quality-checks";
+import { workflowCollaborationKeys } from "@/server/domain/import-agent";
+import { inspectCollaborationVersionGraph } from "@/server/domain/runtime/collaboration-dependencies";
 
 // 发布快照允许进入运行引擎的完整节点类型；未知类型必须在创建 run 前拒绝。
 const SUPPORTED_NODE_TYPES: ReadonlySet<string> = new Set([
@@ -288,6 +290,31 @@ async function validateRuntimePreflight(args: {
   if (routeError) return routeError;
   const outputError = validateOutputContract(args.manifest.outputContract?.fields ?? [], args.manifest.workflowSnapshot.nodes);
   if (outputError) return outputError;
+
+  const collaborationKeys = workflowCollaborationKeys(args.manifest.workflowSnapshot);
+  if (collaborationKeys.length > 0) {
+    const dependencyVersions = await db
+      .select({
+        versionId: agentVersions.id,
+        agentId: agentVersions.agentId,
+        agentName: agents.name,
+        status: agentVersions.status,
+        agentArchivedAt: agents.archivedAt,
+        manifest: agentVersions.manifest,
+      })
+      .from(agentVersions)
+      .innerJoin(agents, eq(agents.id, agentVersions.agentId))
+      .where(and(
+        eq(agentVersions.workspaceId, args.workspaceId),
+        eq(agents.workspaceId, args.workspaceId),
+      ));
+    const graph = inspectCollaborationVersionGraph({
+      rootAgentId: args.currentAgentId,
+      directKeys: collaborationKeys,
+      versions: dependencyVersions,
+    });
+    if (graph.issue) return `${graph.issue}，请重新发布助手后再运行`;
+  }
 
   const unsupported: string[] = [];
   for (const node of Object.values(args.manifest.workflowSnapshot.nodes)) {
