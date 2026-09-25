@@ -54,6 +54,20 @@ afterEach(() => {
 });
 
 describe("知识原文件上传", () => {
+  it("拒绝由其他站点发起的浏览器上传", async () => {
+    const request = new Request("https://studio.example.com/api/knowledge/sources", {
+      method: "POST",
+      headers: { origin: "https://malicious.example" },
+      body: new FormData(),
+    });
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ ok: false, error: "不允许从其他站点提交资料" });
+    expect(startMock).not.toHaveBeenCalled();
+  });
+
   it("根据请求声明大小在解析表单前拒绝明显超限的上传", async () => {
     const request = new Request("http://localhost/api/knowledge/sources", {
       method: "POST",

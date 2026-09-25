@@ -94,6 +94,10 @@ async function reconcileDuplicateSource(sourceId: string, suppliedBlobPathname: 
 }
 
 export async function POST(req: Request) {
+  const origin = req.headers.get("origin");
+  if (origin && origin !== new URL(req.url).origin) {
+    return Response.json({ ok: false, error: "不允许从其他站点提交资料" }, { status: 403 });
+  }
   const declaredLength = Number(req.headers.get("content-length"));
   if (Number.isFinite(declaredLength) && declaredLength > MAX_MULTIPART_BYTES) {
     return Response.json({ ok: false, error: "上传请求过大，文件请保持在 4MB 以内" }, { status: 413 });
