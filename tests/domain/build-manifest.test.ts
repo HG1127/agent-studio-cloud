@@ -114,6 +114,13 @@ describe("buildManifest", () => {
             branches: [{ label: "已确认", value: true, next: "done" }], defaultNext: "done",
           },
         },
+        truthy_condition: {
+          id: "truthy_condition", title: "判断说明是否存在", type: "condition", next: null,
+          condition: {
+            source: "input.note", operator: "truthy",
+            branches: [{ label: "有说明", value: true, next: "done" }], defaultNext: "done",
+          },
+        },
         amount_condition: {
           id: "amount_condition", title: "判断金额", type: "condition", next: null,
           condition: {
@@ -149,6 +156,7 @@ describe("buildManifest", () => {
     expect(buildManifest(configured, options).inputContract.fields).toEqual(expect.arrayContaining([
       { name: "customer", required: true, type: "object" },
       { name: "approved", required: true, type: "boolean" },
+      { name: "note", required: true, type: "string" },
       { name: "amount", required: true, type: "number" },
       { name: "exactCount", required: true, type: "number" },
       { name: "orders", required: true, type: "array" },

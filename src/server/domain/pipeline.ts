@@ -296,6 +296,7 @@ function inputContractFor(draft: WorkflowDraft): AgentManifest["inputContract"] 
     operator: string,
     value: unknown,
   ): AgentManifest["inputContract"]["fields"][number]["type"] => {
+    if (["truthy", "exists"].includes(operator)) return "string";
     if (["gt", "gte", "lt", "lte"].includes(operator) || typeof value === "number") return "number";
     if (typeof value === "boolean") return "boolean";
     if (Array.isArray(value)) return "array";

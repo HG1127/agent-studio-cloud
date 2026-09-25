@@ -196,6 +196,25 @@ describe("直测：结构性检查", () => {
     ]));
   });
 
+  it("真值条件不把已声明的字符串输入误判为布尔值", () => {
+    const out = auditWorkflow(WorkflowDraft.parse({
+      id: "truthy-string-input",
+      rootAgent: { id: "agent", name: "测试助手", role: "处理" },
+      memoryPolicy: { taskContext: true, longTerm: false },
+      variables: [{ name: "task", type: "string", scope: "run" }],
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "condition" },
+        condition: {
+          id: "condition", title: "判断任务是否存在", type: "condition",
+          condition: { source: "input.task", operator: "truthy", branches: [{ label: "有任务", value: true, next: "done" }], defaultNext: "done" },
+        },
+        done: { id: "done", title: "结束", type: "end", next: null },
+      },
+    }));
+
+    expect(out.issues.some((issue) => issue.code === "input_type_mismatch_task")).toBe(false);
+  });
+
   it("同一隐式运行输入被按不同格式使用时阻止发布", () => {
     const out = auditWorkflow(WorkflowDraft.parse({
       id: "implicit-input-type-conflict",

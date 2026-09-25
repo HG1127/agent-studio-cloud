@@ -337,6 +337,7 @@ function inputRequirement(
   const parts = source ? safeDataPathSegments(source) : null;
   if (!parts || !["input", "variables"].includes(parts[0]) || !parts[1]) return null;
   if (parts.length > 2) return { name: parts[1], type: "object" };
+  if (["truthy", "exists"].includes(operator || "")) return null;
   if (["gt", "gte", "lt", "lte"].includes(operator || "") || typeof comparison === "number") {
     return { name: parts[1], type: "number" };
   }
