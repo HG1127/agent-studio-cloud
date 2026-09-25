@@ -15,6 +15,11 @@ const ACTION_LABELS: Record<AuditEventAction, string> = {
   "knowledge.restored": "恢复资料",
   "memory.archived": "停用经验",
   "memory.restored": "恢复经验",
+  "evaluation_case.created": "创建验收样例",
+  "evaluation_case.updated": "修改验收样例",
+  "evaluation_case.archived": "归档验收样例",
+  "evaluation_case.restored": "恢复验收样例",
+  "evaluation.started": "启动自动验收",
 };
 
 function formatTime(iso: string): string {

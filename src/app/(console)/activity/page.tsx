@@ -38,6 +38,7 @@ export default async function ActivityPage({ searchParams }: {
           <option value="version">版本</option>
           <option value="knowledge">知识资料</option>
           <option value="memory">长期经验</option>
+          <option value="evaluation">自动验收</option>
         </select>
       </label>
       <label className="flex min-w-56 flex-[2] flex-col gap-1 text-xs text-gray-600">操作关键词

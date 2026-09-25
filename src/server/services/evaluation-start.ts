@@ -1,13 +1,14 @@
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
-import { agentVersions, agents, evaluationCaseResults, evaluationCases, evaluationRuns } from "@/db/schema";
+import { agentVersions, agents, auditEvents, evaluationCaseResults, evaluationCases, evaluationRuns } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { MAX_EVALUATION_CASES } from "@/contracts/evaluation";
+import { auditEventValues } from "@/server/audit/event-values";
 
 export async function prepareEvaluationRun(agentId: string) {
   return db.transaction(async (tx) => {
     const [lockedAgent] = await tx
-      .select({ id: agents.id })
+      .select({ id: agents.id, name: agents.name })
       .from(agents)
       .where(and(eq(agents.id, agentId), eq(agents.workspaceId, DEMO_WORKSPACE_ID), isNull(agents.archivedAt)))
       .for("update")
@@ -92,6 +93,15 @@ export async function prepareEvaluationRun(agentId: string) {
       evaluationCaseId: testCase.id,
       status: "running",
     })));
+    await tx.insert(auditEvents).values(auditEventValues({
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
+      action: "evaluation.started",
+      targetType: "evaluation",
+      targetId: evaluation.id,
+      summary: `启动助手「${lockedAgent.name}」的自动验收`,
+      data: { caseCount: cases.length },
+    }));
     return { ok: true as const, evaluationId: evaluation.id, versionId: version.id, cases, resumed: false as const };
   });
 }

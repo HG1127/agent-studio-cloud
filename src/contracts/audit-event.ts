@@ -14,10 +14,15 @@ export const AuditEventAction = z.enum([
   "knowledge.restored",
   "memory.archived",
   "memory.restored",
+  "evaluation_case.created",
+  "evaluation_case.updated",
+  "evaluation_case.archived",
+  "evaluation_case.restored",
+  "evaluation.started",
 ]);
 export type AuditEventAction = z.infer<typeof AuditEventAction>;
 
-export const AuditTargetType = z.enum(["agent", "workflow", "version", "knowledge", "memory"]);
+export const AuditTargetType = z.enum(["agent", "workflow", "version", "knowledge", "memory", "evaluation"]);
 export type AuditTargetType = z.infer<typeof AuditTargetType>;
 
 export const AuditEventCreate = z.object({

@@ -36,5 +36,14 @@ describe("操作记录契约", () => {
       summary: "归档知识资料",
     }).success).toBe(true);
     expect(AuditEventFilters.safeParse({ targetType: "memory" }).success).toBe(true);
+    expect(AuditEventCreate.safeParse({
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
+      action: "evaluation.started",
+      targetType: "evaluation",
+      targetId: "00000000-0000-4000-8000-000000000102",
+      summary: "启动自动验收",
+      data: { caseCount: 3 },
+    }).success).toBe(true);
   });
 });

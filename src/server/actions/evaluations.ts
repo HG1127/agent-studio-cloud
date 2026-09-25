@@ -10,7 +10,7 @@ import {
   MAX_EVALUATION_CASES,
   type EvaluationActionResult,
 } from "@/contracts/evaluation";
-import { agents, evaluationCaseResults, evaluationCases, evaluationRuns } from "@/db/schema";
+import { agents, auditEvents, evaluationCaseResults, evaluationCases, evaluationRuns } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { markEvaluationStartFailure, reconcileTerminalEvaluationRun } from "@/server/services/evaluation-state";
@@ -18,6 +18,7 @@ import { prepareEvaluationRun } from "@/server/services/evaluation-start";
 import { startRunCore } from "@/server/services/start-run-core";
 import { runBounded } from "@/server/domain/run-bounded";
 import { validationMessage } from "@/server/domain/validation-message";
+import { auditEventValues } from "@/server/audit/event-values";
 
 const EVALUATION_START_CONCURRENCY = 5;
 
@@ -28,7 +29,7 @@ export async function createEvaluationCaseAction(input: unknown): Promise<Evalua
   }
   try {
     const result = await db.transaction(async (tx) => {
-      const [agent] = await tx.select({ id: agents.id }).from(agents).where(and(
+      const [agent] = await tx.select({ id: agents.id, name: agents.name }).from(agents).where(and(
         eq(agents.id, parsed.data.agentId), eq(agents.workspaceId, DEMO_WORKSPACE_ID), isNull(agents.archivedAt),
       )).for("update").limit(1);
       if (!agent) return { ok: false as const, error: "找不到这个助手，请刷新页面后重试" };
@@ -46,10 +47,19 @@ export async function createEvaluationCaseAction(input: unknown): Promise<Evalua
       if ((active?.count ?? 0) >= MAX_EVALUATION_CASES) {
         return { ok: false as const, error: `每个助手最多保留 ${MAX_EVALUATION_CASES} 条启用中的验收样例` };
       }
-      await tx.insert(evaluationCases).values({
+      const [created] = await tx.insert(evaluationCases).values({
         workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, agentId: parsed.data.agentId,
         name: parsed.data.name, input: parsed.data.input, expectations: parsed.data.expectations,
-      });
+      }).returning({ id: evaluationCases.id });
+      await tx.insert(auditEvents).values(auditEventValues({
+        workspaceId: DEMO_WORKSPACE_ID,
+        createdBy: DEMO_USER_ID,
+        action: "evaluation_case.created",
+        targetType: "evaluation",
+        targetId: created.id,
+        summary: `为助手「${agent.name}」创建验收样例「${parsed.data.name}」`,
+        data: { expectationCount: parsed.data.expectations.length },
+      }));
       return { ok: true as const };
     });
     if (!result.ok) return result;
@@ -68,7 +78,7 @@ export async function updateEvaluationCaseAction(input: unknown): Promise<Evalua
   }
   try {
     const rows = await db.transaction(async (tx) => {
-      const [agent] = await tx.select({ id: agents.id }).from(agents).where(and(
+      const [agent] = await tx.select({ id: agents.id, name: agents.name }).from(agents).where(and(
         eq(agents.id, parsed.data.agentId), eq(agents.workspaceId, DEMO_WORKSPACE_ID), isNull(agents.archivedAt),
       )).for("update").limit(1);
       if (!agent) return null;
@@ -78,13 +88,25 @@ export async function updateEvaluationCaseAction(input: unknown): Promise<Evalua
         eq(evaluationRuns.status, "running"),
       )).limit(1);
       if (running) return "running" as const;
-      return tx.update(evaluationCases).set({
+      const rows = await tx.update(evaluationCases).set({
         name: parsed.data.name, input: parsed.data.input,
         expectations: parsed.data.expectations, updatedAt: new Date(),
       }).where(and(
         eq(evaluationCases.id, parsed.data.caseId), eq(evaluationCases.agentId, parsed.data.agentId),
         eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID), isNull(evaluationCases.archivedAt),
       )).returning({ id: evaluationCases.id });
+      if (rows.length > 0) {
+        await tx.insert(auditEvents).values(auditEventValues({
+          workspaceId: DEMO_WORKSPACE_ID,
+          createdBy: DEMO_USER_ID,
+          action: "evaluation_case.updated",
+          targetType: "evaluation",
+          targetId: rows[0].id,
+          summary: `修改助手「${agent.name}」的验收样例「${parsed.data.name}」`,
+          data: { expectationCount: parsed.data.expectations.length },
+        }));
+      }
+      return rows;
     });
     if (rows === "running") return { ok: false, error: "自动验收运行期间不能修改验收样例" };
     if (!rows) return { ok: false, error: "找不到这个助手，请刷新页面后重试" };
@@ -106,7 +128,7 @@ export async function setEvaluationCaseArchivedAction(input: unknown): Promise<E
   if (!parsed.success) return { ok: false, error: "验收样例信息不正确" };
   try {
     const updated = await db.transaction(async (tx) => {
-      const [agent] = await tx.select({ id: agents.id }).from(agents).where(and(
+      const [agent] = await tx.select({ id: agents.id, name: agents.name }).from(agents).where(and(
         eq(agents.id, parsed.data.agentId), eq(agents.workspaceId, DEMO_WORKSPACE_ID), isNull(agents.archivedAt),
       )).for("update").limit(1);
       if (!agent) return null;
@@ -116,14 +138,26 @@ export async function setEvaluationCaseArchivedAction(input: unknown): Promise<E
         eq(evaluationRuns.status, "running"),
       )).limit(1);
       if (running) return "running" as const;
-      return tx.update(evaluationCases)
+      const rows = await tx.update(evaluationCases)
         .set({ archivedAt: parsed.data.archived ? new Date() : null, updatedAt: new Date() })
         .where(and(
           eq(evaluationCases.id, parsed.data.caseId), eq(evaluationCases.agentId, parsed.data.agentId),
           eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID),
           parsed.data.archived ? isNull(evaluationCases.archivedAt) : isNotNull(evaluationCases.archivedAt),
         ))
-        .returning({ id: evaluationCases.id });
+        .returning({ id: evaluationCases.id, name: evaluationCases.name });
+      if (rows.length > 0) {
+        await tx.insert(auditEvents).values(auditEventValues({
+          workspaceId: DEMO_WORKSPACE_ID,
+          createdBy: DEMO_USER_ID,
+          action: parsed.data.archived ? "evaluation_case.archived" : "evaluation_case.restored",
+          targetType: "evaluation",
+          targetId: rows[0].id,
+          summary: `${parsed.data.archived ? "归档" : "恢复"}助手「${agent.name}」的验收样例「${rows[0].name}」`,
+          data: {},
+        }));
+      }
+      return rows;
     });
     if (updated === "running") return { ok: false, error: "自动验收运行期间不能修改验收样例" };
     if (!updated) return { ok: false, error: "找不到这个助手，请刷新页面后重试" };

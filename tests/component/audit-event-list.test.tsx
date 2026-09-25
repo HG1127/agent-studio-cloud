@@ -25,9 +25,20 @@ describe("操作记录列表", () => {
         data: {},
         createdAt: "2026-09-25T00:01:00.000Z",
       },
+      {
+        id: "00000000-0000-4000-8000-000000000003",
+        action: "evaluation.started",
+        targetType: "evaluation",
+        targetId: "00000000-0000-4000-8000-000000000013",
+        summary: "启动自动验收",
+        actorName: "演示用户",
+        data: { caseCount: 3 },
+        createdAt: "2026-09-25T00:02:00.000Z",
+      },
     ]} />);
 
     expect(screen.getByText("归档资料")).toBeVisible();
     expect(screen.getByText("恢复经验")).toBeVisible();
+    expect(screen.getAllByText("启动自动验收")).toHaveLength(2);
   });
 });
