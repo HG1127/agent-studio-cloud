@@ -5,17 +5,24 @@ import { knowledgeSources } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { queryUnavailableResponse, SafeQueryError, withSafeQueryError } from "@/server/security/query-error";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(_request: Request, context: { params: Promise<{ sourceId: string }> }) {
   const parsed = z.string().uuid().safeParse((await context.params).sourceId);
   if (!parsed.success) return Response.json({ ok: false, error: "资料信息不正确" }, { status: 400 });
-  const [source] = await db
-    .select({ name: knowledgeSources.name, mime: knowledgeSources.mime, blobPathname: knowledgeSources.blobPathname })
-    .from(knowledgeSources)
-    .where(and(eq(knowledgeSources.id, parsed.data), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)))
-    .limit(1);
+  let source: { name: string; mime: string; blobPathname: string | null } | undefined;
+  try {
+    [source] = await withSafeQueryError(() => db
+      .select({ name: knowledgeSources.name, mime: knowledgeSources.mime, blobPathname: knowledgeSources.blobPathname })
+      .from(knowledgeSources)
+      .where(and(eq(knowledgeSources.id, parsed.data), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)))
+      .limit(1), "knowledge-file");
+  } catch (error) {
+    if (error instanceof SafeQueryError) return queryUnavailableResponse();
+    throw error;
+  }
   if (!source) return Response.json({ ok: false, error: "找不到这份资料" }, { status: 404 });
   if (!source.blobPathname) return Response.json({ ok: false, error: "这份资料没有保留原文件" }, { status: 404 });
   const token = process.env.BLOB_READ_WRITE_TOKEN;

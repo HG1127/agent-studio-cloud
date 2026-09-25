@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const getMock = vi.hoisted(() => vi.fn());
-const rows = vi.hoisted(() => ({ value: [] as unknown[] }));
+const rows = vi.hoisted(() => ({ value: [] as unknown[], error: null as Error | null }));
 
 vi.mock("@vercel/blob", () => ({ get: getMock }));
 vi.mock("@/lib/db", () => ({
-  db: { select: () => ({ from: () => ({ where: () => ({ limit: async () => rows.value }) }) }) },
+  db: { select: () => ({ from: () => ({ where: () => ({ limit: async () => {
+    if (rows.error) throw rows.error;
+    return rows.value;
+  } }) }) }) },
 }));
 
 import { GET } from "./route";
@@ -15,6 +18,7 @@ const SOURCE_ID = "00000000-0000-4000-8000-000000000041";
 afterEach(() => {
   delete process.env.BLOB_READ_WRITE_TOKEN;
   rows.value = [];
+  rows.error = null;
   getMock.mockReset();
 });
 
@@ -54,5 +58,17 @@ describe("知识原文件下载", () => {
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ ok: false, error: "原文件存储尚未配置" });
     expect(getMock).not.toHaveBeenCalled();
+  });
+
+  it("数据库暂不可用时不泄露原始异常", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    rows.error = new Error("token=private-file-token");
+
+    const response = await GET(new Request("http://localhost"), { params: Promise.resolve({ sourceId: SOURCE_ID }) });
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ ok: false, error: "暂时无法读取数据，请稍后重试" });
+    expect(JSON.stringify(log.mock.calls)).not.toContain("private-file-token");
+    log.mockRestore();
   });
 });
