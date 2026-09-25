@@ -13,7 +13,8 @@ function stableJson(value: unknown): string {
 }
 
 function fingerprint(draft: WorkflowDraftType): string {
-  const serialized = stableJson(draft);
+  // 助手名称会由独立表单同步回草稿；它不应让同一画布的本地修改失去恢复资格。
+  const serialized = stableJson({ ...draft, rootAgent: { ...draft.rootAgent, name: "" } });
   let hash = 2_166_136_261;
   for (let index = 0; index < serialized.length; index += 1) {
     hash ^= serialized.charCodeAt(index);

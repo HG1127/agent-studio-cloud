@@ -31,6 +31,18 @@ describe("流程草稿标签页恢复", () => {
     expect(restoreDraftRecovery(serializeDraftRecovery(saved, local), changedOnServer)).toBeNull();
   });
 
+  it("只修改助手名称不会丢弃画布中的本地修改", () => {
+    const local = WorkflowDraft.parse({
+      ...saved,
+      nodes: { ...saved.nodes, done: { ...saved.nodes.done, title: "完成本地交付" } },
+    });
+    const renamedOnServer = WorkflowDraft.parse({
+      ...saved,
+      rootAgent: { ...saved.rootAgent, name: "新的助手名称" },
+    });
+    expect(restoreDraftRecovery(serializeDraftRecovery(saved, local), renamedOnServer)).toEqual(local);
+  });
+
   it("忽略损坏或不符合流程契约的恢复内容", () => {
     expect(restoreDraftRecovery("not-json", saved)).toBeNull();
     const raw = serializeDraftRecovery(saved, saved);
