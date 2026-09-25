@@ -163,6 +163,47 @@ describe("运行启动句柄恢复", () => {
     expect(readRunStartLease(failed.stepStates)).toBeNull();
   });
 
+  it("恢复启动的前置检查异常时释放租约并落定失败", async () => {
+    const knowledgeManifest = AgentManifest.parse({
+      ...manifest,
+      workflowFingerprint: "x".repeat(64),
+      knowledgeSnapshot: ["00000000-0000-4000-8000-0000000007b1"],
+      workflowSnapshot: {
+        ...manifest.workflowSnapshot,
+        nodes: {
+          start: { id: "start", title: "开始", type: "trigger", next: "knowledge" },
+          knowledge: { id: "knowledge", title: "查询制度", type: "knowledge", next: "done", knowledge: { space: "业务资料库" } },
+          done: { id: "done", title: "结束", type: "end", next: null },
+        },
+      },
+    });
+    await db.update(agentVersions).set({ manifest: knowledgeManifest }).where(eq(agentVersions.id, VERSION_ID));
+    const staleAt = new Date(Date.now() - RUN_START_LEASE_MS * 2);
+    const [existing] = await db.insert(runs).values({
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
+      agentId: AGENT_ID,
+      versionId: VERSION_ID,
+      status: "queued",
+      input: {},
+      stepStates: withRunStartLease({}, createRunStartLease(staleAt)),
+      updatedAt: staleAt,
+    }).returning({ id: runs.id });
+    const originalSelect = db.select.bind(db);
+    vi.spyOn(db, "select")
+      .mockImplementationOnce(originalSelect)
+      .mockImplementationOnce(() => { throw new Error("模拟前置检查数据库异常"); });
+
+    const result = await resumeQueuedRunStartCore(existing.id);
+
+    expect(result).toEqual({ ok: false, error: "继续启动失败，请稍后重试" });
+    expect(startMock).not.toHaveBeenCalled();
+    vi.mocked(db.select).mockRestore();
+    const [failed] = await db.select().from(runs).where(eq(runs.id, existing.id));
+    expect(failed).toMatchObject({ status: "failed", error: "继续启动失败，请稍后再次运行" });
+    expect(readRunStartLease(failed.stepStates)).toBeNull();
+  });
+
   it("旧启动请求的租约失效后不能初始化同一运行", async () => {
     const currentLease = createRunStartLease();
     const [run] = await db.insert(runs).values({

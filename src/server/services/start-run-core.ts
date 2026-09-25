@@ -123,6 +123,7 @@ export async function resumeQueuedRunStartCore(runId: string): Promise<StartRunR
   if (!z.string().uuid().safeParse(runId).success) {
     return { ok: false, error: "运行信息不正确，请刷新页面后重试" };
   }
+  let claimedRun: { id: string; token: string } | null = null;
   try {
     const [candidate] = await db
       .select({
@@ -169,6 +170,7 @@ export async function resumeQueuedRunStartCore(runId: string): Promise<StartRunR
       ))
       .returning({ id: runs.id });
     if (!claimed) return { ok: true, runId: candidate.id };
+    claimedRun = { id: candidate.id, token: lease.token };
     const manifest = AgentManifest.safeParse(candidate.manifest);
     const input = RunInputPayload.safeParse(candidate.input);
     if (!manifest.success || !input.success) {
@@ -188,6 +190,13 @@ export async function resumeQueuedRunStartCore(runId: string): Promise<StartRunR
     return launchClaimedRun({ runId: candidate.id, manifest: manifest.data, input: input.data, lease });
   } catch (error) {
     console.error("继续启动运行失败", error);
+    if (claimedRun) {
+      try {
+        await markRunStartFailed(claimedRun.id, claimedRun.token, "继续启动失败，请稍后再次运行");
+      } catch (markError) {
+        console.error("记录继续启动失败状态时出错", markError);
+      }
+    }
     return { ok: false, error: "继续启动失败，请稍后重试" };
   }
 }
