@@ -86,3 +86,34 @@ export function validateHandoffNode(node: WorkflowNode, currentAgentId?: string)
   }
   return null;
 }
+
+function readHandoffPath(value: Record<string, unknown>, path: string): unknown {
+  return path.split(".").filter(Boolean).reduce<unknown>((current, segment) => {
+    if (!current || typeof current !== "object" || Array.isArray(current)) return undefined;
+    return (current as Record<string, unknown>)[segment];
+  }, value);
+}
+
+function handoffTypeMatches(value: unknown, type: string): boolean {
+  if (type === "any") return true;
+  if (type === "string") return typeof value === "string";
+  if (type === "number") return typeof value === "number" && Number.isFinite(value);
+  if (type === "boolean") return typeof value === "boolean";
+  if (type === "object") return !!value && typeof value === "object" && !Array.isArray(value);
+  if (type === "array") return Array.isArray(value);
+  return false;
+}
+
+export function validateHandoffOutput(node: WorkflowNode, result: Record<string, unknown>): string | null {
+  for (const field of node.contract?.outputSchema ?? []) {
+    const value = readHandoffPath(result, field.name);
+    if (value === undefined || value === null) {
+      if (field.required) return `交接结果缺少“${field.label || field.name}”`;
+      continue;
+    }
+    if (!handoffTypeMatches(value, field.type)) {
+      return `交接结果“${field.label || field.name}”的格式不正确`;
+    }
+  }
+  return null;
+}

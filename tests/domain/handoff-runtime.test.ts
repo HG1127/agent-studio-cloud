@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { AgentManifest } from "@/contracts/manifest";
 import { WorkflowNode } from "@/contracts/workflow";
 import { compileModelWorkflowPlan } from "@/server/domain/compile";
-import { buildHandoffInput, sanitizeHandoffValue, validateHandoffNode } from "@/server/domain/runtime/handoff-runtime";
+import { buildHandoffInput, sanitizeHandoffValue, validateHandoffNode, validateHandoffOutput } from "@/server/domain/runtime/handoff-runtime";
 
 const targetManifest = AgentManifest.parse({
   schemaVersion: "4.0",
@@ -81,6 +81,14 @@ describe("助手交接运行逻辑", () => {
     expect(missing.input).not.toHaveProperty("count");
     const provided = buildHandoffInput({ node: handoffNode(), targetManifest: typedManifest, input: { count: 2, confirmed: false }, outputs: {} });
     expect(provided.input).toMatchObject({ count: 2, confirmed: false });
+  });
+
+  it("按冻结契约校验交接结果的必填字段和类型", () => {
+    expect(validateHandoffOutput(handoffNode(), {})).toBe("交接结果缺少“result”");
+    const typed = handoffNode();
+    typed.contract!.outputSchema = [{ name: "result.score", label: "评分", type: "number", required: true }];
+    expect(validateHandoffOutput(typed, { result: { score: "高" } })).toBe("交接结果“评分”的格式不正确");
+    expect(validateHandoffOutput(typed, { result: { score: 95 } })).toBeNull();
   });
 
   it("模型流程编译器保留交接节点供画布完成绑定", () => {

@@ -82,7 +82,7 @@ const handoffManifest = AgentManifest.parse({
           deliverables: ["研究结果"],
           mustNotInclude: ["密钥和访问令牌"],
           inputSchema: [{ name: "brief", type: "string" }],
-          outputSchema: [{ name: "result", type: "any" }],
+          outputSchema: [{ name: "result", type: "any", required: false }],
           memoryPolicy: { mode: "none", shared: [], private: ["密钥"] },
         },
       },
@@ -297,6 +297,52 @@ describe("助手协作运行", () => {
       expect(await listChildRuns(parent.id, DEMO_WORKSPACE_ID)).toEqual([
         expect.objectContaining({ id: child?.id, sourceType: "handoff", agentName: "研究助手" }),
       ]);
+    } finally {
+      await cleanup(parentRunId);
+    }
+  }, 240_000);
+
+  it("接收助手缺少约定交付字段时进入备用路径", async () => {
+    let parentRunId: string | undefined;
+    await cleanup();
+    try {
+      await insertTarget();
+      const guardedManifest = AgentManifest.parse({
+        ...handoffManifest,
+        workflowSnapshot: {
+          ...handoffManifest.workflowSnapshot,
+          nodes: {
+            ...handoffManifest.workflowSnapshot.nodes,
+            handoff: {
+              ...handoffManifest.workflowSnapshot.nodes.handoff,
+              onErrorNext: "fallback",
+              contract: {
+                ...handoffManifest.workflowSnapshot.nodes.handoff.contract!,
+                outputSchema: [{ name: "result", label: "研究结果", type: "any", required: true }],
+              },
+            },
+            fallback: { id: "fallback", title: "转员工补充结果", type: "system", next: "done" },
+          },
+        },
+      });
+      const [parent] = await db.insert(runs).values({
+        workspaceId: DEMO_WORKSPACE_ID,
+        createdBy: DEMO_USER_ID,
+        agentId: PARENT_AGENT_ID,
+        versionId: PARENT_VERSION_ID,
+        status: "queued",
+        input: { topic: "客户续约" },
+      }).returning({ id: runs.id });
+      parentRunId = parent.id;
+
+      const handle = await start(agentRunWorkflow, [parent.id, guardedManifest, { topic: "客户续约" }]);
+      await expect(handle.returnValue).resolves.toEqual({ status: "completed" });
+
+      const [finishedParent] = await db.select().from(runs).where(eq(runs.id, parent.id)).limit(1);
+      expect(finishedParent?.result).toMatchObject({
+        handoff: { status: "failed", error: expect.stringContaining("缺少“研究结果”") },
+        fallback: { summary: "转员工补充结果已完成" },
+      });
     } finally {
       await cleanup(parentRunId);
     }

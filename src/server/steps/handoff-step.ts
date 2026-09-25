@@ -5,7 +5,7 @@ import { AgentManifest, type AgentManifest as AgentManifestType } from "@/contra
 import type { WorkflowNode } from "@/contracts/workflow";
 import { agents, agentVersions, runs } from "@/db/schema";
 import { db } from "@/lib/db";
-import { buildHandoffInput } from "@/server/domain/runtime/handoff-runtime";
+import { buildHandoffInput, validateHandoffOutput } from "@/server/domain/runtime/handoff-runtime";
 import { validateCollaborationInput } from "@/server/domain/runtime/collaboration-input";
 import { validateCollaborationTarget } from "@/server/domain/runtime/collaboration-chain";
 import { loadCollaborationChain } from "@/server/services/collaboration-chain";
@@ -104,11 +104,12 @@ export async function finishHandoff(args: {
   failed?: boolean;
   handled?: boolean;
   error?: string;
-}): Promise<{ output: Record<string, unknown> }> {
+}): Promise<{ output: Record<string, unknown>; failed: boolean; error: string | null }> {
   "use step";
   const [child] = await db.select({ status: runs.status, result: runs.result, error: runs.error }).from(runs).where(eq(runs.id, args.childRunId)).limit(1);
-  const failed = args.failed || child?.status !== "completed";
-  const reason = args.error || child?.error || "接收助手未能完成交接任务";
+  const contractError = child?.status === "completed" ? validateHandoffOutput(args.node, child.result ?? {}) : null;
+  const failed = Boolean(args.failed || child?.status !== "completed" || contractError);
+  const reason = args.error || child?.error || contractError || "接收助手未能完成交接任务";
   const output = failed
     ? { assistant: args.targetName, status: "failed", error: reason }
     : { assistant: args.targetName, status: "completed", deliverables: args.node.contract?.deliverables ?? [], result: child?.result ?? {} };
@@ -129,5 +130,5 @@ export async function finishHandoff(args: {
     title: failed ? `「${args.node.title}」未完成` : `「${args.node.title}」已完成交接`,
     detail: failed ? reason : null,
   });
-  return { output };
+  return { output, failed, error: failed ? reason : null };
 }
