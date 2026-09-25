@@ -79,4 +79,15 @@ describe("WorkflowDraft", () => {
       subflow: { name: "准备材料", steps: [{ id: "draft", title: "起草", type: "ai" }] },
     }).subflow?.failurePolicy).toBe("checkpoint");
   });
+
+  it("质量门禁只接受安全范围内的整数结果门槛", () => {
+    expect(WorkflowNode.safeParse({
+      id: "quality", title: "交付检查", type: "rule",
+      quality: { requiredOutputTitles: [], minOutputCount: -1 },
+    }).success).toBe(false);
+    expect(WorkflowNode.safeParse({
+      id: "quality", title: "交付检查", type: "rule",
+      quality: { requiredOutputTitles: [], minOutputCount: 1.5 },
+    }).success).toBe(false);
+  });
 });

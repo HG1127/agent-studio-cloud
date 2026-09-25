@@ -68,6 +68,12 @@ export const WorkflowVariable = z.object({
   required: z.boolean().default(true),
   description: z.string().optional(),
 });
+export const QualityGateSpec = z.object({
+  requiredOutputTitles: z.array(z.string().min(1).max(200)).max(MAX_WORKFLOW_NODES).default([]),
+  minOutputCount: z.number().int().min(0).max(MAX_WORKFLOW_NODES).default(1),
+  checkToolReceipts: z.boolean().default(false),
+  checkHumanBoundary: z.boolean().default(false),
+});
 export const WorkflowNode = z.object({
   id: z.string(), title: z.string(), type: WorkflowNodeType,
   agent: z.object({ id: z.string(), name: z.string(), role: z.string() }).optional(),
@@ -92,10 +98,7 @@ export const WorkflowNode = z.object({
   }).optional(),
   system: z.object({ kind: z.string().optional() }).optional(),
   rule: z.object({ kind: z.string(), sourceNodeId: z.string().optional(), requireBusinessReceipt: z.boolean().optional() }).optional(),
-  quality: z.object({
-    requiredOutputTitles: z.array(z.string()).default([]), minOutputCount: z.number().default(1),
-    checkToolReceipts: z.boolean().default(false), checkHumanBoundary: z.boolean().default(false),
-  }).optional(),
+  quality: QualityGateSpec.optional(),
   loop: z.object({ collectionPath: z.string(), itemKey: z.string(), maxIterations: z.number().int().min(1).max(100), bodyNext: z.string().nullable(), exitNext: z.string().nullable() }).optional(),
   parallel: z.object({ strategy: z.enum(["all", "any", "all_settled"]), failurePolicy: z.enum(["fail_fast", "continue"]), branches: z.array(ParallelBranch).max(MAX_PARALLEL_BRANCHES) }).optional(),
   wait: z.object({ mode: z.enum(["delay", "until", "event"]), durationMs: z.number().default(0), until: z.string().nullable().default(null), eventKey: z.string(), eventLabel: z.string().optional(), payloadSchema: z.record(z.string(), z.unknown()).default({ type: "object" }), timeoutMs: z.number().default(0), onTimeoutNext: z.string().nullable().default(null) }).optional(),

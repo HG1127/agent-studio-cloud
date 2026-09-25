@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { WorkflowDraft } from "./workflow";
+import { QualityGateSpec, WorkflowDraft } from "./workflow";
 
 const RESERVED_FIELD_NAMES: ReadonlySet<string> = new Set(["__proto__", "prototype", "constructor"]);
 
@@ -32,7 +32,7 @@ export const AgentManifest = z.object({
   complexityProfile: z.record(z.string(), z.unknown()).optional(),
   resourceSelection: z.object({ model: z.object({ modelId: z.string(), mock: z.boolean().default(false), connectionId: z.string().uuid().nullable().default(null) }) }),
   designAudit: z.object({ status: z.enum(["passed", "passed_with_warnings", "blocked"]), issueCount: z.number().int(), criticalCount: z.number().int() }),
-  qualityGate: z.object({ requiredOutputTitles: z.array(z.string()).default([]), minOutputCount: z.number().default(1), checkToolReceipts: z.boolean().default(false), checkHumanBoundary: z.boolean().default(false) }).optional(),
+  qualityGate: QualityGateSpec.optional(),
   knowledgeSnapshot: z.array(z.string().uuid()).default([]),
 });
 export type AgentManifest = z.infer<typeof AgentManifest>;

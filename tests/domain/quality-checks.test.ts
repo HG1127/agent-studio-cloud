@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { WorkflowNode } from "@/contracts/workflow";
-import { hasExecutedHumanStep, missingExecutedToolReceipts } from "@/server/domain/runtime/quality-checks";
+import {
+  countMeaningfulQualityOutputs,
+  hasExecutedHumanStep,
+  hasMeaningfulOutput,
+  missingExecutedToolReceipts,
+} from "@/server/domain/runtime/quality-checks";
 
 const nodes = {
   send: WorkflowNode.parse({
@@ -15,6 +20,8 @@ const nodes = {
     id: "approve", title: "负责人确认", type: "human",
     approval: { role: "负责人", reason: "确认高影响操作" },
   }),
+  draft: WorkflowNode.parse({ id: "draft", title: "生成方案", type: "ai" }),
+  safe: WorkflowNode.parse({ id: "safe", title: "保留当前结果", type: "system" }),
 };
 
 describe("质量门禁执行范围", () => {
@@ -32,5 +39,25 @@ describe("质量门禁执行范围", () => {
   it("只在人工步骤实际执行后要求确认记录", () => {
     expect(hasExecutedHumanStep(nodes, { send: { ok: true } })).toBe(false);
     expect(hasExecutedHumanStep(nodes, { approve: { decision: "approved" } })).toBe(true);
+  });
+
+  it("只把非空且非失败的结果计入质量门槛", () => {
+    expect(hasMeaningfulOutput("  ")).toBe(false);
+    expect(hasMeaningfulOutput({ output: "  " })).toBe(false);
+    expect(hasMeaningfulOutput({})).toBe(false);
+    expect(hasMeaningfulOutput({ status: "failed", error: "上游失败" })).toBe(false);
+    expect(countMeaningfulQualityOutputs(nodes, {
+      draft: "完整方案",
+      send: { ok: false, error: "发送失败" },
+      approve: { decision: "approved" },
+    }, [])).toBe(1);
+  });
+
+  it("有指定交付步骤时只统计这些步骤的有效结果并去重", () => {
+    expect(countMeaningfulQualityOutputs(nodes, {
+      draft: "完整方案",
+      safe: { status: "completed" },
+      send: { ok: true },
+    }, ["保留当前结果", "保留当前结果"])).toBe(1);
   });
 });

@@ -9,14 +9,12 @@ import { approvals } from "@/db/schema";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 import { selectQualityRepair, type QualityRepairPlan } from "@/server/domain/runtime/quality-repair";
-import { hasExecutedHumanStep, missingExecutedToolReceipts } from "@/server/domain/runtime/quality-checks";
-
-function hasContent(value: unknown): boolean {
-  if (value === undefined || value === null) return false;
-  if (typeof value === "string") return value.trim().length > 0;
-  if (Array.isArray(value)) return value.length > 0;
-  return true;
-}
+import {
+  countMeaningfulQualityOutputs,
+  hasExecutedHumanStep,
+  hasMeaningfulOutput,
+  missingExecutedToolReceipts,
+} from "@/server/domain/runtime/quality-checks";
 
 function isReceiptOk(value: unknown): boolean {
   return (
@@ -108,7 +106,7 @@ export async function runQualityGate(args: RunQualityGateInput): Promise<Quality
     }
     const missingOutputs = quality.requiredOutputTitles.filter((title) => {
       const sourceNode = Object.values(args.nodes).find((item) => item.title === title);
-      return !sourceNode || !hasContent(args.outputs[sourceNode.id]);
+      return !sourceNode || !hasMeaningfulOutput(args.outputs[sourceNode.id]);
     });
     if (missingOutputs.length > 0) {
       const reason = `交付前检查未通过：以下步骤还没有形成结果：${missingOutputs.join("、")}`;
@@ -128,6 +126,10 @@ export async function runQualityGate(args: RunQualityGateInput): Promise<Quality
         data: { repairNodeId: repair.nodeId, repairAttempt: repair.nextRepairAttempt, maxAttempts: repair.maxAttempts },
       });
       return { next: node.id, repair: { ...repair, feedback: reason }, output: null };
+    }
+    const outputCount = countMeaningfulQualityOutputs(args.nodes, args.outputs, quality.requiredOutputTitles);
+    if (outputCount < quality.minOutputCount) {
+      return reject(`交付前检查未通过：至少需要形成 ${quality.minOutputCount} 项有效结果，当前只有 ${outputCount} 项`);
     }
     if (quality.checkToolReceipts) {
       const missingReceipts = missingExecutedToolReceipts(args.nodes, args.outputs);

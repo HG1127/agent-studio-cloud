@@ -607,9 +607,9 @@ export async function agentRunWorkflow(
     await failRun(runId, guard >= executionLimit ? "步骤数超过安全上限，已停止" : "流程没有后续步骤，已停止");
     return { status: "failed" };
   } catch (err) {
-    const message = err instanceof Error ? err.message : "";
-    const reason = /[\u4e00-\u9fff]/.test(message) ? message : "执行步骤时发生错误，已停止";
-    if (reason !== message) console.error(`运行 ${runId} 步骤执行失败：`, err);
+    const fallback = "执行步骤时发生错误，已停止";
+    const reason = executionFailureReason(err, fallback);
+    if (reason === fallback) console.error(`运行 ${runId} 步骤执行失败：`, err);
     try {
       await failRun(runId, reason);
     } catch (failErr) {

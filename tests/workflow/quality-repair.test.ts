@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { start } from "workflow/api";
+import { WorkflowRunFailedError } from "workflow/errors";
 import { AgentManifest } from "@/contracts/manifest";
 import { runSteps, runs, traceEvents } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
@@ -63,6 +64,23 @@ const branchManifest = AgentManifest.parse({
   },
 });
 
+const emptyResultManifest = AgentManifest.parse({
+  ...manifest,
+  workflowFingerprint: "a".repeat(64),
+  workflowSnapshot: {
+    ...manifest.workflowSnapshot,
+    id: "draft-quality-empty-result-test",
+    nodes: {
+      start: { id: "start", title: "收到任务", type: "trigger", next: "quality" },
+      quality: {
+        id: "quality", title: "交付前检查", type: "rule", next: "done",
+        quality: { requiredOutputTitles: [], minOutputCount: 1, checkToolReceipts: false, checkHumanBoundary: false },
+      },
+      done: { id: "done", title: "完成", type: "end", next: null },
+    },
+  },
+});
+
 async function cleanup(runId: string) {
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -104,6 +122,29 @@ describe("质量检查自动返工", () => {
       const [finished] = await db.select().from(runs).where(eq(runs.id, row.id)).limit(1);
       expect(finished?.status).toBe("completed");
       expect(finished?.result).toMatchObject({ skip: expect.anything(), quality: { passed: true } });
+    } finally {
+      await cleanup(row.id);
+    }
+  }, 240_000);
+
+  it("没有形成任何有效业务结果时不会错误标记完成", async () => {
+    const [row] = await db.insert(runs).values({
+      workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, agentId: AGENT_ID,
+      versionId: VERSION_ID, status: "queued", input: {},
+    }).returning({ id: runs.id });
+    try {
+      const handle = await start(agentRunWorkflow, [row.id, emptyResultManifest, {}]);
+      let rejected: unknown;
+      try {
+        await handle.returnValue;
+        expect.unreachable("没有有效结果的运行应失败");
+      } catch (error) {
+        rejected = error;
+      }
+      expect(WorkflowRunFailedError.is(rejected)).toBe(true);
+      const [finished] = await db.select().from(runs).where(eq(runs.id, row.id)).limit(1);
+      expect(finished?.status).toBe("failed");
+      expect(finished?.error).toBe("交付前检查未通过：至少需要形成 1 项有效结果，当前只有 0 项");
     } finally {
       await cleanup(row.id);
     }
