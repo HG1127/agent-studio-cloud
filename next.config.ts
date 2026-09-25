@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import { withWorkflow } from "workflow/next";
+import { SECURITY_HEADERS } from "./src/lib/security-headers";
 
 const nextConfig: NextConfig = {
   // mammoth 外部化：让运行时按 node 条件加载，避免打包时解析到浏览器构建；
@@ -8,6 +9,9 @@ const nextConfig: NextConfig = {
   experimental: {
     // 助手导入的有效流程最多 1MB；为导出包装与 Server Action 编码预留空间，同时不越过平台请求上限。
     serverActions: { bodySizeLimit: "3mb" },
+  },
+  async headers() {
+    return [{ source: "/(.*)", headers: [...SECURITY_HEADERS] }];
   },
 };
 
