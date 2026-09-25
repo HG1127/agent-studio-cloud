@@ -148,6 +148,13 @@ describe("取消运行", () => {
     expect(cancelMock).toHaveBeenCalledOnce();
     const [run] = await db.select().from(runs).where(eq(runs.id, RUN_ID));
     expect(run.status).toBe("cancelled");
+    expect(appendTraceMock).toHaveBeenCalledWith({
+      runId: RUN_ID,
+      kind: "run.cancelled",
+      level: "warn",
+      title: "运行已取消",
+      detail: "员工手动取消了这次运行",
+    });
     const approvalRows = await db
       .select()
       .from(approvals)

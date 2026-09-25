@@ -11,6 +11,7 @@ import { completeEvaluationForRun, reconcileTerminalEvaluationRun } from "@/serv
 import { MAX_COLLABORATION_DEPTH, parseCollaborationParentId } from "@/server/domain/runtime/collaboration-chain";
 import { isRunStartLeaseExpired, RUN_START_LEASE_KEY } from "@/server/services/run-start-lease";
 import { cancelWorkflowRunIfPresent } from "@/server/services/cancel-workflow-run";
+import { appendTrace } from "@/server/steps/trace-step";
 
 const LIVE_STATUSES = ["queued", "running", "waiting_approval", "waiting_event"];
 
@@ -135,6 +136,18 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
       if (rootRunId !== runId) revalidatePath(`/runs/${rootRunId}`);
       revalidatePath("/runs");
       return { ok: true };
+    }
+    try {
+      await appendTrace({
+        runId: rootRunId,
+        kind: "run.cancelled",
+        level: "warn",
+        title: "运行已取消",
+        detail: "员工手动取消了这次运行",
+      });
+    } catch (traceError) {
+      // 取消终态已经提交；轨迹故障不能把成功取消误报成失败。
+      console.error("记录取消轨迹失败：", traceError);
     }
     await completeEvaluationForRun(rootRunId, null, "运行已取消");
     revalidatePath(`/runs/${runId}`);
