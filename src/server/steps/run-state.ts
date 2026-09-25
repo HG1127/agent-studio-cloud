@@ -75,7 +75,7 @@ export async function persistStep(step: PersistStepInput): Promise<void> {
   await db.transaction(async (tx) => {
     // 锁住运行状态直到步骤与摘要一起落库，取消操作要么在前、要么在后，不能插进检查与写入之间。
     const [run] = await tx
-      .select({ workspaceId: runs.workspaceId, status: runs.status, stepStates: runs.stepStates })
+      .select({ workspaceId: runs.workspaceId, createdBy: runs.createdBy, status: runs.status, stepStates: runs.stepStates })
       .from(runs)
       .where(eq(runs.id, step.runId))
       .for("update")
@@ -101,6 +101,7 @@ export async function persistStep(step: PersistStepInput): Promise<void> {
       .values({
         runId: storedStep.runId,
         workspaceId: run.workspaceId,
+        createdBy: run.createdBy,
         nodeId: storedStep.nodeId,
         nodeTitle: storedStep.nodeTitle ?? null,
         nodeType: storedStep.nodeType,

@@ -80,7 +80,7 @@ export async function indexKnowledgeChunks(args: { sourceId: string; text: strin
   const charCount = chunks.at(-1)?.charEnd ?? 0;
   await db.transaction(async (tx) => {
     const [source] = await tx
-      .select({ workspaceId: knowledgeSources.workspaceId, archivedAt: knowledgeSources.archivedAt, parseEngine: knowledgeSources.parseEngine })
+      .select({ workspaceId: knowledgeSources.workspaceId, createdBy: knowledgeSources.createdBy, archivedAt: knowledgeSources.archivedAt, parseEngine: knowledgeSources.parseEngine })
       .from(knowledgeSources)
       .where(eq(knowledgeSources.id, args.sourceId))
       .for("update")
@@ -94,6 +94,7 @@ export async function indexKnowledgeChunks(args: { sourceId: string; text: strin
       await tx.insert(knowledgeChunks).values(
         batch.map((chunk) => ({
           workspaceId: source.workspaceId,
+          createdBy: source.createdBy,
           sourceId: args.sourceId,
           chunkIndex: chunk.index,
           content: chunk.content,

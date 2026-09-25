@@ -40,7 +40,7 @@ export async function requestApproval(args: RequestApprovalInput): Promise<Appro
   const now = new Date();
   const result = await db.transaction(async (tx) => {
     const [run] = await tx
-      .select({ workspaceId: runs.workspaceId, status: runs.status })
+      .select({ workspaceId: runs.workspaceId, createdBy: runs.createdBy, status: runs.status })
       .from(runs)
       .where(eq(runs.id, args.runId))
       .for("update")
@@ -66,6 +66,7 @@ export async function requestApproval(args: RequestApprovalInput): Promise<Appro
       .values({
         runId: args.runId,
         workspaceId: run.workspaceId,
+        createdBy: run.createdBy,
         nodeId: node.id,
         nodeTitle: node.title,
         status: "pending",

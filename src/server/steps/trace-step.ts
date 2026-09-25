@@ -22,7 +22,7 @@ export interface AppendTraceInput {
 export async function appendTrace(event: AppendTraceInput): Promise<void> {
   "use step";
   const [run] = await db
-    .select({ workspaceId: runs.workspaceId })
+    .select({ workspaceId: runs.workspaceId, createdBy: runs.createdBy })
     .from(runs)
     .where(eq(runs.id, event.runId))
     .limit(1);
@@ -43,7 +43,7 @@ export async function appendTrace(event: AppendTraceInput): Promise<void> {
   const insertWithSeq = (seq: number) =>
     db
       .insert(traceEvents)
-      .values({ runId: event.runId, workspaceId: run.workspaceId, seq, ...base, at })
+      .values({ runId: event.runId, workspaceId: run.workspaceId, createdBy: run.createdBy, seq, ...base, at })
       .returning({ seq: traceEvents.seq });
   let seq = (row?.max ?? 0) + 1;
   let inserted: { seq: number }[] | null = null;

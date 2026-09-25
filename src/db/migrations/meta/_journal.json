@@ -85,6 +85,20 @@
       "when": 1790292892455,
       "tag": "0011_breezy_patriot",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1790311680138,
+      "tag": "0012_backfill-detail-creators",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1790311753400,
+      "tag": "0013_require-detail-creators",
+      "breakpoints": true
     }
   ]
 }

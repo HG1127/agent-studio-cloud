@@ -38,6 +38,7 @@ export const runSteps = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     runId: uuid("run_id").notNull(),
     workspaceId: uuid("workspace_id").notNull(),
+    createdBy: uuid("created_by").notNull(),
     nodeId: text("node_id").notNull(),
     nodeTitle: text("node_title"),
     nodeType: text("node_type").notNull(),

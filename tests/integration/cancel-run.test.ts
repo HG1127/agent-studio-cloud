@@ -66,6 +66,7 @@ async function insertWaitingRun() {
     {
       runId: RUN_ID,
       workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
       nodeId: "approval_pending",
       nodeTitle: "等待确认",
       status: "pending",
@@ -75,6 +76,7 @@ async function insertWaitingRun() {
     {
       runId: RUN_ID,
       workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
       nodeId: "approval_completed",
       nodeTitle: "已完成确认",
       status: "approved",
@@ -128,7 +130,7 @@ describe("取消运行", () => {
       },
     ]);
     await db.insert(approvals).values({
-      runId: GRANDCHILD_RUN_ID, workspaceId: DEMO_WORKSPACE_ID, nodeId: "confirm_delivery",
+      runId: GRANDCHILD_RUN_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, nodeId: "confirm_delivery",
       nodeTitle: "确认交付", status: "pending", role: "负责人", reason: "确认交付内容",
     });
     cancelMock.mockResolvedValue(undefined);

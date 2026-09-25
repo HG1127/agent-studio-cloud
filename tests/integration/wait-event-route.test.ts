@@ -30,6 +30,7 @@ async function insertWaitingRun(payloadSchema: Record<string, unknown> = { type:
   await db.insert(traceEvents).values({
     runId: RUN_ID,
     workspaceId: DEMO_WORKSPACE_ID,
+    createdBy: DEMO_USER_ID,
     seq: 1,
     nodeId: "wait_customer",
     kind: "wait.started",

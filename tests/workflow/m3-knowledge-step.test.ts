@@ -52,7 +52,7 @@ describe("知识步骤真实现", () => {
       sizeBytes: 10, sha256: `m3step-${SOURCE_ID}`, status: "indexed", chunkCount: 1, createdBy: DEMO_USER_ID,
     });
     await db.insert(knowledgeChunks).values({
-      workspaceId: DEMO_WORKSPACE_ID, sourceId: SOURCE_ID, chunkIndex: 0,
+      workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, sourceId: SOURCE_ID, chunkIndex: 0,
       content: "开头即说明退货政策：签收后 7 天内可退。", charStart: 0, charEnd: 20,
     });
     try {
@@ -81,7 +81,7 @@ describe("知识步骤真实现", () => {
       sizeBytes: 10, sha256: `m3step2-${SOURCE_ID}`, status: "indexed", chunkCount: 1, createdBy: DEMO_USER_ID,
     });
     await db.insert(knowledgeChunks).values({
-      workspaceId: DEMO_WORKSPACE_ID, sourceId: SOURCE_ID, chunkIndex: 0,
+      workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, sourceId: SOURCE_ID, chunkIndex: 0,
       content: "这里没有任何与问题相关的内容。", charStart: 0, charEnd: 15,
     });
     try {

@@ -27,7 +27,7 @@ async function insertPendingApproval(status = "waiting_approval") {
     agentId: AGENT_ID, versionId: VERSION_ID, status, input: {},
   });
   await db.insert(approvals).values({
-    id: APPROVAL_ID, runId: RUN_ID, workspaceId: DEMO_WORKSPACE_ID,
+    id: APPROVAL_ID, runId: RUN_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID,
     nodeId: "confirm", nodeTitle: "负责人确认处理方案", status: "pending",
     role: "业务负责人", reason: "确认处理方案后流程才会继续",
   });

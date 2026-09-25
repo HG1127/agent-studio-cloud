@@ -6,6 +6,7 @@ export const traceEvents = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     runId: uuid("run_id").notNull(),
     workspaceId: uuid("workspace_id").notNull(),
+    createdBy: uuid("created_by").notNull(),
     seq: integer("seq").notNull(),
     nodeId: text("node_id"),
     kind: text("kind").notNull(),

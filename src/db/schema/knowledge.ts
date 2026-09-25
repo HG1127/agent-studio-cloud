@@ -33,12 +33,14 @@ export const knowledgeChunks = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     workspaceId: uuid("workspace_id").notNull(),
+    createdBy: uuid("created_by").notNull(),
     sourceId: uuid("source_id").notNull().references(() => knowledgeSources.id, { onDelete: "cascade" }),
     chunkIndex: integer("chunk_index").notNull(),
     content: text("content").notNull(),
     charStart: integer("char_start").notNull(),
     charEnd: integer("char_end").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("knowledge_chunks_source_index_unique").on(t.sourceId, t.chunkIndex)],
 );
