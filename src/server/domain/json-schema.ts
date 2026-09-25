@@ -32,6 +32,32 @@ const MAX_SCHEMA_CHOICES = 100;
 const MAX_PATTERN_LENGTH = 200;
 const MAX_PATTERN_INPUT_LENGTH = 4096;
 
+function unsafeJsonValueKey(value: unknown): { path: string; key: string } | null {
+  const stack: Array<{ value: unknown; path: string }> = [{ value, path: "消息" }];
+  const visited = new WeakSet<object>();
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (!current.value || typeof current.value !== "object") continue;
+    if (visited.has(current.value)) continue;
+    visited.add(current.value);
+    if (Array.isArray(current.value)) {
+      for (let index = current.value.length - 1; index >= 0; index -= 1) {
+        stack.push({ value: current.value[index], path: `${current.path}[${index}]` });
+      }
+      continue;
+    }
+    const entries = Object.entries(current.value as Record<string, unknown>);
+    for (const [key] of entries) {
+      if (!isSafeDataPathSegment(key)) return { path: current.path, key };
+    }
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const [key, child] = entries[index];
+      stack.push({ value: child, path: `${current.path}.${key}` });
+    }
+  }
+  return null;
+}
+
 function nonnegativeIntegerRule(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
@@ -177,6 +203,8 @@ function validateValue(value: unknown, schema: unknown, path: string, depth: num
   if (value && typeof value === "object" && !Array.isArray(value)) {
     const object = value as Record<string, unknown>;
     const keys = Object.keys(object);
+    const unsafeKey = keys.find((key) => !isSafeDataPathSegment(key));
+    if (unsafeKey) return `${path}不能使用保留字段名“${unsafeKey}”`;
     if (typeof rule.minProperties === "number" && keys.length < rule.minProperties) return `${path}至少需要 ${rule.minProperties} 个字段`;
     if (typeof rule.maxProperties === "number" && keys.length > rule.maxProperties) return `${path}最多允许 ${rule.maxProperties} 个字段`;
     const required = Array.isArray(rule.required) ? rule.required.filter((item): item is string => typeof item === "string") : [];
@@ -209,6 +237,8 @@ export function validateJsonSchemaDefinition(schema: Record<string, unknown>): s
 }
 
 export function validateJsonObjectSchema(payload: Record<string, unknown>, schema: Record<string, unknown>): string | null {
+  const unsafe = unsafeJsonValueKey(payload);
+  if (unsafe) return `${unsafe.path}不能使用保留字段名“${unsafe.key}”`;
   const schemaError = validateJsonSchemaDefinition(schema);
   if (schemaError) return schemaError;
   return validateValue(payload, schema, "消息", 0);

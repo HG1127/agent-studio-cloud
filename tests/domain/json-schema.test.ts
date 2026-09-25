@@ -125,6 +125,14 @@ describe("外部消息字段校验", () => {
     })).toBe("消息.code为必填字段");
   });
 
+  it("宽松契约也拒绝消息或工具回执中的保留字段", () => {
+    const payload = JSON.parse('{"nested":{"__proto__":{"polluted":true}}}') as Record<string, unknown>;
+
+    expect(validateJsonObjectSchema(payload, { type: "object" }))
+      .toBe("消息.nested不能使用保留字段名“__proto__”");
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
   it("限制外部消息正则和字段契约复杂度", () => {
     expect(validateJsonObjectSchema({}, {
       type: "object",

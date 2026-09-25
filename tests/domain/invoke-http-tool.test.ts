@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { invokeHttpTool } from "@/server/tools/invoke-http-tool";
 import type { ToolRegistration } from "@/server/tools/tool-registry";
+import { validateJsonObjectSchema } from "@/server/domain/json-schema";
 
 const tool: ToolRegistration = {
   id: "crm.update", name: "客户系统", description: "", endpoint: "https://tools.example.com/update",
@@ -83,5 +84,20 @@ describe("HTTP 工具调用", () => {
       tool, idempotencyKey: "run:node", action: tool.action, input: {}, outputs: {},
       fetchImpl: vi.fn(async () => new Response(interrupted)),
     })).resolves.toEqual({ ok: false, error: "业务系统返回中断，稍后自动重试", retryable: true });
+  });
+
+  it("工具回执中的保留字段不能通过宽松输出契约", async () => {
+    const result = await invokeHttpTool({
+      tool, idempotencyKey: "run:node", action: tool.action, input: {}, outputs: {},
+      fetchImpl: vi.fn(async () => new Response('{"__proto__":{"polluted":true}}', {
+        headers: { "content-type": "application/json" },
+      })),
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(validateJsonObjectSchema(result.output, tool.outputSchema)).toContain("保留字段名");
+    }
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
   });
 });
