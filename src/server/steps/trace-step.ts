@@ -5,6 +5,7 @@ import { eq, sql } from "drizzle-orm";
 import { FatalError, getWritable } from "workflow";
 import { db } from "@/lib/db";
 import { runs, traceEvents } from "@/db/schema";
+import { writeTraceStreamBestEffort } from "@/server/domain/trace-stream";
 import { isUniqueViolation } from "@/server/unique-violation";
 
 export type TraceLevel = "info" | "warn" | "error";
@@ -72,7 +73,9 @@ export async function appendTrace(event: AppendTraceInput): Promise<void> {
   if (!inserted) throw new FatalError("轨迹写入冲突，请重试");
   // 流写入的 seq 必须用插入成功后的实际值：重试后 seq 会变，用插入前的旧号会错号
   const payload = { seq: inserted[0].seq, ...base, at: at.toISOString() };
-  const writer = getWritable({ namespace: "trace" }).getWriter();
-  await writer.write(JSON.stringify(payload));
-  await writer.close();
+  await writeTraceStreamBestEffort(async () => {
+    const writer = getWritable({ namespace: "trace" }).getWriter();
+    await writer.write(JSON.stringify(payload));
+    await writer.close();
+  });
 }
