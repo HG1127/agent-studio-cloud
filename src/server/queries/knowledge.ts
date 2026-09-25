@@ -1,14 +1,15 @@
 import { and, asc, desc, eq, ilike, isNotNull, isNull } from "drizzle-orm";
 import { knowledgeChunks, knowledgeSources } from "@/db/schema";
-import { KnowledgeSearchResult, type KnowledgeSourceView } from "@/contracts/knowledge";
+import { KnowledgeSearchResult, KnowledgeSourceView, type KnowledgeSourceView as KnowledgeSourceViewType } from "@/contracts/knowledge";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { MAX_KNOWLEDGE_SCAN_CHUNKS, scoreChunks } from "@/server/domain/knowledge/search";
+import { parseQueryRows } from "@/server/queries/parse-query-rows";
 
 export async function listKnowledgeSources(
   archived = false,
   options: { query?: string; limit?: number; offset?: number } = {},
-): Promise<KnowledgeSourceView[]> {
+): Promise<KnowledgeSourceViewType[]> {
   const query = options.query?.trim().slice(0, 200);
   const limit = Math.min(101, Math.max(1, options.limit ?? 100));
   const offset = Math.max(0, options.offset ?? 0);
@@ -23,13 +24,13 @@ export async function listKnowledgeSources(
     .orderBy(desc(knowledgeSources.createdAt))
     .limit(limit)
     .offset(offset);
-  return rows.map((row) => ({
+  return parseQueryRows("知识资料列表", KnowledgeSourceView, rows.map((row) => ({
     id: row.id, name: row.name, mime: row.mime, sizeBytes: row.sizeBytes,
-    status: (archived ? "archived" : row.status) as KnowledgeSourceView["status"],
+    status: archived ? "archived" : row.status,
     chunkCount: row.chunkCount, charCount: row.charCount, error: row.error,
     hasOriginal: Boolean(row.blobPathname),
     createdAt: row.createdAt.toISOString(),
-  }));
+  })));
 }
 
 export async function searchKnowledgeChunks(query: string) {

@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { EvaluationCaseView, EvaluationRunView, type EvaluationCaseView as EvaluationCaseViewType, type EvaluationRunView as EvaluationRunViewType } from "@/contracts/evaluation";
 import { agentVersions, evaluationCaseResults, evaluationCases, evaluationRuns } from "@/db/schema";
 import { db } from "@/lib/db";
+import { parseQueryRows } from "@/server/queries/parse-query-rows";
 
 export async function listEvaluationCases(
   agentId: string,
@@ -22,10 +23,10 @@ export async function listEvaluationCases(
     .orderBy(desc(evaluationCases.createdAt))
     .limit(limit)
     .offset(offset);
-  return rows.flatMap((row) => {
-    const parsed = EvaluationCaseView.safeParse({ ...row, createdAt: row.createdAt.toISOString() });
-    return parsed.success ? [parsed.data] : [];
-  });
+  return parseQueryRows("验收样例列表", EvaluationCaseView, rows.map((row) => ({
+    ...row,
+    createdAt: row.createdAt.toISOString(),
+  })));
 }
 
 export async function listEvaluationRuns(agentId: string, workspaceId: string): Promise<EvaluationRunViewType[]> {
@@ -57,20 +58,17 @@ export async function listEvaluationRuns(agentId: string, workspaceId: string): 
     values.push(result);
     resultsByRun.set(result.result.evaluationRunId, values);
   }
-  return rows.flatMap(({ evaluation, version }) => {
-    const parsed = EvaluationRunView.safeParse({
-      ...evaluation,
-      version,
-      startedAt: evaluation.startedAt.toISOString(),
-      finishedAt: evaluation.finishedAt?.toISOString() ?? null,
-      results: (resultsByRun.get(evaluation.id) ?? []).map(({ result, caseName }) => ({
-        caseId: result.evaluationCaseId,
-        caseName,
-        status: result.status,
-        error: result.error,
-        runId: result.runId,
-      })),
-    });
-    return parsed.success ? [parsed.data] : [];
-  });
+  return parseQueryRows("自动验收记录", EvaluationRunView, rows.map(({ evaluation, version }) => ({
+    ...evaluation,
+    version,
+    startedAt: evaluation.startedAt.toISOString(),
+    finishedAt: evaluation.finishedAt?.toISOString() ?? null,
+    results: (resultsByRun.get(evaluation.id) ?? []).map(({ result, caseName }) => ({
+      caseId: result.evaluationCaseId,
+      caseName,
+      status: result.status,
+      error: result.error,
+      runId: result.runId,
+    })),
+  })));
 }

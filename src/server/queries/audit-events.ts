@@ -2,6 +2,7 @@ import { and, desc, eq, ilike } from "drizzle-orm";
 import { AuditEventView, type AuditEventFilters, type AuditEventView as AuditEventViewType } from "@/contracts/audit-event";
 import { auditEvents, users } from "@/db/schema";
 import { db } from "@/lib/db";
+import { parseQueryRows } from "@/server/queries/parse-query-rows";
 
 export async function listAuditEvents(
   workspaceId: string,
@@ -23,12 +24,9 @@ export async function listAuditEvents(
     .orderBy(desc(auditEvents.createdAt), desc(auditEvents.id))
     .limit(limit)
     .offset(offset);
-  return rows.flatMap(({ event, actorName }) => {
-    const parsed = AuditEventView.safeParse({
-      ...event,
-      actorName: actorName || "未知员工",
-      createdAt: event.createdAt.toISOString(),
-    });
-    return parsed.success ? [parsed.data] : [];
-  });
+  return parseQueryRows("操作记录列表", AuditEventView, rows.map(({ event, actorName }) => ({
+    ...event,
+    actorName: actorName || "未知员工",
+    createdAt: event.createdAt.toISOString(),
+  })));
 }
