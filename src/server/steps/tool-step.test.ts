@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkflowNode } from "@/contracts/workflow";
 
 const mocks = vi.hoisted(() => ({
-  persistStep: vi.fn(), appendTrace: vi.fn(), invokeHttpTool: vi.fn(), getToolRegistration: vi.fn(),
+  persistStep: vi.fn(), appendTrace: vi.fn(), invokeHttpTool: vi.fn(), getToolRegistration: vi.fn(), attempt: 1,
+}));
+vi.mock("workflow", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("workflow")>()),
+  getStepMetadata: () => ({ stepName: "runToolStep", stepId: "step-1", stepStartedAt: new Date(), attempt: mocks.attempt }),
 }));
 vi.mock("@/server/steps/run-state", () => ({ persistStep: mocks.persistStep }));
 vi.mock("@/server/steps/trace-step", () => ({ appendTrace: mocks.appendTrace }));
@@ -28,6 +32,7 @@ const registration = {
 describe("真实工具步骤", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.attempt = 1;
     mocks.getToolRegistration.mockReturnValue(registration);
   });
 
@@ -71,8 +76,19 @@ describe("真实工具步骤", () => {
 
   it("保留外部系统瞬时失败的可重试语义", async () => {
     mocks.invokeHttpTool.mockResolvedValue({ ok: false, error: "业务系统暂时不可用，稍后自动重试", retryable: true });
-    await expect(runToolStep({ runId: "run-1", node, input: {}, outputs: {} }))
-      .rejects.toThrow("业务系统暂时不可用");
+    const retrying = runToolStep({ runId: "run-1", node, input: {}, outputs: {} });
+    await expect(retrying).rejects.toMatchObject({ name: "RetryableError" });
     expect(mocks.persistStep).toHaveBeenLastCalledWith(expect.objectContaining({ status: "failed" }));
+  });
+
+  it("达到节点配置的总尝试次数后停止重试", async () => {
+    mocks.attempt = 3;
+    mocks.invokeHttpTool.mockResolvedValue({ ok: false, error: "业务系统持续不可用", retryable: true });
+    await expect(runToolStep({ runId: "run-1", node, input: {}, outputs: {} }))
+      .rejects.toMatchObject({ name: "FatalError" });
+  });
+
+  it("向 Workflow SDK 声明可覆盖节点配置的全局重试上限", () => {
+    expect(runToolStep.maxRetries).toBe(7);
   });
 });

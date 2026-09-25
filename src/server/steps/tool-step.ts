@@ -1,8 +1,9 @@
 "use step";
 // 工具步骤：演示工具保持确定性回执；真实工具只从服务端注册表取地址和凭据，草稿不保存秘密。
-import { FatalError, RetryableError } from "workflow";
+import { FatalError, getStepMetadata, RetryableError } from "workflow";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { validateJsonObjectSchema } from "@/server/domain/json-schema";
+import { canRetryStep, MAX_STEP_ATTEMPTS, resolveToolRetryPolicy } from "@/server/domain/runtime/retry-policy";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 import { invokeHttpTool } from "@/server/tools/invoke-http-tool";
@@ -35,7 +36,13 @@ export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Re
       title: `「${node.title}」无法执行`,
       detail: reason,
     });
-    if (retryable) throw new RetryableError(reason, { retryAfter: "5s" });
+    if (retryable) {
+      const { attempt } = getStepMetadata();
+      const policy = resolveToolRetryPolicy(node);
+      if (canRetryStep(attempt, policy.maxAttempts)) {
+        throw new RetryableError(reason, { retryAfter: policy.backoffMs });
+      }
+    }
     throw new FatalError(reason);
   };
   await appendTrace({
@@ -97,3 +104,6 @@ export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Re
   });
   return { receipt };
 }
+
+// SDK 的 maxRetries 不含首次调用；节点自己的较小上限由步骤内按 attempt 截断。
+runToolStep.maxRetries = MAX_STEP_ATTEMPTS - 1;
