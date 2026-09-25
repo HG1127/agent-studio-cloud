@@ -193,7 +193,7 @@ describe("恢复历史版本", () => {
 
     expect(result).toEqual({
       ok: false,
-      error: "历史版本绑定的协作助手已停用或版本不可用，请先恢复协作助手",
+      error: "协作链包含已停用、缺失或格式不完整的冻结版本，无法恢复这个历史版本",
     });
     const versions = await db.select().from(agentVersions).where(eq(agentVersions.agentId, AGENT_ID));
     expect(versions).toHaveLength(2);

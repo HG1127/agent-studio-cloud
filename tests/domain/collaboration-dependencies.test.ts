@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { AgentManifest } from "@/contracts/manifest";
 import {
   activeVersionDependingOnAgent,
+  inspectCollaborationVersionGraph,
   type CollaborationVersionDependency,
 } from "@/server/domain/runtime/collaboration-dependencies";
 
@@ -73,5 +74,46 @@ describe("在线版本的传递协作依赖", () => {
     ];
 
     expect(activeVersionDependingOnAgent(versions, "agent-c")).toBeNull();
+  });
+
+  it("发布前识别深层缺失版本与循环调用", () => {
+    const valid = [
+      version({ versionId: "version-b", agentId: "agent-b", agentName: "协作助手", manifest: manifest("agent-c", "version-c") }),
+      version({ versionId: "version-c", agentId: "agent-c", agentName: "资料助手" }),
+    ];
+    expect(inspectCollaborationVersionGraph({
+      rootAgentId: "agent-a",
+      directKeys: ["agent-b:version-b"],
+      versions: valid,
+    })).toEqual({ issue: null, agentIds: ["agent-b", "agent-c"], versionIds: ["version-b", "version-c"] });
+
+    expect(inspectCollaborationVersionGraph({
+      rootAgentId: "agent-a",
+      directKeys: ["agent-b:version-b"],
+      versions: valid.slice(0, 1),
+    }).issue).toContain("缺失");
+
+    const cyclic = [
+      version({ versionId: "version-b", agentId: "agent-b", agentName: "协作助手", manifest: manifest("agent-a", "version-a") }),
+    ];
+    expect(inspectCollaborationVersionGraph({
+      rootAgentId: "agent-a",
+      directKeys: ["agent-b:version-b"],
+      versions: cyclic,
+    }).issue).toContain("循环");
+  });
+
+  it("发布前阻止超过运行时上限的深层协作链", () => {
+    const versions = Array.from({ length: 6 }, (_, index) => version({
+      versionId: `version-${index + 1}`,
+      agentId: `agent-${index + 1}`,
+      agentName: `助手 ${index + 1}`,
+      manifest: index === 5 ? manifest("", undefined) : manifest(`agent-${index + 2}`, `version-${index + 2}`),
+    }));
+    expect(inspectCollaborationVersionGraph({
+      rootAgentId: "root-agent",
+      directKeys: ["agent-1:version-1"],
+      versions,
+    }).issue).toContain("5 层");
   });
 });

@@ -21,6 +21,7 @@ import { auditEventValues } from "@/server/audit/event-values";
 import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
 import { knowledgeStepTitles, prepareKnowledgeSnapshot } from "@/server/domain/runtime/knowledge-snapshot";
 import { workflowCollaborationKeys } from "@/server/domain/import-agent";
+import { inspectCollaborationVersionGraph } from "@/server/domain/runtime/collaboration-dependencies";
 
 export async function publishVersionAction(agentId: string, modelSelection?: PublishModelSelection): Promise<PublishVersionResult> {
   if (!z.string().uuid().safeParse(agentId).success) {
@@ -143,7 +144,32 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
         const publishOutcome = await db.transaction(async (tx) => {
           // 保存流程和修改基本信息都会先锁同一助手行；发布也拿这把锁并核对快照，
           // 同时锁住协作目标，防止发布与停用并发时留下上线即失效的版本。
-          const collaborationAgentIds = [...new Set(collaborationRefs.map((ref) => ref.agentId))];
+          const dependencyVersions = collaborationRefs.length > 0
+            ? await tx
+                .select({
+                  versionId: agentVersions.id,
+                  agentId: agentVersions.agentId,
+                  agentName: agents.name,
+                  status: agentVersions.status,
+                  agentArchivedAt: agents.archivedAt,
+                  manifest: agentVersions.manifest,
+                })
+                .from(agentVersions)
+                .innerJoin(agents, eq(agents.id, agentVersions.agentId))
+                .where(and(
+                  eq(agentVersions.workspaceId, agent.workspaceId),
+                  eq(agents.workspaceId, agent.workspaceId),
+                ))
+            : [];
+          const collaborationGraph = inspectCollaborationVersionGraph({
+            rootAgentId: agentId,
+            directKeys: collaborationKeys,
+            versions: dependencyVersions,
+          });
+          if (collaborationGraph.issue) {
+            return { kind: "collaboration_invalid" as const, error: collaborationGraph.issue };
+          }
+          const collaborationAgentIds = collaborationGraph.agentIds;
           const lockedAgents = await tx
             .select({ id: agents.id, updatedAt: agents.updatedAt, archivedAt: agents.archivedAt })
             .from(agents)
@@ -160,20 +186,6 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
           const availableAgentIds = new Set(lockedAgents.filter((row) => !row.archivedAt).map((row) => row.id));
           if (collaborationAgentIds.some((id) => !availableAgentIds.has(id))) {
             return { kind: "collaboration_changed" as const };
-          }
-          if (collaborationRefs.length > 0) {
-            const versionIds = [...new Set(collaborationRefs.map((ref) => ref.versionId))];
-            const targetVersions = await tx
-              .select({ id: agentVersions.id, agentId: agentVersions.agentId })
-              .from(agentVersions)
-              .where(and(
-                inArray(agentVersions.id, versionIds),
-                eq(agentVersions.workspaceId, agent.workspaceId),
-              ));
-            const availableKeys = new Set(targetVersions.map((row) => `${row.agentId}:${row.id}`));
-            if (collaborationKeys.some((key) => !availableKeys.has(key))) {
-              return { kind: "collaboration_changed" as const };
-            }
           }
           const [lockedDefinition] = await tx
             .select({ updatedAt: workflowDefinitions.updatedAt })
@@ -257,6 +269,9 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
         }
         if (publishOutcome.kind === "collaboration_changed") {
           return { ok: false, error: "协作助手刚刚被停用或版本已不可用，请重新选择后发布", issues: [] };
+        }
+        if (publishOutcome.kind === "collaboration_invalid") {
+          return { ok: false, error: `${publishOutcome.error}，请调整协作步骤后再发布`, issues: [] };
         }
         revalidatePath(`/agents/${agentId}`);
         return { ok: true, release, version: publishOutcome.version, exempted: exempted.map((issue) => ({ title: issue.title })) };

@@ -13,6 +13,7 @@ import { auditEventValues } from "@/server/audit/event-values";
 import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
 import { knowledgeStepTitles, validateKnowledgeSnapshot } from "@/server/domain/runtime/knowledge-snapshot";
 import { workflowCollaborationKeys } from "@/server/domain/import-agent";
+import { inspectCollaborationVersionGraph } from "@/server/domain/runtime/collaboration-dependencies";
 
 export async function restoreVersionAction(agentId: string, versionId: string): Promise<RestoreVersionResult> {
   if (!z.string().uuid().safeParse(agentId).success || !z.string().uuid().safeParse(versionId).success) {
@@ -58,7 +59,28 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
             return { kind: "collaboration-unavailable" as const };
           }
           if (collaborationRefs.length > 0) {
-            const targetAgentIds = [...new Set(collaborationRefs.map((ref) => ref.agentId))];
+            const dependencyVersions = await tx
+              .select({
+                versionId: agentVersions.id,
+                agentId: agentVersions.agentId,
+                agentName: agents.name,
+                status: agentVersions.status,
+                agentArchivedAt: agents.archivedAt,
+                manifest: agentVersions.manifest,
+              })
+              .from(agentVersions)
+              .innerJoin(agents, eq(agents.id, agentVersions.agentId))
+              .where(and(
+                eq(agentVersions.workspaceId, agent.workspaceId),
+                eq(agents.workspaceId, agent.workspaceId),
+              ));
+            const graph = inspectCollaborationVersionGraph({
+              rootAgentId: agentId,
+              directKeys: collaborationKeys,
+              versions: dependencyVersions,
+            });
+            if (graph.issue) return { kind: "collaboration-invalid" as const, error: graph.issue };
+            const targetAgentIds = graph.agentIds;
             const targetAgents = await tx
               .select({ id: agents.id })
               .from(agents)
@@ -70,17 +92,6 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
               .orderBy(agents.id)
               .for("share");
             if (targetAgents.length !== targetAgentIds.length) {
-              return { kind: "collaboration-unavailable" as const };
-            }
-            const targetVersions = await tx
-              .select({ id: agentVersions.id, agentId: agentVersions.agentId })
-              .from(agentVersions)
-              .where(and(
-                inArray(agentVersions.id, [...new Set(collaborationRefs.map((ref) => ref.versionId))]),
-                eq(agentVersions.workspaceId, agent.workspaceId),
-              ));
-            const availableKeys = new Set(targetVersions.map((row) => `${row.agentId}:${row.id}`));
-            if (collaborationKeys.some((key) => !availableKeys.has(key))) {
               return { kind: "collaboration-unavailable" as const };
             }
           }
@@ -165,6 +176,9 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
         if (restoreOutcome.kind === "manifest-invalid") return { ok: false, error: "历史版本格式过旧，无法直接恢复" };
         if (restoreOutcome.kind === "collaboration-unavailable") {
           return { ok: false, error: "历史版本绑定的协作助手已停用或版本不可用，请先恢复协作助手" };
+        }
+        if (restoreOutcome.kind === "collaboration-invalid") {
+          return { ok: false, error: `${restoreOutcome.error}，无法恢复这个历史版本` };
         }
         if (restoreOutcome.kind === "knowledge-unavailable") return { ok: false, error: restoreOutcome.error };
         revalidatePath(`/agents/${agentId}`);

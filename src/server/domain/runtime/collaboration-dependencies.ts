@@ -1,5 +1,6 @@
 import { AgentManifest } from "@/contracts/manifest";
 import { workflowCollaborationKeys } from "@/server/domain/import-agent";
+import { MAX_COLLABORATION_DEPTH } from "@/server/domain/runtime/collaboration-chain";
 
 export type CollaborationVersionDependency = {
   versionId: string;
@@ -13,6 +14,60 @@ export type CollaborationVersionDependency = {
 function dependencyKeys(manifest: unknown): string[] {
   const parsed = AgentManifest.safeParse(manifest);
   return parsed.success ? workflowCollaborationKeys(parsed.data.workflowSnapshot) : [];
+}
+
+export type CollaborationGraphInspection = {
+  issue: string | null;
+  agentIds: string[];
+  versionIds: string[];
+};
+
+export function inspectCollaborationVersionGraph(args: {
+  rootAgentId: string;
+  directKeys: string[];
+  versions: CollaborationVersionDependency[];
+}): CollaborationGraphInspection {
+  const byKey = new Map(args.versions.map((version) => [`${version.agentId}:${version.versionId}`, version]));
+  const agentIds = new Set<string>();
+  const versionIds = new Set<string>();
+  let issue: string | null = null;
+
+  const visit = (key: string, depth: number, path: ReadonlySet<string>) => {
+    if (issue) return;
+    const separator = key.lastIndexOf(":");
+    const agentId = key.slice(0, separator);
+    const versionId = key.slice(separator + 1);
+    if (!agentId || !versionId) {
+      issue = "协作助手信息不完整";
+      return;
+    }
+    if (path.has(agentId)) {
+      issue = "协作助手之间形成了循环调用";
+      return;
+    }
+    if (depth > MAX_COLLABORATION_DEPTH) {
+      issue = `协作助手超过最多 ${MAX_COLLABORATION_DEPTH} 层的限制`;
+      return;
+    }
+    const version = byKey.get(key);
+    const manifest = version ? AgentManifest.safeParse(version.manifest) : null;
+    if (!version || version.agentArchivedAt !== null || !manifest?.success) {
+      issue = "协作链包含已停用、缺失或格式不完整的冻结版本";
+      return;
+    }
+    agentIds.add(agentId);
+    versionIds.add(versionId);
+    const nextPath = new Set(path);
+    nextPath.add(agentId);
+    for (const dependencyKey of workflowCollaborationKeys(manifest.data.workflowSnapshot)) {
+      visit(dependencyKey, depth + 1, nextPath);
+    }
+  };
+
+  for (const key of [...new Set(args.directKeys)]) {
+    visit(key, 1, new Set([args.rootAgentId]));
+  }
+  return { issue, agentIds: [...agentIds], versionIds: [...versionIds] };
 }
 
 export function activeVersionDependingOnAgent(
