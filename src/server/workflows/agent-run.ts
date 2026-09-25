@@ -23,8 +23,8 @@ import { runQualityGate } from "@/server/steps/quality-step";
 import { appendTrace } from "@/server/steps/trace-step";
 import { runToolStep } from "@/server/steps/tool-step";
 import { beginWait, completeWait } from "@/server/steps/wait-step";
-import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { safeWorkflowFailureReason } from "@/server/security/workflow-error";
 
 type ParallelBranchResult = {
   id: string;
@@ -35,12 +35,7 @@ type ParallelBranchResult = {
 };
 
 function executionFailureReason(error: unknown, fallback: string): string {
-  const message = error instanceof Error
-    ? error.message
-    : typeof error === "object" && error !== null && "message" in error
-      ? String(error.message)
-      : String(error ?? "");
-  return /[\u4e00-\u9fff]/.test(message) ? redactSensitiveText(message) : fallback;
+  return safeWorkflowFailureReason(error, fallback);
 }
 
 async function recordHandledNodeFailure(args: {

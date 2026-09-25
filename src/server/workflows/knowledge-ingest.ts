@@ -1,5 +1,6 @@
 import { indexKnowledgeChunks, markKnowledgeFailed, parseKnowledgeFile } from "@/server/steps/knowledge-ingest";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { safeWorkflowFailureReason } from "@/server/security/workflow-error";
 
 export interface KnowledgeIngestArgs {
   sourceId: string;
@@ -16,8 +17,7 @@ export async function knowledgeIngestWorkflow(args: KnowledgeIngestArgs): Promis
     const indexed = await indexKnowledgeChunks({ sourceId: args.sourceId, text: parsed.text, ingestToken: args.ingestToken });
     return { chunkCount: indexed.chunkCount };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const reason = /[\u4e00-\u9fff]/.test(message) ? message : "文件解析失败，已停止";
+    const reason = safeWorkflowFailureReason(err, "文件解析失败，已停止");
     try {
       await markKnowledgeFailed({ sourceId: args.sourceId, error: reason, ingestToken: args.ingestToken });
     } catch (failErr) {
