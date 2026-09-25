@@ -21,10 +21,12 @@ describe("服务端工具注册表", () => {
     });
   });
 
-  it("拒绝重复标识、不安全地址、换行请求头和无效字段契约", () => {
+  it("拒绝重复标识、不安全地址、危险请求头和无效字段契约", () => {
     expect(parseToolRegistry(JSON.stringify([valid, valid]))).toEqual([]);
     expect(parseToolRegistry(JSON.stringify([{ ...valid, endpoint: "file:///etc/passwd" }]))).toEqual([]);
     expect(parseToolRegistry(JSON.stringify([{ ...valid, headers: { authorization: "safe\r\ninjected: bad" } }]))).toEqual([]);
+    expect(parseToolRegistry(JSON.stringify([{ ...valid, headers: { Host: "attacker.example" } }]))).toEqual([]);
+    expect(parseToolRegistry(JSON.stringify([{ ...valid, headers: { "Content-Length": "1" } }]))).toEqual([]);
     expect(parseToolRegistry(JSON.stringify([{ ...valid, outputSchema: { type: "mystery" } }]))).toEqual([]);
   });
 

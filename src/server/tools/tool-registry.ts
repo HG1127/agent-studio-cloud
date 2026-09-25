@@ -15,9 +15,23 @@ export type ToolRegistration = z.infer<typeof ToolRegistration>;
 let cachedRaw: string | undefined;
 let cachedRegistry: ToolRegistration[] = [];
 
+const FORBIDDEN_TOOL_HEADER_NAMES = new Set([
+  "connection",
+  "content-length",
+  "host",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+]);
+
 function safeHeaders(headers: Record<string, string>): boolean {
   const names = Object.keys(headers);
-  return names.length <= 20 && names.every((name) => !/[\r\n:]/.test(name))
+  return names.length <= 20 && names.every((name) =>
+    !/[\r\n:]/.test(name) && !FORBIDDEN_TOOL_HEADER_NAMES.has(name.toLowerCase()))
     && Object.values(headers).every((value) => !/[\r\n]/.test(value));
 }
 
