@@ -26,7 +26,10 @@ export async function prepareEvaluationRun(agentId: string) {
       const [evaluation] = await tx
         .select({ versionId: evaluationRuns.versionId })
         .from(evaluationRuns)
-        .where(eq(evaluationRuns.id, runningEvaluation.id))
+        .where(and(
+          eq(evaluationRuns.id, runningEvaluation.id),
+          eq(evaluationRuns.workspaceId, DEMO_WORKSPACE_ID),
+        ))
         .limit(1);
       const cases = await tx
         .select({ id: evaluationCases.id, input: evaluationCases.input })

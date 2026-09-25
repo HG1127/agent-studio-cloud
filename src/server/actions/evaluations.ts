@@ -16,6 +16,9 @@ import { db } from "@/lib/db";
 import { markEvaluationStartFailure, reconcileTerminalEvaluationRun } from "@/server/services/evaluation-state";
 import { prepareEvaluationRun } from "@/server/services/evaluation-start";
 import { startRunCore } from "@/server/services/start-run-core";
+import { runBounded } from "@/server/domain/run-bounded";
+
+const EVALUATION_START_CONCURRENCY = 5;
 
 export async function createEvaluationCaseAction(input: unknown): Promise<EvaluationActionResult> {
   const parsed = EvaluationCaseCreateInput.safeParse(input);
@@ -133,27 +136,38 @@ export async function startEvaluationAction(agentId: string): Promise<Evaluation
   try {
     const prepared = await prepareEvaluationRun(agentId);
     if (!prepared.ok) return prepared;
-    for (const testCase of prepared.cases) {
-      const started = await startRunCore({
-        agentId,
-        versionId: prepared.versionId,
-        input: testCase.input,
-        sourceType: "evaluation",
-        sourceKey: `evaluation:${prepared.evaluationId}:${testCase.id}`,
-      });
-      if (started.ok) {
-        await db
-          .update(evaluationCaseResults)
-          .set({ runId: started.runId, updatedAt: new Date() })
-          .where(and(
-            eq(evaluationCaseResults.evaluationRunId, prepared.evaluationId),
-            eq(evaluationCaseResults.evaluationCaseId, testCase.id),
-          ));
-        await reconcileTerminalEvaluationRun(started.runId);
-      } else {
-        await markEvaluationStartFailure(prepared.evaluationId, testCase.id, started.error);
+    await runBounded(prepared.cases, EVALUATION_START_CONCURRENCY, async (testCase) => {
+      try {
+        const started = await startRunCore({
+          agentId,
+          versionId: prepared.versionId,
+          input: testCase.input,
+          sourceType: "evaluation",
+          sourceKey: `evaluation:${prepared.evaluationId}:${testCase.id}`,
+        });
+        if (started.ok) {
+          await db
+            .update(evaluationCaseResults)
+            .set({ runId: started.runId, updatedAt: new Date() })
+            .where(and(
+              eq(evaluationCaseResults.evaluationRunId, prepared.evaluationId),
+              eq(evaluationCaseResults.evaluationCaseId, testCase.id),
+              eq(evaluationCaseResults.workspaceId, DEMO_WORKSPACE_ID),
+            ));
+          await reconcileTerminalEvaluationRun(started.runId);
+          return;
+        }
+        await markEvaluationStartFailure(prepared.evaluationId, testCase.id, started.error, DEMO_WORKSPACE_ID);
+      } catch (error) {
+        console.error("启动单条验收运行失败", error);
+        await markEvaluationStartFailure(
+          prepared.evaluationId,
+          testCase.id,
+          "验收运行启动失败，请稍后重新运行全部样例",
+          DEMO_WORKSPACE_ID,
+        );
       }
-    }
+    });
     revalidatePath(`/agents/${agentId}`);
     revalidatePath("/runs");
     return { ok: true };

@@ -111,13 +111,19 @@ export async function reconcileTerminalEvaluationRun(runId: string): Promise<voi
   }
 }
 
-export async function markEvaluationStartFailure(evaluationRunId: string, evaluationCaseId: string, error: string): Promise<void> {
+export async function markEvaluationStartFailure(
+  evaluationRunId: string,
+  evaluationCaseId: string,
+  error: string,
+  workspaceId: string,
+): Promise<void> {
   const updated = await db
     .update(evaluationCaseResults)
     .set({ status: "failed", error, updatedAt: new Date() })
     .where(and(
       eq(evaluationCaseResults.evaluationRunId, evaluationRunId),
       eq(evaluationCaseResults.evaluationCaseId, evaluationCaseId),
+      eq(evaluationCaseResults.workspaceId, workspaceId),
       eq(evaluationCaseResults.status, "running"),
     ))
     .returning({ id: evaluationCaseResults.id });
