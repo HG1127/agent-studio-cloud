@@ -33,7 +33,7 @@ export async function listImprovementFeedback(options: {
   const query = options.query?.trim().slice(0, 200);
   const limit = Math.min(100, Math.max(1, options.limit ?? 20));
   const rows = await db
-    .select({ feedback: runFeedback, agentName: agents.name })
+    .select({ feedback: runFeedback, agentName: agents.name, agentArchivedAt: agents.archivedAt })
     .from(runFeedback)
     .innerJoin(agents, and(eq(agents.id, runFeedback.agentId), eq(agents.workspaceId, runFeedback.workspaceId)))
     .where(and(
@@ -44,11 +44,12 @@ export async function listImprovementFeedback(options: {
     ))
     .orderBy(desc(runFeedback.updatedAt))
     .limit(limit);
-  return parseQueryRows("待改进运行反馈", RunImprovementFeedbackView, rows.map(({ feedback, agentName }) => ({
+  return parseQueryRows("待改进运行反馈", RunImprovementFeedbackView, rows.map(({ feedback, agentName, agentArchivedAt }) => ({
     id: feedback.id,
     runId: feedback.runId,
     agentId: feedback.agentId,
     agentName,
+    agentArchived: agentArchivedAt !== null,
     note: feedback.note,
     evaluationCaseId: feedback.evaluationCaseId,
     updatedAt: feedback.updatedAt.toISOString(),

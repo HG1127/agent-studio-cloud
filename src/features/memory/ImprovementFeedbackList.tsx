@@ -25,8 +25,10 @@ export function ImprovementFeedbackList({ feedback }: { feedback: RunImprovement
             </div>
             <span className="flex shrink-0 items-center gap-3">
               <Link href={`/runs/${item.runId}`} className="text-xs text-blue-700 hover:underline">查看来源运行</Link>
-              {item.evaluationCaseId ? (
+              {item.evaluationCaseId && !item.agentArchived ? (
                 <Link href={`/agents/${item.agentId}`} className="text-xs text-emerald-700 hover:underline">已加入验收</Link>
+              ) : item.agentArchived ? (
+                <span className="text-xs text-gray-500">助手已停用</span>
               ) : (
                 <button type="button" disabled={pending} className="text-xs text-amber-800 hover:underline disabled:text-gray-400"
                   onClick={() => {

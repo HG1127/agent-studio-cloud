@@ -26,7 +26,7 @@ describe("运行结果反馈", () => {
       },
     });
     const user = userEvent.setup();
-    render(<RunFeedbackPanel runId={RUN_ID} agentId={AGENT_ID} initialFeedback={null} />);
+    render(<RunFeedbackPanel runId={RUN_ID} agentId={AGENT_ID} agentArchived={false} initialFeedback={null} />);
 
     await user.click(screen.getByRole("button", { name: "需要改进" }));
     expect(screen.getByRole("alert")).toHaveTextContent("请说明这次结果需要改进的地方");
@@ -44,7 +44,7 @@ describe("运行结果反馈", () => {
   it("差评可以复制真实输入为验收样例且不会重复创建", async () => {
     mocks.createRegression.mockResolvedValue({ ok: true, evaluationCaseId: CASE_ID, created: true });
     const user = userEvent.setup();
-    render(<RunFeedbackPanel runId={RUN_ID} agentId={AGENT_ID} initialFeedback={{
+    render(<RunFeedbackPanel runId={RUN_ID} agentId={AGENT_ID} agentArchived={false} initialFeedback={{
       id: FEEDBACK_ID, runId: RUN_ID, rating: "needs_improvement", note: "缺少依据",
       evaluationCaseId: null, updatedAt: "2026-09-26T00:00:00.000Z",
     }} />);
@@ -55,5 +55,15 @@ describe("运行结果反馈", () => {
     expect(screen.getByRole("status")).toHaveTextContent("已加入验收样例");
     expect(screen.getByRole("link", { name: "前往补充结果检查" })).toHaveAttribute("href", `/agents/${AGENT_ID}`);
     expect(screen.queryByRole("button", { name: "加入验收样例" })).not.toBeInTheDocument();
+  });
+
+  it("助手停用后保留反馈但不展示失效的验收入口", () => {
+    render(<RunFeedbackPanel runId={RUN_ID} agentId={AGENT_ID} agentArchived initialFeedback={{
+      id: FEEDBACK_ID, runId: RUN_ID, rating: "needs_improvement", note: "缺少依据",
+      evaluationCaseId: CASE_ID, updatedAt: "2026-09-26T00:00:00.000Z",
+    }} />);
+
+    expect(screen.getByText(/助手已停用，样例仍保留/)).toBeVisible();
+    expect(screen.queryByRole("link", { name: "前往补充结果检查" })).not.toBeInTheDocument();
   });
 });

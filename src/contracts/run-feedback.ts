@@ -29,6 +29,7 @@ export const RunImprovementFeedbackView = z.object({
   runId: z.string().uuid(),
   agentId: z.string().uuid(),
   agentName: z.string(),
+  agentArchived: z.boolean(),
   note: z.string(),
   evaluationCaseId: z.string().uuid().nullable(),
   updatedAt: z.string(),

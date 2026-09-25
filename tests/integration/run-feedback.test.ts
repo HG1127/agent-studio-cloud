@@ -66,7 +66,7 @@ describe("运行反馈闭环", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ rating: "needs_improvement", note: "缺少条款依据" });
     expect(await listImprovementFeedback({ agentId: AGENT_ID, query: "条款" })).toEqual([
-      expect.objectContaining({ runId: RUN_ID, agentName: "反馈助手", note: "缺少条款依据" }),
+      expect.objectContaining({ runId: RUN_ID, agentName: "反馈助手", agentArchived: false, note: "缺少条款依据" }),
     ]);
     expect(await listMemoryAgentOptions()).toContainEqual({ id: AGENT_ID, name: "反馈助手" });
   });

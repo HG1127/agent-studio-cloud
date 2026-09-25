@@ -226,7 +226,7 @@ export async function RunDetail({ runId }: { runId: string }) {
       ) : null}
 
       {run.status === "completed" ? (
-        <RunFeedbackPanel runId={runId} agentId={run.agentId} initialFeedback={feedback} />
+        <RunFeedbackPanel runId={runId} agentId={run.agentId} agentArchived={run.agentArchived} initialFeedback={feedback} />
       ) : null}
 
       {steps.length > 0 ? (

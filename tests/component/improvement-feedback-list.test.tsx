@@ -14,6 +14,7 @@ const feedback = {
   runId: "00000000-0000-4000-8000-000000000002",
   agentId: "00000000-0000-4000-8000-000000000003",
   agentName: "合同助手",
+  agentArchived: false,
   note: "结果缺少条款依据",
   evaluationCaseId: null,
   updatedAt: "2026-09-26T00:00:00.000Z",
@@ -45,5 +46,16 @@ describe("待改进运行反馈列表", () => {
 
     expect(screen.getByRole("link", { name: "已加入验收" })).toHaveAttribute("href", `/agents/${feedback.agentId}`);
     expect(screen.queryByRole("button", { name: "加入验收样例" })).not.toBeInTheDocument();
+  });
+
+  it("助手停用后保留改进记录但不显示失效入口", () => {
+    render(<ImprovementFeedbackList feedback={[{
+      ...feedback,
+      agentArchived: true,
+      evaluationCaseId: "00000000-0000-4000-8000-000000000004",
+    }]} />);
+
+    expect(screen.getByText("助手已停用")).toBeVisible();
+    expect(screen.queryByRole("link", { name: "已加入验收" })).not.toBeInTheDocument();
   });
 });

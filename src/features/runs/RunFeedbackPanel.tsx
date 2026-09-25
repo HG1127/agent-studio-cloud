@@ -8,10 +8,12 @@ import { createRegressionCaseFromRunFeedbackAction, saveRunFeedbackAction } from
 export function RunFeedbackPanel({
   runId,
   agentId,
+  agentArchived,
   initialFeedback,
 }: {
   runId: string;
   agentId: string;
+  agentArchived: boolean;
   initialFeedback: RunFeedbackView | null;
 }) {
   const [feedback, setFeedback] = useState(initialFeedback);
@@ -88,8 +90,12 @@ export function RunFeedbackPanel({
       {feedback?.rating === "needs_improvement" ? (
         feedback.evaluationCaseId ? (
           <p className="text-xs text-gray-600">
-            已加入验收样例。<Link href={`/agents/${agentId}`} className="text-blue-700 hover:underline">前往补充结果检查</Link>
+            已加入验收样例。{agentArchived
+              ? "助手已停用，样例仍保留在历史数据中。"
+              : <Link href={`/agents/${agentId}`} className="text-blue-700 hover:underline">前往补充结果检查</Link>}
           </p>
+        ) : agentArchived ? (
+          <p className="text-xs text-gray-600">助手已停用，无法再新增验收样例。</p>
         ) : (
           <div className="rounded-md bg-amber-50 p-3">
             <p className="text-xs text-amber-800">可复制这次真实输入为验收样例，创建后再补充期望结果，防止同类问题再次出现。</p>
