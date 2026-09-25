@@ -4,6 +4,8 @@ import {
   activeVersionDependingOnAgent,
   activeVersionDependingOnKnowledgeSource,
   inspectCollaborationVersionGraph,
+  liveRunDependingOnAgent,
+  liveRunDependingOnKnowledgeSource,
   type CollaborationVersionDependency,
 } from "@/server/domain/runtime/collaboration-dependencies";
 
@@ -136,5 +138,31 @@ describe("在线版本的传递协作依赖", () => {
       directKeys: ["agent-b:version-b"],
       versions,
     }).knowledgeSourceIds).toEqual([sourceId]);
+  });
+
+  it("识别进行中运行使用的已退役版本依赖", () => {
+    const sourceId = "00000000-0000-4000-8000-0000000000a2";
+    const versions = [
+      version({ versionId: "retired-root", agentId: "agent-a", agentName: "运行中的旧助手", manifest: manifest("agent-b", "retired-child") }),
+      version({ versionId: "retired-child", agentId: "agent-b", agentName: "旧协作助手", agentArchivedAt: new Date(), manifest: manifest("agent-c", "target-version", [sourceId]) }),
+      version({ versionId: "target-version", agentId: "agent-c", agentName: "目标助手", agentArchivedAt: new Date() }),
+    ];
+    const liveRoots = new Set(["retired-root"]);
+
+    expect(liveRunDependingOnAgent(versions, liveRoots, "agent-c"))
+      .toEqual({ agentId: "agent-a", agentName: "运行中的旧助手" });
+    expect(liveRunDependingOnKnowledgeSource(versions, liveRoots, sourceId))
+      .toEqual({ agentId: "agent-a", agentName: "运行中的旧助手" });
+  });
+
+  it("不把无关运行或运行根助手自身当作协作依赖", () => {
+    const versions = [
+      version({ versionId: "root-a", agentId: "agent-a", agentName: "助手 A", manifest: manifest("agent-b", "version-b") }),
+      version({ versionId: "version-b", agentId: "agent-b", agentName: "助手 B" }),
+    ];
+
+    expect(liveRunDependingOnAgent(versions, new Set(["other-version"]), "agent-b")).toBeNull();
+    expect(liveRunDependingOnAgent(versions, new Set(["root-a"]), "agent-a")).toBeNull();
+    expect(liveRunDependingOnKnowledgeSource(versions, new Set(["other-version"]), "missing-source")).toBeNull();
   });
 });

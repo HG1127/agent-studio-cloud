@@ -1,13 +1,13 @@
 "use server";
 
-import { and, eq, isNotNull, isNull, ne } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { AgentArchiveInput, type AgentArchiveResult } from "@/contracts/agent";
-import { agents, agentVersions, auditEvents, evaluationRuns, schedules } from "@/db/schema";
+import { agents, agentVersions, auditEvents, evaluationRuns, runs, schedules } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { auditEventValues } from "@/server/audit/event-values";
-import { activeVersionDependingOnAgent } from "@/server/domain/runtime/collaboration-dependencies";
+import { activeVersionDependingOnAgent, liveRunDependingOnAgent } from "@/server/domain/runtime/collaboration-dependencies";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 export async function setAgentArchivedAction(input: unknown): Promise<AgentArchiveResult> {
@@ -58,6 +58,20 @@ export async function setAgentArchivedAction(input: unknown): Promise<AgentArchi
           ));
         const dependent = activeVersionDependingOnAgent(dependencyVersions, parsed.data.agentId);
         if (dependent) return { kind: "in-use" as const, inUseBy: dependent.agentName };
+        const liveRuns = await tx
+          .select({ versionId: runs.versionId })
+          .from(runs)
+          .where(and(
+            eq(runs.workspaceId, DEMO_WORKSPACE_ID),
+            ne(runs.agentId, parsed.data.agentId),
+            inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"]),
+          ));
+        const liveDependent = liveRunDependingOnAgent(
+          dependencyVersions,
+          new Set(liveRuns.map((run) => run.versionId)),
+          parsed.data.agentId,
+        );
+        if (liveDependent) return { kind: "run-in-use" as const, inUseBy: liveDependent.agentName };
       }
 
       const rows = await tx
@@ -95,6 +109,9 @@ export async function setAgentArchivedAction(input: unknown): Promise<AgentArchi
     });
     if (typeof updated === "object" && updated.kind === "evaluation-running") {
       return { ok: false, error: "自动验收运行期间不能停用助手，请等待验收完成" };
+    }
+    if (typeof updated === "object" && updated.kind === "run-in-use") {
+      return { ok: false, error: `助手「${updated.inUseBy}」仍有运行中的任务需要这个协作助手，请等待运行结束后再停用` };
     }
     if (typeof updated === "object") {
       return { ok: false, error: `助手「${updated.inUseBy}」的当前版本或待验收版本仍在使用它，请先调整并重新发布` };

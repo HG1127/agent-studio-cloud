@@ -112,6 +112,44 @@ describe("知识资料归档并发保护", () => {
     expect(mocks.auditEvents).toHaveLength(0);
   });
 
+  it("旧冻结版本仍在运行时拒绝归档资料", async () => {
+    const rootVersionId = "00000000-0000-4000-8000-000000000094";
+    mocks.rows = [
+      [{ id: SOURCE_ID, name: "退款规则.md", status: "indexed", chunkCount: 3, error: null }],
+      [{
+        versionId: rootVersionId,
+        agentId: "00000000-0000-4000-8000-000000000095",
+        agentName: "运行中的旧助手",
+        status: "retired",
+        agentArchivedAt: null,
+        manifest: {
+          schemaVersion: "4.0",
+          workflowSnapshot: {
+            id: "workflow", startNodeId: "start",
+            rootAgent: { id: "00000000-0000-4000-8000-000000000095", name: "运行中的旧助手", role: "处理" },
+            nodes: {
+              start: { id: "start", title: "开始", type: "trigger", next: "done" },
+              done: { id: "done", title: "完成", type: "end", next: null },
+            },
+            memoryPolicy: { taskContext: true, longTerm: false },
+          },
+          workflowFingerprint: "fingerprint", inputContract: { fields: [] }, outputContract: { fields: [] },
+          resourceSelection: { model: { modelId: "mock", mock: true, connectionId: null } },
+          designAudit: { status: "passed", issueCount: 0, criticalCount: 0 }, knowledgeSnapshot: [SOURCE_ID],
+        },
+      }],
+      [{ versionId: rootVersionId }],
+    ];
+
+    await expect(setKnowledgeSourceArchivedAction({ sourceId: SOURCE_ID, archived: true }))
+      .resolves.toEqual({
+        ok: false,
+        error: "助手「运行中的旧助手」仍有运行中的任务需要这份资料，请等待运行结束后再归档",
+      });
+    expect(mocks.updates).toHaveLength(0);
+    expect(mocks.auditEvents).toHaveLength(0);
+  });
+
   it("锁内状态已变化时不再覆盖资料", async () => {
     mocks.rows = [[]];
 

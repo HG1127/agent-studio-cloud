@@ -131,3 +131,57 @@ export function activeVersionDependingOnKnowledgeSource(
   }
   return null;
 }
+
+export function liveRunDependingOnAgent(
+  versions: CollaborationVersionDependency[],
+  rootVersionIds: ReadonlySet<string>,
+  targetAgentId: string,
+): { agentId: string; agentName: string } | null {
+  const byKey = new Map(versions.map((version) => [`${version.agentId}:${version.versionId}`, version]));
+  const roots = versions.filter((version) => rootVersionIds.has(version.versionId) && version.agentId !== targetAgentId);
+  for (const root of roots) {
+    const pending = dependencyKeys(root.manifest);
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      const key = pending.pop()!;
+      if (visited.has(key)) continue;
+      visited.add(key);
+      const separator = key.lastIndexOf(":");
+      if (key.slice(0, separator) === targetAgentId) {
+        return { agentId: root.agentId, agentName: root.agentName };
+      }
+      const dependency = byKey.get(key);
+      if (dependency) pending.push(...dependencyKeys(dependency.manifest));
+    }
+  }
+  return null;
+}
+
+export function liveRunDependingOnKnowledgeSource(
+  versions: CollaborationVersionDependency[],
+  rootVersionIds: ReadonlySet<string>,
+  targetSourceId: string,
+): { agentId: string; agentName: string } | null {
+  const byKey = new Map(versions.map((version) => [`${version.agentId}:${version.versionId}`, version]));
+  const roots = versions.filter((version) => rootVersionIds.has(version.versionId));
+  for (const root of roots) {
+    const pending = [root];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      const key = `${current.agentId}:${current.versionId}`;
+      if (visited.has(key)) continue;
+      visited.add(key);
+      const manifest = AgentManifest.safeParse(current.manifest);
+      if (!manifest.success) continue;
+      if (manifest.data.knowledgeSnapshot.includes(targetSourceId)) {
+        return { agentId: root.agentId, agentName: root.agentName };
+      }
+      for (const dependencyKey of workflowCollaborationKeys(manifest.data.workflowSnapshot)) {
+        const dependency = byKey.get(dependencyKey);
+        if (dependency) pending.push(dependency);
+      }
+    }
+  }
+  return null;
+}

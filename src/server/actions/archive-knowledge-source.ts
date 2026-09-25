@@ -1,13 +1,13 @@
 "use server";
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { KnowledgeArchiveInput, type KnowledgeArchiveResult } from "@/contracts/knowledge";
-import { agentVersions, agents, auditEvents, knowledgeSources } from "@/db/schema";
+import { agentVersions, agents, auditEvents, knowledgeSources, runs } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { auditEventValues } from "@/server/audit/event-values";
 import { restoredKnowledgeStatus } from "@/server/domain/knowledge/source-state";
-import { activeVersionDependingOnKnowledgeSource } from "@/server/domain/runtime/collaboration-dependencies";
+import { activeVersionDependingOnKnowledgeSource, liveRunDependingOnKnowledgeSource } from "@/server/domain/runtime/collaboration-dependencies";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 export async function setKnowledgeSourceArchivedAction(input: unknown): Promise<KnowledgeArchiveResult> {
@@ -53,6 +53,19 @@ export async function setKnowledgeSourceArchivedAction(input: unknown): Promise<
           ));
         const dependent = activeVersionDependingOnKnowledgeSource(dependencyVersions, source.id);
         if (dependent) return { inUseBy: dependent.agentName };
+        const liveRuns = await tx
+          .select({ versionId: runs.versionId })
+          .from(runs)
+          .where(and(
+            eq(runs.workspaceId, DEMO_WORKSPACE_ID),
+            inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"]),
+          ));
+        const liveDependent = liveRunDependingOnKnowledgeSource(
+          dependencyVersions,
+          new Set(liveRuns.map((run) => run.versionId)),
+          source.id,
+        );
+        if (liveDependent) return { inUseBy: liveDependent.agentName, running: true };
       }
       const now = new Date();
       const rows = await tx
@@ -82,7 +95,9 @@ export async function setKnowledgeSourceArchivedAction(input: unknown): Promise<
       return rows.length > 0;
     });
     if (typeof updated === "object") {
-      return { ok: false, error: `助手「${updated.inUseBy}」的当前版本或待验收版本仍在使用这份资料，请先发布不再使用它的新版本` };
+      return updated.running
+        ? { ok: false, error: `助手「${updated.inUseBy}」仍有运行中的任务需要这份资料，请等待运行结束后再归档` }
+        : { ok: false, error: `助手「${updated.inUseBy}」的当前版本或待验收版本仍在使用这份资料，请先发布不再使用它的新版本` };
     }
     if (!updated) return { ok: false, error: "知识资料状态已经变化，请刷新页面后重试" };
     revalidatePath("/knowledge");
