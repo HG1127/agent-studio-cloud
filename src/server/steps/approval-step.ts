@@ -23,6 +23,10 @@ export interface RequestApprovalInput {
 export interface ApprovalHandle {
   approvalId: string;
   token: string;
+  recordedDecision?: {
+    decision: "approved" | "rejected";
+    note?: string;
+  };
 }
 
 export interface RecordDecisionInput {
@@ -58,7 +62,7 @@ export async function requestApproval(args: RequestApprovalInput): Promise<Appro
       throw new FatalError("运行已经结束，不能再发起确认");
     }
     const [existing] = await tx
-      .select({ id: approvals.id, status: approvals.status })
+      .select({ id: approvals.id, status: approvals.status, note: approvals.note })
       .from(approvals)
       .where(and(
         eq(approvals.runId, args.runId),
@@ -70,7 +74,7 @@ export async function requestApproval(args: RequestApprovalInput): Promise<Appro
       .orderBy(desc(approvals.createdAt))
       .limit(1);
     if (existing) {
-      if (run.status !== "waiting_approval") {
+      if (existing.status === "pending" && run.status !== "waiting_approval") {
         await tx.update(runs).set({ status: "waiting_approval", updatedAt: now }).where(eq(runs.id, args.runId));
       }
       return { row: existing, created: false };
@@ -89,7 +93,7 @@ export async function requestApproval(args: RequestApprovalInput): Promise<Appro
         reason,
         payload,
       })
-      .returning({ id: approvals.id });
+      .returning({ id: approvals.id, status: approvals.status, note: approvals.note });
     await tx.update(runs).set({ status: "waiting_approval", updatedAt: now }).where(eq(runs.id, args.runId));
     return { row: created, created: true };
   });
@@ -103,14 +107,22 @@ export async function requestApproval(args: RequestApprovalInput): Promise<Appro
       data: { approvalId: result.row.id, role },
     });
   }
-  await persistStep({
-    runId: args.runId,
-    nodeId: node.id,
-    nodeTitle: node.title,
-    nodeType: node.type,
-    status: "running",
-  });
-  return { approvalId: result.row.id, token: `approval:${result.row.id}` };
+  const recordedDecision: ApprovalHandle["recordedDecision"] = result.row.status === "approved" || result.row.status === "rejected"
+    ? {
+        decision: result.row.status,
+        ...(result.row.note ? { note: result.row.note } : {}),
+      }
+    : undefined;
+  if (!recordedDecision) {
+    await persistStep({
+      runId: args.runId,
+      nodeId: node.id,
+      nodeTitle: node.title,
+      nodeType: node.type,
+      status: "running",
+    });
+  }
+  return { approvalId: result.row.id, token: `approval:${result.row.id}`, recordedDecision };
 }
 
 export async function recordDecision(args: RecordDecisionInput): Promise<{

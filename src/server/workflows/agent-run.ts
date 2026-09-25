@@ -425,9 +425,8 @@ export async function agentRunWorkflow(
       }
       if (node.type === "human") {
         await persistContext(runId, outputs);
-        const { approvalId, token } = await requestApproval({ runId, node, outputs, nodes: draft.nodes });
-        const hook = createHook<{ decision: "approved" | "rejected"; note?: string }>({ token });
-        const decision = await hook;
+        const { approvalId, token, recordedDecision: storedDecision } = await requestApproval({ runId, node, outputs, nodes: draft.nodes });
+        const decision = storedDecision ?? await createHook<{ decision: "approved" | "rejected"; note?: string }>({ token });
         const recordedDecision = await recordDecision({ runId, node, approvalId, decision });
         outputs[node.id] = recordedDecision;
         lastHumanDecision = decision.decision === "rejected" ? recordedDecision : null;

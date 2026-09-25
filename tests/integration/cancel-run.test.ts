@@ -354,15 +354,19 @@ describe("取消运行", () => {
     const args = { runId: RUN_ID, node: draft.nodes.confirm, outputs: {}, nodes: draft.nodes };
 
     const first = await requestApproval(args);
-    await db.update(approvals).set({ status: "approved", decidedAt: new Date() }).where(eq(approvals.id, first.approvalId));
+    await db.update(approvals).set({ status: "approved", note: "已经确认", decidedAt: new Date() }).where(eq(approvals.id, first.approvalId));
+    await db.update(runs).set({ status: "running" }).where(eq(runs.id, RUN_ID));
     const retried = await requestApproval(args);
 
     expect(retried.approvalId).toBe(first.approvalId);
+    expect(retried.recordedDecision).toEqual({ decision: "approved", note: "已经确认" });
     const rows = await db.select().from(approvals).where(and(
       eq(approvals.runId, RUN_ID), eq(approvals.nodeId, "confirm"),
     ));
     expect(rows).toHaveLength(1);
     expect(rows[0].status).toBe("approved");
+    const [run] = await db.select({ status: runs.status }).from(runs).where(eq(runs.id, RUN_ID));
+    expect(run.status).toBe("running");
     expect(appendTraceMock.mock.calls.filter(([event]) => event.kind === "approval.requested")).toHaveLength(1);
   });
 
