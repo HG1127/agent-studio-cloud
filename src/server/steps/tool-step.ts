@@ -8,6 +8,7 @@ import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 import { invokeHttpTool } from "@/server/tools/invoke-http-tool";
 import { getToolRegistration } from "@/server/tools/tool-registry";
+import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding";
 
 export interface RunToolStepInput {
   runId: string;
@@ -72,9 +73,13 @@ export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Re
   } else {
     const registration = getToolRegistration(tool.registryToolId);
     if (!registration) return reject(`步骤「${node.title}」绑定的业务工具未在服务端配置`);
+    const compatibilityIssue = toolRegistrationCompatibilityIssue(tool, registration);
+    if (compatibilityIssue) return reject(`步骤「${node.title}」${compatibilityIssue}`);
     const requestPayload = { action: tool.action || registration.action, input: args.input, outputs: args.outputs };
     const inputSchemaError = validateJsonObjectSchema(requestPayload, tool.inputSchema);
     if (inputSchemaError) return reject(`工具输入不符合字段契约：${inputSchemaError}`);
+    const currentInputSchemaError = validateJsonObjectSchema(requestPayload, registration.inputSchema);
+    if (currentInputSchemaError) return reject(`工具输入不符合当前服务端字段契约：${currentInputSchemaError}`);
     const invoked = await invokeHttpTool({
       tool: registration,
       // 同一次步骤重试时 stepId 稳定；循环再次调用同一节点时 stepId 会变化。
@@ -86,6 +91,8 @@ export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Re
     if (!invoked.ok) return reject(invoked.error, invoked.retryable);
     const schemaError = validateJsonObjectSchema(invoked.output, tool.outputSchema);
     if (schemaError) return reject(`业务系统回执不符合字段契约：${schemaError}`);
+    const currentSchemaError = validateJsonObjectSchema(invoked.output, registration.outputSchema);
+    if (currentSchemaError) return reject(`业务系统回执不符合当前服务端字段契约：${currentSchemaError}`);
     receipt = { ok: true, ...invoked.output };
   }
   await persistStep({

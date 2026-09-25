@@ -30,6 +30,8 @@ import { qualityOutputReferenceIssue } from "@/server/domain/runtime/quality-che
 import { workflowCollaborationKeys } from "@/server/domain/import-agent";
 import { inspectCollaborationVersionGraph } from "@/server/domain/runtime/collaboration-dependencies";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import type { WorkflowNode } from "@/contracts/workflow";
+import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding";
 
 // 发布快照允许进入运行引擎的完整节点类型；未知类型必须在创建 run 前拒绝。
 const SUPPORTED_NODE_TYPES: ReadonlySet<string> = new Set([
@@ -55,6 +57,15 @@ const CONDITION_OPERATORS: ReadonlySet<string> = new Set(["eq", "neq", "contains
 function runtimeDataPathOk(path: string | null | undefined): boolean {
   const parts = path ? safeDataPathSegments(path) : null;
   return Boolean(parts && ["input", "variables", "context"].includes(parts[0]));
+}
+
+function toolExecutionIssue(node: WorkflowNode): string | null {
+  const tool = node.tool;
+  if (!tool || tool.unresolved === true) return "工具尚未绑定";
+  if (tool.registryToolId === "demo" || tool.protocol === "demo") return null;
+  const registration = getToolRegistration(tool.registryToolId);
+  if (!registration) return "绑定的业务工具未在服务端配置";
+  return toolRegistrationCompatibilityIssue(tool, registration);
 }
 
 function ownsRunStartLease(token: string) {
@@ -339,9 +350,8 @@ async function validateRuntimePreflight(args: {
       continue;
     }
     if (node.type === "tool") {
-      const demoBound = node.tool && (node.tool.registryToolId === "demo" || node.tool.protocol === "demo");
-      const realBound = node.tool && getToolRegistration(node.tool.registryToolId) !== null;
-      if (!node.tool || node.tool.unresolved === true || (!demoBound && !realBound)) unsupported.push(node.title);
+      const issue = toolExecutionIssue(node);
+      if (issue) unsupported.push(`${node.title}（${issue}）`);
     }
     if (node.type === "knowledge" && !node.knowledge?.space) unsupported.push(node.title);
     if (node.type === "condition") {
@@ -385,9 +395,8 @@ async function validateRuntimePreflight(args: {
       for (const branch of prepared.branches) {
         for (const step of branch.steps) {
           if (step.type === "tool") {
-            const demoBound = step.tool && (step.tool.registryToolId === "demo" || step.tool.protocol === "demo");
-            const realBound = step.tool && getToolRegistration(step.tool.registryToolId) !== null;
-            if (!step.tool || step.tool.unresolved === true || (!demoBound && !realBound)) unsupported.push(`${node.title} / ${branch.label} / ${step.title}`);
+            const issue = toolExecutionIssue(step);
+            if (issue) unsupported.push(`${node.title} / ${branch.label} / ${step.title}（${issue}）`);
           }
           if (step.type === "knowledge" && !step.knowledge?.space) unsupported.push(`${node.title} / ${branch.label} / ${step.title}`);
           if (step.type === "memory" && !step.memory) unsupported.push(`${node.title} / ${branch.label} / ${step.title}（经验设置不完整）`);
@@ -404,9 +413,8 @@ async function validateRuntimePreflight(args: {
       }
       for (const step of prepared.steps) {
         if (step.type === "tool") {
-          const demoBound = step.tool && (step.tool.registryToolId === "demo" || step.tool.protocol === "demo");
-          const realBound = step.tool && getToolRegistration(step.tool.registryToolId) !== null;
-          if (!step.tool || step.tool.unresolved === true || (!demoBound && !realBound)) unsupported.push(`${node.title} / ${step.title}`);
+          const issue = toolExecutionIssue(step);
+          if (issue) unsupported.push(`${node.title} / ${step.title}（${issue}）`);
         }
         if (step.type === "knowledge" && !step.knowledge?.space) unsupported.push(`${node.title} / ${step.title}`);
         if (step.type === "memory" && !step.memory) unsupported.push(`${node.title} / ${step.title}（经验设置不完整）`);

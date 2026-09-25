@@ -81,8 +81,16 @@ describe("真实工具步骤", () => {
         },
       },
     });
+    mocks.getToolRegistration.mockReturnValue({ ...registration, inputSchema: strictNode.tool!.inputSchema });
     await expect(runToolStep({ runId: "run-1", node: strictNode, input: {}, outputs: {} }))
       .rejects.toThrow("工具输入不符合字段契约");
+    expect(mocks.invokeHttpTool).not.toHaveBeenCalled();
+  });
+
+  it("服务端工具权限或契约变化后拒绝旧冻结版本", async () => {
+    mocks.getToolRegistration.mockReturnValue({ ...registration, scope: "customer.admin" });
+    await expect(runToolStep({ runId: "run-1", node, input: {}, outputs: {} }))
+      .rejects.toThrow("业务工具配置已变化，请重新发布助手");
     expect(mocks.invokeHttpTool).not.toHaveBeenCalled();
   });
 
