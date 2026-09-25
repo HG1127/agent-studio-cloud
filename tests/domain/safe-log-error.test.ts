@@ -23,4 +23,24 @@ describe("安全错误日志摘要", () => {
     expect(safe.code).toBe("503");
     expect(JSON.stringify(safe)).not.toContain("不会输出");
   });
+
+  it("隐藏数据库查询文本和参数并保留嵌套错误码", () => {
+    const error = Object.assign(
+      new Error("Failed query: insert into agents values ($1)\nparams: 客户业务机密"),
+      {
+        name: "DrizzleQueryError",
+        cause: { code: "23505", detail: "客户业务机密" },
+      },
+    );
+
+    const safe = safeErrorForLog(error);
+
+    expect(safe).toEqual({
+      name: "DrizzleQueryError",
+      message: "数据库操作失败",
+      code: "23505",
+    });
+    expect(JSON.stringify(safe)).not.toContain("客户业务机密");
+    expect(JSON.stringify(safe)).not.toContain("insert into");
+  });
 });
