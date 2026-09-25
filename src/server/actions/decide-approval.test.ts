@@ -5,20 +5,34 @@ const mocks = vi.hoisted(() => ({
   resumeHook: vi.fn(),
   revalidatePath: vi.fn(),
   updates: 0,
+  returningRows: [] as unknown[][],
+  transactions: 0,
 }));
 
 vi.mock("@/lib/db", () => ({
-  db: {
+  db: (() => {
+    const client = {
     select: () => ({
       from: () => ({
-        where: () => ({ limit: async () => mocks.rows.shift() ?? [] }),
+        where: () => ({
+          limit: async () => mocks.rows.shift() ?? [],
+          for: () => ({ limit: async () => mocks.rows.shift() ?? [] }),
+        }),
       }),
     }),
     update: () => {
       mocks.updates += 1;
-      return { set: () => ({ where: () => ({ returning: async () => [] }) }) };
+      return { set: () => ({ where: () => ({ returning: async () => mocks.returningRows.shift() ?? [] }) }) };
     },
-  },
+    };
+    return {
+      ...client,
+      transaction: async (run: (tx: typeof client) => unknown) => {
+        mocks.transactions += 1;
+        return run(client);
+      },
+    };
+  })(),
 }));
 vi.mock("workflow/api", () => ({ resumeHook: mocks.resumeHook }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
@@ -34,6 +48,8 @@ beforeEach(() => {
   mocks.resumeHook.mockReset().mockResolvedValue(undefined);
   mocks.revalidatePath.mockReset();
   mocks.updates = 0;
+  mocks.returningRows = [];
+  mocks.transactions = 0;
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -89,5 +105,20 @@ describe("已记录确认的运行恢复", () => {
 
     expect(result).toEqual({ ok: false, error: "确认已保留，但运行暂时无法继续，请稍后重试" });
     expect(mocks.updates).toBe(0);
+  });
+
+  it("写入确认前重新锁定运行，取消已先完成时不再改写确认", async () => {
+    mocks.rows = [
+      [{ id: APPROVAL_ID, status: "pending", note: null }],
+      [{ agentId: AGENT_ID, status: "waiting_approval" }],
+      [{ status: "cancelled" }],
+    ];
+
+    const result = await decideApprovalAction(RUN_ID, APPROVAL_ID, { decision: "approved" });
+
+    expect(result).toEqual({ ok: false, error: "这次运行已不再等待确认，请刷新页面查看最新状态" });
+    expect(mocks.transactions).toBe(1);
+    expect(mocks.updates).toBe(0);
+    expect(mocks.resumeHook).not.toHaveBeenCalled();
   });
 });

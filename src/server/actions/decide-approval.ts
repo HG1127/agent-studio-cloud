@@ -64,16 +64,28 @@ export async function decideApprovalAction(
     const approved = parsedInput.data.decision === "approved";
     const note = parsedInput.data.note?.trim() ? parsedInput.data.note.trim() : null;
     const now = new Date();
-    const claimed = await db
-      .update(approvals)
-      .set({ status: approved ? "approved" : "rejected", note, decidedAt: now, updatedAt: now })
-      .where(and(
-        eq(approvals.id, approvalId),
-        eq(approvals.runId, runId),
-        eq(approvals.workspaceId, DEMO_WORKSPACE_ID),
-        eq(approvals.status, "pending"),
-      ))
-      .returning({ id: approvals.id });
+    const claimed = await db.transaction(async (tx) => {
+      const [lockedRun] = await tx
+        .select({ status: runs.status })
+        .from(runs)
+        .where(and(eq(runs.id, runId), eq(runs.workspaceId, DEMO_WORKSPACE_ID)))
+        .for("update")
+        .limit(1);
+      if (lockedRun?.status !== "waiting_approval") return null;
+      return tx
+        .update(approvals)
+        .set({ status: approved ? "approved" : "rejected", note, decidedAt: now, updatedAt: now })
+        .where(and(
+          eq(approvals.id, approvalId),
+          eq(approvals.runId, runId),
+          eq(approvals.workspaceId, DEMO_WORKSPACE_ID),
+          eq(approvals.status, "pending"),
+        ))
+        .returning({ id: approvals.id });
+    });
+    if (claimed === null) {
+      return { ok: false, error: "这次运行已不再等待确认，请刷新页面查看最新状态" };
+    }
     if (claimed.length === 0) {
       return { ok: false, error: "这条确认已经处理过，请勿重复提交" };
     }
