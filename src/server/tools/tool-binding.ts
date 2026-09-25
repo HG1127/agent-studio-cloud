@@ -1,4 +1,6 @@
-import type { WorkflowNode } from "@/contracts/workflow";
+import type { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
+import { prepareParallelBranches } from "@/server/domain/runtime/parallel-runtime";
+import { prepareSubflow } from "@/server/domain/runtime/subflow-runtime";
 import type { ToolRegistration } from "@/server/tools/tool-registry";
 
 type ToolSnapshot = NonNullable<WorkflowNode["tool"]>;
@@ -23,6 +25,54 @@ export function toolRegistrationCompatibilityIssue(
     || canonicalJson(snapshot.outputSchema) !== canonicalJson(registration.outputSchema)
   ) {
     return "绑定的业务工具配置已变化，请重新发布助手";
+  }
+  return null;
+}
+
+function toolNodeRegistrationIssue(
+  node: WorkflowNode,
+  getRegistration: (id: string | null | undefined) => ToolRegistration | null,
+): string | null {
+  const tool = node.tool;
+  if (!tool || tool.unresolved === true) return "工具尚未绑定";
+  if (tool.registryToolId === "demo" || tool.protocol === "demo") return null;
+  const registration = getRegistration(tool.registryToolId);
+  if (!registration) return "绑定的业务工具未在服务端配置";
+  return toolRegistrationCompatibilityIssue(tool, registration);
+}
+
+export function workflowToolRegistrationIssue(
+  draft: WorkflowDraft,
+  getRegistration: (id: string | null | undefined) => ToolRegistration | null,
+): string | null {
+  const check = (node: WorkflowNode, label: string) => {
+    if (node.type !== "tool") return null;
+    const issue = toolNodeRegistrationIssue(node, getRegistration);
+    return issue ? `步骤「${label}」${issue}` : null;
+  };
+  for (const node of Object.values(draft.nodes)) {
+    const directIssue = check(node, node.title);
+    if (directIssue) return directIssue;
+    if (node.type === "parallel") {
+      const prepared = prepareParallelBranches(node);
+      if (prepared.ok) {
+        for (const branch of prepared.branches) {
+          for (const step of branch.steps) {
+            const issue = check(step, `${node.title} / ${branch.label} / ${step.title}`);
+            if (issue) return issue;
+          }
+        }
+      }
+    }
+    if (node.type === "subflow") {
+      const prepared = prepareSubflow(node);
+      if (prepared.ok) {
+        for (const step of prepared.steps) {
+          const issue = check(step, `${node.title} / ${step.title}`);
+          if (issue) return issue;
+        }
+      }
+    }
   }
   return null;
 }

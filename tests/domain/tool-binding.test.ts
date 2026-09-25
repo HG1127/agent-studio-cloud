@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { WorkflowNode } from "@/contracts/workflow";
-import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding";
+import { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
+import { toolRegistrationCompatibilityIssue, workflowToolRegistrationIssue } from "@/server/tools/tool-binding";
 import type { ToolRegistration } from "@/server/tools/tool-registry";
 
 const node = WorkflowNode.parse({
@@ -47,5 +47,32 @@ describe("冻结工具绑定", () => {
   ])("拒绝服务端%s发生变化", (_label, change) => {
     expect(toolRegistrationCompatibilityIssue(node.tool!, { ...registration, ...change }))
       .toBe("绑定的业务工具配置已变化，请重新发布助手");
+  });
+
+  it("发布前检查并行工作和子流程内的工具绑定", () => {
+    const draft = WorkflowDraft.parse({
+      id: "workflow",
+      startNodeId: "start",
+      rootAgent: { id: "agent", name: "助手", role: "处理" },
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "parallel" },
+        parallel: {
+          id: "parallel", title: "并行处理", type: "parallel", next: "done",
+          parallel: {
+            strategy: "all", failurePolicy: "fail_fast",
+            branches: [
+              { id: "left", label: "左侧", steps: [{ ...node, id: "tool_left" }] },
+              { id: "right", label: "右侧", steps: [{ id: "ai_right", title: "整理", type: "ai" }] },
+            ],
+          },
+        },
+        done: { id: "done", title: "完成", type: "end", next: null },
+      },
+      variables: [],
+      memoryPolicy: { taskContext: true, longTerm: false },
+      ui: { positions: {} },
+    });
+    const issue = workflowToolRegistrationIssue(draft, () => ({ ...registration, action: "delete_customer" }));
+    expect(issue).toBe("步骤「并行处理 / 左侧 / 更新客户资料」绑定的业务工具配置已变化，请重新发布助手");
   });
 });
