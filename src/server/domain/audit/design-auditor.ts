@@ -435,6 +435,9 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
       if (bs.length < 1) {
         issues.push(issue("critical", "logic", "条件节点没有分支", `「${n.title}」没有配置条件结果。`, { nodeId: id, fixable: true, code: "condition_empty" }));
       }
+      if (!n.condition?.source?.trim() && bs.some((branch) => !branch.rules?.length)) {
+        issues.push(issue("critical", "data", "条件节点没有取值来源", `「${n.title}」包含直接比较分支，但没有选择要判断的数据。`, { nodeId: id, fixable: true, code: "condition_source" }));
+      }
       const targets = bs.map((b) => b.next).filter(Boolean);
       if (new Set(targets).size !== targets.length) {
         issues.push(issue("warning", "logic", "多个条件落到同一路径", `「${n.title}」的多个条件结果指向相同节点，可能存在冗余。`, { nodeId: id, fixable: true, code: "condition_duplicate" }));

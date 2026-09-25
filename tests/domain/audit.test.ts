@@ -105,6 +105,24 @@ describe("直测：结构性检查", () => {
     });
   });
 
+  it("直接比较条件缺少取值来源时阻止发布", () => {
+    const result = auditWorkflow({
+      startNodeId: "start",
+      rootAgent: { id: "agent" },
+      memoryPolicy: { taskContext: true, longTerm: false },
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "condition" },
+        condition: {
+          id: "condition", title: "判断状态", type: "condition",
+          condition: { source: null, branches: [{ label: "通过", value: "ok", next: "done" }], defaultNext: "done" },
+        },
+        done: { id: "done", title: "结束", type: "end", next: null },
+      },
+    });
+
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: "condition_source", severity: "critical" }));
+  });
+
   it("condition 无 defaultNext：condition_default warning，issue 全字段含稳定 id 精确断言", () => {
     const out = auditWorkflow(conditionDraft, {});
     const defaults = out.issues.filter((x) => x.code === "condition_default");
