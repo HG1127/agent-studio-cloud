@@ -6,3 +6,6 @@ allowBuilds:
   cbor-extract: false
 patchedDependencies:
   builtin-modules@5.0.0: patches/builtin-modules@5.0.0.patch
+overrides:
+  nanoid@5.1.6: 5.1.16
+  undici@7.28.0: 7.29.1
