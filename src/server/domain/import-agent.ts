@@ -1,5 +1,6 @@
 import { AgentImportFile } from "@/contracts/agent";
 import type { WorkflowDraft } from "@/contracts/workflow";
+import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
 
 export const MAX_AGENT_IMPORT_BYTES = 5 * 1024 * 1024;
 
@@ -100,12 +101,11 @@ export function rebindImportedWorkflow(args: {
   const nodes = Object.fromEntries(Object.entries(args.workflow.nodes).map(
     ([id, node]) => [id, rebindNode(node, args.validCollaborationKeys)],
   )) as WorkflowDraft["nodes"];
-  return {
+  return bindWorkflowRootAgent({
     ...args.workflow,
     versionId: null,
-    rootAgent: { ...args.workflow.rootAgent, id: args.agentId, name: args.agentName },
     nodes,
-  };
+  }, { id: args.agentId, name: args.agentName });
 }
 
 export function normalizeAgentImport(input: unknown): NormalizedAgentImport | null {

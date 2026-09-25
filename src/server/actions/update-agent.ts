@@ -8,6 +8,7 @@ import { agents, auditEvents, workflowDefinitions } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { auditEventValues } from "@/server/audit/event-values";
+import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
 
 export async function updateAgentAction(input: unknown): Promise<AgentUpdateResult> {
   const parsed = AgentUpdateInput.safeParse(input);
@@ -38,7 +39,7 @@ export async function updateAgentAction(input: unknown): Promise<AgentUpdateResu
         .where(and(eq(agents.id, agent.id), eq(agents.workspaceId, DEMO_WORKSPACE_ID)));
       await tx
         .update(workflowDefinitions)
-        .set({ draft: { ...draft.data, rootAgent: { ...draft.data.rootAgent, name: parsed.data.name } }, updatedAt: now })
+        .set({ draft: bindWorkflowRootAgent(draft.data, { id: agent.id, name: parsed.data.name }), updatedAt: now })
         .where(and(eq(workflowDefinitions.id, definition.id), eq(workflowDefinitions.workspaceId, DEMO_WORKSPACE_ID)));
       await tx.insert(auditEvents).values(auditEventValues({
         workspaceId: DEMO_WORKSPACE_ID,

@@ -12,6 +12,7 @@ import { auditEventValues } from "@/server/audit/event-values";
 import { validateOutputContract } from "@/server/domain/runtime/output-contract";
 import { validateWaitContracts } from "@/server/domain/runtime/wait-contract";
 import { validateWorkflowRoutes } from "@/server/domain/runtime/workflow-routes";
+import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
 
 export async function saveWorkflowAction(agentId: string, draft: WorkflowDraft): Promise<SaveWorkflowResult> {
   if (!z.string().uuid().safeParse(agentId).success) {
@@ -48,7 +49,7 @@ export async function saveWorkflowAction(agentId: string, draft: WorkflowDraft):
       await tx
         .update(workflowDefinitions)
         .set({
-          draft: { ...parsed.data, rootAgent: { ...parsed.data.rootAgent, name: agent.name } },
+          draft: bindWorkflowRootAgent(parsed.data, { id: agentId, name: agent.name }),
           updatedAt: new Date(),
         })
         .where(and(eq(workflowDefinitions.id, definition.id), eq(workflowDefinitions.workspaceId, DEMO_WORKSPACE_ID)));

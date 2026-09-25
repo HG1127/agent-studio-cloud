@@ -10,6 +10,7 @@ import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { isUniqueViolation } from "@/server/unique-violation";
 import { auditEventValues } from "@/server/audit/event-values";
+import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
 
 export async function restoreVersionAction(agentId: string, versionId: string): Promise<RestoreVersionResult> {
   if (!z.string().uuid().safeParse(agentId).success || !z.string().uuid().safeParse(versionId).success) {
@@ -36,6 +37,10 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
     if (source.status !== "retired") return { ok: false, error: "只有曾经上线的历史版本才能恢复为当前版本" };
     const manifest = AgentManifest.safeParse(source.manifest);
     if (!manifest.success) return { ok: false, error: "历史版本格式过旧，无法直接恢复" };
+    const restoredManifest = {
+      ...manifest.data,
+      workflowSnapshot: bindWorkflowRootAgent(manifest.data.workflowSnapshot, agent),
+    };
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
@@ -54,7 +59,7 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
             createdBy: DEMO_USER_ID,
             version: (row?.maxVersion ?? 0) + 1,
             status: "production",
-            manifest: manifest.data,
+            manifest: restoredManifest,
           }).returning({
             id: agentVersions.id,
             version: agentVersions.version,

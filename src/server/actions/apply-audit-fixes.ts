@@ -10,6 +10,7 @@ import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { applySafeAuditFixes } from "@/server/domain/audit/safe-audit-fixes";
 import { auditEventValues } from "@/server/audit/event-values";
+import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
 
 export async function applyAuditFixesAction(agentId: string): Promise<AuditFixActionResult> {
   if (!z.string().uuid().safeParse(agentId).success) return { ok: false, error: "助手信息不正确，请刷新页面后重试" };
@@ -33,7 +34,7 @@ export async function applyAuditFixesAction(agentId: string): Promise<AuditFixAc
       if (result.applied.length === 0) return { kind: "nothing-fixable" as const };
       await tx
         .update(workflowDefinitions)
-        .set({ draft: result.draft, updatedAt: new Date() })
+        .set({ draft: bindWorkflowRootAgent(result.draft, agent), updatedAt: new Date() })
         .where(and(eq(workflowDefinitions.id, definition.id), eq(workflowDefinitions.workspaceId, DEMO_WORKSPACE_ID)));
       await tx.insert(auditEvents).values(auditEventValues({
         workspaceId: DEMO_WORKSPACE_ID,

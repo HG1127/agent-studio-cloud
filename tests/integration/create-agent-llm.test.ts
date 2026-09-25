@@ -57,6 +57,7 @@ async function createDraft() {
   if (!result.ok) throw new Error(result.error);
   const [row] = await db.select().from(workflowDefinitions).where(eq(workflowDefinitions.agentId, result.agentId));
   expect(row.workspaceId).toBe(fixture.workspaceId);
+  expect(row.draft.rootAgent).toMatchObject({ id: result.agentId, name: input.name });
   return row.draft;
 }
 

@@ -15,6 +15,7 @@ import { CompileStepListSchema, buildCompilePrompt, extractJsonObject, shouldUse
 import { db } from "@/lib/db";
 import { listToolCompilerCapabilities } from "@/server/tools/tool-registry";
 import { auditEventValues } from "@/server/audit/event-values";
+import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
 
 async function resolveCompileModel(): Promise<{ baseUrl: string; apiKey: string; modelId: string } | null> {
   const [connection] = await db.select({
@@ -87,11 +88,12 @@ export async function createAgentAction(input: AgentCreateInput): Promise<Create
           intentText,
         })
         .returning({ id: agents.id });
+      const storedDraft = bindWorkflowRootAgent(draft, { id: created.id, name });
       await tx.insert(workflowDefinitions).values({
         agentId: created.id,
         workspaceId: DEMO_WORKSPACE_ID,
         createdBy: DEMO_USER_ID,
-        draft,
+        draft: storedDraft,
       });
       await tx.insert(auditEvents).values(auditEventValues({
         workspaceId: DEMO_WORKSPACE_ID,
@@ -100,7 +102,7 @@ export async function createAgentAction(input: AgentCreateInput): Promise<Create
         targetType: "agent",
         targetId: created.id,
         summary: `创建助手「${name}」`,
-        data: { nodeCount: Object.keys(draft.nodes).length },
+        data: { nodeCount: Object.keys(storedDraft.nodes).length },
       }));
       return created.id;
     });

@@ -80,7 +80,7 @@ describe("助手与流程并发写入", () => {
     expect(result).toEqual({ ok: true });
     expect(mocks.lock).toHaveBeenCalledOnce();
     expect(mocks.updates).toHaveLength(1);
-    expect(mocks.updates[0].value.draft).toMatchObject({ rootAgent: { name: "当前名称" } });
+    expect(mocks.updates[0].value.draft).toMatchObject({ rootAgent: { id: AGENT_ID, name: "当前名称" } });
     expect(mocks.inserts).toHaveLength(1);
   });
 
@@ -119,7 +119,7 @@ describe("助手与流程并发写入", () => {
     expect(result).toEqual({ ok: true });
     expect(mocks.lock).toHaveBeenCalledOnce();
     expect(mocks.updates).toHaveLength(2);
-    expect(mocks.updates[1].value.draft).toMatchObject({ rootAgent: { name: "新名称" } });
+    expect(mocks.updates[1].value.draft).toMatchObject({ rootAgent: { id: AGENT_ID, name: "新名称" } });
     expect(mocks.inserts).toHaveLength(1);
   });
 
@@ -138,7 +138,7 @@ describe("助手与流程并发写入", () => {
     expect(result).toMatchObject({ ok: true, applied: ["补充安全边界"] });
     expect(mocks.lock).toHaveBeenCalledOnce();
     expect(mocks.updates).toHaveLength(1);
-    expect(mocks.updates[0].value.draft).toMatchObject({ rootAgent: { role: "已修复" } });
+    expect(mocks.updates[0].value.draft).toMatchObject({ rootAgent: { id: AGENT_ID, name: "需要修复的助手", role: "已修复" } });
     expect(mocks.inserts).toHaveLength(1);
   });
 });

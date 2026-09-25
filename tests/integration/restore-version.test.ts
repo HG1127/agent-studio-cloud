@@ -97,5 +97,11 @@ describe("恢复历史版本", () => {
       .from(agentVersions)
       .where(and(eq(agentVersions.id, CURRENT_ID), eq(agentVersions.agentId, AGENT_ID)));
     expect(oldCurrent.status).toBe("retired");
+    const [restored] = await db.select().from(agentVersions).where(eq(agentVersions.id, result.version.id));
+    expect(restored.manifest.workflowSnapshot.rootAgent).toMatchObject({
+      id: AGENT_ID,
+      name: "恢复测试助手",
+      role: "owner",
+    });
   });
 });

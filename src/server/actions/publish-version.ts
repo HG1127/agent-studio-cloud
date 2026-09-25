@@ -18,6 +18,7 @@ import { validateOutputContract } from "@/server/domain/runtime/output-contract"
 import { validateWaitContracts } from "@/server/domain/runtime/wait-contract";
 import { validateWorkflowRoutes } from "@/server/domain/runtime/workflow-routes";
 import { auditEventValues } from "@/server/audit/event-values";
+import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
 
 export async function publishVersionAction(agentId: string, modelSelection?: PublishModelSelection): Promise<PublishVersionResult> {
   if (!z.string().uuid().safeParse(agentId).success) {
@@ -46,17 +47,18 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
     if (!parsed.success) {
       return { ok: false, error: "流程草稿没有通过校验，请在画布上重新保存后再发布", issues: [] };
     }
-    const outputPathError = validateOutputContract(parsed.data.outputContract?.fields ?? [], parsed.data.nodes);
+    const draft = bindWorkflowRootAgent(parsed.data, agent);
+    const outputPathError = validateOutputContract(draft.outputContract?.fields ?? [], draft.nodes);
     if (outputPathError) {
       return { ok: false, error: outputPathError, issues: [] };
     }
-    const waitError = validateWaitContracts(parsed.data.nodes);
+    const waitError = validateWaitContracts(draft.nodes);
     if (waitError) return { ok: false, error: waitError, issues: [] };
-    const routeError = validateWorkflowRoutes(parsed.data);
+    const routeError = validateWorkflowRoutes(draft);
     if (routeError) return { ok: false, error: routeError, issues: [] };
-    const audit = auditWorkflow(parsed.data);
+    const audit = auditWorkflow(draft);
     // M1 演示发布策略：critical 门禁交给 filterPublishBlockers 裁决，豁免项随成功返回值透出给面板提醒
-    const { blocking, exempted } = filterPublishBlockers(audit.issues, parsed.data);
+    const { blocking, exempted } = filterPublishBlockers(audit.issues, draft);
     if (blocking.length > 0) {
       return {
         ok: false,
@@ -105,7 +107,7 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
       .select({ id: knowledgeSources.id })
       .from(knowledgeSources)
       .where(and(eq(knowledgeSources.workspaceId, agent.workspaceId), eq(knowledgeSources.status, "indexed"), isNull(knowledgeSources.archivedAt)));
-    const manifest = buildManifest(parsed.data, {
+    const manifest = buildManifest(draft, {
       modelId: manifestModel.modelId,
       mock: manifestModel.mock,
       connectionId: manifestModel.connectionId,
