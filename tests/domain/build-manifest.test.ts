@@ -94,6 +94,57 @@ describe("buildManifest", () => {
     expect(buildManifest(configured, options).inputContract.fields.some((field) => field.name === "input")).toBe(false);
   });
 
+  it("从条件和逐项处理路径推导真实运行输入类型", () => {
+    const configured = WorkflowDraft.parse({
+      ...draft,
+      variables: [],
+      nodes: {
+        ...draft.nodes,
+        nested_condition: {
+          id: "nested_condition", title: "判断客户等级", type: "condition", next: null,
+          condition: {
+            source: "input.customer.level", operator: "eq",
+            branches: [{ label: "重点客户", value: "vip", next: "done" }], defaultNext: "done",
+          },
+        },
+        boolean_condition: {
+          id: "boolean_condition", title: "判断是否确认", type: "condition", next: null,
+          condition: {
+            source: "input.approved", operator: "eq",
+            branches: [{ label: "已确认", value: true, next: "done" }], defaultNext: "done",
+          },
+        },
+        amount_condition: {
+          id: "amount_condition", title: "判断金额", type: "condition", next: null,
+          condition: {
+            source: "input.amount", operator: "gte",
+            branches: [{ label: "达到门槛", value: 100, next: "done" }], defaultNext: "done",
+          },
+        },
+        item_loop: {
+          id: "item_loop", title: "逐项处理订单", type: "loop", next: null,
+          loop: { collectionPath: "input.orders", itemKey: "order", maxIterations: 20, bodyNext: "done", exitNext: "done" },
+        },
+        variable_condition: {
+          id: "variable_condition", title: "判断地区", type: "condition", next: null,
+          condition: {
+            source: "variables.region", operator: "eq",
+            branches: [{ label: "华东", value: "east", next: "done" }], defaultNext: "done",
+          },
+        },
+      },
+    });
+
+    expect(buildManifest(configured, options).inputContract.fields).toEqual(expect.arrayContaining([
+      { name: "customer", required: true, type: "object" },
+      { name: "approved", required: true, type: "boolean" },
+      { name: "amount", required: true, type: "number" },
+      { name: "orders", required: true, type: "array" },
+      { name: "region", required: true, type: "string" },
+    ]));
+    expect(buildManifest(configured, options).inputContract.fields.some((field) => field.name === "input")).toBe(false);
+  });
+
   it("发布选定的模型连接冻结进 manifest；不传 connectionId 时为 null", () => {
     const withConnection = buildManifest(draft, {
       modelId: "gpt-a",

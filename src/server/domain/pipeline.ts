@@ -276,6 +276,22 @@ function inputContractFor(draft: WorkflowDraft): AgentManifest["inputContract"] 
   const fields: AgentManifest["inputContract"]["fields"] = [];
   const seen = new Set<string>();
   const inputTypes = new Set<AgentManifest["inputContract"]["fields"][number]["type"]>(["string", "number", "boolean", "object", "array"]);
+  const addInputSource = (
+    source: string | null | undefined,
+    type: AgentManifest["inputContract"]["fields"][number]["type"],
+  ) => {
+    const prefix = source?.startsWith("input.")
+      ? "input."
+      : source?.startsWith("variables.")
+        ? "variables."
+        : null;
+    if (!source || !prefix) return;
+    const path = source.slice(prefix.length).split(".").filter(Boolean);
+    const name = path[0];
+    if (!name || seen.has(name)) return;
+    seen.add(name);
+    fields.push({ name, required: true, type: path.length > 1 ? "object" : type });
+  };
   for (const variable of draft.variables ?? []) {
     if (
       variable.scope !== "run"
@@ -291,22 +307,29 @@ function inputContractFor(draft: WorkflowDraft): AgentManifest["inputContract"] 
       type: variable.type as AgentManifest["inputContract"]["fields"][number]["type"],
     });
   }
+  for (const node of Object.values(draft.nodes)) {
+    if (node.type === "condition" && node.condition) {
+      const directType = ["gt", "gte", "lt", "lte"].includes(node.condition.operator)
+        ? "number"
+        : node.condition.branches.some((branch) => typeof branch.value === "boolean")
+          ? "boolean"
+          : "string";
+      if (node.condition.branches.some((branch) => !branch.rules?.length)) {
+        addInputSource(node.condition.source, directType);
+      }
+      for (const rule of node.condition.branches.flatMap((branch) => branch.rules ?? [])) {
+        const ruleType = ["gt", "gte", "lt", "lte"].includes(rule.operator)
+          ? "number"
+          : typeof rule.value === "boolean"
+            ? "boolean"
+            : "string";
+        addInputSource(rule.source, ruleType);
+      }
+    }
+    if (node.type === "loop") addInputSource(node.loop?.collectionPath, "array");
+  }
   if (fields.length === 0) {
     fields.push({ name: "input", label: "业务输入", required: true, type: "string" });
-    seen.add("input");
-  }
-  for (const node of Object.values(draft.nodes)) {
-    if (node.type !== "condition" || !node.condition) continue;
-    const sources = [node.condition.source, ...node.condition.branches.flatMap((branch) => (branch.rules ?? []).map((rule) => rule.source))].filter(
-      (source): source is string => typeof source === "string" && source.startsWith("input."),
-    );
-    for (const source of sources) {
-      // 嵌套引用（input.a.b）收敛为首段字段：M1 输入契约只声明一层扁平字段
-      const name = source.slice("input.".length).split(".")[0];
-      if (!name || seen.has(name)) continue;
-      seen.add(name);
-      fields.push({ name, required: true, type: "string" });
-    }
   }
   return { fields };
 }
