@@ -8,7 +8,6 @@ export async function beginLoopIteration(args: {
   node: WorkflowNode;
   iteration: number;
   total: number;
-  item: unknown;
 }): Promise<void> {
   "use step";
   await persistStep({
@@ -23,7 +22,7 @@ export async function beginLoopIteration(args: {
     nodeId: args.node.id,
     kind: "loop.iteration_started",
     title: `「${args.node.title}」正在处理第 ${args.iteration}/${args.total} 项`,
-    data: { iteration: args.iteration, total: args.total, item: args.item },
+    data: { iteration: args.iteration, total: args.total },
   });
 }
 
@@ -49,6 +48,10 @@ export async function completeLoop(args: {
     detail: args.output.limited
       ? `来源共有 ${String(args.output.sourceCount ?? 0)} 项，按安全上限处理了 ${String(args.output.processedCount ?? 0)} 项`
       : `共处理 ${String(args.output.processedCount ?? 0)} 项`,
-    data: args.output,
+    data: {
+      processedCount: args.output.processedCount,
+      sourceCount: args.output.sourceCount,
+      limited: args.output.limited,
+    },
   });
 }

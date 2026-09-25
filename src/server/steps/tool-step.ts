@@ -101,7 +101,7 @@ export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Re
     nodeId: node.id,
     kind: "tool.receipt",
     title: `「${node.title}」已取得${demo ? "演示" : "业务"}回执`,
-    data: receipt,
+    data: { ok: receipt.ok === true },
   });
   return { receipt };
 }

@@ -489,7 +489,7 @@ export async function agentRunWorkflow(
             iteration: state.index,
             total: state.items.length,
           };
-          await beginLoopIteration({ runId, node, iteration: state.index, total: state.items.length, item });
+          await beginLoopIteration({ runId, node, iteration: state.index, total: state.items.length });
           currentId = loop.bodyNext;
           continue;
         }

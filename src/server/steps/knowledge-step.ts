@@ -89,7 +89,7 @@ export async function runKnowledgeStep(args: RunKnowledgeStepInput): Promise<{ r
     kind: "knowledge.receipt",
     title: `「${node.title}」已从知识库找到 ${hits.length} 条相关内容`,
     detail: truncated ? `资料较多，本次只检查了最近 ${MAX_KNOWLEDGE_SCAN_CHUNKS} 个分片` : null,
-    data: receipt,
+    data: { scannedCount: receipt.scannedCount, truncated: receipt.truncated, hitCount: receipt.hitCount },
   });
   return { receipt };
 }

@@ -45,6 +45,12 @@ export async function finishParallel(args: {
     title: args.failed
       ? args.handled ? `「${args.node.title}」保留问题后继续` : `「${args.node.title}」有工作未完成`
       : `「${args.node.title}」全部完成`,
-    data: args.output,
+    data: {
+      strategy: args.output.strategy,
+      status: args.output.status,
+      completedCount: args.output.completedCount,
+      failedCount: args.output.failedCount,
+      selectedBranchId: args.output.selectedBranchId,
+    },
   });
 }

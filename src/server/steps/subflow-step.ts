@@ -45,6 +45,10 @@ export async function finishSubflow(args: {
     title: args.failed
       ? args.handled ? `「${args.node.title}」保留问题后继续` : `「${args.node.title}」未能完成`
       : `「${args.node.title}」已完成`,
-    data: args.output,
+    data: {
+      name: args.output.name,
+      status: args.output.status,
+      expectedOutputs: args.output.expectedOutputs,
+    },
   });
 }

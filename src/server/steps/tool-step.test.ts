@@ -47,6 +47,11 @@ describe("真实工具步骤", () => {
     expect(mocks.persistStep).toHaveBeenLastCalledWith(expect.objectContaining({
       status: "succeeded", output: { ok: true, receiptId: "receipt-1" },
     }));
+    expect(mocks.appendTrace).toHaveBeenLastCalledWith(expect.objectContaining({
+      kind: "tool.receipt",
+      data: { ok: true },
+    }));
+    expect(JSON.stringify(mocks.appendTrace.mock.calls)).not.toContain("receipt-1");
   });
 
   it("保留业务系统显式返回的不成功回执供门禁拦截", async () => {

@@ -19,6 +19,14 @@ export interface AppendTraceInput {
   data?: Record<string, unknown> | null;
 }
 
+const MAX_TRACE_TITLE_LENGTH = 500;
+const MAX_TRACE_DETAIL_LENGTH = 4_000;
+
+function boundedText(value: string | null | undefined, maxLength: number): string | null {
+  if (value === null || value === undefined) return null;
+  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 1)}…`;
+}
+
 export async function appendTrace(event: AppendTraceInput): Promise<void> {
   "use step";
   const [run] = await db
@@ -36,8 +44,8 @@ export async function appendTrace(event: AppendTraceInput): Promise<void> {
     nodeId: event.nodeId ?? null,
     kind: event.kind,
     level: event.level ?? "info",
-    title: event.title,
-    detail: event.detail ?? null,
+    title: boundedText(event.title, MAX_TRACE_TITLE_LENGTH)!,
+    detail: boundedText(event.detail, MAX_TRACE_DETAIL_LENGTH),
     data: event.data ?? null,
   };
   const insertWithSeq = (seq: number) =>
