@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CreateAgentForm } from "@/features/agents/CreateAgentForm";
@@ -82,6 +82,20 @@ describe("CreateAgentForm", () => {
     await fillAndSubmit();
     expect(await screen.findByRole("alert")).toHaveTextContent("创建请求失败，请检查网络后重试");
     expect(screen.getByRole("button", { name: "创建助手" })).toBeEnabled();
+  });
+
+  it("连续提交时只创建一次助手", async () => {
+    actionMock.mockImplementation(() => new Promise(() => undefined));
+    const user = userEvent.setup();
+    render(<CreateAgentForm />);
+    await user.type(screen.getByLabelText("助手名称"), "客服助手");
+    await user.type(screen.getByLabelText(/想让助手完成什么/), INTENT_TEXT);
+    const form = screen.getByRole("button", { name: "创建助手" }).closest("form")!;
+
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+
+    await waitFor(() => expect(actionMock).toHaveBeenCalledOnce());
   });
 
   it("恢复当前标签页未提交的业务蓝图并可主动清空", async () => {

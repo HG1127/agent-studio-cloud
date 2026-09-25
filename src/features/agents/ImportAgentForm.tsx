@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { importAgentAction } from "@/server/actions/import-agent";
 
@@ -9,25 +9,26 @@ const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
 export function ImportAgentForm() {
   const router = useRouter();
   const [pending, setPending] = useState(false);
+  const importingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   async function importFile(file: File | undefined) {
-    if (!file) return;
+    if (!file || importingRef.current) return;
     if (file.size > MAX_IMPORT_BYTES) {
       setError("导入文件不能超过 2MB");
       return;
     }
+    importingRef.current = true;
     setPending(true);
     setError(null);
-    let payload: unknown;
     try {
-      payload = JSON.parse(await file.text()) as unknown;
-    } catch {
-      setError("无法读取这个 JSON 文件，请检查文件内容");
-      setPending(false);
-      return;
-    }
-    try {
+      let payload: unknown;
+      try {
+        payload = JSON.parse(await file.text()) as unknown;
+      } catch {
+        setError("无法读取这个 JSON 文件，请检查文件内容");
+        return;
+      }
       const result = await importAgentAction(payload);
       if (result.ok) {
         router.push(`/agents/${result.agentId}`);
@@ -37,6 +38,7 @@ export function ImportAgentForm() {
     } catch {
       setError("导入请求失败，请检查网络后重试");
     } finally {
+      importingRef.current = false;
       setPending(false);
     }
   }

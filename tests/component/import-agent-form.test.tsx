@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ImportAgentForm } from "@/features/agents/ImportAgentForm";
@@ -46,6 +46,18 @@ describe("ImportAgentForm", () => {
     await user.upload(screen.getByLabelText("选择助手定义文件"), new File(["{}"], "assistant.json", { type: "application/json" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("导入请求失败，请检查网络后重试");
     expect(screen.getByText("选择 JSON 文件")).toBeInTheDocument();
+  });
+
+  it("连续选择同一文件时只导入一次", async () => {
+    importMock.mockImplementation(() => new Promise(() => undefined));
+    render(<ImportAgentForm />);
+    const input = screen.getByLabelText("选择助手定义文件");
+    const file = new File(["{}"], "assistant.json", { type: "application/json" });
+
+    fireEvent.change(input, { target: { files: [file] } });
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => expect(importMock).toHaveBeenCalledOnce());
   });
 
   it("拒绝超过 2MB 的定义文件", async () => {

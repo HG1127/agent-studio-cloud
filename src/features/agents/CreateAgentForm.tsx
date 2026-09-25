@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { createAgentAction } from "@/server/actions/create-agent";
 import { notifyDraftState } from "@/lib/draft-state";
 import { readSessionValue, removeSessionValue, writeSessionValue } from "@/lib/session-storage";
@@ -25,6 +25,7 @@ export function CreateAgentForm() {
   const [outputs, setOutputs] = useState("");
   const [constraints, setConstraints] = useState("");
   const [pending, setPending] = useState(false);
+  const submittingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const dirty = [name, intentText, trigger, inputs, outputs, constraints].some((value) => value.trim());
@@ -92,6 +93,7 @@ export function CreateAgentForm() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submittingRef.current) return;
     setError(null);
     setNotice(null);
     const blueprintIntent = composeAgentBlueprintIntent({
@@ -105,6 +107,7 @@ export function CreateAgentForm() {
       setError(`完整业务蓝图不能超过 ${MAX_AGENT_INTENT_LENGTH} 个字，请精简后重试`);
       return;
     }
+    submittingRef.current = true;
     setPending(true);
     try {
       const result = await createAgentAction({ name, intentText: blueprintIntent });
@@ -117,6 +120,7 @@ export function CreateAgentForm() {
     } catch {
       setError("创建请求失败，请检查网络后重试");
     } finally {
+      submittingRef.current = false;
       setPending(false);
     }
   }
