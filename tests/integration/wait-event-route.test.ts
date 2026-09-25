@@ -50,6 +50,21 @@ async function insertWaitingRun(
 }
 
 describe("外部消息恢复接口", () => {
+  it("拒绝跨站浏览器提交且不读取运行状态", async () => {
+    const response = await POST(
+      new Request(`http://localhost/api/runs/${RUN_ID}/events/customer.profile.updated`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "https://malicious.example" },
+        body: "{}",
+      }),
+      { params: Promise.resolve({ runId: RUN_ID, eventKey: "customer.profile.updated" }) },
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ ok: false, error: "不允许从其他站点提交消息" });
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
   it("等待中的运行收到 JSON 对象后恢复匹配钩子", async () => {
     resumeHookMock.mockResolvedValue(undefined);
     await insertWaitingRun();

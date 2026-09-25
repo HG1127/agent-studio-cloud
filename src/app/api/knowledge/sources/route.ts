@@ -13,6 +13,7 @@ import {
 import { knowledgeIngestWorkflow } from "@/server/workflows/knowledge-ingest";
 import { auditEventValues } from "@/server/audit/event-values";
 import { isKnowledgeParsingStalled } from "@/server/domain/knowledge/source-state";
+import { hasCrossSiteOrigin } from "@/server/security/request-origin";
 
 export const dynamic = "force-dynamic";
 
@@ -107,8 +108,7 @@ async function reconcileDuplicateSource(sourceId: string, suppliedBlobPathname: 
 }
 
 export async function POST(req: Request) {
-  const origin = req.headers.get("origin");
-  if (origin && origin !== new URL(req.url).origin) {
+  if (hasCrossSiteOrigin(req)) {
     return Response.json({ ok: false, error: "不允许从其他站点提交资料" }, { status: 403 });
   }
   const declaredLength = Number(req.headers.get("content-length"));

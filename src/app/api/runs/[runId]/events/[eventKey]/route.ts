@@ -7,6 +7,7 @@ import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { validateJsonObjectSchema } from "@/server/domain/json-schema";
 import { getPendingWait, getPendingWaitHook } from "@/server/queries/runs";
+import { hasCrossSiteOrigin } from "@/server/security/request-origin";
 import { matchesWaitEventToken } from "@/server/security/wait-event-token";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +18,9 @@ const Params = z.object({
 });
 
 export async function POST(req: Request, { params }: { params: Promise<{ runId: string; eventKey: string }> }) {
+  if (hasCrossSiteOrigin(req)) {
+    return Response.json({ ok: false, error: "不允许从其他站点提交消息" }, { status: 403 });
+  }
   const parsedParams = Params.safeParse(await params);
   if (!parsedParams.success) {
     return Response.json({ ok: false, error: "消息参数不正确" }, { status: 400 });
