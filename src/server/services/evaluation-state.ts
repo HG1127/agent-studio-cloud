@@ -8,14 +8,21 @@ import { shouldPromoteEvaluation } from "@/server/domain/release-gate";
 const EvaluationSourceKey = z.string().regex(/^evaluation:[0-9a-f-]{36}:[0-9a-f-]{36}$/i);
 
 async function refreshEvaluationSummary(evaluationRunId: string): Promise<void> {
-  const rows = await db
-    .select({ status: evaluationCaseResults.status })
-    .from(evaluationCaseResults)
-    .where(eq(evaluationCaseResults.evaluationRunId, evaluationRunId));
-  const passedCount = rows.filter((row) => row.status === "passed").length;
-  const failedCount = rows.filter((row) => row.status === "failed").length;
-  const complete = rows.length > 0 && passedCount + failedCount === rows.length;
   await db.transaction(async (tx) => {
+    const [evaluation] = await tx
+      .select({ agentId: evaluationRuns.agentId, versionId: evaluationRuns.versionId })
+      .from(evaluationRuns)
+      .where(eq(evaluationRuns.id, evaluationRunId))
+      .for("update")
+      .limit(1);
+    if (!evaluation) return;
+    const rows = await tx
+      .select({ status: evaluationCaseResults.status })
+      .from(evaluationCaseResults)
+      .where(eq(evaluationCaseResults.evaluationRunId, evaluationRunId));
+    const passedCount = rows.filter((row) => row.status === "passed").length;
+    const failedCount = rows.filter((row) => row.status === "failed").length;
+    const complete = rows.length > 0 && passedCount + failedCount === rows.length;
     await tx
       .update(evaluationRuns)
       .set({
@@ -27,12 +34,6 @@ async function refreshEvaluationSummary(evaluationRunId: string): Promise<void> 
       })
       .where(eq(evaluationRuns.id, evaluationRunId));
     if (!complete || !shouldPromoteEvaluation({ totalCount: rows.length, passedCount, failedCount })) return;
-    const [evaluation] = await tx
-      .select({ agentId: evaluationRuns.agentId, versionId: evaluationRuns.versionId })
-      .from(evaluationRuns)
-      .where(eq(evaluationRuns.id, evaluationRunId))
-      .limit(1);
-    if (!evaluation) return;
     const promoted = await tx
       .update(agentVersions)
       .set({ status: "production", updatedAt: new Date() })

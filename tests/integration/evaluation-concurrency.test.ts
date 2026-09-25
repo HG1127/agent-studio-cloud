@@ -15,6 +15,8 @@ const AGENT_ID = "00000000-0000-4000-8000-0000000000a1";
 const VERSION_ID = "00000000-0000-4000-8000-0000000000a2";
 const CASE_ID = "00000000-0000-4000-8000-0000000000a3";
 const RUN_ID = "00000000-0000-4000-8000-0000000000a4";
+const CASE_ID_2 = "00000000-0000-4000-8000-0000000000a5";
+const RUN_ID_2 = "00000000-0000-4000-8000-0000000000a6";
 
 const manifest = AgentManifest.parse({
   schemaVersion: "4.0",
@@ -35,6 +37,7 @@ const manifest = AgentManifest.parse({
 
 afterEach(async () => {
   await db.delete(runs).where(eq(runs.id, RUN_ID));
+  await db.delete(runs).where(eq(runs.id, RUN_ID_2));
   const evaluations = await db.select({ id: evaluationRuns.id }).from(evaluationRuns).where(eq(evaluationRuns.agentId, AGENT_ID));
   for (const evaluation of evaluations) {
     await db.delete(evaluationCaseResults).where(eq(evaluationCaseResults.evaluationRunId, evaluation.id));
@@ -109,5 +112,61 @@ describe("自动验收并发启动", () => {
 
     const [result] = await db.select().from(evaluationCaseResults).where(eq(evaluationCaseResults.evaluationRunId, prepared.evaluationId));
     expect(result).toMatchObject({ status: "passed", error: null, runId: RUN_ID });
+  });
+
+  it("多个样例同时完成时汇总不会被较早的部分结果覆盖", async () => {
+    await insertFixture();
+    await db.update(evaluationCases)
+      .set({ expectations: [{ path: "answer", operator: "equals", value: "通过" }] })
+      .where(eq(evaluationCases.id, CASE_ID));
+    await db.insert(evaluationCases).values({
+      id: CASE_ID_2,
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
+      agentId: AGENT_ID,
+      name: "并发样例",
+      input: {},
+      expectations: [{ path: "answer", operator: "equals", value: "通过" }],
+    });
+    const prepared = await prepareEvaluationRun(AGENT_ID);
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+    await db.insert(runs).values([
+      {
+        id: RUN_ID,
+        workspaceId: DEMO_WORKSPACE_ID,
+        createdBy: DEMO_USER_ID,
+        agentId: AGENT_ID,
+        versionId: VERSION_ID,
+        status: "completed",
+        input: {},
+        result: { answer: "通过" },
+        sourceType: "evaluation",
+        sourceKey: `evaluation:${prepared.evaluationId}:${CASE_ID}`,
+      },
+      {
+        id: RUN_ID_2,
+        workspaceId: DEMO_WORKSPACE_ID,
+        createdBy: DEMO_USER_ID,
+        agentId: AGENT_ID,
+        versionId: VERSION_ID,
+        status: "completed",
+        input: {},
+        result: { answer: "通过" },
+        sourceType: "evaluation",
+        sourceKey: `evaluation:${prepared.evaluationId}:${CASE_ID_2}`,
+      },
+    ]);
+
+    await Promise.all([
+      completeEvaluationForRun(RUN_ID, { answer: "通过" }),
+      completeEvaluationForRun(RUN_ID_2, { answer: "通过" }),
+    ]);
+
+    const [evaluation] = await db.select().from(evaluationRuns).where(eq(evaluationRuns.id, prepared.evaluationId));
+    const [version] = await db.select().from(agentVersions).where(eq(agentVersions.id, VERSION_ID));
+    expect(evaluation).toMatchObject({ status: "completed", passedCount: 2, failedCount: 0, totalCount: 2 });
+    expect(evaluation.finishedAt).not.toBeNull();
+    expect(version.status).toBe("production");
   });
 });
