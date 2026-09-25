@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { AgentManifest } from "@/contracts/manifest";
 import { WorkflowNode } from "@/contracts/workflow";
 import { compileModelWorkflowPlan } from "@/server/domain/compile";
-import { buildHandoffInput, sanitizeHandoffValue, validateHandoffNode, validateHandoffOutput } from "@/server/domain/runtime/handoff-runtime";
+import { buildHandoffInput, sanitizeHandoffValue, validateHandoffInput, validateHandoffNode, validateHandoffOutput } from "@/server/domain/runtime/handoff-runtime";
 
 const targetManifest = AgentManifest.parse({
   schemaVersion: "4.0",
@@ -137,6 +137,13 @@ describe("助手交接运行逻辑", () => {
     typed.contract!.outputSchema = [{ name: "result.score", label: "评分", type: "number", required: true }];
     expect(validateHandoffOutput(typed, { result: { score: "高" } })).toBe("交接结果“评分”的格式不正确");
     expect(validateHandoffOutput(typed, { result: { score: 95 } })).toBeNull();
+  });
+
+  it("按冻结契约校验实际生成的交接内容", () => {
+    const node = handoffNode();
+    expect(validateHandoffInput(node, {})).toBe("交接内容缺少“brief”");
+    expect(validateHandoffInput(node, { brief: 42 })).toBe("交接内容“brief”的格式不正确");
+    expect(validateHandoffInput(node, { brief: "请继续处理" })).toBeNull();
   });
 
   it("交接契约拒绝保留字段路径", () => {

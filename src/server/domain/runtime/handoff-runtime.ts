@@ -122,16 +122,28 @@ function handoffTypeMatches(value: unknown, type: string): boolean {
   return false;
 }
 
-export function validateHandoffOutput(node: WorkflowNode, result: Record<string, unknown>): string | null {
-  for (const field of node.contract?.outputSchema ?? []) {
-    const value = readHandoffPath(result, field.name);
-    if (value === undefined || value === null) {
-      if (field.required) return `交接结果缺少“${field.label || field.name}”`;
+function validateHandoffSchema(
+  fields: NonNullable<WorkflowNode["contract"]>["inputSchema"],
+  value: Record<string, unknown>,
+  label: "交接内容" | "交接结果",
+): string | null {
+  for (const field of fields) {
+    const fieldValue = readHandoffPath(value, field.name);
+    if (fieldValue === undefined || fieldValue === null) {
+      if (field.required) return `${label}缺少“${field.label || field.name}”`;
       continue;
     }
-    if (!handoffTypeMatches(value, field.type)) {
-      return `交接结果“${field.label || field.name}”的格式不正确`;
+    if (!handoffTypeMatches(fieldValue, field.type)) {
+      return `${label}“${field.label || field.name}”的格式不正确`;
     }
   }
   return null;
+}
+
+export function validateHandoffInput(node: WorkflowNode, input: Record<string, unknown>): string | null {
+  return validateHandoffSchema(node.contract?.inputSchema ?? [], input, "交接内容");
+}
+
+export function validateHandoffOutput(node: WorkflowNode, result: Record<string, unknown>): string | null {
+  return validateHandoffSchema(node.contract?.outputSchema ?? [], result, "交接结果");
 }
