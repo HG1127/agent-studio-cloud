@@ -14,6 +14,7 @@ import { validateHandoffNode } from "@/server/domain/runtime/handoff-runtime";
 import { validateRunInput } from "@/server/domain/runtime/run-input";
 import { validateWaitContracts } from "@/server/domain/runtime/wait-contract";
 import { validateWorkflowRoutes } from "@/server/domain/runtime/workflow-routes";
+import { safeDataPathSegments } from "@/server/domain/runtime/data-path";
 import { knowledgeStepTitles, validateKnowledgeSnapshot } from "@/server/domain/runtime/knowledge-snapshot";
 import { completeEvaluationForRun } from "@/server/services/evaluation-state";
 import {
@@ -45,6 +46,12 @@ const SUPPORTED_NODE_TYPES: ReadonlySet<string> = new Set([
   "agent_call",
   "handoff",
 ]);
+const CONDITION_OPERATORS: ReadonlySet<string> = new Set(["eq", "neq", "contains", "gt", "gte", "lt", "lte", "truthy", "exists"]);
+
+function runtimeDataPathOk(path: string | null | undefined): boolean {
+  const parts = path ? safeDataPathSegments(path) : null;
+  return Boolean(parts && ["input", "variables", "context"].includes(parts[0]));
+}
 
 function ownsRunStartLease(token: string) {
   return sql<boolean>`${runs.stepStates} -> ${RUN_START_LEASE_KEY} ->> 'token' = ${token}`;
@@ -293,8 +300,20 @@ async function validateRuntimePreflight(args: {
       if (!node.tool || node.tool.unresolved === true || (!demoBound && !realBound)) unsupported.push(node.title);
     }
     if (node.type === "knowledge" && !node.knowledge?.space) unsupported.push(node.title);
-    if (node.type === "condition" && !node.condition) unsupported.push(`${node.title}（条件设置不完整）`);
-    if (node.type === "loop" && !node.loop) unsupported.push(`${node.title}（逐项处理设置不完整）`);
+    if (node.type === "condition") {
+      const condition = node.condition;
+      const invalidDirect = condition?.branches.some((branch) => !branch.rules?.length)
+        && (!runtimeDataPathOk(condition.source) || !CONDITION_OPERATORS.has(condition.operator));
+      const invalidRules = condition?.branches.some((branch) =>
+        !branch.next || branch.rules?.some((rule) => !runtimeDataPathOk(rule.source) || !CONDITION_OPERATORS.has(rule.operator)));
+      if (!condition || condition.branches.length === 0 || invalidDirect || invalidRules) unsupported.push(`${node.title}（条件设置不完整）`);
+    }
+    if (node.type === "loop" && (
+      !node.loop ||
+      !node.loop.bodyNext ||
+      !node.loop.exitNext ||
+      !runtimeDataPathOk(node.loop.collectionPath)
+    )) unsupported.push(`${node.title}（逐项处理设置不完整）`);
     if (node.type === "rule") {
       const kind = node.rule?.kind;
       if (["tool_result", "tool_receipt"].includes(kind || "")) {

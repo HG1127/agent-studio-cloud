@@ -296,6 +296,37 @@ describe("直测：结构性检查", () => {
     ]));
   });
 
+  it("条件和逐项处理的无效数据路径与断路会阻止发布", () => {
+    const result = auditWorkflow(WorkflowDraft.parse({
+      id: "invalid-runtime-paths",
+      rootAgent: { id: "agent", name: "测试助手", role: "处理" },
+      memoryPolicy: { taskContext: true, longTerm: false },
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "condition" },
+        condition: {
+          id: "condition", title: "判断状态", type: "condition",
+          condition: {
+            source: "unknown.status", operator: "mystery",
+            branches: [{ label: "继续", value: true, next: null }], defaultNext: "loop",
+          },
+        },
+        loop: {
+          id: "loop", title: "逐项处理", type: "loop",
+          loop: { collectionPath: "orders", itemKey: "order", maxIterations: 10, bodyNext: "body", exitNext: "done" },
+        },
+        body: { id: "body", title: "处理一项", type: "system", next: "loop" },
+        done: { id: "done", title: "结束", type: "end", next: null },
+      },
+    }));
+
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "condition_source_invalid", severity: "critical" }),
+      expect.objectContaining({ code: "condition_operator", severity: "critical" }),
+      expect.objectContaining({ code: "condition_target_0", severity: "critical" }),
+      expect.objectContaining({ code: "loop_collection", severity: "critical" }),
+    ]));
+  });
+
   it("隐藏的质量控制节点不会被误判为业务目标声明", () => {
     const out = auditWorkflow({
       ...deadEndDraft,

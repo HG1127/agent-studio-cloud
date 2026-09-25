@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { isConversationalOrMeta } from "@/server/domain/intent";
 import { forbiddenActionMatch, type PolicyNode } from "@/server/domain/grounding/business-policy";
+import { safeDataPathSegments } from "@/server/domain/runtime/data-path";
 
 // 旧系统 server/designAuditor.mjs 的逐行移植（设计审计 auditWorkflow，minified 展开为可读 TS）。
 // 移植边界按引用可达性逐个核实：旧版 proposeAuditFixes 不直接移植，仅保留检查逻辑；
@@ -55,7 +56,7 @@ export interface AuditConditionBranch {
   label?: unknown;
   value?: unknown;
   next?: string | null;
-  rules?: Array<{ [key: string]: unknown; source?: string | null }>;
+  rules?: Array<{ [key: string]: unknown; source?: string | null; operator?: string | null }>;
 }
 
 export interface AuditCondition {
@@ -318,6 +319,13 @@ function highImpactScope(scope: string | null = ""): boolean {
   return /send|delete|pay|payment|publish|write|offer|salary|admin/i.test(String(scope));
 }
 
+const CONDITION_OPERATORS = new Set(["eq", "neq", "contains", "gt", "gte", "lt", "lte", "truthy", "exists"]);
+
+function conditionSourceOk(source: string | null | undefined): boolean {
+  const parts = source ? safeDataPathSegments(source) : null;
+  return Boolean(parts && ["input", "variables", "context"].includes(parts[0]));
+}
+
 const SUPPORTED_INLINE_TYPES = new Set(["ai", "tool", "knowledge", "system", "memory", "agent_call", "handoff"]);
 
 function inlineRuntimeSettingIssue(step: AuditSubflowStep): { category: string; title: string; detail: string } | null {
@@ -500,6 +508,25 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
       if (!n.condition?.source?.trim() && bs.some((branch) => !branch.rules?.length)) {
         issues.push(issue("critical", "data", "条件节点没有取值来源", `「${n.title}」包含直接比较分支，但没有选择要判断的数据。`, { nodeId: id, fixable: true, code: "condition_source" }));
       }
+      if (n.condition?.source?.trim() && !conditionSourceOk(n.condition.source)) {
+        issues.push(issue("critical", "data", "条件取值来源无法读取", `「${n.title}」的判断数据必须来自运行输入、上游结果或当前循环项。`, { nodeId: id, fixable: true, code: "condition_source_invalid" }));
+      }
+      if (bs.some((branch) => !branch.rules?.length) && !CONDITION_OPERATORS.has(n.condition?.operator || "")) {
+        issues.push(issue("critical", "logic", "条件判断方式无法执行", `「${n.title}」使用了系统无法识别的判断方式。`, { nodeId: id, fixable: true, code: "condition_operator" }));
+      }
+      for (const [branchIndex, branch] of bs.entries()) {
+        if (!branch.next) {
+          issues.push(issue("critical", "flow", "条件结果没有后续步骤", `「${n.title}」的第 ${branchIndex + 1} 个结果没有连接后续步骤。`, { nodeId: id, fixable: true, code: `condition_target_${branchIndex}` }));
+        }
+        for (const [ruleIndex, rule] of (branch.rules || []).entries()) {
+          if (!conditionSourceOk(rule.source)) {
+            issues.push(issue("critical", "data", "组合条件取值来源无法读取", `「${n.title}」第 ${branchIndex + 1} 个结果的第 ${ruleIndex + 1} 条条件没有有效数据来源。`, { nodeId: id, fixable: true, code: `condition_rule_source_${branchIndex}_${ruleIndex}` }));
+          }
+          if (!CONDITION_OPERATORS.has(rule.operator || "")) {
+            issues.push(issue("critical", "logic", "组合条件判断方式无法执行", `「${n.title}」第 ${branchIndex + 1} 个结果的第 ${ruleIndex + 1} 条条件使用了未知判断方式。`, { nodeId: id, fixable: true, code: `condition_rule_operator_${branchIndex}_${ruleIndex}` }));
+          }
+        }
+      }
       const targets = bs.map((b) => b.next).filter(Boolean);
       if (new Set(targets).size !== targets.length) {
         issues.push(issue("warning", "logic", "多个条件落到同一路径", `「${n.title}」的多个条件结果指向相同节点，可能存在冗余。`, { nodeId: id, fixable: true, code: "condition_duplicate" }));
@@ -516,6 +543,10 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
       }
       if (max < 1 || max > 100) {
         issues.push(issue("critical", "recovery", "循环缺少安全上限", `「${n.title}」最大循环次数应为 1–100。`, { nodeId: id, fixable: true, code: "loop_limit" }));
+      }
+      const collectionPath = typeof n.loop?.collectionPath === "string" ? n.loop.collectionPath : "";
+      if (!conditionSourceOk(collectionPath)) {
+        issues.push(issue("critical", "data", "逐项处理没有有效列表来源", `「${n.title}」必须从运行输入、上游结果或当前循环项读取列表。`, { nodeId: id, fixable: true, code: "loop_collection" }));
       }
     }
 
