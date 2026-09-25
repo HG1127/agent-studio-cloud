@@ -33,6 +33,7 @@ import { draftRecoveryKey, restoreDraftRecovery, serializeDraftRecovery } from "
 interface FlowCanvasProps {
   agentId: string;
   draft: WorkflowDraft;
+  draftUpdatedAt: string | null;
   agentTargets: AgentTargetOption[];
   toolOptions: ToolRegistryOption[];
   knowledgeSources: KnowledgeSourceView[];
@@ -47,13 +48,14 @@ const EDGE_STYLES: Record<EdgeKind, { color: string; dashed: boolean }> = {
   timeout: { color: "#0891b2", dashed: true },
 };
 
-export function FlowCanvas({ agentId, draft: initialDraft, agentTargets, toolOptions, knowledgeSources }: FlowCanvasProps) {
+export function FlowCanvas({ agentId, draft: initialDraft, draftUpdatedAt, agentTargets, toolOptions, knowledgeSources }: FlowCanvasProps) {
   const router = useRouter();
   const [draft, setDraft] = useState(initialDraft);
   const [showControlNodes, setShowControlNodes] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [savedRevision, setSavedRevision] = useState(draftUpdatedAt);
   const [newNodeType, setNewNodeType] = useState<(typeof ADDABLE_NODE_TYPES)[number] | "">("");
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
   const markDirty = useCallback(() => {
@@ -219,9 +221,10 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets, toolOpt
     setPending(true);
     setFeedback(null);
     try {
-      const result = await saveWorkflowAction(agentId, draft);
+      const result = await saveWorkflowAction(agentId, draft, savedRevision);
       if (result.ok) {
         setFeedback({ ok: true, text: "草稿已保存" });
+        setSavedRevision(result.updatedAt);
         setDirty(false);
         removeSessionValue(draftRecoveryKey(agentId));
         router.refresh();

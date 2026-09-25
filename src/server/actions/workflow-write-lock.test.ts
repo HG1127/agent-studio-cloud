@@ -48,6 +48,7 @@ import { updateAgentAction } from "@/server/actions/update-agent";
 
 const AGENT_ID = "00000000-0000-4000-8000-000000000071";
 const DEFINITION_ID = "00000000-0000-4000-8000-000000000072";
+const DEFINITION_UPDATED_AT = new Date("2026-09-25T01:00:00.000Z");
 const draft = WorkflowDraft.parse({
   id: "draft-1",
   versionId: null,
@@ -73,15 +74,31 @@ beforeEach(() => {
 
 describe("助手与流程并发写入", () => {
   it("保存流程时锁定助手并使用数据库中的当前名称", async () => {
-    mocks.selectRows = [[{ name: "当前名称" }], [{ id: DEFINITION_ID }]];
+    mocks.selectRows = [[{ name: "当前名称" }], [{ id: DEFINITION_ID, updatedAt: DEFINITION_UPDATED_AT }]];
 
-    const result = await saveWorkflowAction(AGENT_ID, draft);
+    const result = await saveWorkflowAction(AGENT_ID, draft, DEFINITION_UPDATED_AT.toISOString());
 
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ ok: true, updatedAt: expect.any(String) });
     expect(mocks.lock).toHaveBeenCalledOnce();
     expect(mocks.updates).toHaveLength(1);
     expect(mocks.updates[0].value.draft).toMatchObject({ rootAgent: { id: AGENT_ID, name: "当前名称" } });
     expect(mocks.inserts).toHaveLength(1);
+  });
+
+  it("旧页面不会覆盖其他页面刚保存的新草稿", async () => {
+    mocks.selectRows = [[{ name: "当前名称" }], [{
+      id: DEFINITION_ID,
+      updatedAt: new Date(DEFINITION_UPDATED_AT.getTime() + 1_000),
+    }]];
+
+    const result = await saveWorkflowAction(AGENT_ID, draft, DEFINITION_UPDATED_AT.toISOString());
+
+    expect(result).toEqual({
+      ok: false,
+      error: "流程已在其他页面发生变化；你的修改仍保留在本页，请刷新核对后再保存",
+    });
+    expect(mocks.updates).toHaveLength(0);
+    expect(mocks.inserts).toHaveLength(0);
   });
 
   it("已归档或不存在的助手不能被旧页面写回流程", async () => {

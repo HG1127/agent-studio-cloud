@@ -241,4 +241,4 @@ export const RunReportFile = z.object({
 });
 export type RunReportFile = z.infer<typeof RunReportFile>;
 
-export type SaveWorkflowResult = { ok: true } | { ok: false; error: string };
+export type SaveWorkflowResult = { ok: true; updatedAt: string } | { ok: false; error: string };

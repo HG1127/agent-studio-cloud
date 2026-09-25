@@ -81,7 +81,7 @@ export default async function AgentDetailPage({
         <p className="text-sm text-gray-500">{auditStatusLine(audit)}</p>
       </header>
       {detail.draft ? (
-        <FlowCanvas agentId={agentId} draft={detail.draft} agentTargets={agentTargets} toolOptions={toolOptions}
+        <FlowCanvas agentId={agentId} draft={detail.draft} draftUpdatedAt={detail.draftUpdatedAt} agentTargets={agentTargets} toolOptions={toolOptions}
           knowledgeSources={knowledgeSources.filter((source) => source.status === "indexed")} />
       ) : (
         <section className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">
