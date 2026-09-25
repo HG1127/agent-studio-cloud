@@ -73,6 +73,7 @@ export interface PersistStepInput {
   status: PersistStepStatus;
   output?: Record<string, unknown> | null;
   error?: string | null;
+  emitTrace?: boolean;
 }
 
 // upsert run_steps（run_id+node_id 唯一）+ runs.stepStates + trace step.*；running 计一次尝试
@@ -139,19 +140,21 @@ export async function persistStep(step: PersistStepInput): Promise<void> {
     };
     await tx.update(runs).set({ stepStates: states, updatedAt: now }).where(eq(runs.id, storedStep.runId));
   });
-  await appendTrace({
-    runId: storedStep.runId,
-    nodeId: storedStep.nodeId,
-    kind: `step.${storedStep.status}`,
-    level: storedStep.status === "failed" ? "error" : "info",
-    title:
-      storedStep.status === "running"
-        ? `开始步骤「${title}」`
-        : storedStep.status === "succeeded"
-          ? `步骤「${title}」完成`
-          : `步骤「${title}」失败`,
-    detail: storedStep.error ?? null,
-  });
+  if (storedStep.emitTrace !== false) {
+    await appendTrace({
+      runId: storedStep.runId,
+      nodeId: storedStep.nodeId,
+      kind: `step.${storedStep.status}`,
+      level: storedStep.status === "failed" ? "error" : "info",
+      title:
+        storedStep.status === "running"
+          ? `开始步骤「${title}」`
+          : storedStep.status === "succeeded"
+            ? `步骤「${title}」完成`
+            : `步骤「${title}」失败`,
+      detail: storedStep.error ?? null,
+    });
+  }
   if (rejectedOutput) throw new FatalError(rejectedOutput);
 }
 

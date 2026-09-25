@@ -17,7 +17,7 @@ import { beginLoopIteration, completeLoop } from "@/server/steps/loop-step";
 import { runMemoryStep } from "@/server/steps/memory-step";
 import { runModelStep } from "@/server/steps/model-step";
 import { beginParallel, finishParallel } from "@/server/steps/parallel-step";
-import { failRun, finalizeRun, initializeRun, markRunRunning, persistContext } from "@/server/steps/run-state";
+import { failRun, finalizeRun, initializeRun, markRunRunning, persistContext, persistStep } from "@/server/steps/run-state";
 import { beginSubflow, finishSubflow } from "@/server/steps/subflow-step";
 import { runQualityGate } from "@/server/steps/quality-step";
 import { appendTrace } from "@/server/steps/trace-step";
@@ -49,6 +49,15 @@ async function recordHandledNodeFailure(args: {
 }): Promise<{ next: string; output: { status: "failed"; error: string } }> {
   if (!args.node.onErrorNext) throw args.error;
   const reason = executionFailureReason(args.error, args.fallback);
+  await persistStep({
+    runId: args.runId,
+    nodeId: args.node.id,
+    nodeTitle: args.node.title,
+    nodeType: args.node.type,
+    status: "failed",
+    error: reason,
+    emitTrace: false,
+  });
   await appendTrace({
     runId: args.runId,
     nodeId: args.node.id,

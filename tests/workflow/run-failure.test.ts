@@ -1,10 +1,10 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { start } from "workflow/api";
 import { WorkflowRunFailedError } from "workflow/errors";
 import { AgentManifest } from "@/contracts/manifest";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
-import { runs, traceEvents } from "@/db/schema";
+import { runs, runSteps, traceEvents } from "@/db/schema";
 import { db } from "@/lib/db";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 
@@ -146,6 +146,8 @@ describe("运行失败兜底", () => {
     });
     const handled = await db.select().from(traceEvents).where(eq(traceEvents.runId, runId));
     expect(handled.some((event) => event.kind === "step.failed_handled" && event.nodeId === "broken_tool")).toBe(true);
+    const [failedStep] = await db.select().from(runSteps).where(and(eq(runSteps.runId, runId), eq(runSteps.nodeId, "broken_tool"))).limit(1);
+    expect(failedStep).toMatchObject({ status: "failed", error: expect.stringContaining("未在服务端配置") });
   }, 240_000);
 
   it("逐项处理找不到列表时按未完成路径继续", async () => {
@@ -163,6 +165,8 @@ describe("运行失败兜底", () => {
     });
     const trace = await db.select().from(traceEvents).where(eq(traceEvents.runId, runId));
     expect(trace.some((event) => event.kind === "step.failed_handled" && event.nodeId === "loop")).toBe(true);
+    const [failedStep] = await db.select().from(runSteps).where(and(eq(runSteps.runId, runId), eq(runSteps.nodeId, "loop"))).limit(1);
+    expect(failedStep).toMatchObject({ status: "failed", error: expect.stringContaining("没有在") });
   }, 240_000);
 
   it("规则检查未通过时按未完成路径继续而不提前结束运行", async () => {
@@ -180,6 +184,8 @@ describe("运行失败兜底", () => {
     });
     const trace = await db.select().from(traceEvents).where(eq(traceEvents.runId, runId));
     expect(trace.some((event) => event.kind === "step.failed_handled" && event.nodeId === "verify")).toBe(true);
+    const [failedStep] = await db.select().from(runSteps).where(and(eq(runSteps.runId, runId), eq(runSteps.nodeId, "verify"))).limit(1);
+    expect(failedStep).toMatchObject({ status: "failed", error: expect.stringContaining("未取得来源步骤的系统回执") });
   }, 240_000);
 
   it("步骤抛错时 runs 写入失败终态与中文原因，SDK 侧 run 同步失败", async () => {

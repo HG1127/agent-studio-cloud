@@ -4,7 +4,7 @@
 
 ## 当前待处理
 
-- **应用数据库迁移**：在能稳定连接 Neon 直连地址的环境执行 `pnpm db:migrate`。当前待确认应用的迁移包括 `0007_faithful_thunderball.sql`（长期经验）、`0008_flippant_inertia.sql`（自动验收）、`0009_charming_killraven.sql`（核心查询索引）、`0010_modern_multiple_man.sql`（资料分页索引）、`0011_breezy_patriot.sql`（操作记录）、`0012_backfill-detail-creators.sql` 和 `0013_require-detail-creators.sql`（明细记录创建人安全回填与强制写入）；本地于 2026-09-24 至 2026-09-25 多次尝试均受连接超时或缺少前序表影响，未确认迁移成功。2026-09-25 的定向工作流测试进一步确认当前共享库的 `approvals`、`run_steps` 尚缺 `created_by`，因此 `0012` 至少尚未完整应用。
+- **应用数据库迁移**：在能稳定连接 Neon 直连地址的环境执行 `pnpm db:migrate`。当前待确认应用的迁移包括 `0007_faithful_thunderball.sql`（长期经验）、`0008_flippant_inertia.sql`（自动验收）、`0009_charming_killraven.sql`（核心查询索引）、`0010_modern_multiple_man.sql`（资料分页索引）、`0011_breezy_patriot.sql`（操作记录）、`0012_backfill-detail-creators.sql` 和 `0013_require-detail-creators.sql`（明细记录创建人安全回填与强制写入）；本地于 2026-09-24 至 2026-09-25 多次尝试均受连接超时或缺少前序表影响，未确认迁移成功。2026-09-25 的定向工作流测试进一步确认当前共享库的 `approvals`、`run_steps`、`trace_events` 尚缺 `created_by`，因此 `0012` 至少尚未完整应用。
 - **完整工作流套件的稳定数据库连接**：2026-09-25 的定向真实数据库用例可以通过，但完整套件在清理协作测试数据时出现 Neon `CONNECT_TIMEOUT`。合并前应在 CI 临时 Neon 分支重新执行 `pnpm test:workflow`，以 CI 的隔离数据库结果为准。
 - **本地浏览器端到端验收**：2026-09-25 执行 `pnpm test:e2e` 时，Next.js 与 Workflow 均已正常启动，但 `/api/health` 因当前 Neon 连接不可用返回 `503`（`db=false`、`workflow=true`），Playwright 因此未进入用例执行。请在 CI 临时 Neon 分支上重跑 `pnpm test:e2e`。
 - **GitHub 集成测试与生产迁移**：在仓库 Actions 中添加密钥 `NEON_API_KEY` 和变量 `NEON_PROJECT_ID`。CI 会据此创建并清理临时数据库分支；生产迁移工作流只允许从 `main` 手动触发，并要求输入 `MIGRATE_PRODUCTION`，执行前会保留一个 Neon 数据分支。
