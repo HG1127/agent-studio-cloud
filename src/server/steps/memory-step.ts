@@ -19,14 +19,14 @@ export async function runMemoryStep(args: {
   const memory = args.node.memory;
   if (!memory) throw new FatalError(`步骤「${args.node.title}」的经验设置不完整`);
   await persistStep({ runId: args.runId, nodeId: args.node.id, nodeTitle: args.node.title, nodeType: args.node.type, status: "running" });
-  const [run] = await db
-    .select({ workspaceId: runs.workspaceId, createdBy: runs.createdBy, agentId: runs.agentId })
-    .from(runs)
-    .where(eq(runs.id, args.runId))
-    .limit(1);
-  if (!run) throw new FatalError("找不到这次运行");
 
   if (memory.mode === "read") {
+    const [run] = await db
+      .select({ workspaceId: runs.workspaceId, agentId: runs.agentId })
+      .from(runs)
+      .where(eq(runs.id, args.runId))
+      .limit(1);
+    if (!run) throw new FatalError("找不到这次运行");
     const query = memory.query?.trim()
       || (typeof args.input.question === "string" ? args.input.question.trim() : "")
       || (typeof args.input.input === "string" ? args.input.input.trim() : "")
@@ -64,21 +64,33 @@ export async function runMemoryStep(args: {
     throw new FatalError(`步骤「${args.node.title}」指定的经验内容来源“${memory.contentFrom}”不存在`);
   }
   const sourceNodeId = `${args.node.id}:${getStepMetadata().stepId}`;
-  await db
-    .insert(agentMemories)
-    .values({
-      workspaceId: run.workspaceId,
-      createdBy: run.createdBy,
-      agentId: run.agentId,
-      sourceRunId: args.runId,
-      sourceNodeId,
-      content,
-      metadata: { nodeTitle: args.node.title },
-    })
-    .onConflictDoUpdate({
-      target: [agentMemories.sourceRunId, agentMemories.sourceNodeId],
-      set: { content, metadata: { nodeTitle: args.node.title }, updatedAt: new Date() },
-    });
+  await db.transaction(async (tx) => {
+    const [run] = await tx
+      .select({ workspaceId: runs.workspaceId, createdBy: runs.createdBy, agentId: runs.agentId, status: runs.status })
+      .from(runs)
+      .where(eq(runs.id, args.runId))
+      .for("update")
+      .limit(1);
+    if (!run) throw new FatalError("找不到这次运行");
+    if (!["queued", "running", "waiting_approval", "waiting_event"].includes(run.status)) {
+      throw new FatalError("运行已经结束，不能再保存经验");
+    }
+    await tx
+      .insert(agentMemories)
+      .values({
+        workspaceId: run.workspaceId,
+        createdBy: run.createdBy,
+        agentId: run.agentId,
+        sourceRunId: args.runId,
+        sourceNodeId,
+        content,
+        metadata: { nodeTitle: args.node.title },
+      })
+      .onConflictDoUpdate({
+        target: [agentMemories.sourceRunId, agentMemories.sourceNodeId],
+        set: { content, metadata: { nodeTitle: args.node.title }, updatedAt: new Date() },
+      });
+  });
   const output = { mode: "write", saved: true, contentLength: content.length };
   await persistStep({ runId: args.runId, nodeId: args.node.id, nodeTitle: args.node.title, nodeType: args.node.type, status: "succeeded", output });
   await appendTrace({ runId: args.runId, nodeId: args.node.id, kind: "memory.saved", title: `「${args.node.title}」已保存可复用经验`, data: output });

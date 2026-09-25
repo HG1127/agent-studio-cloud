@@ -22,6 +22,7 @@ vi.mock("@/lib/db", () => ({
         from: () => chain,
         where: () => chain,
         orderBy: () => chain,
+        for: () => chain,
         limit: () => Promise.resolve(result),
       };
       return chain;
@@ -31,6 +32,24 @@ vi.mock("@/lib/db", () => ({
         mocks.insertValues(value);
         return { onConflictDoUpdate: mocks.onConflictDoUpdate };
       },
+    }),
+    transaction: async (callback: (tx: unknown) => unknown) => callback({
+      select: () => {
+        const result = mocks.selectResults.shift() ?? [];
+        const chain = {
+          from: () => chain,
+          where: () => chain,
+          for: () => chain,
+          limit: () => Promise.resolve(result),
+        };
+        return chain;
+      },
+      insert: () => ({
+        values: (value: unknown) => {
+          mocks.insertValues(value);
+          return { onConflictDoUpdate: mocks.onConflictDoUpdate };
+        },
+      }),
     }),
   },
 }));
@@ -43,6 +62,7 @@ const runContext = {
   workspaceId: "00000000-0000-4000-8000-000000000001",
   createdBy: "00000000-0000-4000-8000-000000000002",
   agentId: "00000000-0000-4000-8000-000000000003",
+  status: "running",
 };
 
 function memoryNode(mode: "read" | "write") {
@@ -97,5 +117,19 @@ describe("长期经验步骤", () => {
     expect(result.output.memories).toEqual([
       { content: "客户续约需要提前沟通", savedAt: "2026-02-01T00:00:00.000Z" },
     ]);
+  });
+
+  it("运行已取消时不会再保存迟到的经验", async () => {
+    mocks.selectResults.push([{ ...runContext, status: "cancelled" }]);
+
+    await expect(runMemoryStep({
+      runId: "00000000-0000-4000-8000-000000000006",
+      node: memoryNode("write"),
+      input: {},
+      outputs: { run_summary: "迟到的经验" },
+    })).rejects.toThrow("运行已经结束，不能再保存经验");
+
+    expect(mocks.insertValues).not.toHaveBeenCalled();
+    expect(mocks.appendTrace).not.toHaveBeenCalled();
   });
 });

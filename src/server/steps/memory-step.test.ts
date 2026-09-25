@@ -14,11 +14,14 @@ const mocks = vi.hoisted(() => {
       select: () => ({
         from: () => ({
           where: () => ({
-            limit: async () => [{
-              workspaceId: "00000000-0000-4000-8000-000000000001",
-              createdBy: "00000000-0000-4000-8000-000000000002",
-              agentId: "00000000-0000-4000-8000-000000000003",
-            }],
+            for: () => ({
+              limit: async () => [{
+                workspaceId: "00000000-0000-4000-8000-000000000001",
+                createdBy: "00000000-0000-4000-8000-000000000002",
+                agentId: "00000000-0000-4000-8000-000000000003",
+                status: "running",
+              }],
+            }),
           }),
         }),
       }),
@@ -32,6 +35,7 @@ const mocks = vi.hoisted(() => {
           };
         },
       }),
+      transaction: async (callback: (tx: unknown) => unknown) => callback(mocks.db),
     },
   };
 });
