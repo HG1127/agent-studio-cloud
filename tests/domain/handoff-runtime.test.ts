@@ -40,11 +40,12 @@ describe("助手交接运行逻辑", () => {
   it("递归移除密钥和契约禁止字段", () => {
     const sanitized = sanitizeHandoffValue({
       customer: "甲公司",
+      note: "联系 person@example.com，访问令牌：should-not-leak",
       apiKey: "secret-value",
       nested: { token: "hidden", 访问令牌: "也不传递", 内部备注: "未确认" },
     }, ["内部备注"]);
-    expect(sanitized.value).toEqual({ customer: "甲公司", nested: {} });
-    expect(sanitized.redactedPaths).toEqual(expect.arrayContaining(["apiKey", "nested.token", "nested.访问令牌", "nested.内部备注"]));
+    expect(sanitized.value).toEqual({ customer: "甲公司", note: "联系 [已隐藏敏感信息]，[已隐藏敏感信息]", nested: {} });
+    expect(sanitized.redactedPaths).toEqual(expect.arrayContaining(["note", "apiKey", "nested.token", "nested.访问令牌", "nested.内部备注"]));
   });
 
   it("交接清洗不会复制外部结果中的保留字段", () => {

@@ -2,6 +2,7 @@ import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { buildBoundedCollaborationContext, isCollaborationMemoryOutput } from "@/server/domain/runtime/collaboration-input";
 import { isSafeDataPathSegment, safeDataPathSegments } from "@/server/domain/runtime/data-path";
+import { redactSensitiveData } from "@/server/domain/security/redact-sensitive";
 
 const SECRET_KEY = /password|passcode|secret|token|api[_-]?key|credential|cookie|authorization|private[_-]?key|密码|密钥|令牌|凭证|授权|私钥/i;
 
@@ -27,6 +28,12 @@ export function sanitizeHandoffValue(
     if (Array.isArray(current)) {
       const rows = current.map((item, index) => visit(item, `${currentPath}[${index}]`));
       return { value: rows.map((row) => row.value), redactedPaths: rows.flatMap((row) => row.redactedPaths) };
+    }
+    if (typeof current === "string") {
+      const redacted = redactSensitiveData(current);
+      return redacted === current
+        ? { value: current, redactedPaths: [] }
+        : { value: redacted, redactedPaths: [currentPath || "$交接内容"] };
     }
     if (!current || typeof current !== "object") return { value: current, redactedPaths: [] };
     const output: Record<string, unknown> = {};
