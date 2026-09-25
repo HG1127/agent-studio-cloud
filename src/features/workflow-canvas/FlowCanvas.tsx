@@ -26,6 +26,7 @@ import { WorkflowInputEditor } from "./WorkflowInputEditor";
 import { WorkflowOutputEditor } from "./WorkflowOutputEditor";
 import { validateOutputFieldPaths } from "@/server/domain/runtime/output-contract";
 import { notifyDraftState } from "@/lib/draft-state";
+import { draftRecoveryKey, restoreDraftRecovery, serializeDraftRecovery } from "./draft-recovery";
 
 interface FlowCanvasProps {
   agentId: string;
@@ -59,6 +60,33 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets, toolOpt
 
   useEffect(() => notifyDraftState({ agentId, dirty }), [agentId, dirty]);
   useEffect(() => () => notifyDraftState({ agentId, dirty: false }), [agentId]);
+  useEffect(() => {
+    const key = draftRecoveryKey(agentId);
+    const raw = window.sessionStorage.getItem(key);
+    const recovered = restoreDraftRecovery(raw, initialDraft);
+    if (!recovered) {
+      if (raw) window.sessionStorage.removeItem(key);
+      return;
+    }
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setDraft(recovered);
+      setDirty(true);
+      setFeedback({ ok: true, text: "已恢复本标签页中未保存的流程修改" });
+    });
+    return () => {
+      active = false;
+    };
+  }, [agentId, initialDraft]);
+  useEffect(() => {
+    if (!dirty) return;
+    try {
+      window.sessionStorage.setItem(draftRecoveryKey(agentId), serializeDraftRecovery(initialDraft, draft));
+    } catch {
+      // 浏览器禁用或容量不足时仍可继续编辑，离开页面保护保持生效。
+    }
+  }, [agentId, dirty, draft, initialDraft]);
   useEffect(() => {
     if (!dirty) return;
     const warnBeforeLeave = (event: BeforeUnloadEvent) => {
@@ -196,6 +224,7 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets, toolOpt
       if (result.ok) {
         setFeedback({ ok: true, text: "草稿已保存" });
         setDirty(false);
+        window.sessionStorage.removeItem(draftRecoveryKey(agentId));
         router.refresh();
       } else {
         setFeedback({ ok: false, text: result.error });
@@ -205,6 +234,15 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets, toolOpt
     } finally {
       setPending(false);
     }
+  }
+
+  function discardLocalChanges() {
+    if (!window.confirm("确定放弃本标签页中所有未保存的流程修改吗？")) return;
+    window.sessionStorage.removeItem(draftRecoveryKey(agentId));
+    setDraft(initialDraft);
+    setSelectedId(null);
+    setDirty(false);
+    setFeedback({ ok: true, text: "已恢复到最近一次保存的流程" });
   }
 
   const selectedNode = selectedId ? (visibleNodes.find((node) => node.id === selectedId) ?? null) : null;
@@ -256,6 +294,10 @@ export function FlowCanvas({ agentId, draft: initialDraft, agentTargets, toolOpt
             </span>
           ) : null}
           {dirty && !feedback ? <span role="status" className="text-sm text-amber-700">有未保存修改</span> : null}
+          {dirty ? <button type="button" disabled={pending} onClick={discardLocalChanges}
+            className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:border-gray-500 disabled:text-gray-400">
+            放弃修改
+          </button> : null}
           <button
             type="button"
             onClick={handleSave}
