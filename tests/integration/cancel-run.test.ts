@@ -113,6 +113,30 @@ describe("取消运行", () => {
     expect(run.stepStates).not.toHaveProperty(RUN_START_LEASE_KEY);
   });
 
+  it("允许取消启动句柄丢失且租约已过期的运行中任务", async () => {
+    const staleAt = new Date(Date.now() - RUN_START_LEASE_MS * 2);
+    const lease = createRunStartLease(staleAt);
+    await db.insert(runs).values({
+      id: RUN_ID,
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
+      agentId: "00000000-0000-4000-8000-0000000000c2",
+      versionId: "00000000-0000-4000-8000-0000000000c3",
+      status: "running",
+      input: {},
+      stepStates: withRunStartLease({}, lease),
+      startedAt: staleAt,
+      updatedAt: staleAt,
+    });
+
+    await expect(cancelRunAction(RUN_ID)).resolves.toEqual({ ok: true });
+
+    expect(getRunMock).not.toHaveBeenCalled();
+    const [run] = await db.select().from(runs).where(eq(runs.id, RUN_ID));
+    expect(run).toMatchObject({ status: "cancelled", error: "已由员工取消" });
+    expect(run.stepStates).not.toHaveProperty(RUN_START_LEASE_KEY);
+  });
+
   it("取消等待确认的运行时同步关闭尚未处理的确认", async () => {
     await insertWaitingRun();
     cancelMock.mockResolvedValue(undefined);

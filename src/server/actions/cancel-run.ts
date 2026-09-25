@@ -61,10 +61,9 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
       rootRunId = parentId;
       root = parent;
     }
-    const orphanedStart = !root.workflowRunId
-      && root.status === "queued"
+    const orphanedWorkflow = !root.workflowRunId
       && isRunStartLeaseExpired(root.stepStates, root.updatedAt);
-    if (!root.workflowRunId && !orphanedStart) return { ok: false, error: "运行尚未完成启动，请稍后再试" };
+    if (!root.workflowRunId && !orphanedWorkflow) return { ok: false, error: "运行尚未完成启动，请稍后再试" };
 
     if (root.workflowRunId) await getRun(root.workflowRunId).cancel();
     const now = new Date();
