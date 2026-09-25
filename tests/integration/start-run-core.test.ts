@@ -8,7 +8,7 @@ import { AgentManifest } from "@/contracts/manifest";
 import { agents, agentVersions, evaluationCaseResults, evaluationCases, evaluationRuns, runs } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
-import { startRunCore } from "@/server/services/start-run-core";
+import { resumeQueuedRunStartCore, startRunCore } from "@/server/services/start-run-core";
 import { createRunStartLease, readRunStartLease, RUN_START_LEASE_MS, withRunStartLease } from "@/server/services/run-start-lease";
 import { initializeRun } from "@/server/steps/run-state";
 
@@ -131,6 +131,36 @@ describe("运行启动句柄恢复", () => {
       expect.objectContaining({ startToken: expect.not.stringMatching(staleLease.token) }),
     ]));
     expect(await db.select().from(runs).where(eq(runs.sourceKey, sourceKey))).toHaveLength(1);
+  });
+
+  it("恢复过期排队运行时重新校验冻结版本的输入契约", async () => {
+    const requiredInputManifest = AgentManifest.parse({
+      ...manifest,
+      workflowFingerprint: "i".repeat(64),
+      inputContract: {
+        fields: [{ name: "brief", label: "任务说明", required: true, type: "string" }],
+      },
+    });
+    await db.update(agentVersions).set({ manifest: requiredInputManifest }).where(eq(agentVersions.id, VERSION_ID));
+    const staleAt = new Date(Date.now() - RUN_START_LEASE_MS * 2);
+    const [existing] = await db.insert(runs).values({
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
+      agentId: AGENT_ID,
+      versionId: VERSION_ID,
+      status: "queued",
+      input: {},
+      stepStates: withRunStartLease({}, createRunStartLease(staleAt)),
+      updatedAt: staleAt,
+    }).returning({ id: runs.id });
+
+    const result = await resumeQueuedRunStartCore(existing.id);
+
+    expect(result).toEqual({ ok: false, error: "运行输入“任务说明”不能为空" });
+    expect(startMock).not.toHaveBeenCalled();
+    const [failed] = await db.select().from(runs).where(eq(runs.id, existing.id));
+    expect(failed).toMatchObject({ status: "failed", error: "运行输入“任务说明”不能为空" });
+    expect(readRunStartLease(failed.stepStates)).toBeNull();
   });
 
   it("旧启动请求的租约失效后不能初始化同一运行", async () => {

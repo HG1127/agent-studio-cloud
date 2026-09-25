@@ -127,6 +127,8 @@ export async function resumeQueuedRunStartCore(runId: string): Promise<StartRunR
     const [candidate] = await db
       .select({
         id: runs.id,
+        agentId: runs.agentId,
+        workspaceId: runs.workspaceId,
         input: runs.input,
         stepStates: runs.stepStates,
         updatedAt: runs.updatedAt,
@@ -173,6 +175,16 @@ export async function resumeQueuedRunStartCore(runId: string): Promise<StartRunR
       await markRunStartFailed(candidate.id, lease.token, "运行信息不完整，无法继续启动");
       return { ok: false, error: "运行信息不完整，无法继续启动" };
     }
+    const preflightError = await validateRuntimePreflight({
+      manifest: manifest.data,
+      input: input.data,
+      currentAgentId: candidate.agentId,
+      workspaceId: candidate.workspaceId,
+    });
+    if (preflightError) {
+      await markRunStartFailed(candidate.id, lease.token, preflightError);
+      return { ok: false, error: preflightError };
+    }
     return launchClaimedRun({ runId: candidate.id, manifest: manifest.data, input: input.data, lease });
   } catch (error) {
     console.error("继续启动运行失败", error);
@@ -218,6 +230,105 @@ async function collaboratorIssue(node: AgentManifest["workflowSnapshot"]["nodes"
   return null;
 }
 
+async function validateRuntimePreflight(args: {
+  manifest: AgentManifest;
+  input: Record<string, unknown>;
+  currentAgentId: string;
+  workspaceId: string;
+}): Promise<string | null> {
+  const inputError = validateRunInput(args.input, args.manifest.inputContract.fields);
+  if (inputError) return inputError;
+
+  const knowledgeTitles = knowledgeStepTitles(args.manifest.workflowSnapshot.nodes);
+  if (knowledgeTitles.length > 0) {
+    const snapshotSourceIds = args.manifest.knowledgeSnapshot ?? [];
+    const availableSources = snapshotSourceIds.length > 0
+      ? await db
+          .select({ id: knowledgeSources.id })
+          .from(knowledgeSources)
+          .where(and(
+            inArray(knowledgeSources.id, snapshotSourceIds),
+            eq(knowledgeSources.workspaceId, args.workspaceId),
+            eq(knowledgeSources.status, "indexed"),
+            isNull(knowledgeSources.archivedAt),
+          ))
+      : [];
+    const knowledgeError = validateKnowledgeSnapshot({
+      knowledgeTitles,
+      snapshotSourceIds,
+      availableSourceIds: new Set(availableSources.map((source) => source.id)),
+    });
+    if (knowledgeError) return knowledgeError;
+  }
+
+  const waitError = validateWaitContracts(args.manifest.workflowSnapshot.nodes);
+  if (waitError) return waitError;
+  const routeError = validateWorkflowRoutes(args.manifest.workflowSnapshot);
+  if (routeError) return routeError;
+  const outputError = validateOutputContract(args.manifest.outputContract?.fields ?? [], args.manifest.workflowSnapshot.nodes);
+  if (outputError) return outputError;
+
+  const unsupported: string[] = [];
+  for (const node of Object.values(args.manifest.workflowSnapshot.nodes)) {
+    if (!SUPPORTED_NODE_TYPES.has(node.type)) {
+      unsupported.push(node.title);
+      continue;
+    }
+    if (node.type === "tool") {
+      const demoBound = node.tool && (node.tool.registryToolId === "demo" || node.tool.protocol === "demo");
+      const realBound = node.tool && getToolRegistration(node.tool.registryToolId) !== null;
+      if (!node.tool || node.tool.unresolved === true || (!demoBound && !realBound)) unsupported.push(node.title);
+    }
+    if (node.type === "knowledge" && !node.knowledge?.space) unsupported.push(node.title);
+    if (node.type === "parallel") {
+      const prepared = prepareParallelBranches(node);
+      if (!prepared.ok) {
+        unsupported.push(`${node.title}（${prepared.error}）`);
+        continue;
+      }
+      for (const branch of prepared.branches) {
+        for (const step of branch.steps) {
+          if (step.type === "tool") {
+            const demoBound = step.tool && (step.tool.registryToolId === "demo" || step.tool.protocol === "demo");
+            const realBound = step.tool && getToolRegistration(step.tool.registryToolId) !== null;
+            if (!step.tool || step.tool.unresolved === true || (!demoBound && !realBound)) unsupported.push(`${node.title} / ${branch.label} / ${step.title}`);
+          }
+          if (step.type === "knowledge" && !step.knowledge?.space) unsupported.push(`${node.title} / ${branch.label} / ${step.title}`);
+          if (step.type === "memory" && !step.memory) unsupported.push(`${node.title} / ${branch.label} / ${step.title}（经验设置不完整）`);
+          const collaboratorError = await collaboratorIssue(step, args.currentAgentId, args.workspaceId);
+          if (collaboratorError) unsupported.push(`${node.title} / ${branch.label} / ${collaboratorError}`);
+        }
+      }
+    }
+    if (node.type === "subflow") {
+      const prepared = prepareSubflow(node);
+      if (!prepared.ok) {
+        unsupported.push(`${node.title}（${prepared.error}）`);
+        continue;
+      }
+      for (const step of prepared.steps) {
+        if (step.type === "tool") {
+          const demoBound = step.tool && (step.tool.registryToolId === "demo" || step.tool.protocol === "demo");
+          const realBound = step.tool && getToolRegistration(step.tool.registryToolId) !== null;
+          if (!step.tool || step.tool.unresolved === true || (!demoBound && !realBound)) unsupported.push(`${node.title} / ${step.title}`);
+        }
+        if (step.type === "knowledge" && !step.knowledge?.space) unsupported.push(`${node.title} / ${step.title}`);
+        if (step.type === "memory" && !step.memory) unsupported.push(`${node.title} / ${step.title}（经验设置不完整）`);
+        const collaboratorError = await collaboratorIssue(step, args.currentAgentId, args.workspaceId);
+        if (collaboratorError) unsupported.push(`${node.title} / ${collaboratorError}`);
+      }
+    }
+    if (node.type === "memory" && !node.memory) unsupported.push(`${node.title}（经验设置不完整）`);
+    if (node.type === "agent_call" || node.type === "handoff") {
+      const error = await collaboratorIssue(node, args.currentAgentId, args.workspaceId);
+      if (error) unsupported.push(error);
+    }
+  }
+  if (unsupported.length === 0) return null;
+  const names = [...new Set(unsupported)].join("、");
+  return `以下步骤暂不支持自动执行：${names}，请调整流程后再运行`;
+}
+
 export async function startRunCore(args: {
   agentId: string;
   input: Record<string, unknown>;
@@ -256,102 +367,13 @@ export async function startRunCore(args: {
       return { ok: false, error: "这个助手的版本信息不完整，请重新发布后再运行" };
     }
     const manifest = manifestParsed.data;
-    const inputError = validateRunInput(runInput, manifest.inputContract.fields);
-    if (inputError) return { ok: false, error: inputError };
-    const knowledgeTitles = knowledgeStepTitles(manifest.workflowSnapshot.nodes);
-    if (knowledgeTitles.length > 0) {
-      const snapshotSourceIds = manifest.knowledgeSnapshot ?? [];
-      const availableSources = snapshotSourceIds.length > 0
-        ? await db
-            .select({ id: knowledgeSources.id })
-            .from(knowledgeSources)
-            .where(and(
-              inArray(knowledgeSources.id, snapshotSourceIds),
-              eq(knowledgeSources.workspaceId, agent.workspaceId),
-              eq(knowledgeSources.status, "indexed"),
-              isNull(knowledgeSources.archivedAt),
-            ))
-        : [];
-      const knowledgeError = validateKnowledgeSnapshot({
-        knowledgeTitles,
-        snapshotSourceIds,
-        availableSourceIds: new Set(availableSources.map((source) => source.id)),
-      });
-      if (knowledgeError) return { ok: false, error: knowledgeError };
-    }
-    const waitError = validateWaitContracts(manifest.workflowSnapshot.nodes);
-    if (waitError) return { ok: false, error: waitError };
-    const routeError = validateWorkflowRoutes(manifest.workflowSnapshot);
-    if (routeError) return { ok: false, error: routeError };
-    const outputError = validateOutputContract(manifest.outputContract?.fields ?? [], manifest.workflowSnapshot.nodes);
-    if (outputError) return { ok: false, error: outputError };
-    // 启动前置校验：不支持的节点类型 / 未绑定工具 / 未绑定知识来源 → 列出步骤名，不创建 run
-    const unsupported: string[] = [];
-    for (const node of Object.values(manifest.workflowSnapshot.nodes)) {
-      if (!SUPPORTED_NODE_TYPES.has(node.type)) {
-        unsupported.push(node.title);
-        continue;
-      }
-      if (node.type === "tool") {
-        const demoBound = node.tool && (node.tool.registryToolId === "demo" || node.tool.protocol === "demo");
-        const realBound = node.tool && getToolRegistration(node.tool.registryToolId) !== null;
-        if (!node.tool || node.tool.unresolved === true || (!demoBound && !realBound)) unsupported.push(node.title);
-      }
-      if (node.type === "knowledge") {
-        if (!node.knowledge?.space) unsupported.push(node.title);
-      }
-      if (node.type === "parallel") {
-        const prepared = prepareParallelBranches(node);
-        if (!prepared.ok) {
-          unsupported.push(`${node.title}（${prepared.error}）`);
-          continue;
-        }
-        for (const branch of prepared.branches) {
-          for (const step of branch.steps) {
-            if (step.type === "tool") {
-              const demoBound = step.tool && (step.tool.registryToolId === "demo" || step.tool.protocol === "demo");
-              const realBound = step.tool && getToolRegistration(step.tool.registryToolId) !== null;
-              if (!step.tool || step.tool.unresolved === true || (!demoBound && !realBound)) unsupported.push(`${node.title} / ${branch.label} / ${step.title}`);
-            }
-            if (step.type === "knowledge" && !step.knowledge?.space) unsupported.push(`${node.title} / ${branch.label} / ${step.title}`);
-            if (step.type === "memory" && !step.memory) unsupported.push(`${node.title} / ${branch.label} / ${step.title}（经验设置不完整）`);
-            const collaboratorError = await collaboratorIssue(step, agent.id, agent.workspaceId);
-            if (collaboratorError) unsupported.push(`${node.title} / ${branch.label} / ${collaboratorError}`);
-          }
-        }
-      }
-      if (node.type === "subflow") {
-        const prepared = prepareSubflow(node);
-        if (!prepared.ok) {
-          unsupported.push(`${node.title}（${prepared.error}）`);
-          continue;
-        }
-        for (const step of prepared.steps) {
-          if (step.type === "tool") {
-            const demoBound = step.tool && (step.tool.registryToolId === "demo" || step.tool.protocol === "demo");
-            const realBound = step.tool && getToolRegistration(step.tool.registryToolId) !== null;
-            if (!step.tool || step.tool.unresolved === true || (!demoBound && !realBound)) unsupported.push(`${node.title} / ${step.title}`);
-          }
-          if (step.type === "knowledge" && !step.knowledge?.space) unsupported.push(`${node.title} / ${step.title}`);
-          if (step.type === "memory" && !step.memory) unsupported.push(`${node.title} / ${step.title}（经验设置不完整）`);
-          const collaboratorError = await collaboratorIssue(step, agent.id, agent.workspaceId);
-          if (collaboratorError) unsupported.push(`${node.title} / ${collaboratorError}`);
-        }
-      }
-      if (node.type === "memory" && !node.memory) unsupported.push(`${node.title}（经验设置不完整）`);
-      if (node.type === "agent_call") {
-        const error = await collaboratorIssue(node, agent.id, agent.workspaceId);
-        if (error) unsupported.push(error);
-      }
-      if (node.type === "handoff") {
-        const error = await collaboratorIssue(node, agent.id, agent.workspaceId);
-        if (error) unsupported.push(error);
-      }
-    }
-    if (unsupported.length > 0) {
-      const names = [...new Set(unsupported)].join("、");
-      return { ok: false, error: `以下步骤暂不支持自动执行：${names}，请调整流程后再运行` };
-    }
+    const preflightError = await validateRuntimePreflight({
+      manifest,
+      input: runInput,
+      currentAgentId: agent.id,
+      workspaceId: agent.workspaceId,
+    });
+    if (preflightError) return { ok: false, error: preflightError };
     const lease = createRunStartLease();
     const [run] = await db
       .insert(runs)
