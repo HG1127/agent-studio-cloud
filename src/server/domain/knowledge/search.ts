@@ -59,6 +59,15 @@ function hanTrigrams(token: string): string[] {
   return [...grams];
 }
 
+function excerptAroundMatch(content: string, matchIndex: number): string {
+  if (content.length <= EXCERPT_CHARS) return content;
+  const start = Math.min(
+    Math.max(0, matchIndex - Math.floor(EXCERPT_CHARS / 3)),
+    content.length - EXCERPT_CHARS,
+  );
+  return content.slice(start, start + EXCERPT_CHARS);
+}
+
 export function scoreChunks(query: string, docs: SearchDoc[], opts?: { limit?: number }): SearchHit[] {
   const tokens = tokenize(query);
   if (tokens.length === 0) return [];
@@ -69,10 +78,12 @@ export function scoreChunks(query: string, docs: SearchDoc[], opts?: { limit?: n
     const lower = doc.content.toLowerCase();
     let score = 0;
     let exactMatch = false;
+    let firstMatch = Number.POSITIVE_INFINITY;
     for (const { token, grams } of terms) {
       const first = lower.indexOf(token);
       if (first !== -1) {
         exactMatch = true;
+        firstMatch = Math.min(firstMatch, first);
         score += FREQUENCY_WEIGHT * countOccurrences(lower, token);
         if (first < EARLY_POSITION_CHARS) score += EARLY_BONUS;
         continue;
@@ -82,13 +93,14 @@ export function scoreChunks(query: string, docs: SearchDoc[], opts?: { limit?: n
       for (const gram of grams) {
         const gramFirst = lower.indexOf(gram);
         if (gramFirst === -1) continue;
+        firstMatch = Math.min(firstMatch, gramFirst);
         score += FREQUENCY_WEIGHT * countOccurrences(lower, gram);
         if (gramFirst < EARLY_POSITION_CHARS) earlyGramHit = true;
       }
       if (earlyGramHit) score += EARLY_BONUS;
     }
     if (score > 0) {
-      hits.push({ hit: { ...doc, excerpt: doc.content.slice(0, EXCERPT_CHARS), score }, exactMatch });
+      hits.push({ hit: { ...doc, excerpt: excerptAroundMatch(doc.content, firstMatch), score }, exactMatch });
     }
   }
   return hits

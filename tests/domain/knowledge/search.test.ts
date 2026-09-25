@@ -54,6 +54,15 @@ describe("scoreChunks", () => {
     expect(long[0].excerpt.length).toBeLessThanOrEqual(700);
   });
 
+  it("命中位于分片后半段时返回包含命中内容的窗口", () => {
+    const content = `${"前置无关内容。".repeat(120)}关键退款期限是签收后七天。${"后置说明。".repeat(80)}`;
+    const [hit] = scoreChunks("关键退款期限", [{ sourceId: "late", sourceName: "售后规则", chunkIndex: 0, content }]);
+
+    expect(hit.excerpt).toContain("关键退款期限是签收后七天");
+    expect(hit.excerpt).toHaveLength(700);
+    expect(hit.excerpt).not.toBe(content.slice(0, 700));
+  });
+
   it("limit 生效", () => {
     const many = Array.from({ length: 30 }, (_, i) => ({ sourceId: `s${i}`, sourceName: "n", chunkIndex: i, content: "退货政策说明" }));
     expect(scoreChunks("退货政策", many, { limit: 8 })).toHaveLength(8);
