@@ -86,6 +86,27 @@ describe("外部消息字段校验", () => {
     expect(validateJsonObjectSchema({}, { type: "object", maxProperties: -1 })).toContain("必须是非负整数");
   });
 
+  it("拒绝永远无法满足的矛盾契约", () => {
+    expect(validateJsonObjectSchema({}, {
+      type: "object",
+      properties: { code: { type: "string", minLength: 10, maxLength: 5 } },
+    })).toContain("minLength 不能大于 maxLength");
+    expect(validateJsonObjectSchema({}, {
+      type: "object",
+      properties: { score: { type: "number", minimum: 10, exclusiveMaximum: 10 } },
+    })).toContain("数值上下限相互冲突");
+    expect(validateJsonObjectSchema({}, {
+      type: "object",
+      additionalProperties: false,
+      required: ["missing"],
+      properties: { code: { type: "string" } },
+    })).toContain("要求了未声明字段");
+    expect(validateJsonObjectSchema({}, {
+      type: "object",
+      properties: { state: { enum: ["ready"], const: "cancelled" } },
+    })).toContain("const 必须是 enum 中允许的值");
+  });
+
   it("继承属性不能冒充必填字段，契约也不能声明保留字段名", () => {
     expect(validateJsonObjectSchema({}, {
       type: "object",

@@ -36,6 +36,23 @@ function nonnegativeIntegerRule(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
+function conflictingNumericBounds(rule: Record<string, unknown>): boolean {
+  const lowers = [
+    typeof rule.minimum === "number" ? { value: rule.minimum, exclusive: false } : null,
+    typeof rule.exclusiveMinimum === "number" ? { value: rule.exclusiveMinimum, exclusive: true } : null,
+  ].filter((bound): bound is { value: number; exclusive: boolean } => bound !== null);
+  const uppers = [
+    typeof rule.maximum === "number" ? { value: rule.maximum, exclusive: false } : null,
+    typeof rule.exclusiveMaximum === "number" ? { value: rule.exclusiveMaximum, exclusive: true } : null,
+  ].filter((bound): bound is { value: number; exclusive: boolean } => bound !== null);
+  if (lowers.length === 0 || uppers.length === 0) return false;
+  const lowerValue = Math.max(...lowers.map((bound) => bound.value));
+  const upperValue = Math.min(...uppers.map((bound) => bound.value));
+  if (lowerValue !== upperValue) return lowerValue > upperValue;
+  return lowers.some((bound) => bound.value === lowerValue && bound.exclusive)
+    || uppers.some((bound) => bound.value === upperValue && bound.exclusive);
+}
+
 function validateSchemaRule(schema: unknown, path: string, depth: number): string | null {
   if (!schema || typeof schema !== "object" || Array.isArray(schema)) return `${path}必须是对象`;
   if (depth > 8) return `${path}字段结构层级超过 8 层`;
@@ -57,6 +74,16 @@ function validateSchemaRule(schema: unknown, path: string, depth: number): strin
       return `${path}的 ${key} 必须是有限数字`;
     }
   }
+  for (const [minimumKey, maximumKey] of [
+    ["minLength", "maxLength"],
+    ["minItems", "maxItems"],
+    ["minProperties", "maxProperties"],
+  ] as const) {
+    if (typeof rule[minimumKey] === "number" && typeof rule[maximumKey] === "number" && rule[minimumKey] > rule[maximumKey]) {
+      return `${path}的 ${minimumKey} 不能大于 ${maximumKey}`;
+    }
+  }
+  if (conflictingNumericBounds(rule)) return `${path}的数值上下限相互冲突`;
   if (rule.pattern !== undefined) {
     if (typeof rule.pattern !== "string") return `${path}的 pattern 必须是文字`;
     try { new RegExp(rule.pattern); } catch { return `${path}的 pattern 不是有效正则表达式`; }
@@ -79,6 +106,9 @@ function validateSchemaRule(schema: unknown, path: string, depth: number): strin
   if (rule.enum !== undefined) {
     if (!Array.isArray(rule.enum) || rule.enum.length === 0) return `${path}的 enum 不能为空`;
     if (rule.enum.length > MAX_SCHEMA_CHOICES) return `${path}的 enum 不能超过 ${MAX_SCHEMA_CHOICES} 项`;
+    if ("const" in rule && !rule.enum.some((candidate) => jsonValuesEqual(candidate, rule.const))) {
+      return `${path}的 const 必须是 enum 中允许的值`;
+    }
   }
   if (rule.additionalProperties !== undefined && typeof rule.additionalProperties !== "boolean" && (!rule.additionalProperties || typeof rule.additionalProperties !== "object" || Array.isArray(rule.additionalProperties))) {
     return `${path}的 additionalProperties 必须是布尔值或字段规则`;
@@ -100,6 +130,13 @@ function validateSchemaRule(schema: unknown, path: string, depth: number): strin
       const error = validateSchemaRule(child, `${path}.properties.${key}`, depth + 1);
       if (error) return error;
     }
+  }
+  if (rule.additionalProperties === false && Array.isArray(rule.required)) {
+    const properties = rule.properties && typeof rule.properties === "object" && !Array.isArray(rule.properties)
+      ? rule.properties as Record<string, unknown>
+      : {};
+    const undeclared = rule.required.find((key) => typeof key === "string" && !Object.prototype.hasOwnProperty.call(properties, key));
+    if (undeclared) return `${path}要求了未声明字段“${undeclared}”`;
   }
   return null;
 }
