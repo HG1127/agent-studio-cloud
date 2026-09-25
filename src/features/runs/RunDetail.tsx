@@ -96,6 +96,12 @@ export async function RunDetail({ runId }: { runId: string }) {
         </div>
       ) : null}
 
+      {run.status === "cancelled" && run.error ? (
+        <div role="status" className="rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+          <p>{run.error}</p>
+        </div>
+      ) : null}
+
       {pendingApprovals.map((approval) => (
         <ApprovalPanel key={approval.id} runId={runId} approval={approval} />
       ))}

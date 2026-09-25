@@ -127,6 +127,26 @@ describe("运行详情步骤数据", () => {
     expect(screen.queryByRole("button", { name: "重新运行" })).not.toBeInTheDocument();
   });
 
+  it("已取消的运行展示取消原因", async () => {
+    mocks.steps.mockResolvedValue([]);
+    mocks.runView.mockResolvedValue(RunView.parse({
+      id: "00000000-0000-4000-8000-000000000001",
+      agentId: "00000000-0000-4000-8000-000000000002",
+      agentName: "业务助手",
+      status: "cancelled",
+      sourceType: "manual",
+      input: {},
+      result: null,
+      error: "已由员工取消",
+      startedAt: "2026-09-25T01:00:00.000Z",
+      finishedAt: "2026-09-25T01:01:00.000Z",
+    }));
+
+    render(await RunDetail({ runId: "00000000-0000-4000-8000-000000000001" }));
+
+    expect(screen.getByRole("status")).toHaveTextContent("已由员工取消");
+  });
+
   it("失联的排队运行展示继续启动入口", async () => {
     mocks.steps.mockResolvedValue([]);
     mocks.runView.mockResolvedValue(RunView.parse({
