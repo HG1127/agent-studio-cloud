@@ -9,6 +9,7 @@ describe("验收样例更新契约", () => {
       name: "合同验收",
       input: { contract: "示例" },
       expectations: [{ path: "outputs.review", operator: "exists" }],
+      expectedUpdatedAt: "2026-09-25T00:00:00.000Z",
     }).success).toBe(true);
     expect(EvaluationCaseUpdateInput.safeParse({
       agentId: "bad", caseId: "bad", name: "合同验收", input: {}, expectations: [],
@@ -34,6 +35,7 @@ describe("验收样例更新契约", () => {
       name: "合同验收",
       input: { contract: "示例" },
       expectations: [],
+      expectedUpdatedAt: "2026-09-25T00:00:00.000Z",
     };
     expect(EvaluationCaseUpdateInput.safeParse({ ...base, input: { amount: BigInt(1) } }).success).toBe(false);
     expect(EvaluationCaseUpdateInput.safeParse({
@@ -41,5 +43,6 @@ describe("验收样例更新契约", () => {
       expectations: [{ path: "result", operator: "equals", value: BigInt(1) }],
     }).success).toBe(false);
     expect(EvaluationCaseUpdateInput.safeParse({ ...base, input: { text: "中".repeat(100 * 1024) } }).success).toBe(false);
+    expect(EvaluationCaseUpdateInput.safeParse({ ...base, expectedUpdatedAt: "not-a-date" }).success).toBe(false);
   });
 });
