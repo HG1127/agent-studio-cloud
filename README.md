@@ -59,13 +59,14 @@ pnpm dev             # 本地开发
 pnpm build           # 生产构建和 Workflow 编译
 pnpm lint            # 静态检查
 pnpm test            # 领域、契约和组件测试
+pnpm test:integration # 真实数据库上的事务与并发集成测试
 pnpm test:workflow   # 真实数据库上的持久工作流测试
 pnpm test:e2e        # Playwright 关键路径
 pnpm db:generate     # 根据 schema 生成新迁移
 pnpm db:migrate      # 应用迁移
 ```
 
-普通测试不依赖真实数据库。`test:workflow` 和 `test:e2e` 会写入测试数据，必须指向隔离数据库；CI 会创建临时 Neon 分支并在结束时清理。
+普通测试不依赖真实数据库。`test:integration`、`test:workflow` 和 `test:e2e` 会写入测试数据，必须指向隔离数据库；CI 会创建临时 Neon 分支、应用全部迁移，并在结束时清理。
 
 ## 使用路径
 
@@ -104,4 +105,4 @@ pnpm build
 pnpm audit --prod --audit-level high
 ```
 
-带 Neon 临时分支的 CI 还会执行数据库迁移、Workflow 集成测试和 Playwright E2E。项目分层、迁移与 UI 文案约束见 [`AGENTS.md`](./AGENTS.md)。
+带 Neon 临时分支的 CI 还会执行数据库迁移、事务与并发集成测试、Workflow 集成测试和 Playwright E2E。项目分层、迁移与 UI 文案约束见 [`AGENTS.md`](./AGENTS.md)。
