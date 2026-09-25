@@ -25,16 +25,17 @@ export async function setKnowledgeSourceArchivedAction(input: unknown): Promise<
           status: knowledgeSources.status,
           chunkCount: knowledgeSources.chunkCount,
           error: knowledgeSources.error,
+          archivedAt: knowledgeSources.archivedAt,
         })
         .from(knowledgeSources)
         .where(and(
           eq(knowledgeSources.id, parsed.data.sourceId),
           eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID),
-          parsed.data.archived ? isNull(knowledgeSources.archivedAt) : isNotNull(knowledgeSources.archivedAt),
         ))
         .for("update")
         .limit(1);
       if (!source) return false;
+      if (parsed.data.archived === (source.archivedAt !== null)) return true;
       if (parsed.data.archived) {
         const dependencyVersions = await tx
           .select({

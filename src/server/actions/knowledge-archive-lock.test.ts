@@ -61,7 +61,7 @@ beforeEach(() => {
 
 describe("知识资料归档并发保护", () => {
   it("持有来源行锁后按最新分片状态恢复资料", async () => {
-    mocks.rows = [[{ id: SOURCE_ID, name: "退款规则.md", status: "archived", chunkCount: 3, error: null }]];
+    mocks.rows = [[{ id: SOURCE_ID, name: "退款规则.md", status: "archived", chunkCount: 3, error: null, archivedAt: new Date() }]];
 
     await expect(setKnowledgeSourceArchivedAction({ sourceId: SOURCE_ID, archived: false }))
       .resolves.toEqual({ ok: true });
@@ -78,7 +78,7 @@ describe("知识资料归档并发保护", () => {
 
   it("当前版本仍在使用资料时拒绝归档", async () => {
     mocks.rows = [
-      [{ id: SOURCE_ID, name: "退款规则.md", status: "indexed", chunkCount: 3, error: null }],
+      [{ id: SOURCE_ID, name: "退款规则.md", status: "indexed", chunkCount: 3, error: null, archivedAt: null }],
       [{
         versionId: "00000000-0000-4000-8000-000000000092",
         agentId: "00000000-0000-4000-8000-000000000093",
@@ -115,7 +115,7 @@ describe("知识资料归档并发保护", () => {
   it("旧冻结版本仍在运行时拒绝归档资料", async () => {
     const rootVersionId = "00000000-0000-4000-8000-000000000094";
     mocks.rows = [
-      [{ id: SOURCE_ID, name: "退款规则.md", status: "indexed", chunkCount: 3, error: null }],
+      [{ id: SOURCE_ID, name: "退款规则.md", status: "indexed", chunkCount: 3, error: null, archivedAt: null }],
       [{
         versionId: rootVersionId,
         agentId: "00000000-0000-4000-8000-000000000095",
@@ -156,5 +156,21 @@ describe("知识资料归档并发保护", () => {
     await expect(setKnowledgeSourceArchivedAction({ sourceId: SOURCE_ID, archived: true }))
       .resolves.toEqual({ ok: false, error: "知识资料状态已经变化，请刷新页面后重试" });
     expect(mocks.updates).toHaveLength(0);
+  });
+
+  it("重复归档已归档资料时直接返回成功且不重复审计", async () => {
+    mocks.rows = [[{
+      id: SOURCE_ID,
+      name: "退款规则.md",
+      status: "archived",
+      chunkCount: 3,
+      error: null,
+      archivedAt: new Date(),
+    }]];
+
+    await expect(setKnowledgeSourceArchivedAction({ sourceId: SOURCE_ID, archived: true }))
+      .resolves.toEqual({ ok: true });
+    expect(mocks.updates).toHaveLength(0);
+    expect(mocks.auditEvents).toHaveLength(0);
   });
 });

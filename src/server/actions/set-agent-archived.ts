@@ -18,16 +18,16 @@ export async function setAgentArchivedAction(input: unknown): Promise<AgentArchi
     const now = new Date();
     const updated = await db.transaction(async (tx) => {
       const [agent] = await tx
-        .select({ id: agents.id, name: agents.name })
+        .select({ id: agents.id, name: agents.name, archivedAt: agents.archivedAt })
         .from(agents)
         .where(and(
           eq(agents.id, parsed.data.agentId),
           eq(agents.workspaceId, DEMO_WORKSPACE_ID),
-          parsed.data.archived ? isNull(agents.archivedAt) : isNotNull(agents.archivedAt),
         ))
         .for("update")
         .limit(1);
       if (!agent) return false;
+      if (parsed.data.archived === (agent.archivedAt !== null)) return true;
 
       if (parsed.data.archived) {
         const [runningEvaluation] = await tx

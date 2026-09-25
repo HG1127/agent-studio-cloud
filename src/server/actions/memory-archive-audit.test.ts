@@ -48,7 +48,7 @@ beforeEach(() => {
 
 describe("经验状态操作记录", () => {
   it("停用经验与操作记录在同一事务中写入", async () => {
-    mocks.rows = [[{ id: MEMORY_ID, agentName: "续约助手" }]];
+    mocks.rows = [[{ id: MEMORY_ID, agentName: "续约助手", archivedAt: null }]];
 
     await expect(setMemoryArchivedAction({ memoryId: MEMORY_ID, archived: true }))
       .resolves.toEqual({ ok: true });
@@ -67,6 +67,15 @@ describe("经验状态操作记录", () => {
 
     await expect(setMemoryArchivedAction({ memoryId: MEMORY_ID, archived: false }))
       .resolves.toEqual({ ok: false, error: "经验状态已经变化，请刷新页面后重试" });
+    expect(mocks.auditEvents).toHaveLength(0);
+  });
+
+  it("重复停用已停用经验时直接返回成功且不重复审计", async () => {
+    mocks.rows = [[{ id: MEMORY_ID, agentName: "续约助手", archivedAt: new Date() }]];
+
+    await expect(setMemoryArchivedAction({ memoryId: MEMORY_ID, archived: true }))
+      .resolves.toEqual({ ok: true });
+    expect(mocks.updates).toHaveLength(0);
     expect(mocks.auditEvents).toHaveLength(0);
   });
 });

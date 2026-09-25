@@ -15,17 +15,17 @@ export async function setMemoryArchivedAction(input: MemoryArchiveInput): Promis
   try {
     const updated = await db.transaction(async (tx) => {
       const [memory] = await tx
-        .select({ id: agentMemories.id, agentName: agents.name })
+        .select({ id: agentMemories.id, agentName: agents.name, archivedAt: agentMemories.archivedAt })
         .from(agentMemories)
         .innerJoin(agents, and(eq(agents.id, agentMemories.agentId), eq(agents.workspaceId, agentMemories.workspaceId)))
         .where(and(
           eq(agentMemories.id, parsed.data.memoryId),
           eq(agentMemories.workspaceId, DEMO_WORKSPACE_ID),
-          parsed.data.archived ? isNull(agentMemories.archivedAt) : isNotNull(agentMemories.archivedAt),
         ))
         .for("update")
         .limit(1);
       if (!memory) return false;
+      if (parsed.data.archived === (memory.archivedAt !== null)) return true;
       const now = new Date();
       const [row] = await tx
         .update(agentMemories)

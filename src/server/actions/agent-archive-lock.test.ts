@@ -59,7 +59,7 @@ beforeEach(() => {
 describe("助手停用依赖保护", () => {
   it("被其他在线版本使用时拒绝停用", async () => {
     mocks.rows = [
-      [{ id: AGENT_ID, name: "资料整理助手" }],
+      [{ id: AGENT_ID, name: "资料整理助手", archivedAt: null }],
       [],
       [{
         versionId: "00000000-0000-4000-8000-000000000083",
@@ -97,7 +97,7 @@ describe("助手停用依赖保护", () => {
 
   it("没有在线依赖时持有行锁并停用", async () => {
     mocks.rows = [
-      [{ id: AGENT_ID, name: "资料整理助手" }],
+      [{ id: AGENT_ID, name: "资料整理助手", archivedAt: null }],
       [],
       [],
     ];
@@ -116,7 +116,7 @@ describe("助手停用依赖保护", () => {
   it("旧冻结版本仍在运行时拒绝停用其协作助手", async () => {
     const rootVersionId = "00000000-0000-4000-8000-000000000086";
     mocks.rows = [
-      [{ id: AGENT_ID, name: "资料整理助手" }],
+      [{ id: AGENT_ID, name: "资料整理助手", archivedAt: null }],
       [],
       [{
         versionId: rootVersionId,
@@ -154,7 +154,7 @@ describe("助手停用依赖保护", () => {
 
   it("自动验收运行期间拒绝停用", async () => {
     mocks.rows = [
-      [{ id: AGENT_ID, name: "资料整理助手" }],
+      [{ id: AGENT_ID, name: "资料整理助手", archivedAt: null }],
       [{ id: "00000000-0000-4000-8000-000000000085" }],
     ];
 
@@ -175,5 +175,13 @@ describe("助手停用依赖保护", () => {
       error: "助手状态已经变化，请刷新页面后重试",
     });
     expect(mocks.updates).toHaveLength(0);
+  });
+
+  it("重复停用已停用助手时直接返回成功且不重复审计", async () => {
+    mocks.rows = [[{ id: AGENT_ID, name: "资料整理助手", archivedAt: new Date() }]];
+
+    await expect(setAgentArchivedAction({ agentId: AGENT_ID, archived: true })).resolves.toEqual({ ok: true });
+    expect(mocks.updates).toHaveLength(0);
+    expect(mocks.inserts).toHaveLength(0);
   });
 });
