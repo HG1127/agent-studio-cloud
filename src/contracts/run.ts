@@ -4,6 +4,7 @@ export const MAX_RUN_INPUT_BYTES = 100 * 1024;
 const MAX_RUN_INPUT_DEPTH = 12;
 const MAX_RUN_INPUT_ENTRIES = 2_000;
 const MAX_RUN_INPUT_KEYS = 100;
+const RESERVED_INPUT_KEYS: ReadonlySet<string> = new Set(["__proto__", "prototype", "constructor"]);
 
 function runInputIssue(value: Record<string, unknown>): string | null {
   if (Object.keys(value).length > MAX_RUN_INPUT_KEYS) return `运行输入最多包含 ${MAX_RUN_INPUT_KEYS} 个字段`;
@@ -25,7 +26,9 @@ function runInputIssue(value: Record<string, unknown>): string | null {
     if (!Array.isArray(item) && Object.getPrototypeOf(item) !== Object.prototype && Object.getPrototypeOf(item) !== null) {
       return "运行输入只能包含普通对象和数组";
     }
-    const children = Array.isArray(item) ? item : Object.values(item);
+    const itemEntries = Array.isArray(item) ? item.map((child, index) => [String(index), child] as const) : Object.entries(item);
+    if (itemEntries.some(([key]) => RESERVED_INPUT_KEYS.has(key))) return "运行输入不能使用保留字段名";
+    const children = itemEntries.map(([, child]) => child);
     entries += children.length;
     if (entries > MAX_RUN_INPUT_ENTRIES) return `运行输入最多包含 ${MAX_RUN_INPUT_ENTRIES} 个数据项`;
     for (const child of children) stack.push({ value: child, depth: current.depth + 1 });
@@ -34,10 +37,13 @@ function runInputIssue(value: Record<string, unknown>): string | null {
   return bytes > MAX_RUN_INPUT_BYTES ? "运行输入不能超过 100 KB" : null;
 }
 
-export const RunInputPayload = z.record(z.string().max(100), z.unknown()).superRefine((value, ctx) => {
-  const issue = runInputIssue(value);
-  if (issue) ctx.addIssue({ code: "custom", message: issue });
-});
+export const RunInputPayload = z.preprocess((value, ctx) => {
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    const issue = runInputIssue(value as Record<string, unknown>);
+    if (issue) ctx.addIssue({ code: "custom", message: issue });
+  }
+  return value;
+}, z.record(z.string().max(100), z.unknown()));
 export type RunInputPayload = z.infer<typeof RunInputPayload>;
 
 export const RunStartInput = z.object({

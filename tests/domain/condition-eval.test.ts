@@ -46,6 +46,11 @@ describe("resolvePath", () => {
   it("路径穿过非对象值时返回 undefined", () => {
     expect(resolvePath("input.city.deeper", ctx)).toBeUndefined();
   });
+  it("拒绝保留名称和继承属性路径", () => {
+    expect(resolvePath("input.__proto__.polluted", ctx)).toBeUndefined();
+    expect(resolvePath("input.constructor.name", ctx)).toBeUndefined();
+    expect(resolvePath("input.toString", ctx)).toBeUndefined();
+  });
 });
 
 describe("compare", () => {

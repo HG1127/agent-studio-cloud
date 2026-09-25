@@ -7,6 +7,7 @@ import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { prepareParallelBranches } from "@/server/domain/runtime/parallel-runtime";
 import { prepareSubflow } from "@/server/domain/runtime/subflow-runtime";
+import { validateOutputContract } from "@/server/domain/runtime/output-contract";
 import { validateAgentCallNode } from "@/server/domain/runtime/agent-call-runtime";
 import { validateHandoffNode } from "@/server/domain/runtime/handoff-runtime";
 import { validateRunInput } from "@/server/domain/runtime/run-input";
@@ -127,6 +128,8 @@ export async function startRunCore(args: {
     if (waitError) return { ok: false, error: waitError };
     const routeError = validateWorkflowRoutes(manifest.workflowSnapshot);
     if (routeError) return { ok: false, error: routeError };
+    const outputError = validateOutputContract(manifest.outputContract?.fields ?? [], manifest.workflowSnapshot.nodes);
+    if (outputError) return { ok: false, error: outputError };
     // 启动前置校验：不支持的节点类型 / 未绑定工具 / 未绑定知识来源 → 列出步骤名，不创建 run
     const unsupported: string[] = [];
     for (const node of Object.values(manifest.workflowSnapshot.nodes)) {

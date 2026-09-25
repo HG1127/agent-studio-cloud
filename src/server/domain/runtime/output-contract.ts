@@ -1,9 +1,11 @@
 import type { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
+import { safeDataPathSegments } from "@/server/domain/runtime/data-path";
 
 type OutputField = NonNullable<WorkflowDraft["outputContract"]>["fields"][number];
 
 export function validateOutputFieldPaths(fields: OutputField[]): string | null {
   const paths = fields.map((field) => field.path.trim());
+  if (paths.some((path) => !safeDataPathSegments(path))) return "最终交付字段位置不能使用保留名称";
   if (paths.some((path) => !/^[\p{L}_][\p{L}\p{N}_-]*(?:\.[\p{L}_][\p{L}\p{N}_-]*)*$/u.test(path))) {
     return "最终交付字段位置格式不正确";
   }
@@ -31,16 +33,17 @@ export function validateOutputContract(fields: OutputField[], nodes: Record<stri
 }
 
 function readPath(value: Record<string, unknown>, path: string): unknown {
-  const parts = path.replace(/^(?:context\.)?outputs\./, "").split(".").filter(Boolean);
+  const parts = safeDataPathSegments(path.replace(/^(?:context\.)?outputs\./, ""));
+  if (!parts) return undefined;
   return parts.reduce<unknown>((current, key) => {
-    if (!current || typeof current !== "object" || Array.isArray(current)) return undefined;
+    if (!current || typeof current !== "object" || Array.isArray(current) || !Object.prototype.hasOwnProperty.call(current, key)) return undefined;
     return (current as Record<string, unknown>)[key];
   }, value);
 }
 
-function writePath(target: Record<string, unknown>, path: string, value: unknown) {
-  const parts = path.split(".").filter(Boolean);
-  if (parts.length === 0) return;
+function writePath(target: Record<string, unknown>, path: string, value: unknown): boolean {
+  const parts = safeDataPathSegments(path);
+  if (!parts) return false;
   let current = target;
   parts.forEach((part, index) => {
     if (index === parts.length - 1) {
@@ -51,6 +54,7 @@ function writePath(target: Record<string, unknown>, path: string, value: unknown
     if (!child || typeof child !== "object" || Array.isArray(child)) current[part] = {};
     current = current[part] as Record<string, unknown>;
   });
+  return true;
 }
 
 export function projectWorkflowResult(outputs: Record<string, unknown>, fields: OutputField[]):
@@ -60,12 +64,16 @@ export function projectWorkflowResult(outputs: Record<string, unknown>, fields: 
   const result: Record<string, unknown> = {};
   const missing: string[] = [];
   for (const field of fields) {
+    if (!safeDataPathSegments(field.path)) {
+      if (field.required) missing.push(field.label || field.path);
+      continue;
+    }
     const value = field.sourceNodeId ? outputs[field.sourceNodeId] : readPath(outputs, field.path);
     if (value === undefined || value === null) {
       if (field.required) missing.push(field.label || field.path);
       continue;
     }
-    writePath(result, field.path, value);
+    if (!writePath(result, field.path, value) && field.required) missing.push(field.label || field.path);
   }
   return missing.length > 0 ? { ok: false, missing } : { ok: true, result };
 }

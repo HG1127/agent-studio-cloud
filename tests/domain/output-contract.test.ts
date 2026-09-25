@@ -35,6 +35,14 @@ describe("最终交付结果", () => {
       { path: "交付", required: true, sourceNodeId: "draft" },
       { path: "交付.方案", required: true, sourceNodeId: "plan" },
     ])).toContain("与其下级字段冲突");
+    expect(validateOutputFieldPaths([{ path: "__proto__.polluted", required: true, sourceNodeId: "draft" }])).toContain("保留名称");
+  });
+
+  it("旧版本中的危险交付路径不会污染结果对象", () => {
+    expect(projectWorkflowResult({ draft: "内容" }, [{
+      path: "__proto__.polluted", label: "危险字段", required: true, sourceNodeId: "draft",
+    }])).toEqual({ ok: false, missing: ["危险字段"] });
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
   });
 
   it("拒绝不存在、起止或控制步骤作为最终交付来源", () => {

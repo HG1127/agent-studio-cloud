@@ -65,6 +65,11 @@ describe("RunStartInput", () => {
     input.self = input;
     expect(RunStartInput.safeParse({ agentId: uuid, input }).success).toBe(false);
   });
+  it("拒绝任意层级的保留字段名", () => {
+    const topLevel = JSON.parse('{"__proto__":{"polluted":true}}') as Record<string, unknown>;
+    expect(RunStartInput.safeParse({ agentId: uuid, input: topLevel }).success).toBe(false);
+    expect(RunStartInput.safeParse({ agentId: uuid, input: { nested: { constructor: "伪造字段" } } }).success).toBe(false);
+  });
 });
 
 describe("ApprovalDecisionInput", () => {
