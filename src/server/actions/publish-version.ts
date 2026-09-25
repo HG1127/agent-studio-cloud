@@ -129,15 +129,6 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
       connectionId: manifestModel.connectionId,
       knowledgeSnapshot: knowledgeSnapshot.sourceIds,
     });
-    const [evaluationCaseSummary] = await db
-      .select({ count: sql<number>`count(*)`.mapWith(Number) })
-      .from(evaluationCases)
-      .where(and(
-        eq(evaluationCases.agentId, agentId),
-        eq(evaluationCases.workspaceId, agent.workspaceId),
-        isNull(evaluationCases.archivedAt),
-      ));
-    const release = releaseStatusForCaseCount(evaluationCaseSummary?.count ?? 0);
     // 并发发布会撞 (agent_id, version) 唯一索引：整个事务重读 maxVersion 后重试一次
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
@@ -200,6 +191,15 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
           if (!lockedDefinition || lockedDefinition.updatedAt.getTime() !== definition.updatedAt.getTime()) {
             return { kind: "stale" as const };
           }
+          const [evaluationCaseSummary] = await tx
+            .select({ count: sql<number>`count(*)`.mapWith(Number) })
+            .from(evaluationCases)
+            .where(and(
+              eq(evaluationCases.agentId, agentId),
+              eq(evaluationCases.workspaceId, agent.workspaceId),
+              isNull(evaluationCases.archivedAt),
+            ));
+          const release = releaseStatusForCaseCount(evaluationCaseSummary?.count ?? 0);
           if (requiredKnowledgeSourceIds.length > 0) {
             const lockedSources = await tx
               .select({ id: knowledgeSources.id })
@@ -262,6 +262,7 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
           }));
           return {
             kind: "published" as const,
+            release,
             version: VersionSummary.parse({ ...created, createdAt: created.createdAt.toISOString() }),
           };
         });
@@ -278,7 +279,7 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
           return { ok: false, error: `${publishOutcome.error}，请调整协作步骤后再发布`, issues: [] };
         }
         revalidatePath(`/agents/${agentId}`);
-        return { ok: true, release, version: publishOutcome.version, exempted: exempted.map((issue) => ({ title: issue.title })) };
+        return { ok: true, release: publishOutcome.release, version: publishOutcome.version, exempted: exempted.map((issue) => ({ title: issue.title })) };
       } catch (error) {
         if (!isUniqueViolation(error)) throw error;
         if (attempt > 0) {
