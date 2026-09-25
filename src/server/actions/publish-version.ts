@@ -26,6 +26,7 @@ import { validateInlineWorkflows } from "@/server/domain/runtime/inline-workflow
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { getToolRegistration } from "@/server/tools/tool-registry";
 import { workflowToolRegistrationIssue } from "@/server/tools/tool-binding";
+import { isDuplicatePublishedVersion } from "@/server/domain/publish-idempotency";
 
 export async function publishVersionAction(agentId: string, modelSelection?: PublishModelSelection): Promise<PublishVersionResult> {
   if (!z.string().uuid().safeParse(agentId).success) {
@@ -218,6 +219,25 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
               isNull(evaluationCases.archivedAt),
             ));
           const release = releaseStatusForCaseCount(evaluationCaseSummary?.count ?? 0);
+          const [latestVersion] = await tx
+            .select({
+              id: agentVersions.id,
+              version: agentVersions.version,
+              status: agentVersions.status,
+              manifest: agentVersions.manifest,
+              createdAt: agentVersions.createdAt,
+            })
+            .from(agentVersions)
+            .where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.workspaceId, agent.workspaceId)))
+            .orderBy(desc(agentVersions.version))
+            .limit(1);
+          if (isDuplicatePublishedVersion(latestVersion, release, manifest)) {
+            return {
+              kind: "already_published" as const,
+              release,
+              version: VersionSummary.parse({ ...latestVersion, createdAt: latestVersion.createdAt.toISOString() }),
+            };
+          }
           if (requiredKnowledgeSourceIds.length > 0) {
             const lockedSources = await tx
               .select({ id: knowledgeSources.id })

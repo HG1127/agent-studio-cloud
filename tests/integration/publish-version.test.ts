@@ -29,7 +29,13 @@ afterEach(async () => {
 async function insertFixture() {
   const compiled = buildAgentDraft({ name: intentGolden.input.name, intentText: intentGolden.input.text });
   if (!compiled.draft) throw new Error(`测试流程生成失败：${compiled.diagnostics.error ?? "未知原因"}`);
-  const manifest = buildManifest(compiled.draft, {
+  const draft = {
+    ...compiled.draft,
+    outputContract: {
+      fields: [{ path: "回复邮件", label: "回复邮件", required: true, sourceNodeId: "step_5" }],
+    },
+  };
+  const manifest = buildManifest(draft, {
     modelId: "mock",
     mock: true,
     connectionId: null,
@@ -47,7 +53,7 @@ async function insertFixture() {
     agentId: AGENT_ID,
     workspaceId: DEMO_WORKSPACE_ID,
     createdBy: DEMO_USER_ID,
-    draft: compiled.draft,
+    draft,
   });
   await db.insert(agentVersions).values({
     id: VERSION_ID,
@@ -82,5 +88,18 @@ describe("发布版本", () => {
     const versions = await db.select().from(agentVersions).where(eq(agentVersions.agentId, AGENT_ID));
     expect(versions).toHaveLength(1);
     expect(versions[0]).toMatchObject({ id: VERSION_ID, status: "candidate", version: 1 });
+  });
+
+  it("同一冻结清单重复发布时复用最新版本", async () => {
+    await insertFixture();
+    await db.delete(agentVersions).where(eq(agentVersions.agentId, AGENT_ID));
+
+    const first = await publishVersionAction(AGENT_ID);
+    const second = await publishVersionAction(AGENT_ID);
+
+    expect(first.ok).toBe(true);
+    expect(second).toEqual(first);
+    const versions = await db.select().from(agentVersions).where(eq(agentVersions.agentId, AGENT_ID));
+    expect(versions).toHaveLength(1);
   });
 });
