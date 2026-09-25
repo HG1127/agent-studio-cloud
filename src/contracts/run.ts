@@ -210,10 +210,10 @@ export const ApprovalDecisionInput = z.object({
 });
 export type ApprovalDecisionInput = z.infer<typeof ApprovalDecisionInput>;
 
-// 审批动作返回：失败时不改任何数据，只返回中文错误
+// 恢复执行引擎失败时，审批决定仍会保留，saved 提醒页面切换到可恢复状态。
 export const ApprovalDecisionResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true) }),
-  z.object({ ok: z.literal(false), error: z.string() }),
+  z.object({ ok: z.literal(false), error: z.string(), saved: z.literal(true).optional() }),
 ]);
 export type ApprovalDecisionResult = z.infer<typeof ApprovalDecisionResult>;
 

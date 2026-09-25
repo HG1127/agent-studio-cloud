@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, exists } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { resumeHook } from "workflow/api";
@@ -10,7 +10,7 @@ import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 
 // 人工审批决定入口：原子条件更新抢占 pending 行（并发下只有一次提交生效），再恢复工作流；
-// 恢复失败则回滚确认行。token 由确认记录 ID 按服务端约定重建，不经过前端。
+// 恢复结果不确定时保留确认决定，由页面提供显式继续入口。token 由确认记录 ID 按服务端约定重建，不经过前端。
 export async function decideApprovalAction(
   runId: string,
   approvalId: string,
@@ -52,7 +52,7 @@ export async function decideApprovalAction(
         });
       } catch (error) {
         console.error("继续已确认的工作流失败", error);
-        return { ok: false, error: "确认已保留，但运行暂时无法继续，请稍后重试" };
+        return { ok: false, error: "确认已保留，但运行暂时无法继续，请稍后重试", saved: true };
       }
       revalidatePath(`/runs/${runId}`);
       revalidatePath("/runs");
@@ -95,27 +95,11 @@ export async function decideApprovalAction(
         note: note ?? undefined,
       });
     } catch (error) {
-      console.error("恢复工作流失败，回滚确认记录", error);
-      await db
-        .update(approvals)
-        .set({ status: "pending", note: null, decidedAt: null, updatedAt: new Date() })
-        .where(and(
-          eq(approvals.id, approvalId),
-          eq(approvals.runId, runId),
-          eq(approvals.workspaceId, DEMO_WORKSPACE_ID),
-          eq(approvals.status, approved ? "approved" : "rejected"),
-          exists(
-            db
-              .select({ id: runs.id })
-              .from(runs)
-              .where(and(
-                eq(runs.id, runId),
-                eq(runs.workspaceId, DEMO_WORKSPACE_ID),
-                eq(runs.status, "waiting_approval"),
-              )),
-          ),
-        ));
-      return { ok: false, error: "提交确认失败，请稍后重试" };
+      // resumeHook 可能已被执行引擎接收，只是响应在网络中丢失；回滚会让数据库与运行状态互相矛盾。
+      console.error("恢复工作流失败，确认决定已保留", error);
+      revalidatePath(`/runs/${runId}`);
+      revalidatePath("/runs");
+      return { ok: false, error: "确认已保留，但运行暂时无法继续，请稍后重试", saved: true };
     }
     revalidatePath(`/runs/${runId}`);
     revalidatePath("/runs");

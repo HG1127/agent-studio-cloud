@@ -75,7 +75,10 @@ export function ApprovalPanel({
     try {
       const result = await decideApprovalAction(runId, approval.id, { decision, note });
       if (result.ok) router.refresh();
-      else setError(result.error);
+      else {
+        setError(result.error);
+        if (result.saved) router.refresh();
+      }
     } catch {
       setError("提交失败，请检查网络后重试");
     } finally {

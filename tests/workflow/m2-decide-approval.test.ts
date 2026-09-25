@@ -64,16 +64,17 @@ describe("审批决定的原子性", () => {
     expect(approval.status).toBe("pending");
   });
 
-  it("恢复失败时不会把已经取消运行的确认重新回滚为待确认", async () => {
+  it("恢复结果不确定时保留已经提交的确认决定", async () => {
     await insertPendingApproval();
-    resumeHookMock.mockImplementation(async () => {
-      await db.update(runs).set({ status: "cancelled" }).where(eq(runs.id, RUN_ID));
-      throw new Error("运行已取消");
-    });
+    resumeHookMock.mockRejectedValue(new Error("工作流响应丢失"));
 
     const result = await decideApprovalAction(RUN_ID, APPROVAL_ID, { decision: "approved" });
 
-    expect(result).toEqual({ ok: false, error: "提交确认失败，请稍后重试" });
+    expect(result).toEqual({
+      ok: false,
+      error: "确认已保留，但运行暂时无法继续，请稍后重试",
+      saved: true,
+    });
     const [approval] = await db.select().from(approvals).where(eq(approvals.id, APPROVAL_ID)).limit(1);
     expect(approval.status).toBe("approved");
   });

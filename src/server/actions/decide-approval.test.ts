@@ -103,7 +103,11 @@ describe("已记录确认的运行恢复", () => {
       resumeOnly: true,
     });
 
-    expect(result).toEqual({ ok: false, error: "确认已保留，但运行暂时无法继续，请稍后重试" });
+    expect(result).toEqual({
+      ok: false,
+      error: "确认已保留，但运行暂时无法继续，请稍后重试",
+      saved: true,
+    });
     expect(mocks.updates).toBe(0);
   });
 
@@ -120,5 +124,26 @@ describe("已记录确认的运行恢复", () => {
     expect(mocks.transactions).toBe(1);
     expect(mocks.updates).toBe(0);
     expect(mocks.resumeHook).not.toHaveBeenCalled();
+  });
+
+  it("恢复结果不确定时保留新决定并交给页面继续恢复", async () => {
+    mocks.rows = [
+      [{ id: APPROVAL_ID, status: "pending", note: null }],
+      [{ agentId: AGENT_ID, status: "waiting_approval" }],
+      [{ status: "waiting_approval" }],
+    ];
+    mocks.returningRows = [[{ id: APPROVAL_ID }]];
+    mocks.resumeHook.mockRejectedValue(new Error("workflow response lost"));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const result = await decideApprovalAction(RUN_ID, APPROVAL_ID, { decision: "approved", note: "同意" });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "确认已保留，但运行暂时无法继续，请稍后重试",
+      saved: true,
+    });
+    expect(mocks.updates).toBe(1);
+    expect(mocks.revalidatePath).toHaveBeenCalledWith(`/runs/${RUN_ID}`);
   });
 });

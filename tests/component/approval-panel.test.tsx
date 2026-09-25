@@ -112,6 +112,20 @@ describe("ApprovalPanel", () => {
     expect(refreshMock).not.toHaveBeenCalled();
   });
 
+  it("确认已保存但恢复失败时刷新为可继续状态", async () => {
+    actionMock.mockResolvedValue({
+      ok: false,
+      error: "确认已保留，但运行暂时无法继续，请稍后重试",
+      saved: true,
+    });
+    const user = userEvent.setup();
+    render(<ApprovalPanel runId={RUN_ID} approval={PENDING} />);
+
+    await user.click(screen.getByRole("button", { name: "批准" }));
+
+    await waitFor(() => expect(refreshMock).toHaveBeenCalledTimes(1));
+  });
+
   it("审批请求中断时显示网络错误并允许重试", async () => {
     actionMock.mockRejectedValue(new Error("offline"));
     const user = userEvent.setup();
