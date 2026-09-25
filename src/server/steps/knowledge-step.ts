@@ -8,6 +8,7 @@ import type { WorkflowNode } from "@/contracts/workflow";
 import { knowledgeChunks, knowledgeSources, runs } from "@/db/schema";
 import { db } from "@/lib/db";
 import { MAX_KNOWLEDGE_SCAN_CHUNKS, scoreChunks } from "@/server/domain/knowledge/search";
+import { knowledgeSourceIdsForStep } from "@/server/domain/runtime/knowledge-snapshot";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 
@@ -48,6 +49,11 @@ export async function runKnowledgeStep(args: RunKnowledgeStepInput): Promise<{ r
   if (snapshot.length === 0) {
     return reject(`步骤「${node.title}」发布时没有可用知识来源，请先在知识库上传文档并重新发布`);
   }
+  const configuredSourceIds = node.knowledge?.sourceIds ?? [];
+  const selectedSourceIds = knowledgeSourceIdsForStep(snapshot, configuredSourceIds);
+  if (selectedSourceIds.length === 0) {
+    return reject(`步骤「${node.title}」选择的知识来源不在这个发布版本中，请重新发布`);
+  }
   const [run] = await db.select({ workspaceId: runs.workspaceId }).from(runs).where(eq(runs.id, args.runId)).limit(1);
   if (!run) return reject("找不到这次运行");
   const rows = await db
@@ -56,7 +62,7 @@ export async function runKnowledgeStep(args: RunKnowledgeStepInput): Promise<{ r
     .innerJoin(knowledgeSources, eq(knowledgeChunks.sourceId, knowledgeSources.id))
     .where(
       and(
-        inArray(knowledgeChunks.sourceId, snapshot),
+        inArray(knowledgeChunks.sourceId, selectedSourceIds),
         eq(knowledgeChunks.workspaceId, run.workspaceId),
         eq(knowledgeSources.workspaceId, run.workspaceId),
         eq(knowledgeSources.status, "indexed"),

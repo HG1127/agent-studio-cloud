@@ -13,6 +13,7 @@ import { getAgentDetail, listAgentTargets } from "@/server/queries/agents";
 import { listVersions } from "@/server/queries/versions";
 import { listModelConnections } from "@/server/queries/model-connections";
 import { listEvaluationCases, listEvaluationRuns } from "@/server/queries/evaluations";
+import { listKnowledgeSources } from "@/server/queries/knowledge";
 import { AgentManifest } from "@/contracts/manifest";
 import { listToolRegistryOptions } from "@/server/tools/tool-registry";
 import { pageFromSearchParam } from "@/lib/search-params";
@@ -45,7 +46,7 @@ export default async function AgentDetailPage({
   const detail = await getAgentDetail(agentId, DEMO_WORKSPACE_ID);
   if (!detail) notFound();
   const audit = detail.draft ? auditWorkflow(detail.draft) : null;
-  const [versions, connections, agentTargets, evaluationCases, archivedEvaluationCases, evaluationRuns] = await Promise.all([
+  const [versions, connections, agentTargets, evaluationCases, archivedEvaluationCases, evaluationRuns, knowledgeSources] = await Promise.all([
     listVersions(agentId, DEMO_WORKSPACE_ID, { limit: versionPageSize + 1, offset: (versionPage - 1) * versionPageSize }),
     listModelConnections(),
     listAgentTargets(DEMO_WORKSPACE_ID, agentId),
@@ -56,6 +57,7 @@ export default async function AgentDetailPage({
       offset: (archivedCasesPage - 1) * archivedCasesPageSize,
     }),
     listEvaluationRuns(agentId, DEMO_WORKSPACE_ID),
+    listKnowledgeSources(false, { limit: 100 }),
   ]);
   const defaultModelLabel = process.env.MODEL_MOCK === "1" ? "演示模式" : process.env.MODEL_ID?.trim() ? "服务端默认模型" : "尚未配置默认模型";
   const currentVersion = detail.currentVersion;
@@ -79,7 +81,8 @@ export default async function AgentDetailPage({
         <p className="text-sm text-gray-500">{auditStatusLine(audit)}</p>
       </header>
       {detail.draft ? (
-        <FlowCanvas agentId={agentId} draft={detail.draft} agentTargets={agentTargets} toolOptions={toolOptions} />
+        <FlowCanvas agentId={agentId} draft={detail.draft} agentTargets={agentTargets} toolOptions={toolOptions}
+          knowledgeSources={knowledgeSources.filter((source) => source.status === "indexed")} />
       ) : (
         <section className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">
           这个助手还没有流程草稿

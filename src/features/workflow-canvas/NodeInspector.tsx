@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { AgentTargetOption } from "@/contracts/agent";
+import type { KnowledgeSourceView } from "@/contracts/knowledge";
 import type { ToolRegistryOption } from "@/contracts/tool-registry";
 import {
   MAX_CONDITION_BRANCHES,
@@ -18,6 +19,7 @@ interface NodeInspectorProps {
   workflowNodes?: Record<string, WorkflowNode>;
   agentTargets?: AgentTargetOption[];
   toolOptions?: ToolRegistryOption[];
+  knowledgeSources?: KnowledgeSourceView[];
   onNodeChange: (node: WorkflowNode) => void;
   onNodeDelete: (nodeId: string) => void;
 }
@@ -125,12 +127,13 @@ function handoffSelection(target: AgentTargetOption | undefined) {
   };
 }
 
-function InlineStepEditor({ label, steps, index, toolOptions, agentTargets, removable, onChange, onDelete }: {
+function InlineStepEditor({ label, steps, index, toolOptions, agentTargets, knowledgeSources, removable, onChange, onDelete }: {
   label: string;
   steps: Array<Record<string, unknown>>;
   index: number;
   toolOptions: ToolRegistryOption[];
   agentTargets: AgentTargetOption[];
+  knowledgeSources: KnowledgeSourceView[];
   removable: boolean;
   onChange: (steps: Array<Record<string, unknown>>) => void;
   onDelete: () => void;
@@ -139,6 +142,7 @@ function InlineStepEditor({ label, steps, index, toolOptions, agentTargets, remo
   const type = INLINE_STEP_TYPES.includes(step.type as InlineStepType) ? step.type as InlineStepType : "ai";
   const tool = step.tool && typeof step.tool === "object" ? step.tool as Record<string, unknown> : null;
   const retry = step.retry && typeof step.retry === "object" ? step.retry as Record<string, unknown> : null;
+  const knowledge = step.knowledge && typeof step.knowledge === "object" ? step.knowledge as Record<string, unknown> : null;
   const maxAttempts = Number(retry?.maxAttempts ?? tool?.maxRetries ?? 1);
   const backoffMs = Number(retry?.backoffMs ?? 5_000);
   return <div className="grid gap-1 rounded-md bg-gray-50 p-2 md:grid-cols-[110px_1fr_2fr_auto]">
@@ -183,6 +187,20 @@ function InlineStepEditor({ label, steps, index, toolOptions, agentTargets, remo
           className="min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />秒
       </label>
     </div> : null}
+    {type === "knowledge" ? <div className="space-y-2 md:col-span-4">
+      <input aria-label={`${label} 检索内容`} value={String(knowledge?.query ?? "")} placeholder="留空则使用本次运行输入"
+        onChange={(event) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
+          ...item,
+          knowledge: { ...(knowledge ?? { space: "业务资料库" }), query: event.target.value },
+        } : item))}
+        className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
+      <KnowledgeSourcePicker label={`${label} 资料范围`} sourceIds={Array.isArray(knowledge?.sourceIds) ? knowledge.sourceIds.filter((id): id is string => typeof id === "string") : []}
+        sources={knowledgeSources}
+        onChange={(sourceIds) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
+          ...item,
+          knowledge: { ...(knowledge ?? { space: "业务资料库" }), sourceIds },
+        } : item))} compact />
+    </div> : null}
     {type === "agent_call" ? <select aria-label={`${label} 协作助手`}
       value={String((step.agentCall as Record<string, unknown> | undefined)?.versionId ?? "")}
       onChange={(event) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
@@ -218,6 +236,36 @@ function InlineStepEditor({ label, steps, index, toolOptions, agentTargets, remo
       {agentTargets.map((target) => <option key={target.versionId} value={target.versionId}>{target.agentName}（版本 {target.version}）</option>)}
     </select> : null}
   </div>;
+}
+
+function KnowledgeSourcePicker({ label, sourceIds, sources, onChange, compact = false }: {
+  label: string;
+  sourceIds: string[];
+  sources: KnowledgeSourceView[];
+  onChange: (sourceIds: string[]) => void;
+  compact?: boolean;
+}) {
+  const selected = new Set(sourceIds);
+  const unavailableCount = sourceIds.filter((sourceId) => !sources.some((source) => source.id === sourceId)).length;
+  return <fieldset className={`space-y-1 rounded-md border border-gray-200 ${compact ? "p-2" : "p-3"}`}>
+    <legend className={compact ? "px-1 text-xs font-medium" : "px-1 text-sm font-medium"}>{label}</legend>
+    <label className="flex items-center gap-2 text-xs text-gray-700">
+      <input type="checkbox" checked={sourceIds.length === 0} onChange={() => onChange([])} />
+      全部已入库资料
+    </label>
+    {sources.map((source) => <label key={source.id} className="flex items-center gap-2 text-xs text-gray-700">
+      <input type="checkbox" checked={selected.has(source.id)} onChange={(event) => {
+        const next = event.target.checked
+          ? [...new Set([...sourceIds, source.id])]
+          : sourceIds.filter((id) => id !== source.id);
+        onChange(next);
+      }} />
+      {source.name}
+    </label>)}
+    {sources.length === 0 ? <p className="text-xs text-amber-700">还没有完成解析的资料，请先到知识库上传。</p> : null}
+    {unavailableCount > 0 ? <p className="text-xs text-amber-700">有 {unavailableCount} 份已选资料当前不可用，请改选可用资料或切换为全部资料。</p> : null}
+    <p className="text-xs text-gray-500">不单独选择时使用发布当时的全部可用资料。</p>
+  </fieldset>;
 }
 
 function WaitPayloadSchemaEditor({ node, onNodeChange }: {
@@ -262,7 +310,7 @@ function WaitPayloadSchemaEditor({ node, onNodeChange }: {
 }
 
 // 通用标题/说明与各节点专属配置集中在同一检查面板；condition 的说明以「判断说明」呈现。
-export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agentTargets = [], toolOptions = [], onNodeChange, onNodeDelete }: NodeInspectorProps) {
+export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agentTargets = [], toolOptions = [], knowledgeSources = [], onNodeChange, onNodeDelete }: NodeInspectorProps) {
   const isHuman = node.type === "human";
   const isCondition = node.type === "condition";
   const knowledge = node.knowledge;
@@ -372,7 +420,7 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
         </div>
       ) : null}
       {node.type === "knowledge" && knowledge ? (
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-2">
           <label htmlFor="node-query" className="text-sm font-medium">检索内容</label>
           <input
             id="node-query"
@@ -381,6 +429,8 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
             onChange={(event) => onNodeChange({ ...node, knowledge: { ...knowledge, query: event.target.value } })}
             className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
           />
+          <KnowledgeSourcePicker label="资料范围" sourceIds={knowledge.sourceIds ?? []} sources={knowledgeSources}
+            onChange={(sourceIds) => onNodeChange({ ...node, knowledge: { ...knowledge, sourceIds } })} />
         </div>
       ) : null}
       {node.type === "condition" && node.condition ? (
@@ -499,7 +549,7 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
                 {branch.steps.map((step, stepIndex) => (
                   <InlineStepEditor key={String(step.id ?? stepIndex)}
                     label={`并行工作 ${branchIndex + 1} 步骤 ${stepIndex + 1}`}
-                    steps={branch.steps} index={stepIndex} toolOptions={toolOptions} agentTargets={agentTargets} removable={branch.steps.length > 1}
+                    steps={branch.steps} index={stepIndex} toolOptions={toolOptions} agentTargets={agentTargets} knowledgeSources={knowledgeSources} removable={branch.steps.length > 1}
                     onChange={(steps) => onNodeChange({ ...node, parallel: { ...node.parallel!, branches: node.parallel!.branches.map((item, index) => index === branchIndex ? { ...item, steps } : item) } })}
                     onDelete={() => onNodeChange({ ...node, parallel: { ...node.parallel!, branches: node.parallel!.branches.map((item, index) => index === branchIndex ? { ...item, steps: item.steps.filter((_, index2) => index2 !== stepIndex) } : item) } })} />
                 ))}
@@ -542,7 +592,7 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
           <div className="space-y-2">
             {node.subflow.steps.map((step, stepIndex) => (
               <InlineStepEditor key={String(step.id ?? stepIndex)} label={`步骤组步骤 ${stepIndex + 1}`}
-                steps={node.subflow!.steps} index={stepIndex} toolOptions={toolOptions} agentTargets={agentTargets} removable={node.subflow!.steps.length > 1}
+                steps={node.subflow!.steps} index={stepIndex} toolOptions={toolOptions} agentTargets={agentTargets} knowledgeSources={knowledgeSources} removable={node.subflow!.steps.length > 1}
                 onChange={(steps) => onNodeChange({ ...node, subflow: { ...node.subflow!, steps } })}
                 onDelete={() => onNodeChange({ ...node, subflow: { ...node.subflow!, steps: node.subflow!.steps.filter((_, index) => index !== stepIndex) } })} />
             ))}

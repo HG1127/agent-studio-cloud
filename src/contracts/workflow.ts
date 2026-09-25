@@ -92,7 +92,11 @@ export const WorkflowNode = z.object({
   purpose: z.string().optional(),
   approval: z.object({ role: z.string(), reason: z.string() }).optional(),
   tool: ToolSpec.optional(),
-  knowledge: z.object({ space: z.string(), query: z.string().optional() }).optional(),
+  knowledge: z.object({
+    space: z.string(),
+    query: z.string().optional(),
+    sourceIds: z.array(z.string().uuid()).max(100).optional(),
+  }).optional(),
   condition: z.object({
     source: z.string().nullable(), operator: z.string().default("eq"),
     branches: z.array(ConditionBranch).max(MAX_CONDITION_BRANCHES).default([]), defaultNext: z.string().nullable().default(null),

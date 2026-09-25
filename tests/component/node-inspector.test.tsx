@@ -23,6 +23,18 @@ const KNOWLEDGE_NODE = WorkflowNode.parse({
   type: "knowledge",
   knowledge: { space: "业务资料库", query: "退货规则" },
 });
+const KNOWLEDGE_SOURCE = {
+  id: "00000000-0000-4000-8000-000000000041",
+  name: "退款规则.md",
+  mime: "text/markdown",
+  sizeBytes: 100,
+  status: "indexed" as const,
+  chunkCount: 1,
+  charCount: 80,
+  error: null,
+  hasOriginal: false,
+  createdAt: "2026-09-25T00:00:00.000Z",
+};
 const TOOL_NODE = WorkflowNode.parse({
   id: "tool_1", title: "更新客户资料", type: "tool",
   tool: { connector: "demo", action: "update_customer", scope: "demo", risk: "low", maxRetries: 1, registryToolId: "demo", protocol: "demo" },
@@ -329,6 +341,27 @@ describe("NodeInspector", () => {
     }));
   });
 
+  it("步骤组中的资料步骤也可以限制资料范围", async () => {
+    const knowledgeSubflow = WorkflowNode.parse({
+      ...SUBFLOW_NODE,
+      subflow: {
+        ...SUBFLOW_NODE.subflow!,
+        steps: [{ id: "step_1", title: "查询规则", type: "knowledge", knowledge: { space: "业务资料库", query: "" } }],
+      },
+    });
+    const onNodeChange = vi.fn();
+    const user = userEvent.setup();
+    render(<NodeInspector node={knowledgeSubflow} knowledgeSources={[KNOWLEDGE_SOURCE]}
+      onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
+
+    await user.click(screen.getByRole("checkbox", { name: KNOWLEDGE_SOURCE.name }));
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      subflow: expect.objectContaining({
+        steps: [expect.objectContaining({ knowledge: expect.objectContaining({ sourceIds: [KNOWLEDGE_SOURCE.id] }) })],
+      }),
+    }));
+  });
+
   it("顺序步骤组可配置内嵌助手交接并冻结交付契约", async () => {
     const handoffSubflow = WorkflowNode.parse({
       ...SUBFLOW_NODE,
@@ -356,12 +389,18 @@ describe("NodeInspector", () => {
     }));
   });
 
-  it("知识节点可以单独修改检索内容", () => {
+  it("知识节点可以修改检索内容并选择发布资料范围", async () => {
     const onNodeChange = vi.fn();
-    render(<NodeInspector node={KNOWLEDGE_NODE} onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
+    const user = userEvent.setup();
+    render(<NodeInspector node={KNOWLEDGE_NODE} knowledgeSources={[KNOWLEDGE_SOURCE]} onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
     fireEvent.change(screen.getByLabelText("检索内容"), { target: { value: "海蓝灯塔二四" } });
     expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
       knowledge: { space: "业务资料库", query: "海蓝灯塔二四" },
+    }));
+    onNodeChange.mockClear();
+    await user.click(screen.getByRole("checkbox", { name: KNOWLEDGE_SOURCE.name }));
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      knowledge: expect.objectContaining({ sourceIds: [KNOWLEDGE_SOURCE.id] }),
     }));
   });
 
