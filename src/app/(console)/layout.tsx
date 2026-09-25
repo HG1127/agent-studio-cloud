@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { DraftNavigationGuard } from "@/features/workflow-canvas/DraftNavigationGuard";
 
 const NAV_ITEMS = [
   { href: "/", label: "总览" },
@@ -14,6 +15,7 @@ const NAV_ITEMS = [
 export default function ConsoleLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-gray-50">
+      <DraftNavigationGuard />
       <header className="border-b bg-white">
         <nav className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3 sm:px-8">
           <Link href="/" className="whitespace-nowrap text-sm font-semibold text-gray-900">Agent Studio</Link>
