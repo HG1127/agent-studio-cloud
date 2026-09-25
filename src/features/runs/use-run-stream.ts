@@ -54,7 +54,17 @@ export function useRunStream(runId: string, initialEvents: TraceEventView[], liv
         // 单条坏消息不中断整个流
       }
     };
-    const onDone = () => {
+    const onDone = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as { status?: unknown };
+        if (payload.status === "error") {
+          startFallback();
+          router.refresh();
+          return;
+        }
+      } catch {
+        // 无法识别的 done 仍按终态处理，避免损坏消息导致无限重连。
+      }
       closedByDone = true;
       stopFallback();
       source.close();

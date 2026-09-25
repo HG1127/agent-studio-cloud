@@ -186,6 +186,21 @@ describe("TraceTimeline", () => {
     });
   });
 
+  it("服务端暂时读取失败时保留重连并启动低频刷新", () => {
+    vi.useFakeTimers();
+    (globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
+    render(<TraceTimeline runId={RUN_ID} initialEvents={EVENTS} live />);
+    const source = FakeEventSource.instances[0];
+
+    act(() => {
+      source.emit("done", { status: "error" });
+      vi.advanceTimersByTime(5_000);
+    });
+
+    expect(source.closed).toBe(false);
+    expect(refreshMock).toHaveBeenCalledTimes(2);
+  });
+
   it("浏览器没有事件流能力时降级为定时刷新", () => {
     vi.useFakeTimers();
     delete (globalThis as { EventSource?: unknown }).EventSource;
