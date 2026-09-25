@@ -55,7 +55,7 @@ function changeInlineStep(
   return steps.map((step, stepIndex) => stepIndex === index ? { ...step, [field]: value } : step);
 }
 
-const INLINE_STEP_TYPES = ["ai", "system", "tool", "knowledge", "memory"] as const;
+const INLINE_STEP_TYPES = ["ai", "system", "tool", "knowledge", "memory", "agent_call", "handoff"] as const;
 type InlineStepType = (typeof INLINE_STEP_TYPES)[number];
 const CONDITION_OPERATORS = [
   ["eq", "等于"], ["neq", "不等于"], ["contains", "包含"],
@@ -69,6 +69,8 @@ function changeInlineStepType(steps: Array<Record<string, unknown>>, index: numb
     if (type === "tool") return { ...step, type, tool: step.tool ?? { connector: "demo", action: "demo", scope: "demo", risk: "low", maxRetries: 1, registryToolId: "demo", protocol: "demo", inputSchema: { type: "object" }, outputSchema: { type: "object" } } };
     if (type === "knowledge") return { ...step, type, knowledge: step.knowledge ?? { space: "业务资料库", query: "" } };
     if (type === "memory") return { ...step, type, memory: step.memory ?? { mode: "read", limit: 5 } };
+    if (type === "agent_call") return { ...step, type, agentCall: step.agentCall ?? { targetAgentId: "", versionId: "" } };
+    if (type === "handoff") return { ...step, type, toAgent: step.toAgent ?? { id: "", versionId: "" } };
     return { ...step, type };
   });
 }
@@ -93,11 +95,41 @@ function inlineToolSpec(toolId: string, currentAction: string, options: ToolRegi
   };
 }
 
-function InlineStepEditor({ label, steps, index, toolOptions, removable, onChange, onDelete }: {
+function agentCallSelection(target: AgentTargetOption | undefined) {
+  return target ? {
+    targetAgentId: target.agentId,
+    targetAgentName: target.agentName,
+    versionId: target.versionId,
+    workflowId: target.versionId,
+    memoryAccess: { mode: "none" as const },
+    inputContract: target.inputContract,
+    outputContract: target.outputContract,
+  } : { targetAgentId: "", versionId: "" };
+}
+
+function handoffSelection(target: AgentTargetOption | undefined) {
+  const outputFields = target ? contractFields(target.outputContract, "path") : [];
+  const inputFields = target ? contractFields(target.inputContract, "name") : [];
+  return {
+    toAgent: target ? { id: target.agentId, name: target.agentName, versionId: target.versionId } : { id: "", versionId: "" },
+    contract: target ? {
+      deliverables: outputFields.length > 0
+        ? outputFields.map((field) => field.label || field.name)
+        : ["完成交接任务并返回可核对的结果"],
+      mustNotInclude: DEFAULT_HANDOFF_PROHIBITED,
+      inputSchema: inputFields.length > 0 ? inputFields : [{ name: "brief", label: "交接说明", type: "string" as const, required: true }],
+      outputSchema: outputFields.length > 0 ? outputFields : [{ name: "result", label: "交接结果", type: "any" as const, required: true }],
+      memoryPolicy: { mode: "none" as const, shared: [], private: ["密钥", "个人隐私", "内部草稿"] },
+    } : undefined,
+  };
+}
+
+function InlineStepEditor({ label, steps, index, toolOptions, agentTargets, removable, onChange, onDelete }: {
   label: string;
   steps: Array<Record<string, unknown>>;
   index: number;
   toolOptions: ToolRegistryOption[];
+  agentTargets: AgentTargetOption[];
   removable: boolean;
   onChange: (steps: Array<Record<string, unknown>>) => void;
   onDelete: () => void;
@@ -114,6 +146,7 @@ function InlineStepEditor({ label, steps, index, toolOptions, removable, onChang
       className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs">
       <option value="ai">智能处理</option><option value="system">自动记录</option><option value="tool">业务工具</option>
       <option value="knowledge">读取资料</option><option value="memory">参考经验</option>
+      <option value="agent_call">呼叫其他助手</option><option value="handoff">交给其他助手</option>
     </select>
     <input aria-label={`${label} 名称`} value={String(step.title ?? "")}
       onChange={(event) => onChange(changeInlineStep(steps, index, "title", event.target.value))}
@@ -149,6 +182,26 @@ function InlineStepEditor({ label, steps, index, toolOptions, removable, onChang
           className="min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />秒
       </label>
     </div> : null}
+    {type === "agent_call" ? <select aria-label={`${label} 协作助手`}
+      value={String((step.agentCall as Record<string, unknown> | undefined)?.versionId ?? "")}
+      onChange={(event) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
+        ...item,
+        agentCall: agentCallSelection(agentTargets.find((target) => target.versionId === event.target.value)),
+      } : item))}
+      className="rounded-md border border-gray-300 px-2 py-1.5 text-xs md:col-span-4">
+      <option value="">请选择已发布助手</option>
+      {agentTargets.map((target) => <option key={target.versionId} value={target.versionId}>{target.agentName}（版本 {target.version}）</option>)}
+    </select> : null}
+    {type === "handoff" ? <select aria-label={`${label} 接收助手`}
+      value={String((step.toAgent as Record<string, unknown> | undefined)?.versionId ?? "")}
+      onChange={(event) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
+        ...item,
+        ...handoffSelection(agentTargets.find((target) => target.versionId === event.target.value)),
+      } : item))}
+      className="rounded-md border border-gray-300 px-2 py-1.5 text-xs md:col-span-4">
+      <option value="">请选择已发布助手</option>
+      {agentTargets.map((target) => <option key={target.versionId} value={target.versionId}>{target.agentName}（版本 {target.version}）</option>)}
+    </select> : null}
   </div>;
 }
 
@@ -433,7 +486,7 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
                 {branch.steps.map((step, stepIndex) => (
                   <InlineStepEditor key={String(step.id ?? stepIndex)}
                     label={`并行工作 ${branchIndex + 1} 步骤 ${stepIndex + 1}`}
-                    steps={branch.steps} index={stepIndex} toolOptions={toolOptions} removable={branch.steps.length > 1}
+                    steps={branch.steps} index={stepIndex} toolOptions={toolOptions} agentTargets={agentTargets} removable={branch.steps.length > 1}
                     onChange={(steps) => onNodeChange({ ...node, parallel: { ...node.parallel!, branches: node.parallel!.branches.map((item, index) => index === branchIndex ? { ...item, steps } : item) } })}
                     onDelete={() => onNodeChange({ ...node, parallel: { ...node.parallel!, branches: node.parallel!.branches.map((item, index) => index === branchIndex ? { ...item, steps: item.steps.filter((_, index2) => index2 !== stepIndex) } : item) } })} />
                 ))}
@@ -476,7 +529,7 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
           <div className="space-y-2">
             {node.subflow.steps.map((step, stepIndex) => (
               <InlineStepEditor key={String(step.id ?? stepIndex)} label={`步骤组步骤 ${stepIndex + 1}`}
-                steps={node.subflow!.steps} index={stepIndex} toolOptions={toolOptions} removable={node.subflow!.steps.length > 1}
+                steps={node.subflow!.steps} index={stepIndex} toolOptions={toolOptions} agentTargets={agentTargets} removable={node.subflow!.steps.length > 1}
                 onChange={(steps) => onNodeChange({ ...node, subflow: { ...node.subflow!, steps } })}
                 onDelete={() => onNodeChange({ ...node, subflow: { ...node.subflow!, steps: node.subflow!.steps.filter((_, index) => index !== stepIndex) } })} />
             ))}
@@ -618,15 +671,7 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
               const target = agentTargets.find((item) => item.versionId === event.target.value);
               onNodeChange({
                 ...node,
-                agentCall: target ? {
-                  targetAgentId: target.agentId,
-                  targetAgentName: target.agentName,
-                  versionId: target.versionId,
-                  workflowId: target.versionId,
-                  memoryAccess: { mode: "none" },
-                  inputContract: target.inputContract,
-                  outputContract: target.outputContract,
-                } : { targetAgentId: "", versionId: "" },
+                agentCall: agentCallSelection(target),
               });
             }}
             className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
@@ -648,20 +693,9 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
               value={node.toAgent?.versionId ?? ""}
               onChange={(event) => {
                 const target = agentTargets.find((item) => item.versionId === event.target.value);
-                const outputFields = target ? contractFields(target.outputContract, "path") : [];
-                const inputFields = target ? contractFields(target.inputContract, "name") : [];
                 onNodeChange({
                   ...node,
-                  toAgent: target ? { id: target.agentId, name: target.agentName, versionId: target.versionId } : { id: "", versionId: "" },
-                  contract: target ? {
-                    deliverables: outputFields.map((field) => field.label || field.name).length > 0
-                      ? outputFields.map((field) => field.label || field.name)
-                      : ["完成交接任务并返回可核对的结果"],
-                    mustNotInclude: DEFAULT_HANDOFF_PROHIBITED,
-                    inputSchema: inputFields.length > 0 ? inputFields : [{ name: "brief", label: "交接说明", type: "string", required: true }],
-                    outputSchema: outputFields.length > 0 ? outputFields : [{ name: "result", label: "交接结果", type: "any", required: true }],
-                    memoryPolicy: { mode: "none", shared: [], private: ["密钥", "个人隐私", "内部草稿"] },
-                  } : undefined,
+                  ...handoffSelection(target),
                 });
               }}
               className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"

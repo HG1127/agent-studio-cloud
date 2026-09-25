@@ -68,6 +68,14 @@ const SUBFLOW_NODE = WorkflowNode.parse({
   id: "step_11", title: "完成交付准备", type: "subflow",
   subflow: { name: "交付准备", steps: [{ id: "step_1", title: "检查材料", type: "ai" }], inputs: [], outputs: [], failurePolicy: "checkpoint" },
 });
+const COLLABORATION_TARGET = {
+  agentId: "00000000-0000-4000-8000-000000000021",
+  agentName: "研究助手",
+  versionId: "00000000-0000-4000-8000-000000000022",
+  version: 2,
+  inputContract: { fields: [{ name: "brief", label: "任务说明", type: "string", required: true }] },
+  outputContract: { fields: [{ path: "report", label: "研究报告", required: true, sourceNodeId: "draft" }] },
+};
 
 describe("NodeInspector", () => {
   it("修改节点名称时回调携带新值", () => {
@@ -257,6 +265,36 @@ describe("NodeInspector", () => {
     }));
   });
 
+  it("并行工作保留并可配置内嵌助手调用", async () => {
+    const collaborationParallel = WorkflowNode.parse({
+      ...PARALLEL_NODE,
+      parallel: {
+        ...PARALLEL_NODE.parallel!,
+        branches: PARALLEL_NODE.parallel!.branches.map((branch, index) => index === 0 ? {
+          ...branch,
+          steps: [{ id: "step_1", title: "调用研究助手", type: "agent_call", agentCall: { targetAgentId: "", versionId: "" } }],
+        } : branch),
+      },
+    });
+    const onNodeChange = vi.fn();
+    const user = userEvent.setup();
+    render(<NodeInspector node={collaborationParallel} agentTargets={[COLLABORATION_TARGET]}
+      onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
+
+    expect(screen.getByLabelText("并行工作 1 步骤 1 类型")).toHaveValue("agent_call");
+    await user.selectOptions(screen.getByLabelText("并行工作 1 步骤 1 协作助手"), COLLABORATION_TARGET.versionId);
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      parallel: expect.objectContaining({ branches: [expect.objectContaining({
+        steps: [expect.objectContaining({ agentCall: expect.objectContaining({
+          targetAgentName: "研究助手",
+          versionId: COLLABORATION_TARGET.versionId,
+          inputContract: COLLABORATION_TARGET.inputContract,
+          outputContract: COLLABORATION_TARGET.outputContract,
+        }) })],
+      }), expect.anything()] }),
+    }));
+  });
+
   it("顺序步骤组可以修改名称、输出和内部步骤", async () => {
     const onNodeChange = vi.fn();
     const user = userEvent.setup();
@@ -276,6 +314,33 @@ describe("NodeInspector", () => {
     await user.selectOptions(screen.getByLabelText("步骤组步骤 1 类型"), "knowledge");
     expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
       subflow: expect.objectContaining({ steps: [expect.objectContaining({ type: "knowledge", knowledge: { space: "业务资料库", query: "" } })] }),
+    }));
+  });
+
+  it("顺序步骤组可配置内嵌助手交接并冻结交付契约", async () => {
+    const handoffSubflow = WorkflowNode.parse({
+      ...SUBFLOW_NODE,
+      subflow: {
+        ...SUBFLOW_NODE.subflow!,
+        steps: [{ id: "step_1", title: "交给研究助手", type: "handoff", toAgent: { id: "", versionId: "" } }],
+      },
+    });
+    const onNodeChange = vi.fn();
+    const user = userEvent.setup();
+    render(<NodeInspector node={handoffSubflow} agentTargets={[COLLABORATION_TARGET]}
+      onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
+
+    expect(screen.getByLabelText("步骤组步骤 1 类型")).toHaveValue("handoff");
+    await user.selectOptions(screen.getByLabelText("步骤组步骤 1 接收助手"), COLLABORATION_TARGET.versionId);
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      subflow: expect.objectContaining({ steps: [expect.objectContaining({
+        toAgent: expect.objectContaining({ name: "研究助手", versionId: COLLABORATION_TARGET.versionId }),
+        contract: expect.objectContaining({
+          deliverables: ["研究报告"],
+          inputSchema: [expect.objectContaining({ name: "brief" })],
+          outputSchema: [expect.objectContaining({ name: "report" })],
+        }),
+      })] }),
     }));
   });
 
