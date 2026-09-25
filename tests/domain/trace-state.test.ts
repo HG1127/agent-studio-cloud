@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canAppendTraceToRun, isTerminalTraceKind } from "@/server/domain/trace-state";
+import { canAppendTraceToRun, isTerminalTraceKind, terminalTraceKindForStatus } from "@/server/domain/trace-state";
 
 describe("运行轨迹终态守卫", () => {
   it.each(["queued", "running", "waiting_approval", "waiting_event"])("%s 状态允许写入执行轨迹", (status) => {
@@ -24,5 +24,9 @@ describe("运行轨迹终态守卫", () => {
     expect(isTerminalTraceKind("run.failed")).toBe(true);
     expect(isTerminalTraceKind("run.cancelled")).toBe(true);
     expect(isTerminalTraceKind("step.failed")).toBe(false);
+    expect(terminalTraceKindForStatus("completed")).toBe("run.completed");
+    expect(terminalTraceKindForStatus("failed")).toBe("run.failed");
+    expect(terminalTraceKindForStatus("cancelled")).toBe("run.cancelled");
+    expect(terminalTraceKindForStatus("running")).toBeNull();
   });
 });

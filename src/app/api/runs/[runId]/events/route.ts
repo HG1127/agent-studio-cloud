@@ -5,14 +5,16 @@
 import { z } from "zod";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { getRunRow } from "@/server/queries/runs";
-import { listTraceSince } from "@/server/queries/trace";
+import { hasRunTraceKind, listTraceSince } from "@/server/queries/trace";
 import { resolveSseCursor } from "@/server/domain/sse-cursor";
+import { terminalTraceKindForStatus } from "@/server/domain/trace-state";
 
 export const dynamic = "force-dynamic";
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
 const POLL_INTERVAL_MS = 1500;
 const HEARTBEAT_INTERVAL_MS = 15000;
+const TERMINAL_TRACE_GRACE_MS = 15000;
 
 export async function GET(req: Request, { params }: { params: Promise<{ runId: string }> }) {
   const { runId } = await params;
@@ -45,6 +47,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
       req.signal.addEventListener("abort", onAbort);
       try {
         let lastHeartbeat = Date.now();
+        let terminalTraceObserved = false;
+        let terminalSince: number | null = null;
         for (;;) {
           // 先追平轨迹，再判定终态：终态当轮没有新事件才发 done，保证不漏最后一批
           let batch: Awaited<ReturnType<typeof listTraceSince>>;
@@ -67,9 +71,26 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
             pushEvent("done", { status: "gone" });
             break;
           }
-          if (TERMINAL_STATUSES.has(current.status) && batch.scannedCount === 0) {
-            pushEvent("done", { status: current.status });
-            break;
+          if (TERMINAL_STATUSES.has(current.status)) {
+            const terminalKind = terminalTraceKindForStatus(current.status);
+            terminalTraceObserved = terminalTraceObserved
+              || Boolean(terminalKind && batch.events.some((event) => event.kind === terminalKind));
+            if (!terminalTraceObserved && terminalKind) {
+              try {
+                terminalTraceObserved = await hasRunTraceKind(runId, DEMO_WORKSPACE_ID, terminalKind);
+              } catch (error) {
+                console.error(`[events] 检查终态轨迹失败 run=${runId}`, error);
+              }
+            }
+            terminalSince ??= Date.now();
+            if (batch.scannedCount === 0 && (
+              terminalTraceObserved || Date.now() - terminalSince >= TERMINAL_TRACE_GRACE_MS
+            )) {
+              pushEvent("done", { status: current.status });
+              break;
+            }
+          } else {
+            terminalSince = null;
           }
           if (Date.now() - lastHeartbeat >= HEARTBEAT_INTERVAL_MS) {
             send(":ping\n\n");

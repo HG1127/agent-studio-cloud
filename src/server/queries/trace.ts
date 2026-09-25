@@ -71,3 +71,17 @@ export async function listTraceSince(
     .limit(TRACE_STREAM_BATCH_SIZE);
   return parseTraceSinceBatch(rows, cursor);
 }
+
+export async function hasRunTraceKind(runId: string, workspaceId: string, kind: string): Promise<boolean> {
+  if (!RUN_ID.safeParse(runId).success || !kind) return false;
+  const [row] = await db
+    .select({ id: traceEvents.id })
+    .from(traceEvents)
+    .where(and(
+      eq(traceEvents.runId, runId),
+      eq(traceEvents.workspaceId, workspaceId),
+      eq(traceEvents.kind, kind),
+    ))
+    .limit(1);
+  return Boolean(row);
+}

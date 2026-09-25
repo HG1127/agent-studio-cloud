@@ -5,6 +5,13 @@ export function isTerminalTraceKind(kind: string): boolean {
   return TERMINAL_TRACE_KINDS.has(kind);
 }
 
+export function terminalTraceKindForStatus(status: string): string | null {
+  if (status === "completed") return "run.completed";
+  if (status === "failed") return "run.failed";
+  if (status === "cancelled") return "run.cancelled";
+  return null;
+}
+
 export function canAppendTraceToRun(status: string, kind: string): boolean {
   if (ACTIVE_RUN_STATUSES.has(status)) return true;
   if (status === "completed") return kind === "run.completed";
