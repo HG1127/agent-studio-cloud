@@ -3,7 +3,7 @@
 import { and, eq, isNotNull, isNull, ne } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { AgentArchiveInput, type AgentArchiveResult } from "@/contracts/agent";
-import { agents, agentVersions, auditEvents, schedules } from "@/db/schema";
+import { agents, agentVersions, auditEvents, evaluationRuns, schedules } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { auditEventValues } from "@/server/audit/event-values";
@@ -29,6 +29,16 @@ export async function setAgentArchivedAction(input: unknown): Promise<AgentArchi
       if (!agent) return false;
 
       if (parsed.data.archived) {
+        const [runningEvaluation] = await tx
+          .select({ id: evaluationRuns.id })
+          .from(evaluationRuns)
+          .where(and(
+            eq(evaluationRuns.agentId, parsed.data.agentId),
+            eq(evaluationRuns.workspaceId, DEMO_WORKSPACE_ID),
+            eq(evaluationRuns.status, "running"),
+          ))
+          .limit(1);
+        if (runningEvaluation) return { kind: "evaluation-running" as const };
         const dependencyVersions = await tx
           .select({
             versionId: agentVersions.id,
@@ -46,7 +56,7 @@ export async function setAgentArchivedAction(input: unknown): Promise<AgentArchi
             ne(agentVersions.agentId, parsed.data.agentId),
           ));
         const dependent = activeVersionDependingOnAgent(dependencyVersions, parsed.data.agentId);
-        if (dependent) return { inUseBy: dependent.agentName };
+        if (dependent) return { kind: "in-use" as const, inUseBy: dependent.agentName };
       }
 
       const rows = await tx
@@ -82,6 +92,9 @@ export async function setAgentArchivedAction(input: unknown): Promise<AgentArchi
         }));
       return true;
     });
+    if (typeof updated === "object" && updated.kind === "evaluation-running") {
+      return { ok: false, error: "自动验收运行期间不能停用助手，请等待验收完成" };
+    }
     if (typeof updated === "object") {
       return { ok: false, error: `助手「${updated.inUseBy}」的当前版本或待验收版本仍在使用它，请先调整并重新发布` };
     }

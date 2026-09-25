@@ -60,6 +60,7 @@ describe("助手停用依赖保护", () => {
   it("被其他在线版本使用时拒绝停用", async () => {
     mocks.rows = [
       [{ id: AGENT_ID, name: "资料整理助手" }],
+      [],
       [{
         versionId: "00000000-0000-4000-8000-000000000083",
         agentId: "00000000-0000-4000-8000-000000000082",
@@ -98,6 +99,7 @@ describe("助手停用依赖保护", () => {
     mocks.rows = [
       [{ id: AGENT_ID, name: "资料整理助手" }],
       [],
+      [],
     ];
 
     await expect(setAgentArchivedAction({ agentId: AGENT_ID, archived: true })).resolves.toEqual({ ok: true });
@@ -109,6 +111,21 @@ describe("助手停用依赖保护", () => {
       targetId: AGENT_ID,
       summary: "停用助手「资料整理助手」",
     }));
+  });
+
+  it("自动验收运行期间拒绝停用", async () => {
+    mocks.rows = [
+      [{ id: AGENT_ID, name: "资料整理助手" }],
+      [{ id: "00000000-0000-4000-8000-000000000085" }],
+    ];
+
+    await expect(setAgentArchivedAction({ agentId: AGENT_ID, archived: true })).resolves.toEqual({
+      ok: false,
+      error: "自动验收运行期间不能停用助手，请等待验收完成",
+    });
+    expect(mocks.lock).toHaveBeenCalledOnce();
+    expect(mocks.updates).toHaveLength(0);
+    expect(mocks.inserts).toHaveLength(0);
   });
 
   it("锁内状态已经变化时不覆盖", async () => {
