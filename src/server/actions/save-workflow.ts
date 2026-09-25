@@ -16,6 +16,7 @@ import { validateInlineWorkflows } from "@/server/domain/runtime/inline-workflow
 import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
 import { validationMessage } from "@/server/domain/validation-message";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { stableStringify } from "@/server/domain/pipeline";
 
 export async function saveWorkflowAction(
   agentId: string,
@@ -58,20 +59,25 @@ export async function saveWorkflowAction(
       if (!agent) return "agent-missing" as const;
       // 只更新最新一份流程定义，与详情页读取同一行，避免历史版本被误改。
       const [definition] = await tx
-        .select({ id: workflowDefinitions.id, updatedAt: workflowDefinitions.updatedAt })
+        .select({ id: workflowDefinitions.id, draft: workflowDefinitions.draft, updatedAt: workflowDefinitions.updatedAt })
         .from(workflowDefinitions)
         .where(and(eq(workflowDefinitions.agentId, agentId), eq(workflowDefinitions.workspaceId, DEMO_WORKSPACE_ID)))
         .orderBy(desc(workflowDefinitions.createdAt))
         .limit(1);
       if (!definition) return "definition-missing" as const;
+      const storedDraft = bindWorkflowRootAgent(parsed.data, { id: agentId, name: agent.name });
       if (expectedRevision && definition.updatedAt.getTime() !== expectedRevision.getTime()) {
+        const currentDraft = WorkflowDraft.safeParse(definition.draft);
+        if (currentDraft.success && stableStringify(currentDraft.data) === stableStringify(storedDraft)) {
+          return { kind: "saved" as const, updatedAt: definition.updatedAt.toISOString() };
+        }
         return "stale" as const;
       }
       const now = new Date();
       await tx
         .update(workflowDefinitions)
         .set({
-          draft: bindWorkflowRootAgent(parsed.data, { id: agentId, name: agent.name }),
+          draft: storedDraft,
           updatedAt: now,
         })
         .where(and(eq(workflowDefinitions.id, definition.id), eq(workflowDefinitions.workspaceId, DEMO_WORKSPACE_ID)));

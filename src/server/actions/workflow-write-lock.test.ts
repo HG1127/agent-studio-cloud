@@ -102,6 +102,25 @@ describe("助手与流程并发写入", () => {
     expect(mocks.inserts).toHaveLength(0);
   });
 
+  it("响应丢失后重试相同草稿时复用已保存版本", async () => {
+    const savedAt = new Date(DEFINITION_UPDATED_AT.getTime() + 1_000);
+    mocks.selectRows = [[{ name: "当前名称" }], [{
+      id: DEFINITION_ID,
+      draft: {
+        ...draft,
+        rootAgent: { ...draft.rootAgent, id: AGENT_ID, name: "当前名称" },
+      },
+      updatedAt: savedAt,
+    }]];
+
+    const result = await saveWorkflowAction(AGENT_ID, draft, DEFINITION_UPDATED_AT.toISOString());
+
+    expect(result).toEqual({ ok: true, updatedAt: savedAt.toISOString() });
+    expect(mocks.updates).toHaveLength(0);
+    expect(mocks.inserts).toHaveLength(0);
+    expect(mocks.revalidatePath).toHaveBeenCalledWith(`/agents/${AGENT_ID}`);
+  });
+
   it("已归档或不存在的助手不能被旧页面写回流程", async () => {
     mocks.selectRows = [[]];
 
