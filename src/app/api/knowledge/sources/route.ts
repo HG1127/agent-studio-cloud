@@ -109,7 +109,7 @@ async function reconcileDuplicateSource(sourceId: string, suppliedBlobPathname: 
   });
 }
 
-export async function POST(req: Request) {
+async function handleUpload(req: Request) {
   if (hasCrossSiteOrigin(req)) {
     return Response.json({ ok: false, error: "不允许从其他站点提交资料" }, { status: 403 });
   }
@@ -292,4 +292,16 @@ export async function POST(req: Request) {
     return Response.json({ ok: false, error: "解析任务启动失败，请重试上传" }, { status: 500 });
   }
   return Response.json({ ok: true, deduped: false, blobStored: blobPathname !== null, source: toView(row) });
+}
+
+export async function POST(req: Request) {
+  try {
+    return await handleUpload(req);
+  } catch (error) {
+    console.error("[knowledge-upload] 请求处理失败", safeErrorForLog(error));
+    return Response.json(
+      { ok: false, error: "资料上传暂时失败，请稍后重试" },
+      { status: 503, headers: { "cache-control": "no-store" } },
+    );
+  }
 }

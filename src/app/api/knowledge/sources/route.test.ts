@@ -10,6 +10,7 @@ const dbState = vi.hoisted(() => ({
   auditRows: [] as Array<Record<string, unknown>>,
   update: vi.fn(),
   updateRows: [] as unknown[],
+  selectError: null as Error | null,
 }));
 
 vi.mock("@vercel/blob", () => ({ del, put }));
@@ -19,8 +20,14 @@ vi.mock("@/lib/db", () => ({
     select: () => ({
       from: () => ({
         where: () => ({
-          limit: async () => dbState.selectQueue.shift() ?? dbState.rows,
-          for: () => ({ limit: async () => dbState.selectQueue.shift() ?? dbState.rows }),
+          limit: async () => {
+            if (dbState.selectError) throw dbState.selectError;
+            return dbState.selectQueue.shift() ?? dbState.rows;
+          },
+          for: () => ({ limit: async () => {
+            if (dbState.selectError) throw dbState.selectError;
+            return dbState.selectQueue.shift() ?? dbState.rows;
+          } }),
         }),
       }),
     }),
@@ -58,6 +65,7 @@ afterEach(() => {
   dbState.auditRows = [];
   dbState.update.mockReset();
   dbState.updateRows = [];
+  dbState.selectError = null;
 });
 
 describe("知识原文件上传", () => {
@@ -128,6 +136,21 @@ describe("知识原文件上传", () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ ok: false, error: "文件超过 4MB 限制，请拆分后再上传" });
     expect(startMock).not.toHaveBeenCalled();
+  });
+
+  it("数据库暂不可用时返回安全的可重试错误", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    dbState.selectError = new Error("token=private-upload-token");
+    const form = new FormData();
+    form.set("file", new File(["退款规则内容"], "退款规则.md", { type: "text/markdown" }));
+
+    const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: false, error: "资料上传暂时失败，请稍后重试" });
+    expect(JSON.stringify(log.mock.calls)).not.toContain("private-upload-token");
+    log.mockRestore();
   });
 
   it("只尝试私有存储，存储失败时不写入资料记录", async () => {
