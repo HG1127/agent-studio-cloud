@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, like, or } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { start } from "workflow/api";
 import { AgentManifest } from "@/contracts/manifest";
@@ -91,6 +91,30 @@ const handoffManifest = AgentManifest.parse({
   },
 });
 
+const loopCallManifest = AgentManifest.parse({
+  ...parentManifest,
+  workflowFingerprint: "c".repeat(64),
+  workflowSnapshot: {
+    ...parentManifest.workflowSnapshot,
+    id: "agent-call-loop-parent",
+    nodes: {
+      start: { id: "start", title: "收到任务", type: "trigger", next: "each_item" },
+      each_item: {
+        id: "each_item",
+        title: "逐项处理",
+        type: "loop",
+        next: null,
+        loop: { collectionPath: "input.items", itemKey: "item", maxIterations: 10, bodyNext: "research", exitNext: "done" },
+      },
+      research: {
+        ...parentManifest.workflowSnapshot.nodes.research,
+        next: "each_item",
+      },
+      done: { id: "done", title: "完成任务", type: "end", next: null },
+    },
+  },
+});
+
 async function insertTarget() {
   await db.insert(agents).values({
     id: TARGET_AGENT_ID,
@@ -113,10 +137,10 @@ async function insertTarget() {
 
 async function cleanup(parentRunId?: string) {
   const childRows = parentRunId
-    ? await db.select({ id: runs.id }).from(runs).where(inArray(runs.sourceKey, [
-        `agent-call:${parentRunId}:research`,
-        `handoff:${parentRunId}:handoff`,
-      ]))
+    ? await db.select({ id: runs.id }).from(runs).where(or(
+        like(runs.sourceKey, `agent-call:${parentRunId}:%`),
+        like(runs.sourceKey, `handoff:${parentRunId}:%`),
+      ))
     : [];
   const runIds = [
     ...childRows.map((row) => row.id),
@@ -192,7 +216,7 @@ describe("助手协作运行", () => {
       await handle.returnValue;
 
       const [finishedParent] = await db.select().from(runs).where(eq(runs.id, parent.id)).limit(1);
-      const [child] = await db.select().from(runs).where(eq(runs.sourceKey, `agent-call:${parent.id}:research`)).limit(1);
+      const [child] = await db.select().from(runs).where(like(runs.sourceKey, `agent-call:${parent.id}:research:%`)).limit(1);
       expect(finishedParent?.status).toBe("completed");
       expect(finishedParent?.result).toMatchObject({
         research: { assistant: "研究助手", status: "completed", result: {} },
@@ -207,6 +231,33 @@ describe("助手协作运行", () => {
       expect(await listChildRuns(parent.id, DEMO_WORKSPACE_ID)).toEqual([
         expect.objectContaining({ id: child?.id, sourceType: "agent_call", agentName: "研究助手" }),
       ]);
+    } finally {
+      await cleanup(parentRunId);
+    }
+  }, 240_000);
+
+  it("循环中的同一协作节点为每一轮创建独立子运行", async () => {
+    let parentRunId: string | undefined;
+    await cleanup();
+    try {
+      await insertTarget();
+      const [parent] = await db.insert(runs).values({
+        workspaceId: DEMO_WORKSPACE_ID,
+        createdBy: DEMO_USER_ID,
+        agentId: PARENT_AGENT_ID,
+        versionId: PARENT_VERSION_ID,
+        status: "queued",
+        input: { topic: "分项研究", items: ["第一项", "第二项"] },
+      }).returning({ id: runs.id });
+      parentRunId = parent.id;
+
+      const handle = await start(agentRunWorkflow, [parent.id, loopCallManifest, { topic: "分项研究", items: ["第一项", "第二项"] }]);
+      await expect(handle.returnValue).resolves.toEqual({ status: "completed" });
+
+      const children = await db.select().from(runs).where(like(runs.sourceKey, `agent-call:${parent.id}:research:%`));
+      expect(children).toHaveLength(2);
+      expect(new Set(children.map((child) => child.sourceKey)).size).toBe(2);
+      expect(children.every((child) => child.status === "completed")).toBe(true);
     } finally {
       await cleanup(parentRunId);
     }
@@ -231,7 +282,7 @@ describe("助手协作运行", () => {
       await handle.returnValue;
 
       const [finishedParent] = await db.select().from(runs).where(eq(runs.id, parent.id)).limit(1);
-      const [child] = await db.select().from(runs).where(eq(runs.sourceKey, `handoff:${parent.id}:handoff`)).limit(1);
+      const [child] = await db.select().from(runs).where(like(runs.sourceKey, `handoff:${parent.id}:handoff:%`)).limit(1);
       expect(finishedParent?.status).toBe("completed");
       expect(finishedParent?.result).toMatchObject({
         handoff: { assistant: "研究助手", status: "completed", deliverables: ["研究结果"], result: {} },

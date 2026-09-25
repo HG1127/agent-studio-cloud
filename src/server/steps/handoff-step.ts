@@ -1,6 +1,6 @@
 "use step";
 import { and, eq, inArray, isNull } from "drizzle-orm";
-import { FatalError } from "workflow";
+import { FatalError, getStepMetadata } from "workflow";
 import { AgentManifest, type AgentManifest as AgentManifestType } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { agents, agentVersions, runs } from "@/db/schema";
@@ -54,7 +54,7 @@ export async function beginHandoff(args: {
   const validatedInput = validateCollaborationInput(prepared.input, parsedManifest.data.inputContract.fields);
   if (!validatedInput.ok) throw new FatalError(`步骤「${args.node.title}」生成的交接输入无效：${validatedInput.error}`);
   await persistStep({ runId: args.runId, nodeId: args.node.id, nodeTitle: args.node.title, nodeType: args.node.type, status: "running" });
-  const sourceKey = `handoff:${args.runId}:${args.node.id}`;
+  const sourceKey = `handoff:${args.runId}:${args.node.id}:${getStepMetadata().stepId}`;
   const childRunId = await db.transaction(async (tx) => {
     const [lockedParent] = await tx
       .select({ id: runs.id })
@@ -78,7 +78,10 @@ export async function beginHandoff(args: {
       .onConflictDoNothing()
       .returning({ id: runs.id });
     return inserted?.id ?? (
-      await tx.select({ id: runs.id }).from(runs).where(eq(runs.sourceKey, sourceKey)).limit(1)
+      await tx.select({ id: runs.id }).from(runs).where(and(
+        eq(runs.workspaceId, parent.workspaceId),
+        eq(runs.sourceKey, sourceKey),
+      )).limit(1)
     )[0]?.id ?? null;
   });
   if (!childRunId) throw new FatalError(`步骤「${args.node.title}」无法创建交接任务`);
