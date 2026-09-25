@@ -1,4 +1,4 @@
-import { resolvePath } from "@/server/domain/runtime/condition-eval";
+import { resolvePath, runEvalContext } from "@/server/domain/runtime/condition-eval";
 
 export interface LoopCollection {
   items: unknown[];
@@ -21,7 +21,7 @@ export function resolveLoopCollection(args: {
   input: Record<string, unknown>;
   outputs: Record<string, unknown>;
 }): LoopCollection {
-  const context = { input: args.input, variables: {}, context: { outputs: args.outputs } };
+  const context = runEvalContext({ input: args.input, outputs: args.outputs });
   const resolved = resolvePath(args.collectionPath, context);
   let items: unknown[] | null = Array.isArray(resolved) ? resolved : null;
   if (!items && args.collectionPath.startsWith("context.")) {

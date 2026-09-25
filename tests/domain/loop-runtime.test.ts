@@ -11,6 +11,15 @@ describe("resolveLoopCollection", () => {
     })).toEqual({ items: [{ id: 1 }, { id: 2 }], sourceCount: 3, limited: true, sourceMissing: false });
   });
 
+  it("兼容流程变量路径读取同一份运行输入", () => {
+    expect(resolveLoopCollection({
+      collectionPath: "variables.items",
+      maxIterations: 10,
+      input: { items: ["A", "B"] },
+      outputs: {},
+    })).toEqual({ items: ["A", "B"], sourceCount: 2, limited: false, sourceMissing: false });
+  });
+
   it("读取上游步骤输出中的集合", () => {
     expect(resolveLoopCollection({
       collectionPath: "context.outputs.fetch.records",

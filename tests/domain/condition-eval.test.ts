@@ -1,6 +1,6 @@
 // condition-eval 纯函数单测：resolvePath 三种路径来源 + compare 9 个 operator + 未知路径。
 import { describe, expect, it } from "vitest";
-import { compare, matchConditionRules, resolvePath, type RunEvalContext } from "@/server/domain/runtime/condition-eval";
+import { compare, matchConditionRules, resolvePath, runEvalContext, type RunEvalContext } from "@/server/domain/runtime/condition-eval";
 
 const ctx: RunEvalContext = {
   input: { city: "杭州", severity: "high", count: 3, nested: { flag: true } },
@@ -9,6 +9,12 @@ const ctx: RunEvalContext = {
 };
 
 describe("resolvePath", () => {
+  it("运行输入同时作为 input 和 variables 暴露", () => {
+    const runtime = runEvalContext({ input: { owner: "王经理" }, outputs: {} });
+    expect(resolvePath("input.owner", runtime)).toBe("王经理");
+    expect(resolvePath("variables.owner", runtime)).toBe("王经理");
+  });
+
   it("从 input 取值", () => {
     expect(resolvePath("input.city", ctx)).toBe("杭州");
   });

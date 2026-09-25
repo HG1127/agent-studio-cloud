@@ -2,7 +2,7 @@
 // 条件步骤：消费 condition-eval 纯函数，按分支规则（或默认分支）决定下一节点 id。
 import { FatalError } from "workflow";
 import type { WorkflowNode } from "@/contracts/workflow";
-import { compare, matchConditionRules, resolvePath, type RunEvalContext } from "@/server/domain/runtime/condition-eval";
+import { compare, matchConditionRules, resolvePath, runEvalContext } from "@/server/domain/runtime/condition-eval";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 
@@ -57,7 +57,7 @@ export async function evaluateCondition(args: EvaluateConditionInput): Promise<{
   if (!condition) {
     return reject(`步骤「${node.title}」缺少条件配置，无法继续`);
   }
-  const ctx: RunEvalContext = { input: args.input, variables: {}, context: { outputs: args.outputs, currentItem: args.currentItem } };
+  const ctx = runEvalContext({ input: args.input, outputs: args.outputs, currentItem: args.currentItem });
   const actual = resolvePath(condition.source ?? "", ctx);
   let nextId = condition.defaultNext ?? null;
   let matchedLabel: string | null = null;
