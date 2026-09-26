@@ -28,6 +28,16 @@ beforeEach(() => getDetail.mockReset().mockResolvedValue({
 }));
 
 describe("助手定义导出", () => {
+  it("无效助手标识直接返回参数错误且不查询数据库", async () => {
+    const response = await GET(new Request("http://localhost"), {
+      params: Promise.resolve({ agentId: "bad" }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ ok: false, error: "导出参数不正确" });
+    expect(getDetail).not.toHaveBeenCalled();
+  });
+
   it("导出可再次导入的助手定义", async () => {
     const response = await GET(new Request("http://localhost"), {
       params: Promise.resolve({ agentId: AGENT_ID }),

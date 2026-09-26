@@ -1,4 +1,5 @@
 import { AgentManifest } from "@/contracts/manifest";
+import { z } from "zod";
 import { VersionExportFile } from "@/contracts/version";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { getVersionExportSource } from "@/server/queries/versions";
@@ -12,6 +13,10 @@ function safeFilename(value: string) {
 
 export async function GET(_request: Request, context: { params: Promise<{ agentId: string; versionId: string }> }) {
   const { agentId, versionId } = await context.params;
+  const uuid = z.string().uuid();
+  if (!uuid.safeParse(agentId).success || !uuid.safeParse(versionId).success) {
+    return Response.json({ ok: false, error: "导出参数不正确" }, { status: 400 });
+  }
   let source: Awaited<ReturnType<typeof getVersionExportSource>>;
   try {
     source = await withSafeQueryError(

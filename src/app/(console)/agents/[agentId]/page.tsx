@@ -18,6 +18,7 @@ import { AgentManifest } from "@/contracts/manifest";
 import { listToolRegistryOptions } from "@/server/tools/tool-registry";
 import { pageFromSearchParam } from "@/lib/search-params";
 import { withSafeQueryError } from "@/server/security/query-error";
+import { z } from "zod";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +40,7 @@ export default async function AgentDetailPage({
   searchParams: Promise<{ versionsPage?: string; archivedCasesPage?: string }>;
 }) {
   const { agentId } = await params;
+  if (!z.string().uuid().safeParse(agentId).success) notFound();
   const query = await searchParams;
   const versionPage = pageFromSearchParam(query.versionsPage);
   const versionPageSize = 50;

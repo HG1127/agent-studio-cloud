@@ -5,6 +5,7 @@ import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { compareAgentVersions, type VersionDiff } from "@/server/domain/version-diff";
 import { getVersionComparisonSource } from "@/server/queries/versions";
 import { withSafeQueryError } from "@/server/security/query-error";
+import { z } from "zod";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +41,8 @@ export default async function VersionComparePage({ params, searchParams }: {
   const [{ agentId }, query] = await Promise.all([params, searchParams]);
   const from = one(query.from);
   const to = one(query.to);
-  if (!from || !to) notFound();
+  const uuid = z.string().uuid();
+  if (!from || !to || !uuid.safeParse(agentId).success || !uuid.safeParse(from).success || !uuid.safeParse(to).success) notFound();
   const source = await withSafeQueryError(
     () => getVersionComparisonSource(agentId, [from, to], DEMO_WORKSPACE_ID),
     "version-compare-page",

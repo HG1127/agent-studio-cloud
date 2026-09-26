@@ -32,6 +32,15 @@ beforeEach(() => getSource.mockReset().mockResolvedValue({
 }));
 
 describe("冻结版本导出", () => {
+  it("无效版本标识直接返回参数错误且不查询数据库", async () => {
+    const response = await GET(new Request("http://localhost"), {
+      params: Promise.resolve({ agentId: AGENT_ID, versionId: "bad" }),
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ ok: false, error: "导出参数不正确" });
+    expect(getSource).not.toHaveBeenCalled();
+  });
+
   it("导出版本元数据和完整清单", async () => {
     const response = await GET(new Request("http://localhost"), {
       params: Promise.resolve({ agentId: AGENT_ID, versionId: VERSION_ID }),

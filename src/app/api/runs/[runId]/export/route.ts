@@ -1,4 +1,5 @@
 import { RunReportFile, RunStepReport } from "@/contracts/run";
+import { z } from "zod";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { redactSensitiveData } from "@/server/domain/security/redact-sensitive";
 import { getRunContext, getRunView, listApprovals, listRunSteps } from "@/server/queries/runs";
@@ -64,6 +65,9 @@ function streamedRunReport(
 
 export async function GET(_request: Request, context: { params: Promise<{ runId: string }> }) {
   const { runId } = await context.params;
+  if (!z.string().uuid().safeParse(runId).success) {
+    return Response.json({ ok: false, error: "导出参数不正确" }, { status: 400 });
+  }
   let run: Awaited<ReturnType<typeof getRunView>>;
   try {
     run = await withSafeQueryError(() => getRunView(runId, DEMO_WORKSPACE_ID), "run-export");

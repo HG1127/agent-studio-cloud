@@ -68,6 +68,13 @@ beforeEach(() => {
 });
 
 describe("运行报告导出", () => {
+  it("无效运行标识直接返回参数错误且不查询数据库", async () => {
+    const response = await GET(new Request("http://localhost"), { params: Promise.resolve({ runId: "bad" }) });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ ok: false, error: "导出参数不正确" });
+    expect(mocks.getRunView).not.toHaveBeenCalled();
+  });
+
   it("导出工作区内运行的完整报告", async () => {
     const response = await GET(new Request("http://localhost"), { params: Promise.resolve({ runId: RUN_ID }) });
     expect(response.status).toBe(200);
@@ -98,7 +105,7 @@ describe("运行报告导出", () => {
 
   it("找不到运行时返回中文错误", async () => {
     mocks.getRunView.mockResolvedValue(null);
-    const response = await GET(new Request("http://localhost"), { params: Promise.resolve({ runId: "bad" }) });
+    const response = await GET(new Request("http://localhost"), { params: Promise.resolve({ runId: RUN_ID }) });
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({ ok: false, error: "找不到这次运行" });
     expect(mocks.listRunSteps).not.toHaveBeenCalled();

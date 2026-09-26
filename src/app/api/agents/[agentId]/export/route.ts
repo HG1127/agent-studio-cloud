@@ -1,4 +1,5 @@
 import { AgentExportFile } from "@/contracts/agent";
+import { z } from "zod";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { getAgentDetail } from "@/server/queries/agents";
 import { queryUnavailableResponse, SafeQueryError, withSafeQueryError } from "@/server/security/query-error";
@@ -7,6 +8,9 @@ export const dynamic = "force-dynamic";
 
 export async function GET(_request: Request, context: { params: Promise<{ agentId: string }> }) {
   const { agentId } = await context.params;
+  if (!z.string().uuid().safeParse(agentId).success) {
+    return Response.json({ ok: false, error: "导出参数不正确" }, { status: 400 });
+  }
   let detail: Awaited<ReturnType<typeof getAgentDetail>>;
   try {
     detail = await withSafeQueryError(() => getAgentDetail(agentId, DEMO_WORKSPACE_ID), "agent-export");
