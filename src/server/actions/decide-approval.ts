@@ -43,7 +43,7 @@ export async function decideApprovalAction(
     if (run.status !== "waiting_approval") {
       return { ok: false, error: "这次运行已不再等待确认，请刷新页面查看最新状态" };
     }
-    if (parsedInput.data.resumeOnly) {
+    if (parsedInput.data.resumeOnly || row.status !== "pending") {
       if (row.status === "pending" || row.status !== parsedInput.data.decision) {
         return { ok: false, error: "确认记录与继续请求不一致，请刷新页面后重试" };
       }

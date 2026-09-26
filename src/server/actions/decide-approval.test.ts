@@ -74,6 +74,25 @@ describe("已记录确认的运行恢复", () => {
     expect(mocks.updates).toBe(0);
   });
 
+  it("旧页面重复提交相同决定时直接继续已保存的确认", async () => {
+    mocks.rows = [
+      [{ id: APPROVAL_ID, status: "approved", note: "同意执行" }],
+      [{ agentId: AGENT_ID, status: "waiting_approval" }],
+    ];
+
+    const result = await decideApprovalAction(RUN_ID, APPROVAL_ID, {
+      decision: "approved",
+      note: "旧页面里的备注",
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(mocks.resumeHook).toHaveBeenCalledWith(`approval:${APPROVAL_ID}`, {
+      decision: "approved",
+      note: "同意执行",
+    });
+    expect(mocks.updates).toBe(0);
+  });
+
   it("拒绝用继续请求改变已经保存的决定", async () => {
     mocks.rows = [
       [{ id: APPROVAL_ID, status: "approved", note: null }],
