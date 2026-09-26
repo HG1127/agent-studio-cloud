@@ -36,7 +36,7 @@ export async function listSchedules(): Promise<ScheduleViewType[]> {
 
 export async function listScheduleableAgents(): Promise<ScheduleAgentOptionType[]> {
   const rows = await db
-    .selectDistinct({ id: agents.id, name: agents.name })
+    .selectDistinct({ id: agents.id, name: agents.name, createdAt: agents.createdAt })
     .from(agents)
     .innerJoin(agentVersions, and(
       eq(agentVersions.agentId, agents.id),
