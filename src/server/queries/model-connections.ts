@@ -1,11 +1,12 @@
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { ModelConnectionView } from "@/contracts/connections";
+import { ModelConnectionView, type ModelConnectionView as ModelConnectionViewType } from "@/contracts/connections";
 import { modelConnections } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { realModelsEnabled } from "@/lib/model";
+import { parseQueryRows } from "@/server/queries/parse-query-rows";
 
-export async function listModelConnections(): Promise<ModelConnectionView[]> {
+export async function listModelConnections(): Promise<ModelConnectionViewType[]> {
   if (!realModelsEnabled()) return [];
   const rows = await db.select({
     id: modelConnections.id,
@@ -18,5 +19,9 @@ export async function listModelConnections(): Promise<ModelConnectionView[]> {
   }).from(modelConnections)
     .where(and(eq(modelConnections.workspaceId, DEMO_WORKSPACE_ID), isNull(modelConnections.archivedAt)))
     .orderBy(desc(modelConnections.createdAt));
-  return rows.map((row) => ModelConnectionView.parse({ ...row, createdAt: row.createdAt.toISOString() }));
+  return parseQueryRows(
+    "模型连接列表",
+    ModelConnectionView,
+    rows.map((row) => ({ ...row, createdAt: row.createdAt.toISOString() })),
+  );
 }
