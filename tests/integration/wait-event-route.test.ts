@@ -175,6 +175,26 @@ describe("外部消息恢复接口", () => {
     expect(receipt?.status).toBe("accepted");
   });
 
+  it("等待状态已经前进但完成轨迹尚未落库时确认重复提交成功", async () => {
+    resumeHookMock.mockRejectedValue(new Error("workflow response lost"));
+    await insertWaitingRun();
+    const request = () => new Request(`http://localhost/api/runs/${RUN_ID}/events/customer.profile.updated`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-wait-event-token": "submission-token" },
+      body: JSON.stringify({ customerId: "C-100" }),
+    });
+    const context = { params: Promise.resolve({ runId: RUN_ID, eventKey: "customer.profile.updated" }) };
+    expect((await POST(request(), context)).status).toBe(503);
+    await db.update(runs).set({ status: "running" }).where(eq(runs.id, RUN_ID));
+
+    const repeated = await POST(request(), context);
+
+    expect(repeated.status).toBe(200);
+    expect(resumeHookMock).toHaveBeenCalledOnce();
+    const [receipt] = await db.select().from(waitEventSubmissions).where(eq(waitEventSubmissions.runId, RUN_ID));
+    expect(receipt?.status).toBe("accepted");
+  });
+
   it("仍可恢复升级前已经挂起的旧格式等待", async () => {
     resumeHookMock.mockResolvedValue(undefined);
     await insertWaitingRun({ type: "object" }, null, null);

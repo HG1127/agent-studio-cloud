@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { resumeHook } from "workflow/api";
 import { MAX_WAIT_EVENT_PAYLOAD_BYTES, WaitEventPayload } from "@/contracts/run";
-import { runs } from "@/db/schema";
+import { runs, type WaitEventSubmission } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { validateJsonObjectSchema } from "@/server/domain/json-schema";
@@ -10,6 +10,7 @@ import { getPendingWait, getPendingWaitHook } from "@/server/queries/runs";
 import { hasCrossSiteOrigin, hasSameOrigin } from "@/server/security/request-origin";
 import { matchesWaitEventToken } from "@/server/security/wait-event-token";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { runStatusConfirmsWaitEventSubmission } from "@/server/domain/wait-event-submission";
 import {
   claimWaitEventSubmission,
   findWaitEventSubmission,
@@ -61,6 +62,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ runId: 
   }
   const { runId, eventKey } = parsedParams.data;
   const submissionToken = req.headers.get("x-wait-event-token");
+  let processingReceipt: WaitEventSubmission | null = null;
   if (submissionToken) {
     try {
       const receipt = await findWaitEventSubmission(submissionToken);
@@ -73,6 +75,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ runId: 
           await markWaitEventSubmissionAccepted(receipt.id, receipt.attemptToken);
           return Response.json({ ok: true });
         }
+        processingReceipt = receipt;
       }
     } catch (error) {
       console.error("读取等待消息回执失败", safeErrorForLog(error));
@@ -96,6 +99,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ runId: 
   }
   if (!run) return Response.json({ ok: false, error: "找不到这次运行" }, { status: 404 });
   if (run.status !== "waiting_event") {
+    if (processingReceipt && runStatusConfirmsWaitEventSubmission(run.status)) {
+      try {
+        await markWaitEventSubmissionAccepted(processingReceipt.id, processingReceipt.attemptToken);
+        return Response.json({ ok: true });
+      } catch (error) {
+        console.error("确认等待消息回执失败", safeErrorForLog(error));
+        return Response.json({ ok: false, error: "暂时无法确认消息提交结果，请稍后重试" }, { status: 500 });
+      }
+    }
     return Response.json({ ok: false, error: "这次运行当前没有等待外部消息" }, { status: 409 });
   }
   if (!pendingWait || pendingWait.eventKey !== eventKey) {
