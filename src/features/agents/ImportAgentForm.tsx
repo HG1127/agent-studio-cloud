@@ -10,6 +10,7 @@ export function ImportAgentForm() {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const importingRef = useRef(false);
+  const retryRef = useRef<{ content: string; requestId: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function importFile(file: File | undefined) {
@@ -23,13 +24,19 @@ export function ImportAgentForm() {
     setError(null);
     try {
       let payload: unknown;
+      let content: string;
       try {
-        payload = JSON.parse(await file.text()) as unknown;
+        content = await file.text();
+        payload = JSON.parse(content) as unknown;
       } catch {
         setError("无法读取这个 JSON 文件，请检查文件内容");
         return;
       }
-      const result = await importAgentAction(payload);
+      const request = retryRef.current?.content === content
+        ? retryRef.current
+        : { content, requestId: crypto.randomUUID() };
+      retryRef.current = request;
+      const result = await importAgentAction(payload, request.requestId);
       if (result.ok) {
         router.push(`/agents/${result.agentId}`);
         return;

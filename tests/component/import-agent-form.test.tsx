@@ -26,7 +26,7 @@ describe("ImportAgentForm", () => {
     const payload = { format: "agent-studio-cloud", formatVersion: 1 };
     const file = new File([JSON.stringify(payload)], "assistant.json", { type: "application/json" });
     await user.upload(screen.getByLabelText("选择助手定义文件"), file);
-    await waitFor(() => expect(importMock).toHaveBeenCalledWith(payload));
+    await waitFor(() => expect(importMock).toHaveBeenCalledWith(payload, expect.any(String)));
     expect(pushMock).toHaveBeenCalledWith(`/agents/${agentId}`);
   });
 
@@ -53,6 +53,7 @@ describe("ImportAgentForm", () => {
     expect(screen.getByText("选择 JSON 文件")).toBeInTheDocument();
     await user.upload(input, file);
     await waitFor(() => expect(importMock).toHaveBeenCalledTimes(2));
+    expect(importMock.mock.calls[1][1]).toBe(importMock.mock.calls[0][1]);
     expect(pushMock).toHaveBeenCalledWith("/agents/00000000-0000-4000-8000-000000000042");
   });
 

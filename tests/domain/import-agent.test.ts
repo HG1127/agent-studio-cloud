@@ -4,6 +4,7 @@ import { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
 import {
   agentImportSizeIssue,
   importedCollaborationKeys,
+  importedAgentMatches,
   importedWorkflowIssue,
   MAX_AGENT_IMPORT_BYTES,
   normalizeAgentImport,
@@ -22,6 +23,25 @@ const workflow = WorkflowDraft.parse({
 });
 
 describe("助手导入格式归一化", () => {
+  it("只把来源信息完全相同的助手视为同一次导入", () => {
+    const imported = {
+      name: "客户助手",
+      description: "处理客户问题",
+      intentText: "处理客户问题并生成可核对的答复",
+      workflow,
+    };
+    expect(importedAgentMatches({
+      name: imported.name,
+      description: imported.description,
+      intentText: imported.intentText,
+    }, imported)).toBe(true);
+    expect(importedAgentMatches({
+      name: imported.name,
+      description: "另一份说明",
+      intentText: imported.intentText,
+    }, imported)).toBe(false);
+  });
+
   it("服务端拒绝超大或无法序列化的导入内容", () => {
     expect(agentImportSizeIssue({ text: "x".repeat(MAX_AGENT_IMPORT_BYTES) })).toBe("导入文件不能超过 2MB");
     const circular: Record<string, unknown> = {};
