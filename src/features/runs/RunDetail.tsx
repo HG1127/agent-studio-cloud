@@ -53,6 +53,10 @@ function displayValue(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value, null, 2) ?? "";
 }
 
+function displayOutputValue(value: unknown): string {
+  return typeof value === "string" ? presentBusinessOutput(value).text : displayValue(value);
+}
+
 function fallbackResultLabel(key: string, stepTitleByNode: ReadonlyMap<string, string | null>): string {
   return stepTitleByNode.get(key) ?? (/\p{Script=Han}/u.test(key) ? key : "步骤结果");
 }
@@ -91,7 +95,7 @@ export async function RunDetail({ runId }: { runId: string }) {
     ? contractedOutputs
     : Object.entries(redactedResult).map(([key, output]) => ({ key, label: fallbackResultLabel(key, stepTitleByNode), output }));
   const copyText = contractedOutputs.length > 0
-    ? contractedOutputs.map((field) => `${field.label}\n${displayValue(field.output)}`).join("\n\n")
+    ? contractedOutputs.map((field) => `${field.label}\n${displayOutputValue(field.output)}`).join("\n\n")
     : undefined;
 
   return (
@@ -217,7 +221,7 @@ export async function RunDetail({ runId }: { runId: string }) {
                     {label}
                   </p>
                   <p className="whitespace-pre-wrap break-words text-sm text-gray-700">
-                    {displayValue(output)}
+                    {displayOutputValue(output)}
                   </p>
                 </li>
               ))}

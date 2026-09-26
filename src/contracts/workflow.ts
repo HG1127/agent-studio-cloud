@@ -83,13 +83,6 @@ export const QualityGateSpec = z.object({
   checkToolReceipts: z.boolean().default(false),
   checkHumanBoundary: z.boolean().default(false),
 });
-export const ParallelBranch = z.object({
-  id: z.string().min(1),
-  label: z.string().min(1),
-  inputs: z.array(z.string()).default([]),
-  outputs: z.array(z.string()).default([]),
-  steps: z.array(z.record(z.string(), z.unknown())).min(1),
-});
 export const WorkflowNode = z.object({
   id: z.string(), title: z.string(), type: WorkflowNodeType,
   agent: z.object({ id: z.string(), name: z.string(), role: z.string() }).optional(),
