@@ -1,7 +1,7 @@
 "use step";
 import mammoth from "mammoth";
 import { getDocumentProxy } from "unpdf";
-import { FatalError } from "workflow";
+import { FatalError, RetryableError } from "workflow";
 import { and, eq } from "drizzle-orm";
 import { knowledgeChunks, knowledgeSources } from "@/db/schema";
 import { db } from "@/lib/db";
@@ -27,7 +27,7 @@ interface ParseArgs {
 }
 
 function safeKnowledgeParseError(error: unknown, message: string): never {
-  if (error instanceof FatalError) throw error;
+  if (FatalError.is(error) || RetryableError.is(error)) throw error;
   if (error instanceof KnowledgePdfLimitError) throw new FatalError(error.message);
   throw new FatalError(message);
 }

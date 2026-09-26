@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { FatalError, RetryableError } from "workflow";
 import { MAX_KNOWLEDGE_FILE_BYTES, MAX_KNOWLEDGE_PDF_PAGES } from "@/server/domain/knowledge/text-limits";
 
 const mocks = vi.hoisted(() => ({
@@ -34,6 +35,21 @@ describe("知识文件解析防线", () => {
     ]).stream();
 
     await expect(readKnowledgeFile(content)).rejects.toThrow("文件超过 4MB 限制");
+  });
+
+  it.each(["FatalError", "RetryableError"] as const)("文件读取保留跨运行时的 %s", async (name) => {
+    const failure = Object.assign(new Error("读取暂时失败"), {
+      name,
+      [name === "FatalError" ? "fatal" : "retryable"]: true,
+    });
+    expect(name === "FatalError" ? FatalError.is(failure) : RetryableError.is(failure)).toBe(true);
+    const content = new ReadableStream<Uint8Array>({
+      start(controller) { controller.error(failure); },
+    });
+
+    await expect(parseKnowledgeFile({
+      sourceId: "source-1", filename: "资料.txt", mime: "text/plain", content,
+    })).rejects.toBe(failure);
   });
 
   it("在抽取文字前拒绝页数过多的 PDF", async () => {
