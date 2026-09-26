@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { AgentSummary, AgentTargetOption, type AgentTargetOption as AgentTargetOptionType } from "@/contracts/agent";
 import { AgentManifest } from "@/contracts/manifest";
@@ -103,7 +103,16 @@ export async function getAgentDetail(agentId: string, workspaceId: string): Prom
   };
 }
 
-export async function listAgentTargets(workspaceId: string, excludeAgentId: string): Promise<AgentTargetOptionType[]> {
+export async function listAgentTargets(
+  workspaceId: string,
+  excludeAgentId: string,
+  selectedVersionIds: string[] = [],
+): Promise<AgentTargetOptionType[]> {
+  const uuid = z.string().uuid();
+  const selected = [...new Set(selectedVersionIds.filter((id) => uuid.safeParse(id).success))];
+  const versionScope = selected.length > 0
+    ? or(eq(agentVersions.status, "production"), inArray(agentVersions.id, selected))
+    : eq(agentVersions.status, "production");
   const rows = await db
     .select({ agentId: agents.id, agentName: agents.name, versionId: agentVersions.id, version: agentVersions.version, manifest: agentVersions.manifest })
     .from(agentVersions)
@@ -111,7 +120,7 @@ export async function listAgentTargets(workspaceId: string, excludeAgentId: stri
     .where(and(
       eq(agentVersions.workspaceId, workspaceId),
       eq(agents.workspaceId, workspaceId),
-      eq(agentVersions.status, "production"),
+      versionScope,
       isNull(agents.archivedAt),
     ))
     .orderBy(desc(agentVersions.version));

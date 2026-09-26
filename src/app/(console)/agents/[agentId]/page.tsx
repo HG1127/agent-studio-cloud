@@ -15,6 +15,7 @@ import { listModelConnections } from "@/server/queries/model-connections";
 import { hasRunningEvaluation, listEvaluationCases, listEvaluationRuns } from "@/server/queries/evaluations";
 import { listKnowledgeSourcesForPicker } from "@/server/queries/knowledge";
 import { workflowKnowledgeSourceIds } from "@/server/domain/runtime/knowledge-snapshot";
+import { workflowCollaborationKeys } from "@/server/domain/import-agent";
 import { AgentManifest } from "@/contracts/manifest";
 import { listToolRegistryOptions } from "@/server/tools/tool-registry";
 import { pageFromSearchParam } from "@/lib/search-params";
@@ -53,10 +54,13 @@ export default async function AgentDetailPage({
   if (!detail) notFound();
   const audit = detail.draft ? auditWorkflow(detail.draft) : null;
   const selectedKnowledgeSourceIds = detail.draft ? workflowKnowledgeSourceIds(detail.draft.nodes) : [];
+  const selectedCollaborationVersionIds = detail.draft
+    ? workflowCollaborationKeys(detail.draft).map((key) => key.slice(key.lastIndexOf(":") + 1))
+    : [];
   const [versions, connections, agentTargets, evaluationCases, archivedEvaluationCases, evaluationRunRows, evaluationRunning, knowledgeSources] = await withSafeQueryError(() => Promise.all([
     listVersions(agentId, DEMO_WORKSPACE_ID, { limit: versionPageSize + 1, offset: (versionPage - 1) * versionPageSize }),
     listModelConnections(),
-    listAgentTargets(DEMO_WORKSPACE_ID, agentId),
+    listAgentTargets(DEMO_WORKSPACE_ID, agentId, selectedCollaborationVersionIds),
     listEvaluationCases(agentId, DEMO_WORKSPACE_ID),
     listEvaluationCases(agentId, DEMO_WORKSPACE_ID, {
       archived: true,
