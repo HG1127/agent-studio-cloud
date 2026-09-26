@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { WorkflowDraft } from "@/contracts/workflow";
+import { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
 import {
   projectWorkflowResult,
   rejectedWorkflowResult,
@@ -88,6 +88,16 @@ describe("最终交付结果", () => {
     expect(validateOutputContract([{ path: "plan", label: "方案", required: true, sourceNodeId: "toString" }], nodes)).toContain("必须选择有效的业务步骤来源");
     expect(validateOutputContract([{ path: "plan", label: "方案", required: true, sourceNodeId: "start" }], nodes)).toContain("必须选择有效的业务步骤来源");
     expect(validateOutputContract([{ path: "plan", label: "方案", required: true, sourceNodeId: "check" }], nodes)).toContain("必须选择有效的业务步骤来源");
+    const hidden = {
+      ...nodes,
+      hidden: WorkflowNode.parse({
+        id: "hidden", title: "隐藏检查", type: "rule", next: "done",
+        controlPlane: { kind: "quality", hiddenByDefault: true },
+        quality: { requiredOutputTitles: [], minOutputCount: 1 },
+      }),
+    };
+    expect(validateOutputContract([{ path: "plan", label: "方案", required: true, sourceNodeId: "hidden" }], hidden))
+      .toContain("必须选择有效的业务步骤来源");
   });
 
   it("不会读取结果对象继承属性作为交付内容", () => {

@@ -50,6 +50,13 @@ function firstEnd(nodes: Record<string, WorkflowNode>): WorkflowNode | undefined
   return Object.values(nodes).find((node) => node.type === "end");
 }
 
+function isBusinessOutputSource(node: WorkflowNode): boolean {
+  return node.type !== "trigger"
+    && node.type !== "end"
+    && node.ui?.visibility !== "control"
+    && node.controlPlane?.hiddenByDefault !== true;
+}
+
 function safeFixIssue(draft: WorkflowDraft, issue: AuditIssue, applied: string[], skipped: string[]): void {
   const nodes = draft.nodes;
   const node = issue.nodeId ? nodes[issue.nodeId] : undefined;
@@ -72,12 +79,22 @@ function safeFixIssue(draft: WorkflowDraft, issue: AuditIssue, applied: string[]
     applied.push("补充完成节点并接回现有死路");
     return;
   }
-  if (issue.code === "output_contract_missing") {
-    const source = Object.values(nodes).find((item) => item.type !== "trigger" && item.type !== "end" && item.next === end?.id)
-      ?? Object.values(nodes).filter((item) => item.type !== "trigger" && item.type !== "end" && item.ui?.visibility !== "control").at(-1);
+  if (issue.code === "output_contract_missing" || issue.code === "output_contract_source_invalid") {
+    const candidates = Object.values(nodes).filter(isBusinessOutputSource);
+    const source = candidates.find((item) => item.next === end?.id) ?? candidates.at(-1);
     if (source) {
-      draft.outputContract = { fields: [{ path: source.id, label: source.title, required: true, sourceNodeId: source.id }] };
-      applied.push(`把「${source.title}」声明为最终交付物`);
+      const fields = draft.outputContract?.fields ?? [];
+      draft.outputContract = {
+        fields: fields.length === 0
+          ? [{ path: source.id, label: source.title, required: true, sourceNodeId: source.id }]
+          : fields.map((field) => {
+              const current = field.sourceNodeId ? nodes[field.sourceNodeId] : undefined;
+              return current && isBusinessOutputSource(current) ? field : { ...field, sourceNodeId: source.id };
+            }),
+      };
+      applied.push(issue.code === "output_contract_missing"
+        ? `把「${source.title}」声明为最终交付物`
+        : `把失效的最终交付来源改为「${source.title}」`);
     } else skipped.push(issue.title);
     return;
   }

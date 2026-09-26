@@ -475,6 +475,31 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
     issues.push(
       issue("critical", "data", "没有定义最终交付物", "流程只说明了怎么执行，却没有说明最终要交给员工什么结果；不能据此判定任务完成。", { fixable: true, code: "output_contract_missing" }),
     );
+  } else {
+    const invalidSource = outputFields.some((field) => {
+      if (!field || typeof field !== "object" || Array.isArray(field)) return true;
+      const record = field as Record<string, unknown>;
+      const sourceId = typeof record.sourceNodeId === "string"
+        ? record.sourceNodeId
+        : typeof record.path === "string"
+          ? record.path.split(".")[0]
+          : "";
+      const source = sourceId && Object.prototype.hasOwnProperty.call(nodes, sourceId) ? nodes[sourceId] : undefined;
+      return !source
+        || source.type === "trigger"
+        || source.type === "end"
+        || source.ui?.visibility === "control"
+        || source.controlPlane?.hiddenByDefault === true;
+    });
+    if (invalidSource) {
+      issues.push(issue(
+        "critical",
+        "data",
+        "最终交付来源不可用",
+        "最终交付必须来自仍在画布中的业务步骤，不能使用启动、完成或隐藏控制步骤。",
+        { fixable: true, code: "output_contract_source_invalid" },
+      ));
+    }
   }
   if (outputFields.length) {
     for (const endId of endIds) {

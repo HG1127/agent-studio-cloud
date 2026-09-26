@@ -64,6 +64,28 @@ describe("设计检查安全修复", () => {
     });
     const result = applySafeAuditFixes(input);
     expect(result.draft.nodes.quality_review).toBeDefined();
+    expect(result.draft.outputContract?.fields).toEqual([expect.objectContaining({ sourceNodeId: "work" })]);
     expect(result.applied.some((item) => item.includes("移除误识别的目标声明"))).toBe(false);
+  });
+
+  it("把已有的控制节点交付来源改绑到业务步骤", () => {
+    const input = draft({
+      start: { id: "start", title: "开始", type: "trigger", next: "work" },
+      work: { id: "work", title: "形成方案", type: "ai", next: "quality_review" },
+      quality_review: {
+        id: "quality_review", title: "交付前检查结果", type: "rule", next: "done",
+        controlPlane: { kind: "quality", hiddenByDefault: true }, ui: { visibility: "control" },
+        quality: { requiredOutputTitles: [], minOutputCount: 1 },
+      },
+      done: { id: "done", title: "完成", type: "end" },
+    });
+    input.outputContract = { fields: [{ path: "result", label: "处理结果", required: true, sourceNodeId: "quality_review" }] };
+
+    const result = applySafeAuditFixes(input);
+
+    expect(result.draft.outputContract?.fields).toEqual([
+      expect.objectContaining({ path: "result", label: "处理结果", sourceNodeId: "work" }),
+    ]);
+    expect(result.applied).toContain("把失效的最终交付来源改为「形成方案」");
   });
 });

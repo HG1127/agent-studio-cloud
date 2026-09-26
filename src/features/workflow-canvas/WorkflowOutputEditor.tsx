@@ -8,7 +8,10 @@ export function WorkflowOutputEditor({ nodes, fields, onChange }: {
   onChange: (fields: OutputField[]) => void;
 }) {
   const candidates = Object.values(nodes).filter((node) =>
-    node.type !== "trigger" && node.type !== "end" && node.ui?.visibility !== "control",
+    node.type !== "trigger"
+    && node.type !== "end"
+    && node.ui?.visibility !== "control"
+    && node.controlPlane?.hiddenByDefault !== true,
   );
   function update(index: number, patch: Partial<OutputField>) {
     onChange(fields.map((field, position) => position === index ? { ...field, ...patch } : field));

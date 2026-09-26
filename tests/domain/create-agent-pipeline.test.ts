@@ -62,6 +62,20 @@ describe("创建助手管道 buildAgentDraft", () => {
     expect(result.issues.some((issue) => issue.code === "business_source_unresolved")).toBe(false);
   });
 
+  it("带员工确认的默认草稿不会把隐藏检查节点作为最终交付来源", () => {
+    const result = buildAgentDraft({
+      name: "客服测试助手",
+      intentText: "收到客户咨询后生成回复方案，发送前由负责人确认，最后输出回复邮件",
+    });
+
+    expect(result.draft).not.toBeNull();
+    expect(validateOutputContract(result.draft!.outputContract?.fields ?? [], result.draft!.nodes)).toBeNull();
+    const sourceId = result.draft!.outputContract?.fields[0]?.sourceNodeId;
+    expect(sourceId).toBeTruthy();
+    expect(result.draft!.nodes[sourceId!]?.ui?.visibility).not.toBe("control");
+    expect(result.draft!.nodes[sourceId!]?.controlPlane?.hiddenByDefault).not.toBe(true);
+  });
+
   it("链上抛错时不穿透异常：草稿为空、issues 为空数组、诊断带错误信息", () => {
     mocks.compileIntentWorkflow.mockImplementationOnce(() => {
       throw new Error("模拟解析失败");

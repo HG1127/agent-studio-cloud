@@ -488,6 +488,29 @@ describe("直测：结构性检查", () => {
     expect(out.issues.some((item) => item.code === "meta_node_detected" && item.nodeId === "quality_review")).toBe(false);
   });
 
+  it("最终交付引用隐藏控制节点时阻止发布并允许安全修复", () => {
+    const out = auditWorkflow({
+      ...deadEndDraft,
+      outputContract: {
+        fields: [{ path: "result", label: "处理结果", required: true, sourceNodeId: "quality_review" }],
+      },
+      nodes: {
+        start: { id: "start", title: "收到任务", type: "trigger", next: "work" },
+        work: { id: "work", title: "整理工单摘要", type: "ai", next: "quality_review" },
+        quality_review: {
+          id: "quality_review", title: "交付前检查结果", type: "rule", next: "done",
+          controlPlane: { kind: "quality", hiddenByDefault: true }, ui: { visibility: "control" },
+          quality: { requiredOutputTitles: [], minOutputCount: 1 },
+        },
+        done: { id: "done", title: "完成", type: "end" },
+      },
+    }, {});
+
+    expect(out.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "output_contract_source_invalid", severity: "critical", fixable: true }),
+    ]));
+  });
+
   it("交付检查引用不存在或名称重复的步骤时阻止发布", () => {
     const out = auditWorkflow(WorkflowDraft.parse({
       id: "quality-output-reference",

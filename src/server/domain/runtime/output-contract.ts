@@ -38,7 +38,13 @@ export function validateOutputContract(fields: OutputField[], nodes: Record<stri
   for (const field of fields) {
     const sourceId = field.sourceNodeId ?? field.path.split(".")[0];
     const source = Object.prototype.hasOwnProperty.call(nodes, sourceId) ? nodes[sourceId] : undefined;
-    if (!source || source.type === "trigger" || source.type === "end" || source.ui?.visibility === "control") {
+    if (
+      !source
+      || source.type === "trigger"
+      || source.type === "end"
+      || source.ui?.visibility === "control"
+      || source.controlPlane?.hiddenByDefault === true
+    ) {
       return `最终交付“${field.label || field.path}”必须选择有效的业务步骤来源`;
     }
   }

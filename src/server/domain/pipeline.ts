@@ -182,7 +182,7 @@ export function finalizeAgentDraft(params: {
     // parse 在此补全默认值并把形状收敛到契约——入库与后续画布都消费契约形状，不落原始结构
     const parsedDraft = WorkflowDraft.parse(enrichedWithBlueprint);
     const draft = applySafeAuditFixes(parsedDraft, {
-      codes: new Set(["output_contract_missing", "end_without_delivery"]),
+      codes: new Set(["output_contract_missing", "output_contract_source_invalid", "end_without_delivery"]),
     }).draft;
     const audit = auditWorkflow(draft);
     return {
