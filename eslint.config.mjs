@@ -15,6 +15,8 @@ const eslintConfig = defineConfig([
     // Workflow 编译器产物由 SDK 生成，不参与手写源码规范检查。
     ".workflow-vitest/**",
     "src/app/.well-known/workflow/**",
+    // Playwright 使用独立 Next 产物目录，跑过 E2E 后仍应能直接执行全量 lint。
+    ".next-playwright/**",
   ]),
 ]);
 
