@@ -120,6 +120,20 @@
       "when": 1790389028230,
       "tag": "0016_serious_morgan_stark",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1790404418500,
+      "tag": "0017_lazy_doctor_faustus",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1790404499866,
+      "tag": "0018_windy_lord_hawal",
+      "breakpoints": true
     }
   ]
 }

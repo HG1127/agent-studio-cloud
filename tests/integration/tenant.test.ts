@@ -17,6 +17,9 @@ const CROSS_AGENT_ID = "00000000-0000-4000-8000-0000000000e4";
 const CROSS_RUN_ID = "00000000-0000-4000-8000-0000000000e5";
 const CROSS_MEMORY_ID = "00000000-0000-4000-8000-0000000000e6";
 const CROSS_VERSION_ID = "00000000-0000-4000-8000-0000000000e7";
+const IDEMPOTENT_RUN_ID = "00000000-0000-4000-8000-0000000000e8";
+const CROSS_IDEMPOTENT_RUN_ID = "00000000-0000-4000-8000-0000000000e9";
+const SHARED_SOURCE_KEY = "tenant-test:shared-request";
 const manifest = AgentManifest.parse({
   schemaVersion: "4.0",
   workflowFingerprint: "e".repeat(64),
@@ -39,7 +42,7 @@ const manifest = AgentManifest.parse({
 // 常量编号 0e1/0e2：避开 run-failure.test.ts 已占用的 0d1/0d2（各测试共用同一 Neon 库）
 afterAll(async () => {
   await db.delete(agentMemories).where(eq(agentMemories.id, CROSS_MEMORY_ID));
-  await db.delete(runs).where(inArray(runs.id, [RUN_ID, CROSS_RUN_ID]));
+  await db.delete(runs).where(inArray(runs.id, [RUN_ID, CROSS_RUN_ID, IDEMPOTENT_RUN_ID, CROSS_IDEMPOTENT_RUN_ID]));
   await db.delete(agentVersions).where(inArray(agentVersions.id, [VERSION_ID, CROSS_VERSION_ID]));
   await db.delete(agents).where(inArray(agents.id, [AGENT_ID, CROSS_AGENT_ID]));
 });
@@ -107,5 +110,32 @@ describe("租户过滤", () => {
     expect(await getRunView(CROSS_RUN_ID, DEMO_WORKSPACE_ID)).toBeNull();
     expect((await listRuns(DEMO_WORKSPACE_ID)).some((run) => run.id === CROSS_RUN_ID)).toBe(false);
     expect((await listMemories()).some((memory) => memory.id === CROSS_MEMORY_ID)).toBe(false);
+  });
+  it("相同幂等来源键可以在不同工作区各启动一次", async () => {
+    await db.insert(runs).values([
+      {
+        id: IDEMPOTENT_RUN_ID,
+        workspaceId: DEMO_WORKSPACE_ID,
+        createdBy: DEMO_USER_ID,
+        agentId: AGENT_ID,
+        versionId: VERSION_ID,
+        status: "completed",
+        input: {},
+        sourceKey: SHARED_SOURCE_KEY,
+      },
+      {
+        id: CROSS_IDEMPOTENT_RUN_ID,
+        workspaceId: OTHER_WS,
+        createdBy: DEMO_USER_ID,
+        agentId: CROSS_AGENT_ID,
+        versionId: CROSS_VERSION_ID,
+        status: "completed",
+        input: {},
+        sourceKey: SHARED_SOURCE_KEY,
+      },
+    ]);
+
+    const created = await db.select({ id: runs.id }).from(runs).where(inArray(runs.id, [IDEMPOTENT_RUN_ID, CROSS_IDEMPOTENT_RUN_ID]));
+    expect(created).toHaveLength(2);
   });
 });

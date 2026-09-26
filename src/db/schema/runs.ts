@@ -24,7 +24,7 @@ export const runs = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex("runs_source_key_unique").on(t.sourceKey).where(sql`source_key is not null`),
+    uniqueIndex("runs_workspace_source_key_unique").on(t.workspaceId, t.sourceKey).where(sql`source_key is not null`),
     index("runs_workspace_created_idx").on(t.workspaceId, t.createdAt),
     index("runs_workspace_status_created_idx").on(t.workspaceId, t.status, t.createdAt),
     index("runs_workspace_agent_created_idx").on(t.workspaceId, t.agentId, t.createdAt),
