@@ -151,12 +151,6 @@ function safeFixIssue(draft: WorkflowDraft, issue: AuditIssue, applied: string[]
     applied.push(`为「${node.title}」补充其他情况路径`);
     return;
   }
-  if (issue.code === "condition_duplicate" && node?.condition) {
-    const seen = new Set<string>();
-    node.condition = { ...node.condition, branches: node.condition.branches.filter((branch) => !branch.next || (!seen.has(branch.next) && Boolean(seen.add(branch.next)))) };
-    applied.push(`合并「${node.title}」的重复分支`);
-    return;
-  }
   if (issue.code === "failure_target" && node) {
     node.onErrorNext = end?.id ?? null;
     applied.push(`修复「${node.title}」的备用路径`);

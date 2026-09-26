@@ -174,6 +174,31 @@ describe("直测：结构性检查", () => {
     });
   });
 
+  it("不同业务条件汇入同一步骤时只提示人工复核，不允许自动删除", () => {
+    const out = auditWorkflow({
+      ...conditionDraft,
+      nodes: {
+        ...conditionDraft.nodes,
+        check: {
+          ...conditionDraft.nodes.check,
+          condition: {
+            source: "input.customerType", operator: "eq", defaultNext: "done",
+            branches: [
+              { label: "新客户", value: "new", next: "done" },
+              { label: "老客户", value: "returning", next: "done" },
+            ],
+          },
+        },
+      },
+    }, {});
+
+    expect(out.issues).toContainEqual(expect.objectContaining({
+      code: "condition_duplicate",
+      severity: "warning",
+      fixable: false,
+    }));
+  });
+
   it("非法名称与不受支持类型会阻止运行输入字段发布", () => {
     const out = auditWorkflow({
       ...deadEndDraft,

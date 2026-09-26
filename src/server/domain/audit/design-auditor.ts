@@ -608,7 +608,7 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
       }
       const targets = bs.map((b) => b.next).filter(Boolean);
       if (new Set(targets).size !== targets.length) {
-        issues.push(issue("warning", "logic", "多个条件落到同一路径", `「${n.title}」的多个条件结果指向相同节点，可能存在冗余。`, { nodeId: id, fixable: true, code: "condition_duplicate" }));
+        issues.push(issue("warning", "logic", "多个条件落到同一路径", `「${n.title}」的多个条件结果指向相同节点，可能存在冗余。`, { nodeId: id, fixable: false, code: "condition_duplicate" }));
       }
       if (!n.condition?.defaultNext) {
         issues.push(issue("warning", "logic", "条件缺少兜底路径", `「${n.title}」没有“否则/未命中”路径。`, { nodeId: id, fixable: true, code: "condition_default" }));

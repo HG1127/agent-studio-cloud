@@ -88,4 +88,28 @@ describe("设计检查安全修复", () => {
     ]);
     expect(result.applied).toContain("把失效的最终交付来源改为「形成方案」");
   });
+
+  it("不会删除有意汇入同一步骤的不同业务条件", () => {
+    const input = draft({
+      start: { id: "start", title: "开始", type: "trigger", next: "check" },
+      check: {
+        id: "check", title: "判断客户类型", type: "condition",
+        condition: {
+          source: "input.customerType", operator: "eq", defaultNext: "done",
+          branches: [
+            { label: "新客户", value: "new", next: "prepare" },
+            { label: "老客户", value: "returning", next: "prepare" },
+          ],
+        },
+      },
+      prepare: { id: "prepare", title: "准备方案", type: "ai", next: "done" },
+      done: { id: "done", title: "完成", type: "end" },
+    });
+
+    const result = applySafeAuditFixes(input);
+
+    expect(result.draft.nodes.check.condition?.branches).toHaveLength(2);
+    expect(result.draft.nodes.check.condition?.branches.map((branch) => branch.label)).toEqual(["新客户", "老客户"]);
+    expect(result.applied.some((item) => item.includes("重复分支"))).toBe(false);
+  });
 });
