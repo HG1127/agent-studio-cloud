@@ -97,6 +97,30 @@ describe("知识原文件上传", () => {
     expect(startMock).not.toHaveBeenCalled();
   });
 
+  it("没有声明长度的分块上传也会按实际字节拒绝", async () => {
+    const cancelled = vi.fn();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(3 * 1024 * 1024));
+        controller.enqueue(new Uint8Array(3 * 1024 * 1024));
+      },
+      cancel: cancelled,
+    });
+    const request = new Request("http://localhost/api/knowledge/sources", {
+      method: "POST",
+      headers: { "content-type": "multipart/form-data; boundary=test" },
+      body,
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ ok: false, error: "上传请求过大，文件请保持在 4MB 以内" });
+    expect(cancelled).toHaveBeenCalledOnce();
+    expect(startMock).not.toHaveBeenCalled();
+  });
+
   it("服务端拒绝空文件且不创建资料记录", async () => {
     const form = new FormData();
     form.set("file", new File([], "空资料.txt", { type: "text/plain" }));

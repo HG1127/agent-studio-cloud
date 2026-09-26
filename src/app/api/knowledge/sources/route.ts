@@ -16,6 +16,7 @@ import { isKnowledgeParsingStalled } from "@/server/domain/knowledge/source-stat
 import { hasCrossSiteOrigin } from "@/server/security/request-origin";
 import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { readBoundedRequestBytes } from "@/server/security/bounded-request-body";
 
 export const dynamic = "force-dynamic";
 
@@ -113,13 +114,18 @@ async function handleUpload(req: Request) {
   if (hasCrossSiteOrigin(req)) {
     return Response.json({ ok: false, error: "不允许从其他站点提交资料" }, { status: 403 });
   }
-  const declaredLength = Number(req.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_MULTIPART_BYTES) {
+  const bodyResult = await readBoundedRequestBytes(req, MAX_MULTIPART_BYTES);
+  if (!bodyResult.ok && bodyResult.reason === "too_large") {
     return Response.json({ ok: false, error: "上传请求过大，文件请保持在 4MB 以内" }, { status: 413 });
+  }
+  if (!bodyResult.ok) {
+    return Response.json({ ok: false, error: "上传内容读取失败，请重新选择文件" }, { status: 400 });
   }
   let form: FormData;
   try {
-    form = await req.formData();
+    form = await new Response(new Uint8Array(bodyResult.bytes).buffer, {
+      headers: { "content-type": req.headers.get("content-type") ?? "" },
+    }).formData();
   } catch {
     return Response.json({ ok: false, error: "上传内容不是有效的文件表单" }, { status: 400 });
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { readBoundedRequestText } from "@/server/security/bounded-request-body";
+import { readBoundedRequestBytes, readBoundedRequestText } from "@/server/security/bounded-request-body";
 
 function requestWithBody(body: ReadableStream<Uint8Array>, contentLength?: string): Pick<Request, "body" | "headers"> {
   return {
@@ -41,6 +41,19 @@ describe("受限请求正文读取", () => {
       ok: true,
       text: "客户已补充资料",
     });
+  });
+
+  it("按原始字节保留二进制正文", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([0, 255]));
+        controller.enqueue(new Uint8Array([128, 1]));
+        controller.close();
+      },
+    });
+
+    const result = await readBoundedRequestBytes(requestWithBody(body), 4);
+    expect(result.ok && [...result.bytes]).toEqual([0, 255, 128, 1]);
   });
 
   it("声明长度已经超限时不读取正文", async () => {

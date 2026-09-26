@@ -2,19 +2,22 @@ export type BoundedRequestTextResult =
   | { ok: true; text: string }
   | { ok: false; reason: "too_large" | "read_failed" };
 
-export async function readBoundedRequestText(
+export type BoundedRequestBytesResult =
+  | { ok: true; bytes: Uint8Array }
+  | { ok: false; reason: "too_large" | "read_failed" };
+
+export async function readBoundedRequestBytes(
   request: Pick<Request, "body" | "headers">,
   maxBytes: number,
-): Promise<BoundedRequestTextResult> {
+): Promise<BoundedRequestBytesResult> {
   const declaredLength = Number(request.headers.get("content-length"));
   if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
     return { ok: false, reason: "too_large" };
   }
-  if (!request.body) return { ok: true, text: "" };
+  if (!request.body) return { ok: true, bytes: new Uint8Array() };
 
   const reader = request.body.getReader();
-  const decoder = new TextDecoder();
-  let text = "";
+  const chunks: Uint8Array[] = [];
   let totalBytes = 0;
   try {
     while (true) {
@@ -25,13 +28,27 @@ export async function readBoundedRequestText(
         await reader.cancel("请求内容超过大小限制").catch(() => undefined);
         return { ok: false, reason: "too_large" };
       }
-      text += decoder.decode(value, { stream: true });
+      chunks.push(value);
     }
-    text += decoder.decode();
-    return { ok: true, text };
+    const bytes = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return { ok: true, bytes };
   } catch {
     return { ok: false, reason: "read_failed" };
   } finally {
     reader.releaseLock();
   }
+}
+
+export async function readBoundedRequestText(
+  request: Pick<Request, "body" | "headers">,
+  maxBytes: number,
+): Promise<BoundedRequestTextResult> {
+  const result = await readBoundedRequestBytes(request, maxBytes);
+  if (!result.ok) return result;
+  return { ok: true, text: new TextDecoder().decode(result.bytes) };
 }
