@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { WorkflowDraft } from "@/contracts/workflow";
-import { createWorkflowNode } from "@/features/workflow-canvas/create-workflow-node";
+import { MAX_WORKFLOW_NODES, WorkflowDraft } from "@/contracts/workflow";
+import { canAddWorkflowNode, createWorkflowNode } from "@/features/workflow-canvas/create-workflow-node";
 
 const draft = WorkflowDraft.parse({
   id: "draft",
@@ -28,5 +28,15 @@ describe("新增画布节点", () => {
     expect(createWorkflowNode(draft, "loop").draft.nodes.loop_1.loop).toMatchObject({ collectionPath: "input.items", maxIterations: 20 });
     expect(createWorkflowNode(draft, "parallel").draft.nodes.parallel_1.parallel?.branches).toHaveLength(2);
     expect(createWorkflowNode(draft, "subflow").draft.nodes.subflow_1.subflow?.steps).toHaveLength(1);
+  });
+
+  it("达到流程步骤上限后不再允许新增", () => {
+    const nodes = Object.fromEntries(Array.from({ length: MAX_WORKFLOW_NODES }, (_, index) => [
+      `node_${index}`,
+      { id: `node_${index}`, title: `步骤 ${index + 1}`, type: index === 0 ? "trigger" as const : "ai" as const, next: null },
+    ]));
+
+    expect(canAddWorkflowNode({ nodes })).toBe(false);
+    expect(canAddWorkflowNode({ nodes: Object.fromEntries(Object.entries(nodes).slice(1)) })).toBe(true);
   });
 });

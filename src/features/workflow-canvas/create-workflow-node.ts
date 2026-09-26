@@ -1,4 +1,4 @@
-import { WorkflowNode, type WorkflowDraft, type WorkflowNodeType } from "@/contracts/workflow";
+import { MAX_WORKFLOW_NODES, WorkflowNode, type WorkflowDraft, type WorkflowNodeType } from "@/contracts/workflow";
 
 export const ADDABLE_NODE_TYPES = [
   "ai",
@@ -29,6 +29,10 @@ const TITLES: Record<(typeof ADDABLE_NODE_TYPES)[number], string> = {
   agent_call: "新增助手协作",
   handoff: "新增助手交接",
 };
+
+export function canAddWorkflowNode(draft: { nodes: Record<string, unknown> }): boolean {
+  return Object.keys(draft.nodes).length < MAX_WORKFLOW_NODES;
+}
 
 function nextNodeId(draft: WorkflowDraft, type: (typeof ADDABLE_NODE_TYPES)[number]): string {
   let index = 1;

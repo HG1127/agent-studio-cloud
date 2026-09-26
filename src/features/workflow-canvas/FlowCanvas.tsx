@@ -15,14 +15,14 @@ import "@xyflow/react/dist/style.css";
 import type { AgentTargetOption } from "@/contracts/agent";
 import type { KnowledgeSourceView } from "@/contracts/knowledge";
 import type { ToolRegistryOption } from "@/contracts/tool-registry";
-import type { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
+import { MAX_WORKFLOW_NODES, type WorkflowDraft, type WorkflowNode } from "@/contracts/workflow";
 import { saveWorkflowAction } from "@/server/actions/save-workflow";
 import { NODE_TYPE_LABELS, workflowNodeTypes, type WorkflowFlowNode } from "./CustomNodes";
 import { autoLayout } from "./layout";
 import { NodeInspector } from "./NodeInspector";
 import { applyConnection, clearEdge, connectionReplacesHiddenControl, outgoingSpecs, removeNode, visibleOutgoingSpecs, type EdgeKind } from "./flow-edges";
 import { updateWorkflowNode } from "./update-workflow-node";
-import { ADDABLE_NODE_TYPES, createWorkflowNode } from "./create-workflow-node";
+import { ADDABLE_NODE_TYPES, canAddWorkflowNode, createWorkflowNode } from "./create-workflow-node";
 import { WorkflowInputEditor } from "./WorkflowInputEditor";
 import { WorkflowOutputEditor } from "./WorkflowOutputEditor";
 import { validateOutputFieldPaths } from "@/server/domain/runtime/output-contract";
@@ -60,6 +60,7 @@ export function FlowCanvas({ agentId, draft: initialDraft, draftUpdatedAt, agent
   const [savedRevision, setSavedRevision] = useState(draftUpdatedAt);
   const [newNodeType, setNewNodeType] = useState<(typeof ADDABLE_NODE_TYPES)[number] | "">("");
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
+  const nodeLimitReached = !canAddWorkflowNode(draft);
   const markDirty = useCallback(() => {
     setDirty(true);
     setFeedback(null);
@@ -204,6 +205,10 @@ export function FlowCanvas({ agentId, draft: initialDraft, draftUpdatedAt, agent
 
   const handleNodeAdd = useCallback(() => {
     if (!newNodeType) return;
+    if (!canAddWorkflowNode(draft)) {
+      setFeedback({ ok: false, text: `流程步骤不能超过 ${MAX_WORKFLOW_NODES} 个` });
+      return;
+    }
     markDirty();
     setDraft((current) => {
       const created = createWorkflowNode(current, newNodeType);
@@ -211,7 +216,7 @@ export function FlowCanvas({ agentId, draft: initialDraft, draftUpdatedAt, agent
       return created.draft;
     });
     setNewNodeType("");
-  }, [markDirty, newNodeType]);
+  }, [draft, markDirty, newNodeType]);
 
   async function handleSave() {
     const names = draft.variables.map((variable) => variable.name);
@@ -296,12 +301,13 @@ export function FlowCanvas({ agentId, draft: initialDraft, draftUpdatedAt, agent
           </label>
           <button
             type="button"
-            disabled={!newNodeType}
+            disabled={!newNodeType || nodeLimitReached}
             onClick={handleNodeAdd}
             className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:border-gray-500 disabled:text-gray-400"
           >
             添加
           </button>
+          {nodeLimitReached ? <span role="status" className="text-sm text-amber-700">已达到 {MAX_WORKFLOW_NODES} 个步骤上限</span> : null}
           {feedback ? (
             <span role={feedback.ok ? "status" : "alert"} className={feedback.ok ? "text-sm text-emerald-600" : "text-sm text-red-600"}>
               {feedback.text}
