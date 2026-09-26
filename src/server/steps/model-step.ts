@@ -130,7 +130,7 @@ export async function runModelStep(args: RunModelStepInput): Promise<{ output: s
     });
     return { output };
   } catch (error) {
-    if (error instanceof FatalError) throw error;
+    if (FatalError.is(error) || RetryableError.is(error)) throw error;
     const retryable = isTransientModelError(error);
     const reason = retryable
       ? "模型服务暂时不可用，稍后自动重试"
