@@ -7,9 +7,10 @@ import type { ImportAgentResult } from "@/contracts/agent";
 import { agents, agentVersions, auditEvents, workflowDefinitions } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
-import { agentImportSizeIssue, importedAgentMatches, importedCollaborationKeys, importedWorkflowIssue, normalizeAgentImport, rebindImportedWorkflow } from "@/server/domain/import-agent";
+import { agentImportSizeIssue, importedCollaborationKeys, importedWorkflowIssue, normalizeAgentImport, rebindImportedWorkflow } from "@/server/domain/import-agent";
 import { auditEventValues } from "@/server/audit/event-values";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { agentIdentityMatches } from "@/server/domain/agent-identity";
 
 export async function importAgentAction(input: unknown, requestId: string): Promise<ImportAgentResult> {
   if (!z.string().uuid().safeParse(requestId).success) return { ok: false, error: "导入请求信息不正确，请重新选择文件" };
@@ -33,7 +34,7 @@ export async function importAgentAction(input: unknown, requestId: string): Prom
       eq(agents.workspaceId, DEMO_WORKSPACE_ID),
     )).limit(1);
     if (existing) {
-      return importedAgentMatches(existing, imported)
+      return agentIdentityMatches(existing, imported)
         ? { ok: true, agentId: existing.id }
         : { ok: false, error: "导入请求信息已经失效，请重新选择文件" };
     }
@@ -103,7 +104,7 @@ export async function importAgentAction(input: unknown, requestId: string): Prom
         eq(agents.id, requestId),
         eq(agents.workspaceId, DEMO_WORKSPACE_ID),
       )).limit(1);
-      if (existing && importedAgentMatches(existing, imported)) {
+      if (existing && agentIdentityMatches(existing, imported)) {
         revalidatePath("/agents");
         return { ok: true, agentId: existing.id };
       }

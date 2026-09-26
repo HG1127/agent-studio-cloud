@@ -35,15 +35,6 @@ export interface NormalizedAgentImport {
   workflow: WorkflowDraft;
 }
 
-export function importedAgentMatches(
-  current: { name: string; description: string | null; intentText: string },
-  imported: NormalizedAgentImport,
-): boolean {
-  return current.name === imported.name
-    && current.description === imported.description
-    && current.intentText === imported.intentText;
-}
-
 function editableWorkflowFromVersion(
   manifest: AgentManifest,
   agentName: string,

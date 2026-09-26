@@ -4,6 +4,7 @@ import { generateText } from "ai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { and, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { AgentCreateInput, type CreateAgentResult } from "@/contracts/agent";
 import { WorkflowDraft } from "@/contracts/workflow";
 import { agents, auditEvents, modelConnections, workflowDefinitions } from "@/db/schema";
@@ -16,6 +17,8 @@ import { db } from "@/lib/db";
 import { listToolCompilerCapabilities } from "@/server/tools/tool-registry";
 import { auditEventValues } from "@/server/audit/event-values";
 import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
+import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { agentIdentityMatches } from "@/server/domain/agent-identity";
 
 async function resolveCompileModel(): Promise<{ baseUrl: string; apiKey: string; modelId: string } | null> {
   const [connection] = await db.select({
@@ -39,12 +42,42 @@ async function resolveCompileModel(): Promise<{ baseUrl: string; apiKey: string;
   return null;
 }
 
-export async function createAgentAction(input: AgentCreateInput): Promise<CreateAgentResult> {
+export async function createAgentAction(input: AgentCreateInput, requestId?: string): Promise<CreateAgentResult> {
   const parsedInput = AgentCreateInput.safeParse(input);
   if (!parsedInput.success) {
     return { ok: false, error: "请填写助手名称，并用至少 10 个字描述你想让助手完成的工作" };
   }
   const { name, intentText } = parsedInput.data;
+  const agentId = requestId ?? crypto.randomUUID();
+  if (requestId !== undefined && !z.string().uuid().safeParse(requestId).success) {
+    return { ok: false, error: "创建请求信息不正确，请重新提交" };
+  }
+  const description = intentText.split(/[。！？！？\n]/)[0]?.slice(0, 100) || null;
+  const identity = { name, description, intentText };
+  if (requestId) {
+    try {
+      const [existing] = await db.select({
+        id: agents.id,
+        name: agents.name,
+        description: agents.description,
+        intentText: agents.intentText,
+      }).from(agents).innerJoin(workflowDefinitions, and(
+        eq(workflowDefinitions.agentId, agents.id),
+        eq(workflowDefinitions.workspaceId, DEMO_WORKSPACE_ID),
+      )).where(and(
+        eq(agents.id, agentId),
+        eq(agents.workspaceId, DEMO_WORKSPACE_ID),
+      )).limit(1);
+      if (existing) {
+        return agentIdentityMatches(existing, identity)
+          ? { ok: true, agentId: existing.id }
+          : { ok: false, error: "创建请求信息已经失效，请重新提交" };
+      }
+    } catch (error) {
+      console.error("检查助手创建请求失败", safeErrorForLog(error));
+      return { ok: false, error: "助手创建失败，请稍后重试" };
+    }
+  }
   let built = buildAgentDraft({ name, intentText, capabilities: listToolCompilerCapabilities() });
   if (realModelsEnabled() && shouldUseLlmCompile({ llmCompile: process.env.LLM_COMPILE })) {
     try {
@@ -76,11 +109,11 @@ export async function createAgentAction(input: AgentCreateInput): Promise<Create
   try {
     // 入库前以契约解析结果为准（parse 补全默认值），不落原始结构
     const draft = WorkflowDraft.parse(built.draft);
-    const description = intentText.split(/[。！？！？\n]/)[0]?.slice(0, 100) || null;
-    const agentId = await db.transaction(async (tx) => {
+    const createdAgentId = await db.transaction(async (tx) => {
       const [created] = await tx
         .insert(agents)
         .values({
+          id: agentId,
           workspaceId: DEMO_WORKSPACE_ID,
           createdBy: DEMO_USER_ID,
           name,
@@ -107,8 +140,31 @@ export async function createAgentAction(input: AgentCreateInput): Promise<Create
       return created.id;
     });
     revalidatePath("/agents");
-    return { ok: true, agentId };
-  } catch {
+    return { ok: true, agentId: createdAgentId };
+  } catch (error) {
+    if (requestId) {
+      try {
+        const [existing] = await db.select({
+          id: agents.id,
+          name: agents.name,
+          description: agents.description,
+          intentText: agents.intentText,
+        }).from(agents).innerJoin(workflowDefinitions, and(
+          eq(workflowDefinitions.agentId, agents.id),
+          eq(workflowDefinitions.workspaceId, DEMO_WORKSPACE_ID),
+        )).where(and(
+          eq(agents.id, agentId),
+          eq(agents.workspaceId, DEMO_WORKSPACE_ID),
+        )).limit(1);
+        if (existing && agentIdentityMatches(existing, identity)) {
+          revalidatePath("/agents");
+          return { ok: true, agentId: existing.id };
+        }
+      } catch (recoveryError) {
+        console.error("确认助手创建结果失败", safeErrorForLog(recoveryError));
+      }
+    }
+    console.error("创建助手失败", safeErrorForLog(error));
     return { ok: false, error: "助手创建失败，请稍后重试" };
   }
 }

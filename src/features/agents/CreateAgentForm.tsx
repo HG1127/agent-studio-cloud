@@ -26,6 +26,7 @@ export function CreateAgentForm() {
   const [constraints, setConstraints] = useState("");
   const [pending, setPending] = useState(false);
   const submittingRef = useRef(false);
+  const requestRef = useRef<{ name: string; intentText: string; requestId: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const dirty = [name, intentText, trigger, inputs, outputs, constraints].some((value) => value.trim());
@@ -110,7 +111,11 @@ export function CreateAgentForm() {
     submittingRef.current = true;
     setPending(true);
     try {
-      const result = await createAgentAction({ name, intentText: blueprintIntent });
+      const request = requestRef.current?.name === name && requestRef.current.intentText === blueprintIntent
+        ? requestRef.current
+        : { name, intentText: blueprintIntent, requestId: crypto.randomUUID() };
+      requestRef.current = request;
+      const result = await createAgentAction({ name, intentText: blueprintIntent }, request.requestId);
       if (result.ok) {
         removeSessionValue(AGENT_BLUEPRINT_DRAFT_KEY);
         router.push(`/agents/${result.agentId}`);

@@ -13,6 +13,7 @@ vi.mock("@ai-sdk/openai-compatible", () => ({ createOpenAICompatible: fixture.pr
 import { agents, modelConnections, workflowDefinitions } from "@/db/schema";
 import { db } from "@/lib/db";
 import { encryptApiKey } from "@/server/domain/crypto";
+import { buildAgentDraft } from "@/server/domain/pipeline";
 import { createAgentAction } from "@/server/actions/create-agent";
 
 const input = { name: "模型编排验收助手", intentText: "请分析客户反馈内容，归纳问题并生成一份处理建议报告" };
@@ -62,6 +63,29 @@ async function createDraft() {
 }
 
 describe("创建助手模型编译", () => {
+  it("响应丢失后使用同一请求标识时复用已创建助手", async () => {
+    const agentId = crypto.randomUUID();
+    const description = input.intentText.split(/[。！？！？\n]/)[0]?.slice(0, 100) || null;
+    await db.insert(agents).values({
+      id: agentId,
+      workspaceId: fixture.workspaceId,
+      createdBy: fixture.userId,
+      name: input.name,
+      description,
+      intentText: input.intentText,
+    });
+    await db.insert(workflowDefinitions).values({
+      agentId,
+      workspaceId: fixture.workspaceId,
+      createdBy: fixture.userId,
+      draft: buildAgentDraft({ name: input.name, intentText: input.intentText }).draft!,
+    });
+
+    expect(await createAgentAction(input, agentId)).toEqual({ ok: true, agentId });
+    expect(fixture.generateText).not.toHaveBeenCalled();
+    expect(await db.select().from(agents).where(eq(agents.id, agentId))).toHaveLength(1);
+  });
+
   it("默认连接优先于环境模型，首模型生成的草稿经审计后持久化", async () => {
     configureEnvironment();
     await saveDefault();

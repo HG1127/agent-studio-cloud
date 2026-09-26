@@ -34,7 +34,7 @@ describe("CreateAgentForm", () => {
     actionMock.mockResolvedValue({ ok: true, agentId: "00000000-0000-4000-8000-000000000009" });
     await fillAndSubmit();
     await waitFor(() => {
-      expect(actionMock).toHaveBeenCalledWith({ name: "客服助手", intentText: INTENT_TEXT });
+      expect(actionMock).toHaveBeenCalledWith({ name: "客服助手", intentText: INTENT_TEXT }, expect.any(String));
     });
     await waitFor(() => {
       expect(pushMock).toHaveBeenCalledWith("/agents/00000000-0000-4000-8000-000000000009");
@@ -74,14 +74,20 @@ describe("CreateAgentForm", () => {
         "最终交付：回复邮件和处理记录",
         "必须遵守：发送前必须由负责人确认",
       ].join("\n"),
-    }));
+    }, expect.any(String)));
   });
 
   it("创建请求中断时显示网络错误并允许重试", async () => {
-    actionMock.mockRejectedValue(new Error("offline"));
+    actionMock.mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce({
+      ok: true,
+      agentId: "00000000-0000-4000-8000-000000000009",
+    });
     await fillAndSubmit();
     expect(await screen.findByRole("alert")).toHaveTextContent("创建请求失败，请检查网络后重试");
     expect(screen.getByRole("button", { name: "创建助手" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: "创建助手" }));
+    await waitFor(() => expect(actionMock).toHaveBeenCalledTimes(2));
+    expect(actionMock.mock.calls[1][1]).toBe(actionMock.mock.calls[0][1]);
   });
 
   it("连续提交时只创建一次助手", async () => {
