@@ -124,6 +124,51 @@ describe("自动验收并发启动", () => {
     expect(testCase.name).toBe("其他页面的新名称");
   });
 
+  it("响应丢失后重试相同验收样例修改时返回成功且不重复覆盖", async () => {
+    await insertFixture();
+    const savedAt = new Date(CASE_UPDATED_AT.getTime() + 1_000);
+    await db.update(evaluationCases).set({
+      name: "已经保存的新名称",
+      input: { customer: "甲方" },
+      expectations: [{ path: "answer", operator: "contains", value: "已完成" }],
+      updatedAt: savedAt,
+    }).where(eq(evaluationCases.id, CASE_ID));
+
+    const result = await updateEvaluationCaseAction({
+      caseId: CASE_ID,
+      agentId: AGENT_ID,
+      name: "已经保存的新名称",
+      input: { customer: "甲方" },
+      expectations: [{ path: "answer", operator: "contains", value: "已完成" }],
+      expectedUpdatedAt: CASE_UPDATED_AT.toISOString(),
+    });
+
+    expect(result).toEqual({ ok: true });
+    const [testCase] = await db.select().from(evaluationCases).where(eq(evaluationCases.id, CASE_ID));
+    expect(testCase.updatedAt).toEqual(savedAt);
+  });
+
+  it("重复归档或恢复相同验收样例时返回成功", async () => {
+    await insertFixture();
+    const archivedAt = new Date("2026-09-25T00:00:01.000Z");
+    await db.update(evaluationCases).set({ archivedAt }).where(eq(evaluationCases.id, CASE_ID));
+
+    expect(await setEvaluationCaseArchivedAction({
+      caseId: CASE_ID,
+      agentId: AGENT_ID,
+      archived: true,
+    })).toEqual({ ok: true });
+    const [archived] = await db.select().from(evaluationCases).where(eq(evaluationCases.id, CASE_ID));
+    expect(archived.archivedAt).toEqual(archivedAt);
+
+    await db.update(evaluationCases).set({ archivedAt: null }).where(eq(evaluationCases.id, CASE_ID));
+    expect(await setEvaluationCaseArchivedAction({
+      caseId: CASE_ID,
+      agentId: AGENT_ID,
+      archived: false,
+    })).toEqual({ ok: true });
+  });
+
   it("同一助手同时发起两次时复用同一轮验收", async () => {
     await insertFixture();
     const results = await Promise.all([prepareEvaluationRun(AGENT_ID), prepareEvaluationRun(AGENT_ID)]);
