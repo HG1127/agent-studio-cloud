@@ -126,7 +126,7 @@ export async function getPendingWait(runId: string, workspaceId: string): Promis
     eventKey: row?.data?.eventKey,
     title: row?.title,
     payloadSchema: row?.data?.payloadSchema ?? { type: "object" },
-    submissionToken: row?.data?.submissionToken,
+    submissionToken: row?.data?.submissionToken ?? null,
   });
   return parsed.success ? parsed.data : null;
 }

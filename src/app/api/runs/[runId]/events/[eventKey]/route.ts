@@ -11,6 +11,7 @@ import { hasCrossSiteOrigin, hasSameOrigin } from "@/server/security/request-ori
 import { matchesWaitEventToken } from "@/server/security/wait-event-token";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { runStatusConfirmsWaitEventSubmission } from "@/server/domain/wait-event-submission";
+import { readBoundedRequestText } from "@/server/security/bounded-request-body";
 import {
   claimWaitEventSubmission,
   findWaitEventSubmission,
@@ -34,22 +35,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ runId: 
   if (!parsedParams.success) {
     return Response.json({ ok: false, error: "消息参数不正确" }, { status: 400 });
   }
-  const declaredLength = Number(req.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_WAIT_EVENT_PAYLOAD_BYTES) {
+  const bodyResult = await readBoundedRequestText(req, MAX_WAIT_EVENT_PAYLOAD_BYTES);
+  if (!bodyResult.ok && bodyResult.reason === "too_large") {
     return Response.json({ ok: false, error: "消息内容超过 256KB 限制" }, { status: 413 });
   }
-  let body: string;
-  try {
-    body = await req.text();
-  } catch {
+  if (!bodyResult.ok) {
     return Response.json({ ok: false, error: "消息内容必须是 JSON 对象" }, { status: 400 });
-  }
-  if (new TextEncoder().encode(body).byteLength > MAX_WAIT_EVENT_PAYLOAD_BYTES) {
-    return Response.json({ ok: false, error: "消息内容超过 256KB 限制" }, { status: 413 });
   }
   let raw: unknown;
   try {
-    raw = JSON.parse(body);
+    raw = JSON.parse(bodyResult.text);
   } catch {
     return Response.json({ ok: false, error: "消息内容必须是 JSON 对象" }, { status: 400 });
   }
