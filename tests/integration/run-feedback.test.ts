@@ -58,6 +58,31 @@ async function insertFixture(status = "completed") {
 }
 
 describe("运行反馈闭环", () => {
+  it("响应丢失后重复保存相同反馈时复用已有记录", async () => {
+    await insertFixture();
+    const savedAt = new Date("2026-09-26T00:00:00.000Z");
+    await db.insert(runFeedback).values({
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
+      runId: RUN_ID,
+      agentId: AGENT_ID,
+      rating: "needs_improvement",
+      note: "缺少条款依据",
+      updatedAt: savedAt,
+    });
+
+    const result = await saveRunFeedbackAction({
+      runId: RUN_ID,
+      rating: "needs_improvement",
+      note: "缺少条款依据",
+    });
+
+    expect(result).toMatchObject({ ok: true, feedback: { updatedAt: savedAt.toISOString() } });
+    const rows = await db.select().from(runFeedback).where(eq(runFeedback.runId, RUN_ID));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].updatedAt).toEqual(savedAt);
+  });
+
   it("同一次运行更新反馈时只保留一条记录", async () => {
     await insertFixture();
     expect((await saveRunFeedbackAction({ runId: RUN_ID, rating: "useful" })).ok).toBe(true);

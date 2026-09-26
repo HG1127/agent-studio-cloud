@@ -17,10 +17,12 @@ import { auditEventValues } from "@/server/audit/event-values";
 import { validationMessage } from "@/server/domain/validation-message";
 import { redactCredentialData, redactCredentialText } from "@/server/domain/security/redact-sensitive";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { runFeedbackMatches } from "@/server/domain/run-feedback";
 
 export async function saveRunFeedbackAction(input: unknown): Promise<RunFeedbackSaveResult> {
   const parsed = RunFeedbackSaveInput.safeParse(input);
   if (!parsed.success) return { ok: false, error: validationMessage(parsed.error, "运行反馈填写不正确") };
+  const storedNote = parsed.data.note ? redactCredentialText(parsed.data.note) : null;
   try {
     const outcome = await db.transaction(async (tx) => {
       const [run] = await tx.select({ id: runs.id, agentId: runs.agentId, status: runs.status })
@@ -30,14 +32,17 @@ export async function saveRunFeedbackAction(input: unknown): Promise<RunFeedback
         .limit(1);
       if (!run) return { kind: "missing" as const };
       if (run.status !== "completed") return { kind: "not-completed" as const };
-      const [existing] = await tx.select({ id: runFeedback.id })
+      const [existing] = await tx.select()
         .from(runFeedback)
         .where(and(eq(runFeedback.runId, run.id), eq(runFeedback.workspaceId, DEMO_WORKSPACE_ID)))
         .limit(1);
+      if (existing && runFeedbackMatches(existing, { rating: parsed.data.rating, note: storedNote })) {
+        return { kind: "saved" as const, row: existing };
+      }
       const now = new Date();
       const values = {
         rating: parsed.data.rating,
-        note: parsed.data.note ? redactCredentialText(parsed.data.note) : null,
+        note: storedNote,
         updatedAt: now,
       };
       const [saved] = existing
