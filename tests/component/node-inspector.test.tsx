@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { WorkflowNode } from "@/contracts/workflow";
+import { MAX_WAIT_DURATION_MS, WorkflowNode } from "@/contracts/workflow";
 import { fromDateTimeLocalValue, NodeInspector, parseConditionValue, toDateTimeLocalValue } from "@/features/workflow-canvas/NodeInspector";
 
 const AI_NODE = WorkflowNode.parse({ id: "step_1", title: "生成回复方案", type: "ai" });
@@ -188,6 +188,10 @@ describe("NodeInspector", () => {
     const { rerender } = render(<NodeInspector node={WAIT_NODE} onNodeChange={onWait} onNodeDelete={vi.fn()} />);
     fireEvent.change(screen.getByLabelText("等待秒数"), { target: { value: "5" } });
     expect(onWait).toHaveBeenLastCalledWith(expect.objectContaining({ wait: expect.objectContaining({ durationMs: 5000 }) }));
+    fireEvent.change(screen.getByLabelText("等待秒数"), { target: { value: "99999999" } });
+    expect(onWait).toHaveBeenLastCalledWith(expect.objectContaining({
+      wait: expect.objectContaining({ durationMs: MAX_WAIT_DURATION_MS }),
+    }));
 
     rerender(<NodeInspector node={MEMORY_NODE} onNodeChange={vi.fn()} onNodeDelete={vi.fn()} />);
     expect(screen.getByLabelText("最多参考条数")).toHaveValue(5);

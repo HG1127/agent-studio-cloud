@@ -1,4 +1,4 @@
-import type { WorkflowNode } from "@/contracts/workflow";
+import { MAX_WAIT_DURATION_MS, type WorkflowNode } from "@/contracts/workflow";
 import { validateJsonSchemaDefinition } from "@/server/domain/json-schema";
 
 export function validateWaitContracts(nodes: Record<string, WorkflowNode>): string | null {
@@ -7,8 +7,10 @@ export function validateWaitContracts(nodes: Record<string, WorkflowNode>): stri
     const wait = node.wait;
     if (!wait) return `等待步骤「${node.title}」的设置不完整`;
     if (!Number.isFinite(wait.timeoutMs) || wait.timeoutMs < 0) return `等待步骤「${node.title}」的超时时间不正确`;
+    if (wait.timeoutMs > MAX_WAIT_DURATION_MS) return `等待步骤「${node.title}」的超时时间不能超过 30 天`;
     if (wait.mode === "delay") {
       if (!Number.isFinite(wait.durationMs) || wait.durationMs <= 0) return `等待步骤「${node.title}」的等待时长必须大于 0`;
+      if (wait.durationMs > MAX_WAIT_DURATION_MS) return `等待步骤「${node.title}」的等待时长不能超过 30 天`;
       continue;
     }
     if (wait.mode === "until") {

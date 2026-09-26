@@ -18,6 +18,7 @@ export const MAX_PARALLEL_STEPS = 20;
 export const MAX_SUBFLOW_STEPS = 50;
 export const MAX_WORKFLOW_VARIABLES = 100;
 export const MAX_WORKFLOW_OUTPUT_FIELDS = 100;
+export const MAX_WAIT_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
 
 export const WorkflowNodeType = z.enum([
   "trigger", "end", "ai", "human", "tool", "knowledge", "condition",
@@ -113,7 +114,16 @@ export const WorkflowNode = z.object({
   quality: QualityGateSpec.optional(),
   loop: z.object({ collectionPath: z.string(), itemKey: z.string(), maxIterations: z.number().int().min(1).max(100), bodyNext: z.string().nullable(), exitNext: z.string().nullable() }).optional(),
   parallel: z.object({ strategy: z.enum(["all", "any", "all_settled"]), failurePolicy: z.enum(["fail_fast", "continue"]), branches: z.array(ParallelBranch).max(MAX_PARALLEL_BRANCHES) }).optional(),
-  wait: z.object({ mode: z.enum(["delay", "until", "event"]), durationMs: z.number().default(0), until: z.string().nullable().default(null), eventKey: z.string(), eventLabel: z.string().optional(), payloadSchema: z.record(z.string(), z.unknown()).default({ type: "object" }), timeoutMs: z.number().default(0), onTimeoutNext: z.string().nullable().default(null) }).optional(),
+  wait: z.object({
+    mode: z.enum(["delay", "until", "event"]),
+    durationMs: z.number().default(0),
+    until: z.string().nullable().default(null),
+    eventKey: z.string(),
+    eventLabel: z.string().optional(),
+    payloadSchema: z.record(z.string(), z.unknown()).default({ type: "object" }),
+    timeoutMs: z.number().default(0),
+    onTimeoutNext: z.string().nullable().default(null),
+  }).optional(),
   memory: z.object({ mode: z.enum(["read", "write"]), query: z.string().optional(), limit: z.number().int().min(1).max(20).optional(), contentFrom: z.string().optional() }).optional(),
   subflow: z.object({ name: z.string(), steps: z.array(z.record(z.string(), z.unknown())).max(MAX_SUBFLOW_STEPS).default([]), inputs: z.array(z.string()).default([]), outputs: z.array(z.string()).default([]), failurePolicy: z.enum(["checkpoint", "continue"]).default("checkpoint") }).optional(),
   agentCall: z.object({ targetAgentId: z.string(), versionId: z.string(), targetAgentName: z.string().optional(), workflowId: z.string().optional(), memoryAccess: z.object({ mode: z.enum(["self", "team", "none"]) }).optional(), inputContract: z.record(z.string(), z.unknown()).optional(), outputContract: z.record(z.string(), z.unknown()).optional() }).optional(),

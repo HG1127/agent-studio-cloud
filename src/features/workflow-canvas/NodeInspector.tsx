@@ -9,6 +9,7 @@ import {
   MAX_PARALLEL_BRANCHES,
   MAX_PARALLEL_STEPS,
   MAX_SUBFLOW_STEPS,
+  MAX_WAIT_DURATION_MS,
   type WorkflowNode,
 } from "@/contracts/workflow";
 import { validateJsonSchemaDefinition } from "@/server/domain/json-schema";
@@ -630,8 +631,8 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
             <option value="delay">等待一段时间</option><option value="until">等待到指定时间</option><option value="event">等待外部消息</option>
           </select>
           {node.wait.mode === "delay" ? <label className="flex flex-col gap-1 text-sm font-medium">等待秒数
-            <input aria-label="等待秒数" type="number" min={1} value={Math.max(1, Math.round(node.wait.durationMs / 1000))}
-              onChange={(event) => onNodeChange({ ...node, wait: { ...node.wait!, durationMs: Math.max(1, Number(event.target.value) || 1) * 1000 } })}
+            <input aria-label="等待秒数" type="number" min={1} max={MAX_WAIT_DURATION_MS / 1000} value={Math.max(1, Math.round(node.wait.durationMs / 1000))}
+              onChange={(event) => onNodeChange({ ...node, wait: { ...node.wait!, durationMs: Math.min(MAX_WAIT_DURATION_MS, Math.max(1, Number(event.target.value) || 1) * 1000) } })}
               className="rounded-md border border-gray-300 px-3 py-2 text-sm font-normal" />
           </label> : null}
           {node.wait.mode === "until" ? <label className="flex flex-col gap-1 text-sm font-medium">继续时间
@@ -647,8 +648,8 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
               <span className="text-xs font-normal text-gray-500">仅使用字母、数字、点、下划线、冒号或短横线。</span>
             </label>
             <label className="flex flex-col gap-1 text-sm font-medium">超时分钟数
-              <input aria-label="超时分钟数" type="number" min={0} value={Math.round(node.wait.timeoutMs / 60_000)}
-                onChange={(event) => onNodeChange({ ...node, wait: { ...node.wait!, timeoutMs: Math.max(0, Number(event.target.value) || 0) * 60_000 } })}
+              <input aria-label="超时分钟数" type="number" min={0} max={MAX_WAIT_DURATION_MS / 60_000} value={Math.round(node.wait.timeoutMs / 60_000)}
+                onChange={(event) => onNodeChange({ ...node, wait: { ...node.wait!, timeoutMs: Math.min(MAX_WAIT_DURATION_MS, Math.max(0, Number(event.target.value) || 0) * 60_000) } })}
                 className="rounded-md border border-gray-300 px-3 py-2 text-sm font-normal" />
             </label>
             <WaitPayloadSchemaEditor node={node} onNodeChange={onNodeChange} />

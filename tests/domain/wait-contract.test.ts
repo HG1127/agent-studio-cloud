@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { WorkflowDraft } from "@/contracts/workflow";
+import { MAX_WAIT_DURATION_MS, WorkflowDraft } from "@/contracts/workflow";
 import { validateWaitContracts } from "@/server/domain/runtime/wait-contract";
 
 function waitNode(wait: Record<string, unknown>) {
@@ -30,6 +30,12 @@ describe("等待步骤契约", () => {
     expect(validateWaitContracts(waitNode({ mode: "until", until: "不是时间", eventKey: "unused" }))).toContain("继续时间不正确");
     expect(validateWaitContracts(waitNode({ mode: "event", eventKey: "客户 已回复" }))).toContain("消息标识只能使用");
     expect(validateWaitContracts(waitNode({ mode: "event", eventKey: "ready", timeoutMs: -1 }))).toContain("超时时间不正确");
+    const longDelay = waitNode({ mode: "delay", durationMs: 1_000, eventKey: "unused" });
+    longDelay.wait.wait!.durationMs = MAX_WAIT_DURATION_MS + 1;
+    expect(validateWaitContracts(longDelay)).toContain("等待时长不能超过 30 天");
+    const longTimeout = waitNode({ mode: "event", eventKey: "ready", timeoutMs: 0 });
+    longTimeout.wait.wait!.timeoutMs = MAX_WAIT_DURATION_MS + 1;
+    expect(validateWaitContracts(longTimeout)).toContain("超时时间不能超过 30 天");
   });
 
   it("拒绝根类型错误或包含不支持规则的消息契约", () => {

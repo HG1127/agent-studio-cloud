@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { WorkflowDraft } from "@/contracts/workflow";
+import { MAX_WAIT_DURATION_MS, WorkflowDraft } from "@/contracts/workflow";
 
 // 旧系统 server/workflowPlanCompilerV30.mjs 的逐行移植（模型结构化计划 → WorkflowDraft）。
 // 控制面细节按控制方裁定保留：条件/错误环引用回退、incoming/rewire 审批门禁重接线、
@@ -466,8 +466,8 @@ function waitSpec(step: Raw): WaitData {
   const raw = step.wait && typeof step.wait === "object" ? (step.wait as Raw) : {};
   let mode = String(raw.mode || step.waitMode || "").toLowerCase();
   if (!["delay", "until", "event"].includes(mode)) mode = raw.eventKey || step.eventKey ? "event" : raw.until || step.until ? "until" : "delay";
-  const durationMs = Math.max(0, Math.min(30 * 24 * 60 * 60 * 1000, Number(raw.durationMs || step.durationMs || 0)));
-  const timeoutMs = Math.max(0, Math.min(30 * 24 * 60 * 60 * 1000, Number(raw.timeoutMs || step.timeoutMs || 0)));
+  const durationMs = Math.max(0, Math.min(MAX_WAIT_DURATION_MS, Number(raw.durationMs || step.durationMs || 0)));
+  const timeoutMs = Math.max(0, Math.min(MAX_WAIT_DURATION_MS, Number(raw.timeoutMs || step.timeoutMs || 0)));
   return {
     mode,
     durationMs,
