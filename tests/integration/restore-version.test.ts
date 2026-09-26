@@ -201,6 +201,45 @@ describe("恢复历史版本", () => {
     expect(versions.find((version) => version.id === CURRENT_ID)?.status).toBe("production");
   });
 
+  it("业务工具已经不可用时不会替换当前版本", async () => {
+    const toolManifest = AgentManifest.parse({
+      ...manifest,
+      workflowFingerprint: "restore-tool-test",
+      workflowSnapshot: {
+        ...manifest.workflowSnapshot,
+        nodes: {
+          start: { id: "start", title: "开始", type: "trigger", next: "tool" },
+          tool: {
+            id: "tool",
+            title: "更新客户",
+            type: "tool",
+            next: "end",
+            tool: {
+              connector: "客户系统",
+              action: "update_customer",
+              scope: "customer.write",
+              risk: "medium",
+              registryToolId: "missing.tool",
+              protocol: "http-json",
+            },
+          },
+          end: { id: "end", title: "结束", type: "end", next: null },
+        },
+      },
+    });
+    await insertVersions("retired", toolManifest);
+
+    const result = await restoreVersionAction(AGENT_ID, SOURCE_ID);
+
+    expect(result).toEqual({
+      ok: false,
+      error: "步骤「更新客户」绑定的业务工具未在服务端配置，无法恢复这个历史版本",
+    });
+    const versions = await db.select().from(agentVersions).where(eq(agentVersions.agentId, AGENT_ID));
+    expect(versions).toHaveLength(2);
+    expect(versions.find((version) => version.id === CURRENT_ID)?.status).toBe("production");
+  });
+
   it("协作助手已经不可用时不会替换当前版本", async () => {
     const missingAgentId = "00000000-0000-4000-8000-0000000000e2";
     const missingVersionId = "00000000-0000-4000-8000-0000000000e3";

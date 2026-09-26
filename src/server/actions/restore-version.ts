@@ -16,6 +16,8 @@ import { workflowCollaborationKeys } from "@/server/domain/import-agent";
 import { inspectCollaborationVersionGraph } from "@/server/domain/runtime/collaboration-dependencies";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { restorationMatchesSource } from "@/server/domain/restore-idempotency";
+import { workflowToolRegistrationIssue } from "@/server/tools/tool-binding";
+import { getToolRegistration } from "@/server/tools/tool-registry";
 
 export async function restoreVersionAction(agentId: string, versionId: string): Promise<RestoreVersionResult> {
   if (!z.string().uuid().safeParse(agentId).success || !z.string().uuid().safeParse(versionId).success) {
@@ -58,6 +60,8 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
           if (source.status !== "retired") return { kind: "source-not-retired" as const };
           const manifest = AgentManifest.safeParse(source.manifest);
           if (!manifest.success) return { kind: "manifest-invalid" as const };
+          const toolIssue = workflowToolRegistrationIssue(manifest.data.workflowSnapshot, getToolRegistration);
+          if (toolIssue) return { kind: "tool-unavailable" as const, error: toolIssue };
           let collaborationKnowledgeSourceIds: string[] = [];
           const collaborationKeys = workflowCollaborationKeys(manifest.data.workflowSnapshot);
           const uuid = z.string().uuid();
@@ -233,6 +237,9 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
         if (restoreOutcome.kind === "already-production") return { ok: false, error: "这个版本已经是当前版本" };
         if (restoreOutcome.kind === "source-not-retired") return { ok: false, error: "只有曾经上线的历史版本才能恢复为当前版本" };
         if (restoreOutcome.kind === "manifest-invalid") return { ok: false, error: "历史版本格式过旧，无法直接恢复" };
+        if (restoreOutcome.kind === "tool-unavailable") {
+          return { ok: false, error: `${restoreOutcome.error}，无法恢复这个历史版本` };
+        }
         if (restoreOutcome.kind === "collaboration-unavailable") {
           return { ok: false, error: "历史版本绑定的协作助手已停用或版本不可用，请先恢复协作助手" };
         }
