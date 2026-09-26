@@ -3,6 +3,7 @@ import { isConversationalOrMeta } from "@/server/domain/intent";
 import { forbiddenActionMatch, type PolicyNode } from "@/server/domain/grounding/business-policy";
 import { safeDataPathSegments } from "@/server/domain/runtime/data-path";
 import { canProduceQualityResult } from "@/server/domain/runtime/quality-checks";
+import { isHiddenControlNode } from "@/lib/workflow-node-visibility";
 
 // 旧系统 server/designAuditor.mjs 的逐行移植（设计审计 auditWorkflow，minified 展开为可读 TS）。
 // 移植边界按引用可达性逐个核实：旧版 proposeAuditFixes 不直接移植，仅保留检查逻辑；
@@ -568,7 +569,7 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
             issues.push(issue("critical", "logic", "交付检查引用的步骤不存在", `「${n.title}」要求检查「${title}」，但画布中没有这个步骤。`, { nodeId: id, fixable: true, code: `quality_source_missing_${title}` }));
           } else if (matches.length > 1) {
             issues.push(issue("critical", "logic", "交付检查引用的步骤名称重复", `「${n.title}」要求检查「${title}」，但有多个步骤使用这个名称，无法确定检查对象。`, { nodeId: id, fixable: true, code: `quality_source_ambiguous_${title}` }));
-          } else if (!canProduceQualityResult(matches[0].type)) {
+          } else if (isHiddenControlNode(matches[0]) || !canProduceQualityResult(matches[0].type)) {
             issues.push(issue("critical", "logic", "交付检查引用的步骤没有结果", `「${n.title}」要求检查「${title}」，但这个步骤不会产生可检查的交付结果。`, { nodeId: id, fixable: true, code: `quality_source_no_result_${title}` }));
           }
         }

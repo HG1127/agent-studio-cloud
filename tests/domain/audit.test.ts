@@ -598,4 +598,29 @@ describe("直测：结构性检查", () => {
       expect.objectContaining({ code: "quality_min_output_impossible", severity: "critical" }),
     ]));
   });
+
+  it("交付检查不能把隐藏控制步骤当作业务结果", () => {
+    const out = auditWorkflow(WorkflowDraft.parse({
+      id: "hidden-quality-output",
+      rootAgent: { id: "agent", name: "测试助手", role: "处理" },
+      memoryPolicy: { taskContext: true, longTerm: false },
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "hidden" },
+        hidden: {
+          id: "hidden", title: "内部安全收口", type: "system", next: "quality",
+          controlPlane: { kind: "safety", hiddenByDefault: true },
+        },
+        quality: {
+          id: "quality", title: "交付检查", type: "rule", next: "done",
+          quality: { requiredOutputTitles: ["内部安全收口"], minOutputCount: 1 },
+        },
+        done: { id: "done", title: "完成", type: "end", next: null },
+      },
+    }));
+
+    expect(out.issues).toContainEqual(expect.objectContaining({
+      code: "quality_source_no_result_内部安全收口",
+      severity: "critical",
+    }));
+  });
 });
