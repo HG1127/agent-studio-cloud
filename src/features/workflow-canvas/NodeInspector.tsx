@@ -203,10 +203,11 @@ function InlineStepEditor({ label, steps, index, toolOptions, agentTargets, know
         } : item))}
         className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
       <KnowledgeSourcePicker label={`${label} 资料范围`} sourceIds={Array.isArray(knowledge?.sourceIds) ? knowledge.sourceIds.filter((id): id is string => typeof id === "string") : []}
+        selectionRequired={knowledge?.selectionRequired === true}
         sources={knowledgeSources}
         onChange={(sourceIds) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
           ...item,
-          knowledge: { ...(knowledge ?? { space: "业务资料库" }), sourceIds },
+          knowledge: { ...(knowledge ?? { space: "业务资料库" }), sourceIds, selectionRequired: false },
         } : item))} compact />
     </div> : null}
     {type === "agent_call" ? <select aria-label={`${label} 协作助手`}
@@ -246,19 +247,20 @@ function InlineStepEditor({ label, steps, index, toolOptions, agentTargets, know
   </div>;
 }
 
-function KnowledgeSourcePicker({ label, sourceIds, sources, onChange, compact = false }: {
+function KnowledgeSourcePicker({ label, sourceIds, sources, onChange, compact = false, selectionRequired = false }: {
   label: string;
   sourceIds: string[];
   sources: KnowledgeSourceView[];
   onChange: (sourceIds: string[]) => void;
   compact?: boolean;
+  selectionRequired?: boolean;
 }) {
   const selected = new Set(sourceIds);
   const unavailableCount = sourceIds.filter((sourceId) => !sources.some((source) => source.id === sourceId)).length;
   return <fieldset className={`space-y-1 rounded-md border border-gray-200 ${compact ? "p-2" : "p-3"}`}>
     <legend className={compact ? "px-1 text-xs font-medium" : "px-1 text-sm font-medium"}>{label}</legend>
     <label className="flex items-center gap-2 text-xs text-gray-700">
-      <input type="checkbox" checked={sourceIds.length === 0} onChange={() => onChange([])} />
+      <input type="checkbox" checked={sourceIds.length === 0 && !selectionRequired} onChange={() => onChange([])} />
       全部已入库资料
     </label>
     {sources.map((source) => <label key={source.id} className="flex items-center gap-2 text-xs text-gray-700">
@@ -271,6 +273,7 @@ function KnowledgeSourcePicker({ label, sourceIds, sources, onChange, compact = 
       {source.name}
     </label>)}
     {sources.length === 0 ? <p className="text-xs text-amber-700">还没有完成解析的资料，请先到知识库上传。</p> : null}
+    {selectionRequired ? <p className="text-xs text-amber-700">导入文件中的资料不属于当前工作区，请重新选择资料范围。</p> : null}
     {unavailableCount > 0 ? <p className="text-xs text-amber-700">有 {unavailableCount} 份已选资料未显示或当前不可用；保存会保留原选择，发布时会再次校验。</p> : null}
     <p className="text-xs text-gray-500">不单独选择时使用发布当时的全部可用资料。</p>
   </fieldset>;
@@ -437,8 +440,8 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
             onChange={(event) => onNodeChange({ ...node, knowledge: { ...knowledge, query: event.target.value } })}
             className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
           />
-          <KnowledgeSourcePicker label="资料范围" sourceIds={knowledge.sourceIds ?? []} sources={knowledgeSources}
-            onChange={(sourceIds) => onNodeChange({ ...node, knowledge: { ...knowledge, sourceIds } })} />
+          <KnowledgeSourcePicker label="资料范围" sourceIds={knowledge.sourceIds ?? []} selectionRequired={knowledge.selectionRequired} sources={knowledgeSources}
+            onChange={(sourceIds) => onNodeChange({ ...node, knowledge: { ...knowledge, sourceIds, selectionRequired: false } })} />
         </div>
       ) : null}
       {node.type === "condition" && node.condition ? (

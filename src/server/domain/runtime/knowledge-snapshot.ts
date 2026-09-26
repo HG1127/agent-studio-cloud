@@ -4,7 +4,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
-type KnowledgeScope = { title: string; sourceIds: string[] };
+type KnowledgeScope = { title: string; sourceIds: string[]; selectionRequired: boolean };
 
 function collectKnowledgeScope(node: Record<string, unknown>, scopes: KnowledgeScope[]): void {
   if (node.type === "knowledge") {
@@ -14,6 +14,7 @@ function collectKnowledgeScope(node: Record<string, unknown>, scopes: KnowledgeS
       sourceIds: Array.isArray(knowledge?.sourceIds)
         ? knowledge.sourceIds.filter((value): value is string => typeof value === "string")
         : [],
+      selectionRequired: knowledge?.selectionRequired === true,
     });
   }
 }
@@ -55,6 +56,9 @@ export function prepareKnowledgeSnapshot(
 ): { ok: true; sourceIds: string[] } | { ok: false; error: string } {
   const scopes = collectWorkflowKnowledgeScopes(nodes);
   if (scopes.length === 0) return { ok: true, sourceIds: [] };
+  if (scopes.some((scope) => scope.selectionRequired)) {
+    return { ok: false, error: "导入流程中的资料范围需要重新选择后再发布" };
+  }
   const available = new Set(sourceIds);
   const requested = [...new Set(scopes.flatMap((scope) => scope.sourceIds))];
   const missingSelection = requested.find((sourceId) => !available.has(sourceId));

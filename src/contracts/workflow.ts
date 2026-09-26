@@ -104,6 +104,7 @@ export const WorkflowNode = z.object({
     space: z.string(),
     query: z.string().optional(),
     sourceIds: z.array(z.string().uuid()).max(100).optional(),
+    selectionRequired: z.boolean().optional(),
   }).optional(),
   condition: z.object({
     source: z.string().nullable(), operator: z.string().default("eq"),

@@ -4,13 +4,14 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { ImportAgentResult } from "@/contracts/agent";
-import { agents, agentVersions, auditEvents, workflowDefinitions } from "@/db/schema";
+import { agents, agentVersions, auditEvents, knowledgeSources, workflowDefinitions } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { agentImportSizeIssue, importedCollaborationKeys, importedWorkflowIssue, normalizeAgentImport, rebindImportedWorkflow } from "@/server/domain/import-agent";
 import { auditEventValues } from "@/server/audit/event-values";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { agentIdentityMatches } from "@/server/domain/agent-identity";
+import { workflowKnowledgeSourceIds } from "@/server/domain/runtime/knowledge-snapshot";
 
 export async function importAgentAction(input: unknown, requestId: string): Promise<ImportAgentResult> {
   if (!z.string().uuid().safeParse(requestId).success) return { ok: false, error: "导入请求信息不正确，请重新选择文件" };
@@ -65,11 +66,24 @@ export async function importAgentAction(input: unknown, requestId: string): Prom
               isNull(agents.archivedAt),
             ))
         : [];
+      const importedSourceIds = workflowKnowledgeSourceIds(imported.workflow.nodes);
+      const validKnowledgeRows = importedSourceIds.length > 0
+        ? await tx
+            .select({ id: knowledgeSources.id })
+            .from(knowledgeSources)
+            .where(and(
+              inArray(knowledgeSources.id, importedSourceIds),
+              eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID),
+              eq(knowledgeSources.status, "indexed"),
+              isNull(knowledgeSources.archivedAt),
+            ))
+        : [];
       const workflow = rebindImportedWorkflow({
         workflow: imported.workflow,
         agentId: created.id,
         agentName: imported.name,
         validCollaborationKeys: new Set(validRows.map((row) => `${row.agentId}:${row.versionId}`)),
+        validKnowledgeSourceIds: new Set(validKnowledgeRows.map((row) => row.id)),
       });
       await tx.insert(workflowDefinitions).values({
         agentId: created.id,

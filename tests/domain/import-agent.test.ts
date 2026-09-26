@@ -156,6 +156,7 @@ describe("助手导入格式归一化", () => {
       agentId: "new-agent",
       agentName: "导入副本",
       validCollaborationKeys: new Set(["target-a:version-a"]),
+      validKnowledgeSourceIds: new Set(),
     });
     expect(rebound).toMatchObject({ versionId: null, rootAgent: { id: "new-agent", name: "导入副本" } });
     expect(rebound.nodes.call.agentCall).toMatchObject({ targetAgentId: "target-a", versionId: "version-a" });
@@ -213,11 +214,44 @@ describe("助手导入格式归一化", () => {
       agentId: "new-agent",
       agentName: "导入副本",
       validCollaborationKeys: new Set(["target-a:version-a"]),
+      validKnowledgeSourceIds: new Set(),
     });
     const subflowSteps = rebound.nodes.group.subflow?.steps as Array<Record<string, unknown>>;
     const parallelSteps = rebound.nodes.parallel.parallel?.branches[0].steps as Array<Record<string, unknown>>;
     expect(subflowSteps[0].agentCall).toMatchObject({ targetAgentId: "target-a", versionId: "version-a" });
     expect(parallelSteps[0].toAgent).toEqual({ id: "", versionId: "" });
     expect(parallelSteps[0].contract).toBeUndefined();
+  });
+
+  it("只保留当前工作区可用的资料绑定并要求确认被清理的范围", () => {
+    const available = "00000000-0000-4000-8000-000000000031";
+    const missing = "00000000-0000-4000-8000-000000000032";
+    const withKnowledge = WorkflowDraft.parse({
+      ...workflow,
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "knowledge" },
+        knowledge: {
+          id: "knowledge",
+          title: "查资料",
+          type: "knowledge",
+          next: "done",
+          knowledge: { space: "资料库", sourceIds: [available, missing] },
+        },
+        done: { id: "done", title: "结束", type: "end" },
+      },
+    });
+
+    const rebound = rebindImportedWorkflow({
+      workflow: withKnowledge,
+      agentId: "new-agent",
+      agentName: "导入副本",
+      validCollaborationKeys: new Set(),
+      validKnowledgeSourceIds: new Set([available]),
+    });
+
+    expect(rebound.nodes.knowledge.knowledge).toMatchObject({
+      sourceIds: [available],
+      selectionRequired: true,
+    });
   });
 });

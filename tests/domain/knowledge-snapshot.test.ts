@@ -105,6 +105,21 @@ describe("知识快照发布选择", () => {
     });
   });
 
+  it("导入后尚未重新确认资料范围时阻止发布", () => {
+    const nodes = {
+      step: WorkflowNode.parse({
+        id: "step",
+        title: "查制度",
+        type: "knowledge",
+        knowledge: { space: "制度", sourceIds: [], selectionRequired: true },
+      }),
+    };
+    expect(prepareKnowledgeSnapshot(nodes, ["00000000-0000-4000-8000-000000000001"])).toEqual({
+      ok: false,
+      error: "导入流程中的资料范围需要重新选择后再发布",
+    });
+  });
+
   it("其他步骤使用全部资料时也不会掩盖失效的指定资料", () => {
     const available = "00000000-0000-4000-8000-000000000005";
     const missing = "00000000-0000-4000-8000-000000000006";

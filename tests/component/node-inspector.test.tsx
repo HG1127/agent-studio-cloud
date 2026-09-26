@@ -437,6 +437,24 @@ describe("NodeInspector", () => {
     }));
   });
 
+  it("导入资料失效时要求重新确认，选择后解除发布阻止", async () => {
+    const onNodeChange = vi.fn();
+    const user = userEvent.setup();
+    const imported = WorkflowNode.parse({
+      ...KNOWLEDGE_NODE,
+      knowledge: { ...KNOWLEDGE_NODE.knowledge!, sourceIds: [], selectionRequired: true },
+    });
+    render(<NodeInspector node={imported} knowledgeSources={[KNOWLEDGE_SOURCE]}
+      onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
+
+    expect(screen.getByText("导入文件中的资料不属于当前工作区，请重新选择资料范围。")).toBeVisible();
+    expect(screen.getByRole("checkbox", { name: "全部已入库资料" })).not.toBeChecked();
+    await user.click(screen.getByRole("checkbox", { name: KNOWLEDGE_SOURCE.name }));
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      knowledge: expect.objectContaining({ sourceIds: [KNOWLEDGE_SOURCE.id], selectionRequired: false }),
+    }));
+  });
+
   it("工具节点可以选择服务端业务工具并冻结回执契约", async () => {
     const onNodeChange = vi.fn();
     const user = userEvent.setup();

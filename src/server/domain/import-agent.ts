@@ -116,19 +116,45 @@ function rebindCollaborationNode(node: Record<string, unknown>, validKeys: Reado
   return rebound;
 }
 
-function rebindTopLevelNode(node: Record<string, unknown>, validKeys: ReadonlySet<string>): Record<string, unknown> {
-  const rebound = rebindCollaborationNode(node, validKeys);
+function rebindKnowledgeNode(node: Record<string, unknown>, validSourceIds: ReadonlySet<string>): Record<string, unknown> {
+  if (node.type !== "knowledge" || !isRecord(node.knowledge) || !Array.isArray(node.knowledge.sourceIds)) return node;
+  const requested = node.knowledge.sourceIds.filter((id): id is string => typeof id === "string");
+  const sourceIds = requested.filter((id) => validSourceIds.has(id));
+  return {
+    ...node,
+    knowledge: {
+      ...node.knowledge,
+      sourceIds,
+      selectionRequired: requested.length !== sourceIds.length,
+    },
+  };
+}
+
+function rebindPortableNode(
+  node: Record<string, unknown>,
+  validKeys: ReadonlySet<string>,
+  validSourceIds: ReadonlySet<string>,
+): Record<string, unknown> {
+  return rebindKnowledgeNode(rebindCollaborationNode(node, validKeys), validSourceIds);
+}
+
+function rebindTopLevelNode(
+  node: Record<string, unknown>,
+  validKeys: ReadonlySet<string>,
+  validSourceIds: ReadonlySet<string>,
+): Record<string, unknown> {
+  const rebound = rebindPortableNode(node, validKeys, validSourceIds);
   if (isRecord(node.subflow) && Array.isArray(node.subflow.steps)) {
     rebound.subflow = {
       ...node.subflow,
-      steps: node.subflow.steps.map((step) => isRecord(step) ? rebindCollaborationNode(step, validKeys) : step),
+      steps: node.subflow.steps.map((step) => isRecord(step) ? rebindPortableNode(step, validKeys, validSourceIds) : step),
     };
   }
   if (isRecord(node.parallel) && Array.isArray(node.parallel.branches)) {
     rebound.parallel = {
       ...node.parallel,
       branches: node.parallel.branches.map((branch) => isRecord(branch) && Array.isArray(branch.steps)
-        ? { ...branch, steps: branch.steps.map((step) => isRecord(step) ? rebindCollaborationNode(step, validKeys) : step) }
+        ? { ...branch, steps: branch.steps.map((step) => isRecord(step) ? rebindPortableNode(step, validKeys, validSourceIds) : step) }
         : branch),
     };
   }
@@ -140,9 +166,10 @@ export function rebindImportedWorkflow(args: {
   agentId: string;
   agentName: string;
   validCollaborationKeys: ReadonlySet<string>;
+  validKnowledgeSourceIds: ReadonlySet<string>;
 }): WorkflowDraft {
   const nodes = Object.fromEntries(Object.entries(args.workflow.nodes).map(
-    ([id, node]) => [id, rebindTopLevelNode(node, args.validCollaborationKeys)],
+    ([id, node]) => [id, rebindTopLevelNode(node, args.validCollaborationKeys, args.validKnowledgeSourceIds)],
   )) as WorkflowDraft["nodes"];
   return bindWorkflowRootAgent({
     ...args.workflow,
