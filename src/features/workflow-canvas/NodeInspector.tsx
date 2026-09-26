@@ -50,6 +50,12 @@ function inlineStep(steps: Array<Record<string, unknown>>, title: string): Recor
   return { id: `step_${index}`, title, type: "ai", description: "完成这一步并返回结果" };
 }
 
+function nextParallelBranchId(branches: Array<{ id: string }>): string {
+  let index = branches.length + 1;
+  while (branches.some((branch) => branch.id === `branch_${index}`)) index += 1;
+  return `branch_${index}`;
+}
+
 function changeInlineStep(
   steps: Array<Record<string, unknown>>,
   index: number,
@@ -560,8 +566,9 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
             </div>
           ))}
           <button type="button" disabled={node.parallel.branches.length >= MAX_PARALLEL_BRANCHES} onClick={() => {
-            const index = node.parallel!.branches.length + 1;
-            const branch = { id: `branch_${index}`, label: `工作${index}`, inputs: [], outputs: [], steps: [inlineStep([], `处理工作${index}`)] };
+            const branchId = nextParallelBranchId(node.parallel!.branches);
+            const index = Number(branchId.slice("branch_".length));
+            const branch = { id: branchId, label: `工作${index}`, inputs: [], outputs: [], steps: [inlineStep([], `处理工作${index}`)] };
             onNodeChange({ ...node, parallel: { ...node.parallel!, branches: [...node.parallel!.branches, branch] } });
           }} className="w-fit text-xs text-blue-700 disabled:text-gray-400">添加并行工作</button>
         </div>

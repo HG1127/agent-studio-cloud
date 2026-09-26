@@ -261,6 +261,30 @@ describe("NodeInspector", () => {
     expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({ parallel: expect.objectContaining({ branches: [expect.objectContaining({ steps: expect.arrayContaining([expect.objectContaining({ type: "ai" })]) }), expect.anything()] }) }));
   });
 
+  it("并行工作删除后再添加不会复用仍存在的标识", async () => {
+    const nodeWithGap = WorkflowNode.parse({
+      ...PARALLEL_NODE,
+      parallel: {
+        ...PARALLEL_NODE.parallel!,
+        branches: [
+          PARALLEL_NODE.parallel!.branches[0],
+          { ...PARALLEL_NODE.parallel!.branches[1], id: "branch_3" },
+        ],
+      },
+    });
+    const onNodeChange = vi.fn();
+    const user = userEvent.setup();
+    render(<NodeInspector node={nodeWithGap} onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "添加并行工作" }));
+
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      parallel: expect.objectContaining({
+        branches: expect.arrayContaining([expect.objectContaining({ id: "branch_4" })]),
+      }),
+    }));
+  });
+
   it("并行工作可以改为业务工具并绑定服务端工具", async () => {
     const toolParallel = WorkflowNode.parse({
       ...PARALLEL_NODE,
