@@ -29,6 +29,7 @@ import { validateOutputFieldPaths } from "@/server/domain/runtime/output-contrac
 import { notifyDraftState } from "@/lib/draft-state";
 import { readSessionValue, removeSessionValue, writeSessionValue } from "@/lib/session-storage";
 import { draftRecoveryKey, restoreDraftRecovery, serializeDraftRecovery } from "./draft-recovery";
+import { isHiddenControlNode } from "@/lib/workflow-node-visibility";
 
 interface FlowCanvasProps {
   agentId: string;
@@ -100,7 +101,7 @@ export function FlowCanvas({ agentId, draft: initialDraft, draftUpdatedAt, agent
   }, [dirty]);
 
   const visibleNodes = useMemo(
-    () => Object.values(draft.nodes).filter((node) => showControlNodes || node.ui?.visibility !== "control"),
+    () => Object.values(draft.nodes).filter((node) => showControlNodes || !isHiddenControlNode(node)),
     [draft.nodes, showControlNodes],
   );
   const layoutPositions = useMemo(() => autoLayout(draft), [draft]);

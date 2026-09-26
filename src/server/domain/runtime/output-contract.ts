@@ -1,5 +1,6 @@
 import type { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
 import { safeDataPathSegments } from "@/server/domain/runtime/data-path";
+import { isHiddenControlNode } from "@/lib/workflow-node-visibility";
 import { hasMeaningfulResult } from "@/server/domain/runtime/result-content";
 
 type OutputField = NonNullable<WorkflowDraft["outputContract"]>["fields"][number];
@@ -42,8 +43,7 @@ export function validateOutputContract(fields: OutputField[], nodes: Record<stri
       !source
       || source.type === "trigger"
       || source.type === "end"
-      || source.ui?.visibility === "control"
-      || source.controlPlane?.hiddenByDefault === true
+      || isHiddenControlNode(source)
     ) {
       return `最终交付“${field.label || field.path}”必须选择有效的业务步骤来源`;
     }

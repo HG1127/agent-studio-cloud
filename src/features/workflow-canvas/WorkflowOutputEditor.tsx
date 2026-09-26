@@ -1,4 +1,5 @@
 import { MAX_WORKFLOW_OUTPUT_FIELDS, type WorkflowDraft, type WorkflowNode } from "@/contracts/workflow";
+import { isHiddenControlNode } from "@/lib/workflow-node-visibility";
 
 type OutputField = NonNullable<WorkflowDraft["outputContract"]>["fields"][number];
 
@@ -10,8 +11,7 @@ export function WorkflowOutputEditor({ nodes, fields, onChange }: {
   const candidates = Object.values(nodes).filter((node) =>
     node.type !== "trigger"
     && node.type !== "end"
-    && node.ui?.visibility !== "control"
-    && node.controlPlane?.hiddenByDefault !== true,
+    && !isHiddenControlNode(node),
   );
   function update(index: number, patch: Partial<OutputField>) {
     onChange(fields.map((field, position) => position === index ? { ...field, ...patch } : field));

@@ -14,6 +14,7 @@ import {
 } from "@/contracts/workflow";
 import { validateJsonSchemaDefinition } from "@/server/domain/json-schema";
 import { NODE_TYPE_LABELS } from "./CustomNodes";
+import { isHiddenControlNode } from "@/lib/workflow-node-visibility";
 
 interface NodeInspectorProps {
   node: WorkflowNode;
@@ -326,7 +327,7 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
     candidate.id !== node.id
     && candidate.type !== "trigger"
     && candidate.type !== "end"
-    && candidate.ui?.visibility !== "control",
+    && !isHiddenControlNode(candidate),
   );
   return (
     <aside aria-label="节点详情" className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4">

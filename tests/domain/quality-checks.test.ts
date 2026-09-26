@@ -23,6 +23,10 @@ const nodes = {
   }),
   draft: WorkflowNode.parse({ id: "draft", title: "生成方案", type: "ai" }),
   safe: WorkflowNode.parse({ id: "safe", title: "保留当前结果", type: "system" }),
+  hidden: WorkflowNode.parse({
+    id: "hidden", title: "内部安全收口", type: "system",
+    controlPlane: { kind: "safety", hiddenByDefault: true },
+  }),
 };
 
 describe("质量门禁执行范围", () => {
@@ -60,6 +64,14 @@ describe("质量门禁执行范围", () => {
       safe: { status: "completed" },
       send: { ok: true },
     }, ["保留当前结果", "保留当前结果"])).toBe(1);
+  });
+
+  it("隐藏控制步骤不能满足默认质量门槛或成为指定交付来源", () => {
+    expect(countMeaningfulQualityOutputs(nodes, {
+      hidden: { status: "completed" },
+    }, [])).toBe(0);
+    expect(qualityOutputReferenceIssue(nodes, ["内部安全收口"]))
+      .toBe("交付检查引用的步骤「内部安全收口」是隐藏控制步骤，不能作为业务结果");
   });
 
   it("拒绝不存在或名称重复的交付检查来源", () => {

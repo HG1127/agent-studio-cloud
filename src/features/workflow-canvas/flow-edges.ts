@@ -1,6 +1,7 @@
 import type { Connection } from "@xyflow/react";
 import type { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
 import { updateWorkflowNode } from "./update-workflow-node";
+import { isHiddenControlNode } from "@/lib/workflow-node-visibility";
 
 export type EdgeKind = "next" | "reject" | "error" | "branch" | "body" | "timeout";
 
@@ -50,8 +51,7 @@ export function removeNode(draft: WorkflowDraft, nodeId: string): WorkflowDraft 
   if (!target || target.type === "trigger" || target.type === "end" || draft.startNodeId === nodeId) return draft;
   const removedIds = new Set([nodeId]);
   for (const [id, node] of Object.entries(draft.nodes)) {
-    const hiddenControl = node.ui?.visibility === "control" || node.controlPlane?.hiddenByDefault === true;
-    if (!hiddenControl) continue;
+    if (!isHiddenControlNode(node)) continue;
     if (node.type === "rule" && node.rule?.sourceNodeId === nodeId) removedIds.add(id);
     if (node.type === "human" && node.controlPlane?.kind === "governance" && node.next === nodeId) removedIds.add(id);
   }

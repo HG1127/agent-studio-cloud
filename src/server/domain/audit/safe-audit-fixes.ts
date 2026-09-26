@@ -1,5 +1,6 @@
 import { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
 import { auditWorkflow, type AuditIssue } from "./design-auditor";
+import { isHiddenControlNode } from "@/lib/workflow-node-visibility";
 
 export interface SafeAuditFixResult {
   draft: WorkflowDraft;
@@ -53,8 +54,7 @@ function firstEnd(nodes: Record<string, WorkflowNode>): WorkflowNode | undefined
 function isBusinessOutputSource(node: WorkflowNode): boolean {
   return node.type !== "trigger"
     && node.type !== "end"
-    && node.ui?.visibility !== "control"
-    && node.controlPlane?.hiddenByDefault !== true;
+    && !isHiddenControlNode(node);
 }
 
 function safeFixIssue(draft: WorkflowDraft, issue: AuditIssue, applied: string[], skipped: string[]): void {

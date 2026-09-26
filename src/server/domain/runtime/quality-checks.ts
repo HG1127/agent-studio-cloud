@@ -1,5 +1,6 @@
 import type { WorkflowNode } from "@/contracts/workflow";
 import { hasMeaningfulResult } from "@/server/domain/runtime/result-content";
+import { isHiddenControlNode } from "@/lib/workflow-node-visibility";
 
 function hasOwnOutput(outputs: Record<string, unknown>, nodeId: string): boolean {
   return Object.prototype.hasOwnProperty.call(outputs, nodeId);
@@ -28,6 +29,7 @@ export function qualityOutputReferenceIssue(
     const matches = Object.values(nodes).filter((node) => node.title === title);
     if (matches.length === 0) return `交付检查引用的步骤「${title}」不存在`;
     if (matches.length > 1) return `交付检查引用的步骤名称「${title}」不唯一，请先修改重复名称`;
+    if (isHiddenControlNode(matches[0])) return `交付检查引用的步骤「${title}」是隐藏控制步骤，不能作为业务结果`;
     if (!canProduceQualityResult(matches[0].type)) return `交付检查引用的步骤「${title}」不会产生可检查结果`;
   }
   if (uniqueTitles.length > 0 && minOutputCount > uniqueTitles.length) {
@@ -46,7 +48,7 @@ export function countMeaningfulQualityOutputs(
         const node = Object.values(nodes).find((item) => item.title === title);
         return node ? [node] : [];
       })
-    : Object.values(nodes).filter((node) => canProduceQualityResult(node.type) && node.ui?.visibility !== "control");
+    : Object.values(nodes).filter((node) => canProduceQualityResult(node.type) && !isHiddenControlNode(node));
   const candidateIds = [...new Set(candidates.map((node) => node.id))];
   return candidateIds.filter((nodeId) => hasOwnOutput(outputs, nodeId) && hasMeaningfulResult(outputs[nodeId])).length;
 }

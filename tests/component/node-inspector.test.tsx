@@ -236,15 +236,20 @@ describe("NodeInspector", () => {
 
   it("保存经验时从业务步骤选择内容来源", async () => {
     const writeNode = WorkflowNode.parse({ id: "memory_write", title: "保存经验", type: "memory", memory: { mode: "write", contentFrom: "run_summary" } });
+    const hiddenNode = WorkflowNode.parse({
+      id: "hidden", title: "内部安全收口", type: "system",
+      controlPlane: { kind: "safety", hiddenByDefault: true },
+    });
     const onNodeChange = vi.fn();
     const user = userEvent.setup();
     render(<NodeInspector
       node={writeNode}
-      workflowNodes={{ [AI_NODE.id]: AI_NODE, [writeNode.id]: writeNode }}
+      workflowNodes={{ [AI_NODE.id]: AI_NODE, [hiddenNode.id]: hiddenNode, [writeNode.id]: writeNode }}
       onNodeChange={onNodeChange}
       onNodeDelete={vi.fn()}
     />);
     expect(screen.getByRole("option", { name: "生成回复方案" })).toHaveValue(AI_NODE.id);
+    expect(screen.queryByRole("option", { name: "内部安全收口" })).not.toBeInTheDocument();
     await user.selectOptions(screen.getByLabelText("保存内容来源"), AI_NODE.id);
     expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({ memory: { mode: "write", contentFrom: AI_NODE.id } }));
   });

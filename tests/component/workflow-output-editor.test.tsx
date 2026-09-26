@@ -8,6 +8,7 @@ const nodes = Object.fromEntries([
   WorkflowNode.parse({ id: "start", title: "收到任务", type: "trigger", next: "draft" }),
   WorkflowNode.parse({ id: "draft", title: "生成方案", type: "ai", next: "review" }),
   WorkflowNode.parse({ id: "review", title: "检查结果", type: "rule", next: "done", ui: { visibility: "control" } }),
+  WorkflowNode.parse({ id: "hidden", title: "内部安全收口", type: "system", next: "done", controlPlane: { kind: "safety", hiddenByDefault: true } }),
   WorkflowNode.parse({ id: "done", title: "完成", type: "end", next: null }),
 ].map((node) => [node.id, node]));
 
@@ -19,6 +20,7 @@ describe("最终交付字段编辑", () => {
     expect(onChange).toHaveBeenCalledWith([
       { path: "draft", label: "生成方案", required: true, sourceNodeId: "draft" },
     ]);
+    expect(screen.queryByRole("option", { name: "内部安全收口" })).not.toBeInTheDocument();
   });
 
   it("可以改结果字段位置、显示名称、必需状态并删除", async () => {

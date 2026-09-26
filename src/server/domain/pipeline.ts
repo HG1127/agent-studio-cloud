@@ -9,6 +9,7 @@ import { attachComplexIntentContract, compileIntentWorkflow, type IntentStep } f
 import { groundBusinessWorkflow } from "@/server/domain/grounding";
 import { auditWorkflow, type AuditIssue, type DesignAuditResult } from "@/server/domain/audit";
 import { applySafeAuditFixes } from "@/server/domain/audit/safe-audit-fixes";
+import { isHiddenControlNode } from "@/lib/workflow-node-visibility";
 
 export interface AgentDraftAuditSummary {
   status: DesignAuditResult["status"];
@@ -116,7 +117,7 @@ function applyBlueprintStructure(draft: WorkflowDraft, blueprint: AgentBlueprint
   }
 
   const candidates = Object.values(draft.nodes).filter((node) =>
-    node.ui?.visibility !== "control"
+    !isHiddenControlNode(node)
     && !["trigger", "end", "human", "condition", "rule", "wait"].includes(node.type),
   );
   return candidates.at(-1)?.id ?? null;
@@ -232,7 +233,7 @@ const PUBLISH_EXEMPT_CODES: ReadonlySet<string> = new Set(["meta_node_detected"]
 function isControlDraftNode(nodeId: string | null, draft: WorkflowDraft): boolean {
   if (!nodeId) return false;
   const node = draft.nodes[nodeId];
-  return node?.ui?.visibility === "control" || node?.controlPlane?.hiddenByDefault === true;
+  return isHiddenControlNode(node);
 }
 
 export function filterPublishBlockers(issues: AuditIssue[], draft: WorkflowDraft): { blocking: AuditIssue[]; exempted: AuditIssue[] } {
