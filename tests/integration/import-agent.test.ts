@@ -4,7 +4,7 @@ import { WorkflowDraft } from "@/contracts/workflow";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-import { agents, workflowDefinitions } from "@/db/schema";
+import { agents, auditEvents, workflowDefinitions } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { importAgentAction } from "@/server/actions/import-agent";
@@ -32,6 +32,7 @@ const payload = {
 };
 
 afterEach(async () => {
+  await db.delete(auditEvents).where(eq(auditEvents.targetId, AGENT_ID));
   await db.delete(workflowDefinitions).where(eq(workflowDefinitions.agentId, AGENT_ID));
   await db.delete(agents).where(eq(agents.id, AGENT_ID));
 });
@@ -55,5 +56,17 @@ describe("助手导入安全重试", () => {
 
     expect(await importAgentAction(payload, AGENT_ID)).toEqual({ ok: true, agentId: AGENT_ID });
     expect(await db.select().from(agents).where(eq(agents.id, AGENT_ID))).toHaveLength(1);
+  });
+
+  it("同一请求标识不能被同名但不同流程的文件复用", async () => {
+    expect(await importAgentAction(payload, AGENT_ID)).toEqual({ ok: true, agentId: AGENT_ID });
+    const changed = {
+      ...payload,
+      workflow: WorkflowDraft.parse({ ...workflow, memoryPolicy: { taskContext: true, longTerm: true } }),
+    };
+    expect(await importAgentAction(changed, AGENT_ID)).toEqual({
+      ok: false,
+      error: "导入请求信息已经失效，请重新选择文件",
+    });
   });
 });

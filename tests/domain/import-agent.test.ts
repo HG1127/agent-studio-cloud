@@ -9,6 +9,7 @@ import {
   normalizeAgentImport,
   rebindImportedWorkflow,
 } from "@/server/domain/import-agent";
+import { agentImportFingerprint } from "@/server/domain/import-agent-fingerprint";
 
 const workflow = WorkflowDraft.parse({
   id: "workflow-import",
@@ -40,6 +41,20 @@ describe("助手导入格式归一化", () => {
     });
     expect(result).toMatchObject({ name: "客户助手", description: "处理客户问题", intentText: "处理客户问题并生成可核对的答复" });
     expect(result?.workflow.id).toBe("workflow-import");
+  });
+
+  it("导入指纹忽略对象字段顺序但能识别流程内容变化", () => {
+    const base = normalizeAgentImport({
+      format: "agent-studio-cloud",
+      formatVersion: 1,
+      exportedAt: "2026-09-24T00:00:00.000Z",
+      agent: { name: "客户助手", description: "处理客户问题", intentText: "处理客户问题并生成可核对的答复" },
+      workflow,
+    })!;
+    const reordered = { workflow: base.workflow, intentText: base.intentText, description: base.description, name: base.name };
+    const changed = { ...base, workflow: { ...base.workflow, memoryPolicy: { ...base.workflow.memoryPolicy, longTerm: true } } };
+    expect(agentImportFingerprint(reordered)).toBe(agentImportFingerprint(base));
+    expect(agentImportFingerprint(changed)).not.toBe(agentImportFingerprint(base));
   });
 
   it("把冻结版本转换为脱离原版本状态的可编辑草稿", () => {

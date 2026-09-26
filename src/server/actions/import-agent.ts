@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { ImportAgentResult } from "@/contracts/agent";
@@ -8,6 +8,7 @@ import { agents, agentVersions, auditEvents, knowledgeSources, workflowDefinitio
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { agentImportSizeIssue, importedCollaborationKeys, importedWorkflowIssue, normalizeAgentImport, rebindImportedWorkflow } from "@/server/domain/import-agent";
+import { agentImportFingerprint } from "@/server/domain/import-agent-fingerprint";
 import { auditEventValues } from "@/server/audit/event-values";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { agentIdentityMatches } from "@/server/domain/agent-identity";
@@ -15,29 +16,51 @@ import { workflowKnowledgeSourceIds } from "@/server/domain/runtime/knowledge-sn
 import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding";
 import { getToolRegistration } from "@/server/tools/tool-registry";
 
+async function findExistingImport(requestId: string) {
+  const [existing] = await db.select({
+    id: agents.id,
+    name: agents.name,
+    description: agents.description,
+    intentText: agents.intentText,
+    auditData: auditEvents.data,
+  }).from(agents).innerJoin(workflowDefinitions, and(
+    eq(workflowDefinitions.agentId, agents.id),
+    eq(workflowDefinitions.workspaceId, DEMO_WORKSPACE_ID),
+  )).leftJoin(auditEvents, and(
+    eq(auditEvents.workspaceId, DEMO_WORKSPACE_ID),
+    eq(auditEvents.targetType, "agent"),
+    eq(auditEvents.targetId, agents.id),
+    eq(auditEvents.action, "agent.imported"),
+  )).where(and(
+    eq(agents.id, requestId),
+    eq(agents.workspaceId, DEMO_WORKSPACE_ID),
+  )).orderBy(desc(auditEvents.createdAt)).limit(1);
+  return existing ?? null;
+}
+
+function existingImportMatches(
+  existing: NonNullable<Awaited<ReturnType<typeof findExistingImport>>>,
+  imported: NonNullable<ReturnType<typeof normalizeAgentImport>>,
+  fingerprint: string,
+): boolean {
+  if (!agentIdentityMatches(existing, imported)) return false;
+  const storedFingerprint = existing.auditData?.importFingerprint;
+  return typeof storedFingerprint === "string" ? storedFingerprint === fingerprint : true;
+}
+
 export async function importAgentAction(input: unknown, requestId: string): Promise<ImportAgentResult> {
   if (!z.string().uuid().safeParse(requestId).success) return { ok: false, error: "导入请求信息不正确，请重新选择文件" };
   const sizeIssue = agentImportSizeIssue(input);
   if (sizeIssue) return { ok: false, error: sizeIssue };
   const imported = normalizeAgentImport(input);
   if (!imported) return { ok: false, error: "文件不是有效的助手定义或冻结版本，或文件版本暂不兼容" };
+  const fingerprint = agentImportFingerprint(imported);
   const workflowIssue = importedWorkflowIssue(imported.workflow);
   if (workflowIssue) return { ok: false, error: `导入的流程无法使用：${workflowIssue}` };
   try {
-    const [existing] = await db.select({
-      id: agents.id,
-      name: agents.name,
-      description: agents.description,
-      intentText: agents.intentText,
-    }).from(agents).innerJoin(workflowDefinitions, and(
-      eq(workflowDefinitions.agentId, agents.id),
-      eq(workflowDefinitions.workspaceId, DEMO_WORKSPACE_ID),
-    )).where(and(
-      eq(agents.id, requestId),
-      eq(agents.workspaceId, DEMO_WORKSPACE_ID),
-    )).limit(1);
+    const existing = await findExistingImport(requestId);
     if (existing) {
-      return agentIdentityMatches(existing, imported)
+      return existingImportMatches(existing, imported, fingerprint)
         ? { ok: true, agentId: existing.id }
         : { ok: false, error: "导入请求信息已经失效，请重新选择文件" };
     }
@@ -104,7 +127,7 @@ export async function importAgentAction(input: unknown, requestId: string): Prom
         targetType: "agent",
         targetId: created.id,
         summary: `导入助手「${imported.name}」`,
-        data: { nodeCount: Object.keys(workflow.nodes).length },
+        data: { nodeCount: Object.keys(workflow.nodes).length, importFingerprint: fingerprint },
       }));
       return created.id;
     });
@@ -112,19 +135,8 @@ export async function importAgentAction(input: unknown, requestId: string): Prom
     return { ok: true, agentId };
   } catch (error) {
     try {
-      const [existing] = await db.select({
-        id: agents.id,
-        name: agents.name,
-        description: agents.description,
-        intentText: agents.intentText,
-      }).from(agents).innerJoin(workflowDefinitions, and(
-        eq(workflowDefinitions.agentId, agents.id),
-        eq(workflowDefinitions.workspaceId, DEMO_WORKSPACE_ID),
-      )).where(and(
-        eq(agents.id, requestId),
-        eq(agents.workspaceId, DEMO_WORKSPACE_ID),
-      )).limit(1);
-      if (existing && agentIdentityMatches(existing, imported)) {
+      const existing = await findExistingImport(requestId);
+      if (existing && existingImportMatches(existing, imported, fingerprint)) {
         revalidatePath("/agents");
         return { ok: true, agentId: existing.id };
       }
