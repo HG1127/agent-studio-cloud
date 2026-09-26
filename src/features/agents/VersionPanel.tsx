@@ -24,6 +24,7 @@ export function VersionPanel({
   versionPage = 1,
   hasMoreVersions = false,
   archivedCasesPage = 1,
+  evaluationRunsPage = 1,
 }: {
   agentId: string;
   versions: VersionSummary[];
@@ -33,6 +34,7 @@ export function VersionPanel({
   versionPage?: number;
   hasMoreVersions?: boolean;
   archivedCasesPage?: number;
+  evaluationRunsPage?: number;
 }) {
   const router = useRouter();
   const [optimisticVersions, setOptimisticVersions] = useState<VersionSummary[]>([]);
@@ -75,6 +77,7 @@ export function VersionPanel({
   const versionPageHref = (page: number) => {
     const params = new URLSearchParams({ versionsPage: String(page) });
     if (archivedCasesPage > 1) params.set("archivedCasesPage", String(archivedCasesPage));
+    if (evaluationRunsPage > 1) params.set("evaluationRunsPage", String(evaluationRunsPage));
     return `?${params.toString()}#versions`;
   };
 

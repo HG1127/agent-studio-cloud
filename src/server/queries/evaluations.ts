@@ -33,7 +33,13 @@ export async function listEvaluationCases(
   })));
 }
 
-export async function listEvaluationRuns(agentId: string, workspaceId: string): Promise<EvaluationRunViewType[]> {
+export async function listEvaluationRuns(
+  agentId: string,
+  workspaceId: string,
+  pagination: { limit?: number; offset?: number } = {},
+): Promise<EvaluationRunViewType[]> {
+  const limit = Math.min(51, Math.max(1, pagination.limit ?? 10));
+  const offset = Math.max(0, pagination.offset ?? 0);
   const rows = await db
     .select({ evaluation: evaluationRuns, version: agentVersions.version })
     .from(evaluationRuns)
@@ -45,7 +51,8 @@ export async function listEvaluationRuns(agentId: string, workspaceId: string): 
       eq(agentVersions.workspaceId, workspaceId),
     ))
     .orderBy(desc(evaluationRuns.createdAt))
-    .limit(10);
+    .limit(limit)
+    .offset(offset);
   if (rows.length === 0) return [];
   const resultRows = await db
     .select({ result: evaluationCaseResults, caseName: evaluationCases.name })
@@ -75,4 +82,17 @@ export async function listEvaluationRuns(agentId: string, workspaceId: string): 
       runId: result.runId,
     })),
   })));
+}
+
+export async function hasRunningEvaluation(agentId: string, workspaceId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: evaluationRuns.id })
+    .from(evaluationRuns)
+    .where(and(
+      eq(evaluationRuns.agentId, agentId),
+      eq(evaluationRuns.workspaceId, workspaceId),
+      eq(evaluationRuns.status, "running"),
+    ))
+    .limit(1);
+  return Boolean(row);
 }

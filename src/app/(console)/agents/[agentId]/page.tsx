@@ -12,7 +12,7 @@ import { auditWorkflow, type DesignAuditResult } from "@/server/domain/audit";
 import { getAgentDetail, listAgentTargets } from "@/server/queries/agents";
 import { listVersions } from "@/server/queries/versions";
 import { listModelConnections } from "@/server/queries/model-connections";
-import { listEvaluationCases, listEvaluationRuns } from "@/server/queries/evaluations";
+import { hasRunningEvaluation, listEvaluationCases, listEvaluationRuns } from "@/server/queries/evaluations";
 import { listKnowledgeSourcesForPicker } from "@/server/queries/knowledge";
 import { workflowKnowledgeSourceIds } from "@/server/domain/runtime/knowledge-snapshot";
 import { AgentManifest } from "@/contracts/manifest";
@@ -38,7 +38,7 @@ export default async function AgentDetailPage({
   searchParams,
 }: {
   params: Promise<{ agentId: string }>;
-  searchParams: Promise<{ versionsPage?: string; archivedCasesPage?: string }>;
+  searchParams: Promise<{ versionsPage?: string; archivedCasesPage?: string; evaluationRunsPage?: string }>;
 }) {
   const { agentId } = await params;
   if (!z.string().uuid().safeParse(agentId).success) notFound();
@@ -47,11 +47,13 @@ export default async function AgentDetailPage({
   const versionPageSize = 50;
   const archivedCasesPage = pageFromSearchParam(query.archivedCasesPage);
   const archivedCasesPageSize = 25;
+  const evaluationRunsPage = pageFromSearchParam(query.evaluationRunsPage);
+  const evaluationRunsPageSize = 10;
   const detail = await withSafeQueryError(() => getAgentDetail(agentId, DEMO_WORKSPACE_ID), "agent-detail");
   if (!detail) notFound();
   const audit = detail.draft ? auditWorkflow(detail.draft) : null;
   const selectedKnowledgeSourceIds = detail.draft ? workflowKnowledgeSourceIds(detail.draft.nodes) : [];
-  const [versions, connections, agentTargets, evaluationCases, archivedEvaluationCases, evaluationRuns, knowledgeSources] = await withSafeQueryError(() => Promise.all([
+  const [versions, connections, agentTargets, evaluationCases, archivedEvaluationCases, evaluationRunRows, evaluationRunning, knowledgeSources] = await withSafeQueryError(() => Promise.all([
     listVersions(agentId, DEMO_WORKSPACE_ID, { limit: versionPageSize + 1, offset: (versionPage - 1) * versionPageSize }),
     listModelConnections(),
     listAgentTargets(DEMO_WORKSPACE_ID, agentId),
@@ -61,7 +63,11 @@ export default async function AgentDetailPage({
       limit: archivedCasesPageSize + 1,
       offset: (archivedCasesPage - 1) * archivedCasesPageSize,
     }),
-    listEvaluationRuns(agentId, DEMO_WORKSPACE_ID),
+    listEvaluationRuns(agentId, DEMO_WORKSPACE_ID, {
+      limit: evaluationRunsPageSize + 1,
+      offset: (evaluationRunsPage - 1) * evaluationRunsPageSize,
+    }),
+    hasRunningEvaluation(agentId, DEMO_WORKSPACE_ID),
     listKnowledgeSourcesForPicker(selectedKnowledgeSourceIds),
   ]), "agent-detail-related");
   const defaultModelLabel = process.env.MODEL_MOCK === "1" ? "演示模式" : process.env.MODEL_ID?.trim() ? "服务端默认模型" : "尚未配置默认模型";
@@ -108,12 +114,16 @@ export default async function AgentDetailPage({
         versionPage={versionPage}
         hasMoreVersions={versions.length > versionPageSize}
         archivedCasesPage={archivedCasesPage}
+        evaluationRunsPage={evaluationRunsPage}
       />
       <EvaluationPanel
         agentId={agentId}
         cases={evaluationCases}
         archivedCases={archivedEvaluationCases.slice(0, archivedCasesPageSize)}
-        runs={evaluationRuns}
+        runs={evaluationRunRows.slice(0, evaluationRunsPageSize)}
+        evaluationRunning={evaluationRunning}
+        runsPage={evaluationRunsPage}
+        hasMoreRuns={evaluationRunRows.length > evaluationRunsPageSize}
         archivedPage={archivedCasesPage}
         hasMoreArchived={archivedEvaluationCases.length > archivedCasesPageSize}
         versionsPage={versionPage}

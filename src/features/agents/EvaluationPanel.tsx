@@ -59,6 +59,9 @@ export function EvaluationPanel({
   archivedPage = 1,
   hasMoreArchived = false,
   versionsPage = 1,
+  evaluationRunning,
+  runsPage = 1,
+  hasMoreRuns = false,
 }: {
   agentId: string;
   cases: EvaluationCaseView[];
@@ -67,6 +70,9 @@ export function EvaluationPanel({
   archivedPage?: number;
   hasMoreArchived?: boolean;
   versionsPage?: number;
+  evaluationRunning?: boolean;
+  runsPage?: number;
+  hasMoreRuns?: boolean;
 }) {
   const evaluationRequestIdRef = useRef<string | null>(null);
   const router = useRouter();
@@ -79,13 +85,15 @@ export function EvaluationPanel({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const evaluationRunning = runs.some((run) => run.status === "running");
+  const isEvaluationRunning = evaluationRunning ?? runs.some((run) => run.status === "running");
+  const detailHref = (nextArchivedPage: number, nextRunsPage: number) =>
+    `/agents/${agentId}?versionsPage=${versionsPage}&archivedCasesPage=${nextArchivedPage}&evaluationRunsPage=${nextRunsPage}#evaluation`;
 
   useEffect(() => {
-    if (!runs.some((run) => run.status === "running")) return;
+    if (!isEvaluationRunning) return;
     const timer = window.setInterval(() => router.refresh(), 3000);
     return () => window.clearInterval(timer);
-  }, [router, runs]);
+  }, [isEvaluationRunning, router]);
 
   function resetCaseForm() {
     setName("");
@@ -171,7 +179,7 @@ export function EvaluationPanel({
     setError(null);
     setNotice(null);
     try {
-      const requestId = evaluationRunning
+      const requestId = isEvaluationRunning
         ? undefined
         : evaluationRequestIdRef.current ?? crypto.randomUUID();
       if (requestId) evaluationRequestIdRef.current = requestId;
@@ -224,7 +232,7 @@ export function EvaluationPanel({
   }
 
   return (
-    <section className="flex flex-col gap-4 rounded-lg border border-gray-200 bg-white p-4">
+    <section id="evaluation" className="flex flex-col gap-4 rounded-lg border border-gray-200 bg-white p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold">自动验收</h2>
@@ -232,25 +240,25 @@ export function EvaluationPanel({
         </div>
         <button type="button" disabled={pending || cases.length === 0} onClick={startEvaluation}
           className="rounded-md bg-violet-700 px-3 py-2 text-sm text-white hover:bg-violet-600 disabled:bg-gray-300">
-          {pending ? "正在处理…" : evaluationRunning ? "检查并继续" : "运行全部样例"}
+          {pending ? "正在处理…" : isEvaluationRunning ? "检查并继续" : "运行全部样例"}
         </button>
       </div>
-      {evaluationRunning ? <p role="status" className="rounded-md bg-blue-50 p-2 text-sm text-blue-700">验收运行期间样例已锁定；若状态长时间不变化，可点“检查并继续”自动补启未完成样例。</p> : null}
+      {isEvaluationRunning ? <p role="status" className="rounded-md bg-blue-50 p-2 text-sm text-blue-700">验收运行期间样例已锁定；若状态长时间不变化，可点“检查并继续”自动补启未完成样例。</p> : null}
       {error ? <p role="alert" className="rounded-md bg-red-50 p-2 text-sm text-red-700">{error}</p> : null}
       {notice ? <p role="status" className="rounded-md bg-emerald-50 p-2 text-sm text-emerald-700">{notice}</p> : null}
       {cases.length === 0 ? <div className="rounded-md border border-dashed border-gray-200 p-3">
         <p className="text-xs text-gray-500">可从最新发布版本生成类型正确的示例输入和最终交付字段检查，生成后再按真实业务调整内容。</p>
-        <button type="button" disabled={pending || evaluationRunning} onClick={generateCases}
+        <button type="button" disabled={pending || isEvaluationRunning} onClick={generateCases}
           className="mt-2 rounded-md border border-gray-300 px-3 py-1.5 text-sm disabled:text-gray-400">从流程生成样例</button>
       </div> : null}
       <div className="grid gap-2 md:grid-cols-[1fr_2fr_1fr_auto]">
-        <input aria-label="样例名称" disabled={evaluationRunning} value={name} onChange={(event) => setName(event.target.value)} placeholder="样例名称"
+        <input aria-label="样例名称" disabled={isEvaluationRunning} value={name} onChange={(event) => setName(event.target.value)} placeholder="样例名称"
           className="rounded-md border border-gray-300 px-3 py-2 text-sm" />
-        <input aria-label="运行输入" disabled={evaluationRunning} value={inputText} onChange={(event) => setInputText(event.target.value)} placeholder='{"input":"业务输入"}'
+        <input aria-label="运行输入" disabled={isEvaluationRunning} value={inputText} onChange={(event) => setInputText(event.target.value)} placeholder='{"input":"业务输入"}'
           className="rounded-md border border-gray-300 px-3 py-2 font-mono text-sm" />
-        <input aria-label="结果应包含" disabled={evaluationRunning} value={expectedText} onChange={(event) => setExpectedText(event.target.value)} placeholder="可不填"
+        <input aria-label="结果应包含" disabled={isEvaluationRunning} value={expectedText} onChange={(event) => setExpectedText(event.target.value)} placeholder="可不填"
           className="rounded-md border border-gray-300 px-3 py-2 text-sm" />
-        <button type="button" disabled={pending || evaluationRunning || !name.trim() || (!editingId && cases.length >= MAX_EVALUATION_CASES)} onClick={saveCase}
+        <button type="button" disabled={pending || isEvaluationRunning || !name.trim() || (!editingId && cases.length >= MAX_EVALUATION_CASES)} onClick={saveCase}
           className="rounded-md border border-gray-300 px-3 py-2 text-sm disabled:text-gray-400">{editingId ? "保存修改" : "添加样例"}</button>
       </div>
       <p className="text-xs text-gray-500">请使用可重复的测试数据；输入中的密钥、令牌和密码会自动隐藏。</p>
@@ -260,25 +268,25 @@ export function EvaluationPanel({
         <p className="mt-2 text-xs text-gray-500">可检查结构化结果中的指定字段是否存在、等于或包含某个值。</p>
         {advancedExpectations.map((expectation, index) => (
           <div key={index} className="mt-2 grid gap-2 md:grid-cols-[1.5fr_120px_1.5fr_auto]">
-            <input aria-label={`字段检查 ${index + 1} 路径`} disabled={evaluationRunning} value={expectation.path} placeholder="例如：deliverables.plan"
+            <input aria-label={`字段检查 ${index + 1} 路径`} disabled={isEvaluationRunning} value={expectation.path} placeholder="例如：deliverables.plan"
               onChange={(event) => setAdvancedExpectations((current) => current.map((item, position) => position === index ? { ...item, path: event.target.value } : item))}
               className="rounded-md border border-gray-300 px-2 py-1.5 text-sm" />
-            <select aria-label={`字段检查 ${index + 1} 方式`} disabled={evaluationRunning} value={expectation.operator}
+            <select aria-label={`字段检查 ${index + 1} 方式`} disabled={isEvaluationRunning} value={expectation.operator}
               onChange={(event) => setAdvancedExpectations((current) => current.map((item, position) => position === index ? { ...item, operator: event.target.value as AdvancedExpectationDraft["operator"] } : item))}
               className="rounded-md border border-gray-300 px-2 py-1.5 text-sm">
               <option value="exists">需要存在</option>
               <option value="equals">需要等于</option>
               <option value="contains">需要包含</option>
             </select>
-            <input aria-label={`字段检查 ${index + 1} 预期值`} value={expectation.valueText} disabled={evaluationRunning || expectation.operator === "exists"}
+            <input aria-label={`字段检查 ${index + 1} 预期值`} value={expectation.valueText} disabled={isEvaluationRunning || expectation.operator === "exists"}
               placeholder={expectation.operator === "equals" ? "文字、数字、true 或 JSON" : "需要包含的文字"}
               onChange={(event) => setAdvancedExpectations((current) => current.map((item, position) => position === index ? { ...item, valueText: event.target.value } : item))}
               className="rounded-md border border-gray-300 px-2 py-1.5 text-sm disabled:bg-gray-100" />
-            <button type="button" disabled={pending || evaluationRunning} onClick={() => setAdvancedExpectations((current) => current.filter((_, position) => position !== index))}
+            <button type="button" disabled={pending || isEvaluationRunning} onClick={() => setAdvancedExpectations((current) => current.filter((_, position) => position !== index))}
               className="text-xs text-red-600 hover:underline">删除检查</button>
           </div>
         ))}
-        <button type="button" disabled={pending || evaluationRunning || advancedExpectations.length >= MAX_EVALUATION_EXPECTATIONS - (expectedText.trim() ? 1 : 0)}
+        <button type="button" disabled={pending || isEvaluationRunning || advancedExpectations.length >= MAX_EVALUATION_EXPECTATIONS - (expectedText.trim() ? 1 : 0)}
           onClick={() => setAdvancedExpectations((current) => [...current, { path: "", operator: "exists", valueText: "" }])}
           className="mt-3 rounded-md border border-gray-300 px-2.5 py-1.5 text-xs disabled:text-gray-400">添加字段检查</button>
       </details>
@@ -298,8 +306,8 @@ export function EvaluationPanel({
                 </details>
               </div>
               <span className="flex shrink-0 gap-3">
-                <button type="button" disabled={pending || evaluationRunning} onClick={() => editCase(testCase)} className="text-xs text-blue-700 hover:underline disabled:text-gray-400">编辑</button>
-                <button type="button" disabled={pending || evaluationRunning} onClick={() => changeCaseState(testCase.id, true)} className="text-xs text-gray-500 hover:text-red-600 disabled:text-gray-400">归档</button>
+                <button type="button" disabled={pending || isEvaluationRunning} onClick={() => editCase(testCase)} className="text-xs text-blue-700 hover:underline disabled:text-gray-400">编辑</button>
+                <button type="button" disabled={pending || isEvaluationRunning} onClick={() => changeCaseState(testCase.id, true)} className="text-xs text-gray-500 hover:text-red-600 disabled:text-gray-400">归档</button>
               </span>
             </li>
           ))}
@@ -312,7 +320,7 @@ export function EvaluationPanel({
             {archivedCases.map((testCase) => (
               <li key={testCase.id} className="flex items-center justify-between gap-3 py-2 text-sm text-gray-500">
                 <span>{testCase.name}</span>
-                <button type="button" disabled={pending || evaluationRunning} onClick={() => changeCaseState(testCase.id, false)} className="text-xs text-blue-700 hover:underline disabled:text-gray-400">恢复</button>
+                <button type="button" disabled={pending || isEvaluationRunning} onClick={() => changeCaseState(testCase.id, false)} className="text-xs text-blue-700 hover:underline disabled:text-gray-400">恢复</button>
               </li>
             ))}
           </ul>
@@ -320,14 +328,14 @@ export function EvaluationPanel({
             <nav aria-label="已归档样例分页" className="mt-3 flex items-center gap-3 text-xs">
               {archivedPage > 1 ? (
                 <Link
-                  href={`/agents/${agentId}?versionsPage=${versionsPage}&archivedCasesPage=${archivedPage - 1}`}
+                  href={detailHref(archivedPage - 1, runsPage)}
                   className="text-blue-700 hover:underline"
                 >上一页</Link>
               ) : null}
               <span className="text-gray-500">第 {archivedPage} 页</span>
               {hasMoreArchived ? (
                 <Link
-                  href={`/agents/${agentId}?versionsPage=${versionsPage}&archivedCasesPage=${archivedPage + 1}`}
+                  href={detailHref(archivedPage + 1, runsPage)}
                   className="text-blue-700 hover:underline"
                 >下一页</Link>
               ) : null}
@@ -337,7 +345,7 @@ export function EvaluationPanel({
       ) : null}
       {runs.length > 0 ? (
         <div className="flex flex-col gap-2 border-t border-gray-100 pt-3">
-          <h3 className="text-xs font-medium text-gray-600">最近验收</h3>
+          <h3 className="text-xs font-medium text-gray-600">验收记录</h3>
           {runs.map((run) => (
             <div key={run.id} className="rounded-md border border-gray-100 p-2 text-sm">
               <div className="flex flex-wrap items-center gap-2">
@@ -364,6 +372,18 @@ export function EvaluationPanel({
               ) : null}
             </div>
           ))}
+          {runsPage > 1 || hasMoreRuns ? (
+            <nav aria-label="验收记录分页" className="flex items-center justify-between gap-3 pt-1 text-xs">
+              {runsPage > 1 ? <Link href={detailHref(archivedPage, runsPage - 1)} className="text-blue-700 hover:underline">上一页</Link> : <span />}
+              <span className="text-gray-500">第 {runsPage} 页</span>
+              {hasMoreRuns ? <Link href={detailHref(archivedPage, runsPage + 1)} className="text-blue-700 hover:underline">下一页</Link> : <span />}
+            </nav>
+          ) : null}
+        </div>
+      ) : runsPage > 1 ? (
+        <div className="border-t border-gray-100 pt-3">
+          <p className="text-sm text-gray-500">这一页没有验收记录。</p>
+          <Link href={detailHref(archivedPage, runsPage - 1)} className="mt-2 inline-block text-xs text-blue-700 hover:underline">返回上一页</Link>
         </div>
       ) : null}
     </section>

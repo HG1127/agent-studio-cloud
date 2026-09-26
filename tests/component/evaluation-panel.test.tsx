@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EvaluationPanel } from "@/features/agents/EvaluationPanel";
@@ -292,11 +292,51 @@ describe("EvaluationPanel", () => {
     expect(screen.getByText("已归档样例（第 2 页）")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "上一页" })).toHaveAttribute(
       "href",
-      `/agents/${AGENT_ID}?versionsPage=3&archivedCasesPage=1`,
+      `/agents/${AGENT_ID}?versionsPage=3&archivedCasesPage=1&evaluationRunsPage=1#evaluation`,
     );
     expect(screen.getByRole("link", { name: "下一页" })).toHaveAttribute(
       "href",
-      `/agents/${AGENT_ID}?versionsPage=3&archivedCasesPage=3`,
+      `/agents/${AGENT_ID}?versionsPage=3&archivedCasesPage=3&evaluationRunsPage=1#evaluation`,
     );
+  });
+
+  it("验收记录支持翻页并保留其他列表页码", () => {
+    render(<EvaluationPanel
+      agentId={AGENT_ID}
+      cases={CASES}
+      runs={[{
+        id: "00000000-0000-4000-8000-000000000033",
+        version: 3,
+        status: "completed",
+        totalCount: 1,
+        passedCount: 1,
+        failedCount: 0,
+        startedAt: "2026-09-24T00:00:00.000Z",
+        finishedAt: "2026-09-24T00:01:00.000Z",
+        results: [],
+      }]}
+      archivedPage={4}
+      versionsPage={3}
+      runsPage={2}
+      hasMoreRuns
+    />);
+
+    const pagination = screen.getByRole("navigation", { name: "验收记录分页" });
+    expect(within(pagination).getByRole("link", { name: "上一页" })).toHaveAttribute(
+      "href",
+      `/agents/${AGENT_ID}?versionsPage=3&archivedCasesPage=4&evaluationRunsPage=1#evaluation`,
+    );
+    expect(within(pagination).getByRole("link", { name: "下一页" })).toHaveAttribute(
+      "href",
+      `/agents/${AGENT_ID}?versionsPage=3&archivedCasesPage=4&evaluationRunsPage=3#evaluation`,
+    );
+  });
+
+  it("当前页没有运行中记录时仍按服务端状态锁定样例", () => {
+    render(<EvaluationPanel agentId={AGENT_ID} cases={CASES} runs={[]} evaluationRunning />);
+
+    expect(screen.getByRole("button", { name: "检查并继续" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "编辑" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("验收运行期间样例已锁定");
   });
 });
