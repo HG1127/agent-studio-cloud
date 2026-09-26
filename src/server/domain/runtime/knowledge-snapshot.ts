@@ -45,6 +45,10 @@ export function knowledgeStepTitles(nodes: Record<string, WorkflowNode>): string
   return [...new Set(scopes.map((scope) => scope.title))];
 }
 
+export function workflowKnowledgeSourceIds(nodes: Record<string, WorkflowNode>): string[] {
+  return [...new Set(collectWorkflowKnowledgeScopes(nodes).flatMap((scope) => scope.sourceIds))];
+}
+
 export function prepareKnowledgeSnapshot(
   nodes: Record<string, WorkflowNode>,
   sourceIds: string[],

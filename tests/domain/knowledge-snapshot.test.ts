@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { WorkflowNode } from "@/contracts/workflow";
-import { knowledgeSourceIdsForStep, knowledgeStepTitles, prepareKnowledgeSnapshot, validateKnowledgeSnapshot } from "@/server/domain/runtime/knowledge-snapshot";
+import { knowledgeSourceIdsForStep, knowledgeStepTitles, prepareKnowledgeSnapshot, validateKnowledgeSnapshot, workflowKnowledgeSourceIds } from "@/server/domain/runtime/knowledge-snapshot";
 
 function knowledgeNodes() {
   return {
@@ -19,6 +19,19 @@ function knowledgeNodes() {
 describe("知识快照启动门禁", () => {
   it("识别主流程、并行分支和步骤组中的知识步骤", () => {
     expect(knowledgeStepTitles(knowledgeNodes())).toEqual(["查询制度", "读取手册", "检索合同"]);
+  });
+
+  it("收集画布各层已选择的资料并去重", () => {
+    const first = "00000000-0000-4000-8000-000000000001";
+    const second = "00000000-0000-4000-8000-000000000002";
+    const nodes = {
+      top: WorkflowNode.parse({ id: "top", title: "查询制度", type: "knowledge", knowledge: { space: "制度", sourceIds: [first] } }),
+      group: WorkflowNode.parse({
+        id: "group", title: "步骤组", type: "subflow",
+        subflow: { name: "资料处理", steps: [{ id: "nested", title: "读取手册", type: "knowledge", knowledge: { space: "手册", sourceIds: [second, first] } }] },
+      }),
+    };
+    expect(workflowKnowledgeSourceIds(nodes)).toEqual([first, second]);
   });
 
   it("有知识步骤但快照为空或资料全部失效时拒绝启动", () => {

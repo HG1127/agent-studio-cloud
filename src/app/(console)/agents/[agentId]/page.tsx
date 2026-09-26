@@ -13,7 +13,8 @@ import { getAgentDetail, listAgentTargets } from "@/server/queries/agents";
 import { listVersions } from "@/server/queries/versions";
 import { listModelConnections } from "@/server/queries/model-connections";
 import { listEvaluationCases, listEvaluationRuns } from "@/server/queries/evaluations";
-import { listKnowledgeSources } from "@/server/queries/knowledge";
+import { listKnowledgeSourcesForPicker } from "@/server/queries/knowledge";
+import { workflowKnowledgeSourceIds } from "@/server/domain/runtime/knowledge-snapshot";
 import { AgentManifest } from "@/contracts/manifest";
 import { listToolRegistryOptions } from "@/server/tools/tool-registry";
 import { pageFromSearchParam } from "@/lib/search-params";
@@ -49,6 +50,7 @@ export default async function AgentDetailPage({
   const detail = await withSafeQueryError(() => getAgentDetail(agentId, DEMO_WORKSPACE_ID), "agent-detail");
   if (!detail) notFound();
   const audit = detail.draft ? auditWorkflow(detail.draft) : null;
+  const selectedKnowledgeSourceIds = detail.draft ? workflowKnowledgeSourceIds(detail.draft.nodes) : [];
   const [versions, connections, agentTargets, evaluationCases, archivedEvaluationCases, evaluationRuns, knowledgeSources] = await withSafeQueryError(() => Promise.all([
     listVersions(agentId, DEMO_WORKSPACE_ID, { limit: versionPageSize + 1, offset: (versionPage - 1) * versionPageSize }),
     listModelConnections(),
@@ -60,7 +62,7 @@ export default async function AgentDetailPage({
       offset: (archivedCasesPage - 1) * archivedCasesPageSize,
     }),
     listEvaluationRuns(agentId, DEMO_WORKSPACE_ID),
-    listKnowledgeSources(false, { limit: 100 }),
+    listKnowledgeSourcesForPicker(selectedKnowledgeSourceIds),
   ]), "agent-detail-related");
   const defaultModelLabel = process.env.MODEL_MOCK === "1" ? "演示模式" : process.env.MODEL_ID?.trim() ? "服务端默认模型" : "尚未配置默认模型";
   const currentVersion = detail.currentVersion;
@@ -90,7 +92,7 @@ export default async function AgentDetailPage({
       </header>
       {detail.draft ? (
         <FlowCanvas agentId={agentId} draft={detail.draft} draftUpdatedAt={detail.draftUpdatedAt} agentTargets={agentTargets} toolOptions={toolOptions}
-          knowledgeSources={knowledgeSources.filter((source) => source.status === "indexed")} />
+          knowledgeSources={knowledgeSources} />
       ) : (
         <section className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">
           这个助手还没有流程草稿

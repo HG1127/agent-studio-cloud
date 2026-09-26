@@ -271,7 +271,7 @@ function KnowledgeSourcePicker({ label, sourceIds, sources, onChange, compact = 
       {source.name}
     </label>)}
     {sources.length === 0 ? <p className="text-xs text-amber-700">还没有完成解析的资料，请先到知识库上传。</p> : null}
-    {unavailableCount > 0 ? <p className="text-xs text-amber-700">有 {unavailableCount} 份已选资料当前不可用，请改选可用资料或切换为全部资料。</p> : null}
+    {unavailableCount > 0 ? <p className="text-xs text-amber-700">有 {unavailableCount} 份已选资料未显示或当前不可用；保存会保留原选择，发布时会再次校验。</p> : null}
     <p className="text-xs text-gray-500">不单独选择时使用发布当时的全部可用资料。</p>
   </fieldset>;
 }
