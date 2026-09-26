@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { AgentTargetOption } from "@/contracts/agent";
 import { MAX_WAIT_DURATION_MS, WorkflowNode } from "@/contracts/workflow";
 import { fromDateTimeLocalValue, NodeInspector, parseConditionValue, toDateTimeLocalValue } from "@/features/workflow-canvas/NodeInspector";
 
@@ -80,14 +81,14 @@ const SUBFLOW_NODE = WorkflowNode.parse({
   id: "step_11", title: "完成交付准备", type: "subflow",
   subflow: { name: "交付准备", steps: [{ id: "step_1", title: "检查材料", type: "ai" }], inputs: [], outputs: [], failurePolicy: "checkpoint" },
 });
-const COLLABORATION_TARGET = {
+const COLLABORATION_TARGET = AgentTargetOption.parse({
   agentId: "00000000-0000-4000-8000-000000000021",
   agentName: "研究助手",
   versionId: "00000000-0000-4000-8000-000000000022",
   version: 2,
   inputContract: { fields: [{ name: "brief", label: "任务说明", type: "string", required: true }] },
   outputContract: { fields: [{ path: "report", label: "研究报告", required: true, sourceNodeId: "draft" }] },
-};
+});
 
 describe("NodeInspector", () => {
   it("修改节点名称时回调携带新值", () => {
@@ -547,8 +548,8 @@ describe("NodeInspector", () => {
         agentName: "研究助手",
         versionId: "00000000-0000-4000-8000-000000000012",
         version: 3,
-        inputContract: { fields: [{ name: "brief" }] },
-        outputContract: { fields: [{ path: "result" }] },
+        inputContract: { fields: [{ name: "brief", type: "string", required: true }] },
+        outputContract: { fields: [{ path: "result", required: true }] },
       }]}
       onNodeChange={onNodeChange}
       onNodeDelete={vi.fn()}
@@ -558,7 +559,7 @@ describe("NodeInspector", () => {
       agentCall: expect.objectContaining({
         targetAgentName: "研究助手",
         versionId: "00000000-0000-4000-8000-000000000012",
-        inputContract: { fields: [{ name: "brief" }] },
+        inputContract: { fields: [{ name: "brief", type: "string", required: true }] },
       }),
     }));
     onNodeChange.mockClear();
@@ -578,8 +579,8 @@ describe("NodeInspector", () => {
         agentName: "履约助手",
         versionId: "00000000-0000-4000-8000-000000000022",
         version: 2,
-        inputContract: { fields: [{ name: "brief", label: "任务说明", type: "string" }] },
-        outputContract: { fields: [{ path: "result", label: "履约结果" }] },
+        inputContract: { fields: [{ name: "brief", label: "任务说明", type: "string", required: true }] },
+        outputContract: { fields: [{ path: "result", label: "履约结果", required: true }] },
       }]}
       onNodeChange={onNodeChange}
       onNodeDelete={vi.fn()}
