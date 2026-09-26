@@ -77,7 +77,7 @@ pnpm db:migrate      # 应用迁移
 5. 在“运行记录”查看实时状态、审批、等待消息、步骤轨迹和结果。
 6. 在“操作记录”追溯关键设计变更；添加验收样例批量验证当前版本，需要回退时从历史版本生成新的当前版本。
 
-外部业务系统需要恢复等待中的运行时，可在运行详情复制本次专用的接入地址和一次性提交凭据。请求格式与安全约束见 [`docs/wait-event-http-contract.md`](./docs/wait-event-http-contract.md)。
+外部业务系统需要恢复等待中的运行时，可在运行详情复制本次专用的接入地址和一次性提交凭据；相同凭据与消息可安全重试，不会重复恢复工作流。请求格式、重试规则与安全约束见 [`docs/wait-event-http-contract.md`](./docs/wait-event-http-contract.md)。
 
 知识文件通过应用入口上传时最大 4MB，这是为 Vercel Function 的 4.5MB 请求体上限预留 multipart 开销。PDF 最多 500 页，DOCX 解压后最多 64MB；更大文件需拆分，超过 4MB 的原文件需先按人工配置清单启用私有 Blob 客户端直传方案。
 
