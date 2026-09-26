@@ -47,7 +47,12 @@ export async function retryKnowledgeSourceAction(sourceId: string): Promise<Know
       ))
       .limit(1);
     if (!source) return { ok: false, error: "找不到这份知识资料，请刷新页面后重试" };
-    if (source.status !== "failed" && !isKnowledgeParsingStalled(source)) {
+    const parsingStalled = isKnowledgeParsingStalled(source);
+    if (source.status === "parsing" && !parsingStalled) {
+      revalidatePath("/knowledge");
+      return { ok: true };
+    }
+    if (source.status !== "failed" && !parsingStalled) {
       return { ok: false, error: "资料状态已经变化，请刷新页面查看最新状态" };
     }
     if (!source.blobPathname) return { ok: false, error: "这份资料没有保留原文件，请重新上传同一文件" };

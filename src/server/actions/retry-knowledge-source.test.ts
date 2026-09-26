@@ -112,16 +112,14 @@ describe("重新解析知识资料", () => {
     }));
   });
 
-  it("仍在正常解析的任务不能重复启动", async () => {
+  it("响应丢失后重试已在正常解析的任务时复用当前状态", async () => {
     vi.spyOn(Date, "now").mockReturnValue(new Date("2026-09-25T12:09:59.000Z").getTime());
     mocks.rows = [[{ ...source, status: "parsing", updatedAt: new Date("2026-09-25T12:05:00.000Z") }]];
 
-    await expect(retryKnowledgeSourceAction(SOURCE_ID)).resolves.toEqual({
-      ok: false,
-      error: "资料状态已经变化，请刷新页面查看最新状态",
-    });
+    await expect(retryKnowledgeSourceAction(SOURCE_ID)).resolves.toEqual({ ok: true });
     expect(mocks.get).not.toHaveBeenCalled();
     expect(mocks.start).not.toHaveBeenCalled();
+    expect(mocks.revalidatePath).toHaveBeenCalledWith("/knowledge");
   });
 
   it("锁内状态已变化时不重复启动解析", async () => {
