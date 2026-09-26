@@ -1,4 +1,5 @@
 import type { WorkflowDraft } from "@/contracts/workflow";
+import { visibleOutgoingSpecs } from "./flow-edges";
 
 export interface LayoutPosition {
   x: number;
@@ -11,9 +12,12 @@ export const LAYOUT_COLUMN_GAP = 300;
 export const LAYOUT_ROW_GAP = 130;
 
 // 沿契约的全部出边收集后继（loop 出边供分层，wait 超时边不在 M1 画布语义内）
-function successorIds(draft: WorkflowDraft, id: string): string[] {
+function successorIds(draft: WorkflowDraft, id: string, includedIds?: ReadonlySet<string>): string[] {
   const node = draft.nodes[id];
   if (!node) return [];
+  if (includedIds) {
+    return [...new Set(visibleOutgoingSpecs(node, draft.nodes, includedIds).map((edge) => edge.target))];
+  }
   const targets: Array<string | null | undefined> = [
     node.next,
     node.rejectNext,
@@ -109,10 +113,10 @@ function assignComponentLevels(
   return levels;
 }
 
-export function autoLayout(draft: WorkflowDraft): Record<string, LayoutPosition> {
-  const ids = Object.keys(draft.nodes);
+export function autoLayout(draft: WorkflowDraft, includedIds?: ReadonlySet<string>): Record<string, LayoutPosition> {
+  const ids = Object.keys(draft.nodes).filter((id) => !includedIds || includedIds.has(id));
   if (ids.length === 0) return {};
-  const successors = new Map<string, string[]>(ids.map((id) => [id, successorIds(draft, id)]));
+  const successors = new Map<string, string[]>(ids.map((id) => [id, successorIds(draft, id, includedIds)]));
   const components = stronglyConnectedComponents(ids, successors);
   const componentOf = new Map<string, number>();
   components.forEach((component, index) => {

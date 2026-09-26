@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
-import { autoLayout } from "@/features/workflow-canvas/layout";
+import { autoLayout, LAYOUT_COLUMN_GAP } from "@/features/workflow-canvas/layout";
 
 function makeDraft(nodes: Array<{ id: string; type: string; extra?: Record<string, unknown> }>, edges: Record<string, Record<string, unknown>>, startNodeId = "start"): WorkflowDraft {
   const nodeMap: Record<string, WorkflowNode> = {};
@@ -99,5 +99,25 @@ describe("autoLayout", () => {
     const positions = autoLayout(draft);
     expect(positions.loop.x).toBeLessThan(positions.body.x);
     expect(positions.body.x).toBeLessThan(positions.done.x);
+  });
+
+  it("业务视图布局跨过隐藏控制节点且不留下空白层", () => {
+    const draft = makeDraft(
+      [
+        { id: "start", type: "trigger" },
+        { id: "approval", type: "human", extra: {
+          approval: { role: "负责人", reason: "确认" },
+          controlPlane: { kind: "governance", hiddenByDefault: true },
+        } },
+        { id: "work", type: "ai" },
+        { id: "done", type: "end" },
+      ],
+      { start: { next: "approval" }, approval: { next: "work" }, work: { next: "done" } },
+    );
+    const positions = autoLayout(draft, new Set(["start", "work", "done"]));
+
+    expect(positions.approval).toBeUndefined();
+    expect(positions.work.x - positions.start.x).toBe(LAYOUT_COLUMN_GAP);
+    expect(positions.done.x - positions.work.x).toBe(LAYOUT_COLUMN_GAP);
   });
 });

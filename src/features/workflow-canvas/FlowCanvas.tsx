@@ -104,7 +104,8 @@ export function FlowCanvas({ agentId, draft: initialDraft, draftUpdatedAt, agent
     () => Object.values(draft.nodes).filter((node) => showControlNodes || !isHiddenControlNode(node)),
     [draft.nodes, showControlNodes],
   );
-  const layoutPositions = useMemo(() => autoLayout(draft), [draft]);
+  const visibleIds = useMemo(() => new Set(visibleNodes.map((node) => node.id)), [visibleNodes]);
+  const layoutPositions = useMemo(() => autoLayout(draft, visibleIds), [draft, visibleIds]);
 
   const flowNodes: WorkflowFlowNode[] = useMemo(
     () =>
@@ -119,7 +120,6 @@ export function FlowCanvas({ agentId, draft: initialDraft, draftUpdatedAt, agent
   );
 
   const flowEdges: Edge[] = useMemo(() => {
-    const visibleIds = new Set(visibleNodes.map((node) => node.id));
     return visibleNodes.flatMap((node) =>
       (showControlNodes
         ? outgoingSpecs(node).map((spec) => ({ ...spec, directTarget: spec.target, collapsed: false }))
@@ -147,7 +147,7 @@ export function FlowCanvas({ agentId, draft: initialDraft, draftUpdatedAt, agent
           } satisfies Edge;
         }),
     );
-  }, [draft.nodes, showControlNodes, visibleNodes]);
+  }, [draft.nodes, showControlNodes, visibleIds, visibleNodes]);
 
   const onNodesChange = useCallback((changes: NodeChange<WorkflowFlowNode>[]) => {
     if (changes.some((change) => change.type === "position" && change.position)) markDirty();
