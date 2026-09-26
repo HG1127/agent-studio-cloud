@@ -1,6 +1,8 @@
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+const { startMock } = vi.hoisted(() => ({ startMock: vi.fn() }));
+vi.mock("workflow/api", () => ({ start: startMock }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 import { AgentManifest } from "@/contracts/manifest";
 import { agentVersions, agents, runs, schedules } from "@/db/schema";
@@ -44,6 +46,8 @@ const authedRequest = () =>
 
 beforeAll(async () => {
   process.env.CRON_SECRET = "test-cron-secret";
+  let workflowCount = 0;
+  startMock.mockImplementation(async () => ({ runId: `schedule-workflow-${++workflowCount}`, cancel: vi.fn() }));
   await db.insert(agents).values({ id: AGENT_ID, workspaceId: DEMO_WORKSPACE_ID, name: "定时测试助手", intentText: "定时触发的测试助手", createdBy: DEMO_USER_ID });
   await db.insert(agents).values({ id: DRAFT_AGENT_ID, workspaceId: DEMO_WORKSPACE_ID, name: "未发布测试助手", intentText: "尚未发布的测试助手", createdBy: DEMO_USER_ID });
   await db.insert(agentVersions).values({ id: VERSION_ID, agentId: AGENT_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, version: 1, status: "production", manifest });
