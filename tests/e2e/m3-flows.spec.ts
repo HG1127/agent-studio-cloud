@@ -80,7 +80,7 @@ test("创建定时任务并经 tick 接口开出定时运行", async ({ page, re
   const due = new Date(Date.now() + 90_000);
   const pad = (value: number) => String(value).padStart(2, "0");
   const local = `${due.getFullYear()}-${pad(due.getMonth() + 1)}-${pad(due.getDate())}T${pad(due.getHours())}:${pad(due.getMinutes())}`;
-  await page.getByLabel("执行时间").fill(local);
+  await page.getByLabel("计划时间").fill(local);
   await page.getByLabel("运行输入（JSON）").fill(JSON.stringify(input));
   await page.getByRole("button", { name: "创建定时任务" }).click();
   const schedule = page.getByRole("listitem").filter({ has: page.getByText(agentName, { exact: true }) });

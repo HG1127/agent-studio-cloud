@@ -327,6 +327,8 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
   const isHuman = node.type === "human";
   const isCondition = node.type === "condition";
   const knowledge = node.knowledge;
+  const wait = node.wait;
+  const loop = node.loop;
   const deletable = node.type !== "trigger" && node.type !== "end";
   const memorySources = Object.values(workflowNodes).filter((candidate) =>
     candidate.id !== node.id
@@ -701,6 +703,140 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
             </select>
           </label>}
         </div>
+      ) : null}
+      {node.type === "wait" && wait ? (
+        <section className="flex flex-col gap-3 rounded-md border border-cyan-100 bg-cyan-50 p-3">
+          <h3 className="text-sm font-semibold">等待设置</h3>
+          <label className="flex flex-col gap-1 text-sm">
+            等待方式
+            <select
+              value={wait.mode}
+              onChange={(event) => onNodeChange({ ...node, wait: { ...wait, mode: event.target.value as typeof wait.mode } })}
+              className="rounded-md border border-gray-300 bg-white px-3 py-2"
+            >
+              <option value="delay">等待一段时间</option>
+              <option value="until">到指定时间继续</option>
+              <option value="event">收到消息后继续</option>
+            </select>
+          </label>
+          {wait.mode === "delay" ? (
+            <label className="flex flex-col gap-1 text-sm">
+              等待秒数
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={Math.round(wait.durationMs / 1000)}
+                onChange={(event) => onNodeChange({ ...node, wait: { ...wait, durationMs: Math.max(0, Math.round(Number(event.target.value) * 1000)) } })}
+                className="rounded-md border border-gray-300 bg-white px-3 py-2"
+              />
+            </label>
+          ) : null}
+          {wait.mode === "until" ? (
+            <label className="flex flex-col gap-1 text-sm">
+              继续时间（本地时间）
+              <input
+                type="datetime-local"
+                value={localDateTime(wait.until)}
+                onChange={(event) => {
+                  const date = event.target.value ? new Date(event.target.value) : null;
+                  onNodeChange({ ...node, wait: { ...wait, until: date && !Number.isNaN(date.getTime()) ? date.toISOString() : null } });
+                }}
+                className="rounded-md border border-gray-300 bg-white px-3 py-2"
+              />
+              {!wait.until ? <span className="text-xs text-amber-800">请填写继续时间。</span> : null}
+            </label>
+          ) : null}
+          {wait.mode === "event" ? (
+            <>
+              <label className="flex flex-col gap-1 text-sm">
+                等待的消息名称
+                <input
+                  value={wait.eventLabel ?? ""}
+                  maxLength={80}
+                  onChange={(event) => onNodeChange({ ...node, wait: { ...wait, eventLabel: event.target.value } })}
+                  className="rounded-md border border-gray-300 bg-white px-3 py-2"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                消息标识
+                <input
+                  value={wait.eventKey}
+                  maxLength={120}
+                  onChange={(event) => onNodeChange({ ...node, wait: { ...wait, eventKey: event.target.value.replace(/[^a-zA-Z0-9._:-]/g, "") } })}
+                  className="rounded-md border border-gray-300 bg-white px-3 py-2"
+                />
+              </label>
+              <p className="text-xs text-gray-600">外部系统发送消息时使用此标识。只能填写英文字母、数字和 . _ : -。</p>
+              {!wait.eventKey ? <p className="text-xs text-amber-800">请填写消息标识。</p> : null}
+              <label className="flex flex-col gap-1 text-sm">
+                最长等待秒数（0 表示一直等待）
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={Math.round(wait.timeoutMs / 1000)}
+                  onChange={(event) => onNodeChange({ ...node, wait: { ...wait, timeoutMs: Math.max(0, Math.round(Number(event.target.value) * 1000)) } })}
+                  className="rounded-md border border-gray-300 bg-white px-3 py-2"
+                />
+              </label>
+              {wait.timeoutMs > 0 ? (
+                <p className={wait.onTimeoutNext ? "text-xs text-gray-600" : "text-xs text-amber-800"}>
+                  从右侧“超时后”连线到处理步骤；没有连线时，超时会停止运行。
+                </p>
+              ) : null}
+            </>
+          ) : null}
+        </section>
+      ) : null}
+      {node.type === "loop" && loop ? (
+        <section className="flex flex-col gap-3 rounded-md border border-indigo-100 bg-indigo-50 p-3">
+          <h3 className="text-sm font-semibold">逐项处理设置</h3>
+          <label className="flex flex-col gap-1 text-sm">
+            要处理的列表
+            <input
+              value={loop.collectionPath}
+              maxLength={200}
+              onChange={(event) => onNodeChange({ ...node, loop: { ...loop, collectionPath: event.target.value.trim() } })}
+              placeholder="input.records"
+              className="rounded-md border border-gray-300 bg-white px-3 py-2"
+            />
+          </label>
+          <p className="text-xs text-gray-600">填写输入中的列表路径，例如 input.records；也可以引用前面步骤的结果。</p>
+          {!loop.collectionPath ? <p className="text-xs text-amber-800">请填写列表路径。</p> : null}
+          <label className="flex flex-col gap-1 text-sm">
+            单项名称
+            <input
+              value={loop.itemKey}
+              maxLength={80}
+              onChange={(event) => onNodeChange({ ...node, loop: { ...loop, itemKey: event.target.value } })}
+              placeholder="currentItem"
+              className="rounded-md border border-gray-300 bg-white px-3 py-2"
+            />
+          </label>
+          <p className="text-xs text-gray-600">运行结果会记录当前处理项及这个名称。</p>
+          <label className="flex flex-col gap-1 text-sm">
+            最多处理项数
+            <input
+              type="number"
+              min={1}
+              max={100}
+              step={1}
+              value={loop.maxIterations}
+              onChange={(event) => {
+                const count = Number(event.target.value);
+                if (Number.isInteger(count) && count >= 1 && count <= 100) {
+                  onNodeChange({ ...node, loop: { ...loop, maxIterations: count } });
+                }
+              }}
+              className="rounded-md border border-gray-300 bg-white px-3 py-2"
+            />
+          </label>
+          <p className="text-xs text-gray-600">超出的项目不会处理，最多可设置 100 项。</p>
+          {!loop.bodyNext || !loop.exitNext ? (
+            <p className="text-xs text-amber-800">请分别从节点右侧的“逐项处理”和“完成”连接后续步骤。</p>
+          ) : null}
+        </section>
       ) : null}
       {isHuman ? (
         <>

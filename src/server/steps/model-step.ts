@@ -25,6 +25,14 @@ export interface RunModelStepInput {
   qualityFeedback?: string | null;
 }
 
+class UnusableModelOutputError extends Error {}
+
+function cleanModelOutput(raw: string): string {
+  const output = raw.replace(/<think\b[^>]*>[\s\S]*?<\/think\s*>/gi, "").trim();
+  if (!output || /<\/?think\b/i.test(output)) throw new UnusableModelOutputError();
+  return output;
+}
+
 export async function runModelStep(args: RunModelStepInput): Promise<{ output: string }> {
   "use step";
   const { node } = args;
@@ -111,7 +119,7 @@ export async function runModelStep(args: RunModelStepInput): Promise<{ output: s
       prompt: prompt.user,
       abortSignal: AbortSignal.timeout(60_000),
     });
-    const output = text.trim();
+    const output = cleanModelOutput(text);
     await persistStep({
       runId: args.runId,
       nodeId: node.id,

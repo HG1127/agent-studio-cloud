@@ -104,14 +104,14 @@ export function CreateScheduleForm({ agents }: { agents: { id: string; name: str
           )}
           {kind === "once" && (
             <label className="text-sm text-gray-700">
-              执行时间
+              计划时间
               <input type="datetime-local" value={at} onChange={(event) => setAt(event.target.value)} className="ml-2 rounded border px-2 py-1 text-sm" />
             </label>
           )}
         </div>
         {(kind === "daily" || kind === "weekly" || kind === "monthly") && (
           <div className="flex flex-wrap items-center gap-2 text-sm text-gray-700">
-            <span>运行时间（最多 5 个）</span>
+            <span>计划时间（最多 5 个）</span>
             {times.map((time, index) => (
               <input
                 key={index}
