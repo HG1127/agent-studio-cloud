@@ -19,6 +19,6 @@ describe("页面故障恢复", () => {
     const { rerender } = render(<ConsoleLoading />);
     expect(screen.getByText("正在读取最新数据…")).toBeInTheDocument();
     rerender(<NotFound />);
-    expect(screen.getByRole("heading", { name: "没有找到这个页面" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "没有找到你要查看的内容" })).toBeInTheDocument();
   });
 });
