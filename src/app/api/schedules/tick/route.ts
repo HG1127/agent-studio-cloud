@@ -56,6 +56,7 @@ async function handle(req: Request) {
       .where(eq(schedules.id, schedule.id));
     const result = await startRunCore({
       agentId: schedule.agentId,
+      versionId: schedule.versionId,
       input: schedule.input,
       sourceType: "schedule",
       sourceKey: `${schedule.id}:${occurrenceKey}`,

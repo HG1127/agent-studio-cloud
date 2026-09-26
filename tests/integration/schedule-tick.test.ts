@@ -79,6 +79,7 @@ describe("调度 tick 接口", () => {
     const dueRuns = await runsFor(SCHEDULE_DUE);
     expect(dueRuns).toHaveLength(1);
     expect(dueRuns[0].sourceType).toBe("schedule");
+    expect(dueRuns[0].versionId).toBe(VERSION_ID);
     // 第二次 tick：next_run_at 已推进到 5 分钟后，无可领取项，不会重复开 run
     const second = await tick(authedRequest());
     const secondBody = await second.json();
