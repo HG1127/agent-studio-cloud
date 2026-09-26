@@ -5,6 +5,7 @@ import { agentVersions, agents, runs, schedules } from "@/db/schema";
 import { db } from "@/lib/db";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { POST as tick } from "@/app/api/schedules/tick/route";
+import { listScheduleableAgents } from "@/server/queries/schedules";
 
 const AGENT_ID = "00000000-0000-4000-8000-0000000000e9";
 const VERSION_ID = "00000000-0000-4000-8000-0000000000ea";
@@ -12,6 +13,7 @@ const SCHEDULE_DUE = "00000000-0000-4000-8000-0000000000eb";
 const SCHEDULE_ONCE = "00000000-0000-4000-8000-0000000000ec";
 const SCHEDULE_PAUSED = "00000000-0000-4000-8000-0000000000ed";
 const SCHEDULE_FAILING = "00000000-0000-4000-8000-0000000000ee";
+const DRAFT_AGENT_ID = "00000000-0000-4000-8000-0000000000ef";
 
 const manifest = AgentManifest.parse({
   schemaVersion: "4.0",
@@ -38,6 +40,7 @@ const authedRequest = () =>
 beforeAll(async () => {
   process.env.CRON_SECRET = "test-cron-secret";
   await db.insert(agents).values({ id: AGENT_ID, workspaceId: DEMO_WORKSPACE_ID, name: "定时测试助手", intentText: "定时触发的测试助手", createdBy: DEMO_USER_ID });
+  await db.insert(agents).values({ id: DRAFT_AGENT_ID, workspaceId: DEMO_WORKSPACE_ID, name: "未发布测试助手", intentText: "尚未发布的测试助手", createdBy: DEMO_USER_ID });
   await db.insert(agentVersions).values({ id: VERSION_ID, agentId: AGENT_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, version: 1, status: "production", manifest });
 });
 
@@ -45,7 +48,7 @@ afterAll(async () => {
   await db.delete(runs).where(eq(runs.agentId, AGENT_ID));
   await db.delete(schedules).where(inArray(schedules.id, [SCHEDULE_DUE, SCHEDULE_ONCE, SCHEDULE_PAUSED, SCHEDULE_FAILING]));
   await db.delete(agentVersions).where(eq(agentVersions.agentId, AGENT_ID));
-  await db.delete(agents).where(eq(agents.id, AGENT_ID));
+  await db.delete(agents).where(inArray(agents.id, [AGENT_ID, DRAFT_AGENT_ID]));
 });
 
 async function insertSchedule(overrides?: Partial<typeof schedules.$inferInsert>) {
@@ -58,6 +61,13 @@ async function insertSchedule(overrides?: Partial<typeof schedules.$inferInsert>
 }
 
 describe("调度 tick 接口", () => {
+  it("可定时助手只包含已有生产版本的助手", async () => {
+    const options = await listScheduleableAgents();
+
+    expect(options.some((option) => option.id === AGENT_ID)).toBe(true);
+    expect(options.some((option) => option.id === DRAFT_AGENT_ID)).toBe(false);
+  });
+
   it("无密钥或未配密钥返回 401", async () => {
     const response = await tick(new Request("http://localhost/api/schedules/tick", { method: "POST" }));
     expect(response.status).toBe(401);

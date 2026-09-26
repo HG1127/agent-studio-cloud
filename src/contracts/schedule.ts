@@ -20,6 +20,12 @@ export const ScheduleCreateInput = z.object({
 });
 export type ScheduleCreateInput = z.infer<typeof ScheduleCreateInput>;
 
+export const ScheduleAgentOption = z.object({
+  id: z.string().uuid(),
+  name: z.string().trim().min(1).max(60),
+});
+export type ScheduleAgentOption = z.infer<typeof ScheduleAgentOption>;
+
 export const ScheduleView = z.object({
   id: z.string().uuid(),
   agentId: z.string().uuid(),
