@@ -84,6 +84,16 @@ export function visibleOutgoingSpecs(
   return resolved;
 }
 
+export function connectionReplacesHiddenControl(draft: WorkflowDraft, connection: Connection): boolean {
+  const source = connection.source;
+  if (!source) return false;
+  const node = draft.nodes[source];
+  if (!node) return false;
+  const handle = connection.sourceHandle ?? "next";
+  const current = outgoingSpecs(node).find((spec) => spec.handle === handle);
+  return Boolean(current && isHiddenControlNode(draft.nodes[current.target]));
+}
+
 function patchNode(draft: WorkflowDraft, nodeId: string, node: WorkflowNode): WorkflowDraft {
   return updateWorkflowNode(draft, nodeId, node);
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { WorkflowDraft } from "@/contracts/workflow";
-import { applyConnection, clearEdge, outgoingSpecs, removeNode, supportsErrorRoute, visibleOutgoingSpecs } from "@/features/workflow-canvas/flow-edges";
+import { applyConnection, clearEdge, connectionReplacesHiddenControl, outgoingSpecs, removeNode, supportsErrorRoute, visibleOutgoingSpecs } from "@/features/workflow-canvas/flow-edges";
 
 function draft() {
   return WorkflowDraft.parse({
@@ -128,5 +128,11 @@ describe("画布等待超时连线", () => {
       expect.objectContaining({ target: "done", directTarget: "approval", collapsed: true, label: "不通过" }),
     ]);
     expect(clearEdge(value, "start~next~approval~work").nodes.start.next).toBeNull();
+    expect(connectionReplacesHiddenControl(value, {
+      source: "start", target: "work", sourceHandle: "next", targetHandle: "in",
+    })).toBe(true);
+    expect(connectionReplacesHiddenControl(value, {
+      source: "work", target: "start", sourceHandle: "error", targetHandle: "in",
+    })).toBe(false);
   });
 });

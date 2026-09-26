@@ -20,7 +20,7 @@ import { saveWorkflowAction } from "@/server/actions/save-workflow";
 import { NODE_TYPE_LABELS, workflowNodeTypes, type WorkflowFlowNode } from "./CustomNodes";
 import { autoLayout } from "./layout";
 import { NodeInspector } from "./NodeInspector";
-import { applyConnection, clearEdge, outgoingSpecs, removeNode, visibleOutgoingSpecs, type EdgeKind } from "./flow-edges";
+import { applyConnection, clearEdge, connectionReplacesHiddenControl, outgoingSpecs, removeNode, visibleOutgoingSpecs, type EdgeKind } from "./flow-edges";
 import { updateWorkflowNode } from "./update-workflow-node";
 import { ADDABLE_NODE_TYPES, createWorkflowNode } from "./create-workflow-node";
 import { WorkflowInputEditor } from "./WorkflowInputEditor";
@@ -183,9 +183,13 @@ export function FlowCanvas({ agentId, draft: initialDraft, draftUpdatedAt, agent
   }, [markDirty]);
 
   const onConnect = useCallback((connection: Connection) => {
+    if (!showControlNodes && connectionReplacesHiddenControl(draft, connection)) {
+      setFeedback({ ok: false, text: "这条连线包含隐藏的安全检查，请先显示控制节点再修改" });
+      return;
+    }
     markDirty();
     setDraft((current) => applyConnection(current, connection));
-  }, [markDirty]);
+  }, [draft, markDirty, showControlNodes]);
 
   const handleNodeChange = useCallback((node: WorkflowNode) => {
     markDirty();
