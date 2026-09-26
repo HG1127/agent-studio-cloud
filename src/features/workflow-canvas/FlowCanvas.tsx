@@ -20,7 +20,7 @@ import { saveWorkflowAction } from "@/server/actions/save-workflow";
 import { NODE_TYPE_LABELS, workflowNodeTypes, type WorkflowFlowNode } from "./CustomNodes";
 import { autoLayout } from "./layout";
 import { NodeInspector } from "./NodeInspector";
-import { applyConnection, clearEdge, outgoingSpecs, removeNode, type EdgeKind } from "./flow-edges";
+import { applyConnection, clearEdge, outgoingSpecs, removeNode, visibleOutgoingSpecs, type EdgeKind } from "./flow-edges";
 import { updateWorkflowNode } from "./update-workflow-node";
 import { ADDABLE_NODE_TYPES, createWorkflowNode } from "./create-workflow-node";
 import { WorkflowInputEditor } from "./WorkflowInputEditor";
@@ -121,17 +121,22 @@ export function FlowCanvas({ agentId, draft: initialDraft, draftUpdatedAt, agent
   const flowEdges: Edge[] = useMemo(() => {
     const visibleIds = new Set(visibleNodes.map((node) => node.id));
     return visibleNodes.flatMap((node) =>
-      outgoingSpecs(node)
+      (showControlNodes
+        ? outgoingSpecs(node).map((spec) => ({ ...spec, directTarget: spec.target, collapsed: false }))
+        : visibleOutgoingSpecs(node, draft.nodes, visibleIds))
         .filter((spec) => visibleIds.has(spec.target))
         .map((spec) => {
           const style = EDGE_STYLES[spec.kind];
           return {
-            id: `${node.id}~${spec.handle}~${spec.target}`,
+            id: spec.collapsed
+              ? `${node.id}~${spec.handle}~${spec.directTarget}~${spec.target}`
+              : `${node.id}~${spec.handle}~${spec.target}`,
             source: node.id,
             target: spec.target,
             sourceHandle: spec.handle,
             targetHandle: "in",
             label: spec.label,
+            deletable: !spec.collapsed,
             style: {
               stroke: style.color,
               strokeWidth: 1.5,
@@ -142,7 +147,7 @@ export function FlowCanvas({ agentId, draft: initialDraft, draftUpdatedAt, agent
           } satisfies Edge;
         }),
     );
-  }, [visibleNodes]);
+  }, [draft.nodes, showControlNodes, visibleNodes]);
 
   const onNodesChange = useCallback((changes: NodeChange<WorkflowFlowNode>[]) => {
     if (changes.some((change) => change.type === "position" && change.position)) markDirty();

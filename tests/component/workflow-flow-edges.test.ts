@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { WorkflowDraft } from "@/contracts/workflow";
-import { applyConnection, clearEdge, outgoingSpecs, removeNode, supportsErrorRoute } from "@/features/workflow-canvas/flow-edges";
+import { applyConnection, clearEdge, outgoingSpecs, removeNode, supportsErrorRoute, visibleOutgoingSpecs } from "@/features/workflow-canvas/flow-edges";
 
 function draft() {
   return WorkflowDraft.parse({
@@ -98,5 +98,35 @@ describe("画布等待超时连线", () => {
     expect(removed.nodes.quality.quality?.requiredOutputTitles).toEqual([]);
     expect(removed.outputContract?.fields).toEqual([]);
     expect(removed.ui.positions).toEqual({});
+  });
+
+  it("业务视图用只读连线跨过隐藏控制节点并保留真实清理目标", () => {
+    const value = WorkflowDraft.parse({
+      id: "collapsed-control-edges",
+      startNodeId: "start",
+      rootAgent: { id: "agent", name: "测试助手", role: "处理" },
+      memoryPolicy: { taskContext: true, longTerm: false },
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "approval" },
+        approval: {
+          id: "approval", title: "安全确认", type: "human", next: "work", rejectNext: "safe_stop",
+          approval: { role: "负责人", reason: "确认" },
+          controlPlane: { kind: "governance", hiddenByDefault: true },
+        },
+        safe_stop: {
+          id: "safe_stop", title: "安全结束", type: "system", next: "done",
+          controlPlane: { kind: "safety", hiddenByDefault: true },
+        },
+        work: { id: "work", title: "执行工作", type: "ai", next: "done" },
+        done: { id: "done", title: "完成", type: "end" },
+      },
+    });
+    const visibleIds = new Set(["start", "work", "done"]);
+
+    expect(visibleOutgoingSpecs(value.nodes.start, value.nodes, visibleIds)).toEqual([
+      expect.objectContaining({ target: "work", directTarget: "approval", collapsed: true }),
+      expect.objectContaining({ target: "done", directTarget: "approval", collapsed: true, label: "不通过" }),
+    ]);
+    expect(clearEdge(value, "start~next~approval~work").nodes.start.next).toBeNull();
   });
 });

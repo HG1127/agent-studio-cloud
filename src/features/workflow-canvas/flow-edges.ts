@@ -12,6 +12,11 @@ export interface EdgeSpec {
   label?: string;
 }
 
+export interface VisibleEdgeSpec extends EdgeSpec {
+  directTarget: string;
+  collapsed: boolean;
+}
+
 const ERROR_ROUTE_TYPES = new Set([
   "ai", "tool", "knowledge", "condition", "system", "rule", "loop", "memory",
   "agent_call", "handoff", "parallel", "subflow",
@@ -40,6 +45,43 @@ export function outgoingSpecs(node: WorkflowNode): EdgeSpec[] {
   }
   if (node.next) specs.push({ handle: "next", target: node.next, kind: "next" });
   return specs;
+}
+
+export function visibleOutgoingSpecs(
+  node: WorkflowNode,
+  nodes: Record<string, WorkflowNode>,
+  visibleIds: ReadonlySet<string>,
+): VisibleEdgeSpec[] {
+  const resolved: VisibleEdgeSpec[] = [];
+  const seen = new Set<string>();
+  for (const direct of outgoingSpecs(node)) {
+    if (visibleIds.has(direct.target)) {
+      resolved.push({ ...direct, directTarget: direct.target, collapsed: false });
+      continue;
+    }
+    const queue: Array<{ nodeId: string; label?: string }> = [{ nodeId: direct.target, label: direct.label }];
+    const visited = new Set<string>();
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (visited.has(current.nodeId)) continue;
+      visited.add(current.nodeId);
+      const hidden = nodes[current.nodeId];
+      if (!hidden || !isHiddenControlNode(hidden)) continue;
+      for (const next of outgoingSpecs(hidden)) {
+        const label = current.label ?? next.label;
+        if (visibleIds.has(next.target)) {
+          const key = `${direct.handle}:${next.target}:${label ?? ""}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            resolved.push({ ...direct, target: next.target, label, directTarget: direct.target, collapsed: true });
+          }
+        } else {
+          queue.push({ nodeId: next.target, label });
+        }
+      }
+    }
+  }
+  return resolved;
 }
 
 function patchNode(draft: WorkflowDraft, nodeId: string, node: WorkflowNode): WorkflowDraft {
@@ -139,7 +181,7 @@ export function applyConnection(draft: WorkflowDraft, connection: Connection): W
 
 export function clearEdge(draft: WorkflowDraft, edgeId: string): WorkflowDraft {
   const parts = edgeId.split("~");
-  if (parts.length !== 3) return draft;
+  if (parts.length !== 3 && parts.length !== 4) return draft;
   const [source, handle, target] = parts;
   const node = draft.nodes[source];
   if (!node) return draft;
