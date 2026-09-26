@@ -240,6 +240,31 @@ describe("恢复历史版本", () => {
     expect(versions.find((version) => version.id === CURRENT_ID)?.status).toBe("production");
   });
 
+  it("执行路径已经不符合当前运行规则时不会替换当前版本", async () => {
+    const brokenManifest = AgentManifest.parse({
+      ...manifest,
+      workflowFingerprint: "restore-route-test",
+      workflowSnapshot: {
+        ...manifest.workflowSnapshot,
+        nodes: {
+          start: { id: "start", title: "开始", type: "trigger", next: "missing" },
+          end: { id: "end", title: "结束", type: "end", next: null },
+        },
+      },
+    });
+    await insertVersions("retired", brokenManifest);
+
+    const result = await restoreVersionAction(AGENT_ID, SOURCE_ID);
+
+    expect(result).toEqual({
+      ok: false,
+      error: "步骤“开始”的正常路径指向了不存在的步骤，无法恢复这个历史版本",
+    });
+    const versions = await db.select().from(agentVersions).where(eq(agentVersions.agentId, AGENT_ID));
+    expect(versions).toHaveLength(2);
+    expect(versions.find((version) => version.id === CURRENT_ID)?.status).toBe("production");
+  });
+
   it("协作助手已经不可用时不会替换当前版本", async () => {
     const missingAgentId = "00000000-0000-4000-8000-0000000000e2";
     const missingVersionId = "00000000-0000-4000-8000-0000000000e3";
