@@ -2,7 +2,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { ScheduleSpec } from "@/contracts/schedule";
+import { ScheduleSpec, type ScheduleActionResult } from "@/contracts/schedule";
 import { agentVersions, schedules } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
@@ -11,7 +11,7 @@ import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 const Next = z.enum(["paused", "active", "archived"]);
 
-export async function updateScheduleStatusAction(id: string, next: string): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function updateScheduleStatusAction(id: string, next: string): Promise<ScheduleActionResult> {
   if (!z.string().uuid().safeParse(id).success) return { ok: false, error: "定时任务标识不正确，请刷新页面后重试" };
   const parsed = Next.safeParse(next);
   if (!parsed.success) return { ok: false, error: "不支持的状态切换" };
