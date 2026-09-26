@@ -33,4 +33,10 @@ describe("工作流安全异常边界", () => {
     expect(safeWorkflowFailureReason(new RetryableError("服务繁忙，请稍后重试", { retryAfter: "2s" }), "运行失败"))
       .toBe("服务繁忙，请稍后重试");
   });
+
+  it("跨执行环境还原的工作流错误仍保留脱敏后的业务原因", () => {
+    const restored = Object.assign(new Error("业务失败，令牌：private-token-value"), { name: "FatalError" });
+    expect(restored).not.toBeInstanceOf(FatalError);
+    expect(safeWorkflowFailureReason(restored, "运行失败")).toBe("业务失败，[已隐藏敏感信息]");
+  });
 });
