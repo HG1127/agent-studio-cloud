@@ -66,6 +66,7 @@ describe("运行终态步骤", () => {
 
   it("重入已结束的运行时继续修复验收汇总", async () => {
     mocks.returning.mockResolvedValue([]);
+    mocks.selectRows.mockResolvedValue([{ status: "completed" }]);
 
     await finalizeRun("run-1", { answer: "done" });
 
@@ -75,6 +76,19 @@ describe("运行终态步骤", () => {
       kind: "run.completed",
     }));
     expect(mocks.completeEvaluationForRun).not.toHaveBeenCalled();
+  });
+
+  it("迟到的完成和失败回调不覆盖取消轨迹", async () => {
+    mocks.returning.mockResolvedValue([]);
+    mocks.selectRows.mockResolvedValue([{ status: "cancelled" }]);
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await finalizeRun("run-1", { answer: "late" });
+    await failRun("run-1", "迟到错误");
+
+    expect(mocks.appendTrace).not.toHaveBeenCalled();
+    expect(mocks.reconcileTerminalEvaluationRun).not.toHaveBeenCalled();
+    log.mockRestore();
   });
 
   it("首次完成运行时写入轨迹并汇总验收", async () => {

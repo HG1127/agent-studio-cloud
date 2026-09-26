@@ -296,7 +296,7 @@ describe("恢复历史版本", () => {
 
     expect(result).toEqual({
       ok: false,
-      error: "步骤“开始”的正常路径指向了不存在的步骤，无法恢复这个历史版本",
+      error: "步骤“收到恢复请求”的正常路径指向了不存在的步骤，无法恢复这个历史版本",
     });
     const versions = await db.select().from(agentVersions).where(eq(agentVersions.agentId, AGENT_ID));
     expect(versions).toHaveLength(2);

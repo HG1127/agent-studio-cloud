@@ -234,6 +234,12 @@ export async function finalizeRun(
     .where(and(eq(runs.id, runId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])))
     .returning({ id: runs.id }), "运行结果暂时无法保存，请稍后重试");
   if (updated.length === 0) {
+    const [current] = await withSafeWorkflowError(() => db
+      .select({ status: runs.status })
+      .from(runs)
+      .where(eq(runs.id, runId))
+      .limit(1), "运行状态暂时无法读取，请稍后重试");
+    if (current?.status !== "completed") return;
     // 终态写入后若验收汇总瞬时失败，Workflow 会重试本步骤；重入时仍需完成对账。
     await appendTrace({ runId, kind: "run.completed", title: "流程执行完成", detail: `共 ${Object.keys(result).length} 个步骤产出` });
     await withSafeWorkflowError(
@@ -275,7 +281,13 @@ export async function failRun(runId: string, error: string): Promise<void> {
     return rows;
   }), "运行失败状态暂时无法保存，请稍后重试");
   if (updated.length === 0) {
-    // 已是终态时不改写运行结果，但要修复上一次可能未完成的验收汇总。
+    const [current] = await withSafeWorkflowError(() => db
+      .select({ status: runs.status })
+      .from(runs)
+      .where(eq(runs.id, runId))
+      .limit(1), "运行状态暂时无法读取，请稍后重试");
+    if (current?.status !== "failed") return;
+    // 已是失败终态时不改写运行结果，但要修复上一次可能未完成的验收汇总。
     await appendTrace({ runId, kind: "run.failed", level: "error", title: "流程执行失败", detail: safeError });
     await withSafeWorkflowError(
       () => reconcileTerminalEvaluationRun(runId),

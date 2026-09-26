@@ -1,5 +1,7 @@
 import { eq, inArray } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 import { AgentManifest } from "@/contracts/manifest";
 import { agentVersions, agents, runs, schedules } from "@/db/schema";
 import { db } from "@/lib/db";
