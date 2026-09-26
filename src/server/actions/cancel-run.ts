@@ -16,31 +16,14 @@ import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 const LIVE_STATUSES = ["queued", "running", "waiting_approval", "waiting_event"];
 
-async function listCollaborationDescendants(rootRunId: string): Promise<Array<{ id: string; workflowRunId: string | null; status: string }>> {
-  const descendants: Array<{ id: string; workflowRunId: string | null; status: string }> = [];
-  const seen = new Set([rootRunId]);
-  let parents = [rootRunId];
-  for (let depth = 0; depth < MAX_COLLABORATION_DEPTH && parents.length > 0; depth += 1) {
-    const children = await db
-      .select({ id: runs.id, workflowRunId: runs.workflowRunId, status: runs.status })
-      .from(runs)
-      .where(and(
-        eq(runs.workspaceId, DEMO_WORKSPACE_ID),
-        or(...parents.flatMap((parentId) => [
-          like(runs.sourceKey, `agent-call:${parentId}:%`),
-          like(runs.sourceKey, `handoff:${parentId}:%`),
-        ])),
-      ));
-    const fresh = children.filter((child) => !seen.has(child.id));
-    fresh.forEach((child) => seen.add(child.id));
-    descendants.push(...fresh);
-    parents = fresh.map((child) => child.id);
+async function cancelWorkflowRunsBestEffort(workflowRunIds: ReadonlyArray<string>): Promise<void> {
+  const uniqueIds = [...new Set(workflowRunIds)];
+  const outcomes = await Promise.allSettled(uniqueIds.map((workflowRunId) => cancelWorkflowRunIfPresent(workflowRunId)));
+  for (const [index, outcome] of outcomes.entries()) {
+    if (outcome.status === "rejected") {
+      console.error(`停止工作流 ${uniqueIds[index]} 失败，运行终态已保留：`, safeErrorForLog(outcome.reason));
+    }
   }
-  return descendants;
-}
-
-async function cancelWorkflowRuns(workflowRunIds: ReadonlyArray<string>): Promise<void> {
-  await Promise.all([...new Set(workflowRunIds)].map(cancelWorkflowRunIfPresent));
 }
 
 export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
@@ -60,7 +43,8 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
       .limit(1);
     if (!run) return { ok: false, error: "找不到这次运行" };
     if (run.status === "cancelled") {
-      // 首次请求可能已写入取消终态、但在验收汇总时失败；重复请求负责把对账补齐。
+      // 首次请求可能已写入取消终态、但执行引擎停止或验收汇总失败；重复请求负责补偿。
+      if (run.workflowRunId) await cancelWorkflowRunsBestEffort([run.workflowRunId]);
       await appendCancellationTrace(runId);
       await reconcileTerminalEvaluationRun(runId);
       revalidatePath(`/runs/${runId}`);
@@ -95,14 +79,6 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
       && isRunStartLeaseExpired(root.stepStates, root.updatedAt);
     if (!root.workflowRunId && !orphanedWorkflow) return { ok: false, error: "运行尚未完成启动，请稍后再试" };
 
-    const descendantsBeforeCancel = await listCollaborationDescendants(rootRunId);
-    const cancelledWorkflowIds = [
-      root.workflowRunId,
-      ...descendantsBeforeCancel
-        .filter((descendant) => LIVE_STATUSES.includes(descendant.status))
-        .map((descendant) => descendant.workflowRunId),
-    ].filter((id): id is string => Boolean(id));
-    await cancelWorkflowRuns(cancelledWorkflowIds);
     const now = new Date();
     const outcome = await db.transaction(async (tx) => {
       const rows = await tx
@@ -176,6 +152,7 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
         .where(and(eq(runs.id, rootRunId), eq(runs.workspaceId, DEMO_WORKSPACE_ID)))
         .limit(1);
       if (current?.status !== "cancelled") return { ok: false, error: "运行已在取消前结束，请刷新页面查看结果" };
+      if (root.workflowRunId) await cancelWorkflowRunsBestEffort([root.workflowRunId]);
       await appendCancellationTrace(rootRunId);
       await reconcileTerminalEvaluationRun(rootRunId);
       revalidatePath(`/runs/${runId}`);
@@ -183,15 +160,12 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
       revalidatePath("/runs");
       return { ok: true };
     }
-    const lateWorkflowRunIds = outcome.descendantWorkflowRunIds.filter((id) => !cancelledWorkflowIds.includes(id));
-    if (lateWorkflowRunIds.length > 0) {
-      try {
-        await cancelWorkflowRuns(lateWorkflowRunIds);
-      } catch (error) {
-        // 数据库终态已经阻止后续步骤落库；这里仍尽力停止事务锁定期间刚创建的极小竞态任务。
-        console.error("停止新发现的协作子任务失败：", safeErrorForLog(error));
-      }
-    }
+    // 先提交数据库终态，再停止执行引擎。即使平台取消接口瞬时失败，后续步骤也会被终态守卫拒绝，
+    // 不会留下“引擎已停、数据库仍显示运行中”的永久卡死记录。
+    await cancelWorkflowRunsBestEffort([
+      ...(root.workflowRunId ? [root.workflowRunId] : []),
+      ...outcome.descendantWorkflowRunIds,
+    ]);
     await appendCancellationTrace(rootRunId);
     await completeEvaluationForRun(rootRunId, null, "运行已取消");
     revalidatePath(`/runs/${runId}`);

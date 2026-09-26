@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   reconcileTerminalEvaluationRun: vi.fn(),
   revalidatePath: vi.fn(),
   appendTrace: vi.fn(),
+  cancelWorkflowRunIfPresent: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -25,6 +26,9 @@ vi.mock("@/server/services/evaluation-state", () => ({
   reconcileTerminalEvaluationRun: mocks.reconcileTerminalEvaluationRun,
 }));
 vi.mock("@/server/steps/trace-step", () => ({ appendTrace: mocks.appendTrace }));
+vi.mock("@/server/services/cancel-workflow-run", () => ({
+  cancelWorkflowRunIfPresent: mocks.cancelWorkflowRunIfPresent,
+}));
 
 import { cancelRunAction } from "@/server/actions/cancel-run";
 
@@ -33,6 +37,7 @@ const RUN_ID = "00000000-0000-4000-8000-0000000000c1";
 describe("取消运行幂等性", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.cancelWorkflowRunIfPresent.mockResolvedValue("cancelled");
   });
 
   it("重复取消已取消运行时继续修复验收汇总并返回成功", async () => {
@@ -48,6 +53,7 @@ describe("取消运行幂等性", () => {
     await expect(cancelRunAction(RUN_ID)).resolves.toEqual({ ok: true });
 
     expect(mocks.reconcileTerminalEvaluationRun).toHaveBeenCalledWith(RUN_ID);
+    expect(mocks.cancelWorkflowRunIfPresent).toHaveBeenCalledWith("workflow-1");
     expect(mocks.appendTrace).toHaveBeenCalledWith(expect.objectContaining({ runId: RUN_ID, kind: "run.cancelled" }));
     expect(mocks.revalidatePath).toHaveBeenCalledWith(`/runs/${RUN_ID}`);
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/runs");

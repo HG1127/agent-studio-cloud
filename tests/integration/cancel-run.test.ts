@@ -170,6 +170,27 @@ describe("取消运行", () => {
     });
   });
 
+  it("执行引擎取消接口暂时失败时仍保留数据库取消终态", async () => {
+    await insertWaitingRun();
+    cancelMock.mockImplementation(async () => {
+      const [stored] = await db.select({ status: runs.status }).from(runs).where(eq(runs.id, RUN_ID));
+      expect(stored.status).toBe("cancelled");
+      throw new Error("service unavailable");
+    });
+    getRunMock.mockReturnValue({ cancel: cancelMock });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await expect(cancelRunAction(RUN_ID)).resolves.toEqual({ ok: true });
+
+    const [run] = await db.select().from(runs).where(eq(runs.id, RUN_ID));
+    expect(run).toMatchObject({ status: "cancelled", error: "已由员工取消" });
+    expect(errorSpy).toHaveBeenCalledWith(
+      "停止工作流 workflow-cancel-test 失败，运行终态已保留：",
+      expect.anything(),
+    );
+    errorSpy.mockRestore();
+  });
+
   it("取消父运行时同步取消仍在执行的协作与交接后代", async () => {
     await insertWaitingRun();
     await db.insert(runs).values([
