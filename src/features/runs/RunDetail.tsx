@@ -170,6 +170,7 @@ export async function RunDetail({ runId }: { runId: string }) {
                   {child.agentName}
                 </Link>
                 <span className="flex items-center gap-2">
+                  {child.version === null ? null : <span className="text-xs text-gray-500">版本 {child.version}</span>}
                   <span className="text-xs text-gray-500">{child.sourceType === "handoff" ? "助手交接" : "助手协作"}</span>
                   <RunStatusBadge status={child.status} />
                 </span>

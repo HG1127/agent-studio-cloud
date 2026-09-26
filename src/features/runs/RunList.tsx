@@ -75,6 +75,7 @@ export function RunList({ runs }: { runs: RunSummary[] }) {
             </div>
             <p className="mt-2 text-sm text-gray-400">
               {run.startedAt ? `开始于 ${formatTime(run.startedAt)}` : "尚未开始"}
+              {run.version === null ? " · 版本信息不可用" : ` · 版本 ${run.version}`}
             </p>
           </Link>
         </li>

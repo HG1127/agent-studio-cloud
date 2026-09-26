@@ -71,6 +71,7 @@ describe("RunSummary", () => {
     id: runFixture.id,
     agentId: runFixture.agentId,
     agentName: "客户咨询回复助手",
+    version: 3,
     status: "running",
     startedAt: "2026-09-21T08:30:00.000Z",
     finishedAt: null,
@@ -78,6 +79,7 @@ describe("RunSummary", () => {
   it("直接 parse 运行列表查询产出的行", () => {
     const parsed = RunSummary.parse(listFixture);
     expect(parsed.agentName).toBe("客户咨询回复助手");
+    expect(parsed.version).toBe(3);
     expect(parsed.startedAt).toBe("2026-09-21T08:30:00.000Z");
   });
   it("排队中的行允许起止时间为空", () => {

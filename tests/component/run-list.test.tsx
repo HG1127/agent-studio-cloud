@@ -9,6 +9,7 @@ describe("运行记录", () => {
       id: "00000000-0000-4000-8000-000000000001",
       agentId: "00000000-0000-4000-8000-000000000002",
       agentName: "旧版合同助手",
+      version: 6,
       status: "completed",
       sourceType: "manual",
       agentArchived: true,
@@ -17,6 +18,7 @@ describe("运行记录", () => {
     }]} />);
     expect(screen.getByRole("link", { name: /旧版合同助手/ })).toBeInTheDocument();
     expect(screen.getByText("助手已停用")).toBeInTheDocument();
+    expect(screen.getByText(/版本 6/)).toBeInTheDocument();
   });
 
   it("筛选器保留当前条件并提供清除入口", () => {

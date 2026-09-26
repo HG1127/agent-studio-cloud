@@ -158,6 +158,7 @@ export const RunSummary = z.object({
   id: z.string().uuid(),
   agentId: z.string().uuid(),
   agentName: z.string(),
+  version: z.number().int().positive().nullable().default(null),
   status: RunStatus,
   sourceType: RunSourceType.default("manual"),
   agentArchived: z.boolean().default(false),

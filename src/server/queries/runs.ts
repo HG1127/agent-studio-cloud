@@ -31,6 +31,7 @@ export async function listRuns(
       id: runs.id,
       agentId: runs.agentId,
       agentName: agents.name,
+      version: agentVersions.version,
       status: runs.status,
       sourceType: runs.sourceType,
       agentArchivedAt: agents.archivedAt,
@@ -39,6 +40,11 @@ export async function listRuns(
     })
     .from(runs)
     .innerJoin(agents, eq(agents.id, runs.agentId))
+    .leftJoin(agentVersions, and(
+      eq(agentVersions.id, runs.versionId),
+      eq(agentVersions.agentId, runs.agentId),
+      eq(agentVersions.workspaceId, runs.workspaceId),
+    ))
     .where(and(
       eq(runs.workspaceId, workspaceId),
       eq(agents.workspaceId, workspaceId),
@@ -53,6 +59,7 @@ export async function listRuns(
       id: row.id,
       agentId: row.agentId,
       agentName: row.agentName,
+      version: row.version,
       status: row.status,
       sourceType: row.sourceType,
       agentArchived: row.agentArchivedAt !== null,
@@ -78,6 +85,7 @@ export async function listChildRuns(parentRunId: string, workspaceId: string): P
       id: runs.id,
       agentId: runs.agentId,
       agentName: agents.name,
+      version: agentVersions.version,
       status: runs.status,
       sourceType: runs.sourceType,
       agentArchivedAt: agents.archivedAt,
@@ -86,6 +94,11 @@ export async function listChildRuns(parentRunId: string, workspaceId: string): P
     })
     .from(runs)
     .innerJoin(agents, eq(agents.id, runs.agentId))
+    .leftJoin(agentVersions, and(
+      eq(agentVersions.id, runs.versionId),
+      eq(agentVersions.agentId, runs.agentId),
+      eq(agentVersions.workspaceId, runs.workspaceId),
+    ))
     .where(and(
       eq(runs.workspaceId, workspaceId),
       eq(agents.workspaceId, workspaceId),
@@ -99,6 +112,7 @@ export async function listChildRuns(parentRunId: string, workspaceId: string): P
     id: row.id,
     agentId: row.agentId,
     agentName: row.agentName,
+    version: row.version,
     status: row.status,
     sourceType: row.sourceType,
     agentArchived: row.agentArchivedAt !== null,

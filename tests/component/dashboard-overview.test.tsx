@@ -17,6 +17,7 @@ describe("工作台总览", () => {
       id: "00000000-0000-4000-8000-000000000001",
       agentId: "00000000-0000-4000-8000-000000000002",
       agentName: "客服助手",
+      version: 2,
       status: "waiting_approval",
       sourceType: "manual",
       agentArchived: false,
