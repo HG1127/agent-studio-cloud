@@ -33,10 +33,12 @@ export async function listImprovementFeedback(options: {
   agentId?: string;
   query?: string;
   limit?: number;
+  offset?: number;
 } = {}): Promise<RunImprovementFeedbackViewType[]> {
   const agentId = z.string().uuid().safeParse(options.agentId).data;
   const query = options.query?.trim().slice(0, 200);
-  const limit = Math.min(100, Math.max(1, options.limit ?? 20));
+  const limit = Math.min(101, Math.max(1, options.limit ?? 20));
+  const offset = Math.max(0, options.offset ?? 0);
   const rows = await db
     .select({ feedback: runFeedback, agentName: agents.name, agentArchivedAt: agents.archivedAt })
     .from(runFeedback)
@@ -48,7 +50,8 @@ export async function listImprovementFeedback(options: {
       query ? ilike(runFeedback.note, `%${escapeLikePattern(query)}%`) : undefined,
     ))
     .orderBy(desc(runFeedback.updatedAt))
-    .limit(limit);
+    .limit(limit)
+    .offset(offset);
   return parseQueryRows("待改进运行反馈", RunImprovementFeedbackView, rows.map(({ feedback, agentName, agentArchivedAt }) => ({
     id: feedback.id,
     runId: feedback.runId,

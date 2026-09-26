@@ -10,10 +10,11 @@ export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 25;
 
-function pageHref(args: { agentId?: string; query?: string; page: number; archivedPage: number }) {
+function pageHref(args: { agentId?: string; query?: string; feedbackPage: number; page: number; archivedPage: number }) {
   const params = new URLSearchParams();
   if (args.agentId) params.set("agent", args.agentId);
   if (args.query) params.set("q", args.query);
+  if (args.feedbackPage > 1) params.set("feedbackPage", String(args.feedbackPage));
   if (args.page > 1) params.set("page", String(args.page));
   if (args.archivedPage > 1) params.set("archivedPage", String(args.archivedPage));
   const query = params.toString();
@@ -26,18 +27,21 @@ export default async function MemoryPage({ searchParams }: {
   const params = await searchParams;
   const agentId = firstSearchParam(params.agent);
   const query = firstSearchParam(params.q)?.trim().slice(0, 200);
+  const feedbackPage = pageFromSearchParam(params.feedbackPage);
   const page = pageFromSearchParam(params.page);
   const archivedPage = pageFromSearchParam(params.archivedPage);
-  const [memoryRows, archivedRows, agents, improvementFeedback] = await withSafeQueryError(() => Promise.all([
+  const [memoryRows, archivedRows, agents, improvementFeedbackRows] = await withSafeQueryError(() => Promise.all([
     listMemories({ agentId, query, limit: PAGE_SIZE + 1, offset: (page - 1) * PAGE_SIZE }),
     listMemories({ agentId, query, archived: true, limit: PAGE_SIZE + 1, offset: (archivedPage - 1) * PAGE_SIZE }),
     listMemoryAgentOptions(),
-    listImprovementFeedback({ agentId, query, limit: 20 }),
+    listImprovementFeedback({ agentId, query, limit: PAGE_SIZE + 1, offset: (feedbackPage - 1) * PAGE_SIZE }),
   ]), "memory-page");
+  const improvementFeedback = improvementFeedbackRows.slice(0, PAGE_SIZE);
   const memories = memoryRows.slice(0, PAGE_SIZE);
   const archivedMemories = archivedRows.slice(0, PAGE_SIZE);
   const hasNext = memoryRows.length > PAGE_SIZE;
   const archivedHasNext = archivedRows.length > PAGE_SIZE;
+  const feedbackHasNext = improvementFeedbackRows.length > PAGE_SIZE;
   const filtered = Boolean(agentId || query);
   return <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 p-8">
     <header>
@@ -60,9 +64,16 @@ export default async function MemoryPage({ searchParams }: {
     <section className="flex flex-col gap-3">
       <div>
         <h2 className="text-lg font-semibold">待改进结果</h2>
-        <p className="mt-1 text-xs text-gray-500">最近 20 条需要改进的运行反馈；加入验收后可继续补充期望结果。</p>
+        <p className="mt-1 text-xs text-gray-500">需要改进的运行反馈；加入验收后可继续补充期望结果。</p>
       </div>
       <ImprovementFeedbackList feedback={improvementFeedback} />
+      <MemoryPagination
+        page={feedbackPage}
+        hasNext={feedbackHasNext}
+        previousHref={pageHref({ agentId, query, feedbackPage: feedbackPage - 1, page, archivedPage })}
+        nextHref={pageHref({ agentId, query, feedbackPage: feedbackPage + 1, page, archivedPage })}
+        label="待改进结果翻页"
+      />
     </section>
     <section className="flex flex-col gap-3 border-t border-gray-200 pt-6">
       <h2 className="text-lg font-semibold">长期经验</h2>
@@ -70,8 +81,8 @@ export default async function MemoryPage({ searchParams }: {
     <MemoryPagination
       page={page}
       hasNext={hasNext}
-      previousHref={pageHref({ agentId, query, page: page - 1, archivedPage })}
-      nextHref={pageHref({ agentId, query, page: page + 1, archivedPage })}
+      previousHref={pageHref({ agentId, query, feedbackPage, page: page - 1, archivedPage })}
+      nextHref={pageHref({ agentId, query, feedbackPage, page: page + 1, archivedPage })}
       label="在用经验翻页"
     />
     </section>
@@ -82,8 +93,8 @@ export default async function MemoryPage({ searchParams }: {
         <MemoryPagination
           page={archivedPage}
           hasNext={archivedHasNext}
-          previousHref={pageHref({ agentId, query, page, archivedPage: archivedPage - 1 })}
-          nextHref={pageHref({ agentId, query, page, archivedPage: archivedPage + 1 })}
+          previousHref={pageHref({ agentId, query, feedbackPage, page, archivedPage: archivedPage - 1 })}
+          nextHref={pageHref({ agentId, query, feedbackPage, page, archivedPage: archivedPage + 1 })}
           label="已停用经验翻页"
         />
       </div>
