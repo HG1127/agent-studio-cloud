@@ -107,6 +107,9 @@ export async function RunDetail({ runId }: { runId: string }) {
           {run.startedAt ? `开始于 ${formatDateTime(run.startedAt)}` : "尚未开始"}
           {run.finishedAt ? ` · 结束于 ${formatDateTime(run.finishedAt)}` : ""}
         </p>
+        <p className="text-sm text-gray-500">
+          {run.version === null ? "运行版本信息不可用" : `运行版本：版本 ${run.version}`}
+        </p>
         {run.agentArchived ? (
           <p className="text-sm text-gray-500">这个助手已停用，历史运行仍保留。</p>
         ) : (

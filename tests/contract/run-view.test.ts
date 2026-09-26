@@ -15,6 +15,8 @@ const runFixture = {
   id: "3f0d2c9e-8a7b-4c1d-9e2f-1a2b3c4d5e6f",
   agentId: "5a1b2c3d-4e5f-4a6b-8c9d-0e1f2a3b4c5d",
   agentName: "客户咨询回复助手",
+  versionId: "6b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d",
+  version: 7,
   status: "completed",
   input: { input: "客户咨询物流发货进度" },
   result: {
@@ -31,6 +33,8 @@ describe("RunView", () => {
     const parsed = RunView.parse(runFixture);
     expect(parsed.status).toBe("completed");
     expect(parsed.agentName).toBe("客户咨询回复助手");
+    expect(parsed.version).toBe(7);
+    expect(parsed.versionId).toBe(runFixture.versionId);
     expect(parsed.startupRecoverable).toBe(false);
     expect(parsed.finishedAt).toBe("2026-09-21T08:30:12.345Z");
   });

@@ -31,6 +31,7 @@ beforeEach(() => {
     id: "00000000-0000-4000-8000-000000000001",
     agentId: "00000000-0000-4000-8000-000000000002",
     agentName: "业务助手", status: "completed", sourceType: "agent_call",
+    versionId: "00000000-0000-4000-8000-000000000004", version: 4,
     parentRunId: "00000000-0000-4000-8000-000000000003", input: {}, result: { ok: true },
     error: null, startedAt: null, finishedAt: null,
   }));
@@ -48,6 +49,7 @@ describe("运行详情步骤数据", () => {
       "href",
       "/runs/00000000-0000-4000-8000-000000000003",
     );
+    expect(screen.getByText("运行版本：版本 4")).toBeVisible();
   });
 
   it("可展开步骤的持久化输出和模型用量，不依赖最终结果包含用量", async () => {

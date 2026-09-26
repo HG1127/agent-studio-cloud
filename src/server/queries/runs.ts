@@ -174,7 +174,13 @@ export async function getPendingWaitHook(runId: string, workspaceId: string): Pr
 export async function getRunView(runId: string, workspaceId: string): Promise<RunView | null> {
   if (!RUN_ID.safeParse(runId).success) return null;
   const [row] = await db
-    .select({ run: runs, agentName: agents.name, agentArchivedAt: agents.archivedAt, manifest: agentVersions.manifest })
+    .select({
+      run: runs,
+      agentName: agents.name,
+      agentArchivedAt: agents.archivedAt,
+      version: agentVersions.version,
+      manifest: agentVersions.manifest,
+    })
     .from(runs)
     .innerJoin(agents, eq(agents.id, runs.agentId))
     .leftJoin(agentVersions, and(
@@ -194,6 +200,8 @@ export async function getRunView(runId: string, workspaceId: string): Promise<Ru
     id: row.run.id,
     agentId: row.run.agentId,
     agentName: row.agentName,
+    versionId: row.run.versionId,
+    version: row.version,
     agentArchived: row.agentArchivedAt !== null,
     status: row.run.status,
     sourceType: row.run.sourceType,

@@ -27,6 +27,8 @@ beforeEach(() => {
     id: RUN_ID,
     agentId: "00000000-0000-4000-8000-000000000012",
     agentName: "合同 审核助手",
+    versionId: "00000000-0000-4000-8000-000000000017",
+    version: 4,
     status: "completed",
     input: { contract: "示例" },
     result: { ok: true },
@@ -81,7 +83,12 @@ describe("运行报告导出", () => {
     expect(response.headers.get("content-disposition")).toContain(encodeURIComponent("合同-审核助手-2026-09-24-运行报告.json"));
     expect(await response.json()).toMatchObject({
       format: "agent-studio-cloud-run",
-      run: { id: RUN_ID, input: { contract: "示例" } },
+      run: {
+        id: RUN_ID,
+        versionId: "00000000-0000-4000-8000-000000000017",
+        version: 4,
+        input: { contract: "示例" },
+      },
       context: { outputs: { review: "通过" } },
       steps: [{ nodeId: "review", output: { output: "通过" } }],
       trace: [{ title: "开始审核" }, { title: "审核完成" }],
