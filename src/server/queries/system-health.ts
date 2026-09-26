@@ -1,7 +1,12 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
+import migrationJournal from "@/db/migrations/meta/_journal.json";
+
+export const LATEST_MIGRATION_WHEN = migrationJournal.entries.at(-1)?.when;
+if (!LATEST_MIGRATION_WHEN) throw new Error("数据库迁移清单为空");
 
 export const REQUIRED_DATABASE_OBJECTS = [
+  "drizzle.__drizzle_migrations",
   "public.workspaces",
   "public.users",
   "public.agents",
@@ -71,5 +76,10 @@ export async function isDatabaseReady() {
           as required_column(table_name, column_name, require_not_null, allow_default))
       as ready
   `);
-  return rows[0]?.ready === true;
+  if (rows[0]?.ready !== true) return false;
+  const migrationRows = await db.execute<{ current: boolean }>(sql`
+    select coalesce(max(created_at), 0) >= ${LATEST_MIGRATION_WHEN} as current
+    from drizzle.__drizzle_migrations
+  `);
+  return migrationRows[0]?.current === true;
 }
