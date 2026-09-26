@@ -17,7 +17,8 @@ test("创建助手到审批完成的完整闭环", async ({ page }) => {
   await page.getByRole("button", { name: "创建助手" }).click();
   await page.waitForURL(/\/agents\/[0-9a-f-]+$/, { timeout: 60_000 });
   await expect(page.getByRole("heading", { level: 1, name: agentName })).toBeVisible();
-  await expect(page.getByText("负责人确认发送内容")).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('[data-testid^="rf__node-"]').getByText("负责人确认发送内容", { exact: true }))
+    .toBeVisible({ timeout: 30_000 });
 
   // ② 发布：版本面板出现「版本 1」与「当前版本」标记
   await page.getByRole("button", { name: "发布新版本" }).click();
@@ -46,7 +47,7 @@ test("创建助手到审批完成的完整闭环", async ({ page }) => {
   await page.getByRole("button", { name: "需要改进", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("已记录改进意见");
   await page.getByRole("button", { name: "加入验收样例", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("已加入验收样例");
+  await expect(page.getByRole("status")).toContainText("已加入验收样例", { timeout: 30_000 });
   await page.getByRole("link", { name: "前往补充结果检查" }).click();
   await expect(page).toHaveURL(/\/agents\/[0-9a-f-]+$/);
   await expect(page.getByText(`改进回归：${agentName}`)).toBeVisible({ timeout: 30_000 });

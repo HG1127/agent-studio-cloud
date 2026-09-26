@@ -13,6 +13,7 @@ export default defineConfig({
       MODEL_MOCK: "1",
       LLM_COMPILE: "0",
       PORT: "3210",
+      NEXT_DIST_DIR: ".next-playwright",
       NODE_OPTIONS: process.env.NODE_OPTIONS || "--max-old-space-size=1024",
     },
     timeout: 120_000,
