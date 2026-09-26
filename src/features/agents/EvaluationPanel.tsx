@@ -85,7 +85,7 @@ export function EvaluationPanel({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const isEvaluationRunning = evaluationRunning ?? runs.some((run) => run.status === "running");
+  const isEvaluationRunning = Boolean(evaluationRunning || runs.some((run) => run.status === "running"));
   const detailHref = (nextArchivedPage: number, nextRunsPage: number) =>
     `/agents/${agentId}?versionsPage=${versionsPage}&archivedCasesPage=${nextArchivedPage}&evaluationRunsPage=${nextRunsPage}#evaluation`;
 

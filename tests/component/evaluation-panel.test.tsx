@@ -339,4 +339,21 @@ describe("EvaluationPanel", () => {
     expect(screen.getByRole("button", { name: "编辑" })).toBeDisabled();
     expect(screen.getByRole("status")).toHaveTextContent("验收运行期间样例已锁定");
   });
+
+  it("并发查询中任一结果仍显示运行中时保持锁定", () => {
+    render(<EvaluationPanel agentId={AGENT_ID} cases={CASES} evaluationRunning={false} runs={[{
+      id: "00000000-0000-4000-8000-000000000035",
+      version: 4,
+      status: "running",
+      totalCount: 1,
+      passedCount: 0,
+      failedCount: 0,
+      startedAt: "2026-09-24T00:00:00.000Z",
+      finishedAt: null,
+      results: [],
+    }]} />);
+
+    expect(screen.getByRole("button", { name: "检查并继续" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "编辑" })).toBeDisabled();
+  });
 });
