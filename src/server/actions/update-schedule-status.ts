@@ -7,6 +7,7 @@ import { agentVersions, schedules } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { nextOccurrence } from "@/server/domain/schedule-spec";
+import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 const Next = z.enum(["paused", "active", "archived"]);
 
@@ -56,7 +57,7 @@ export async function updateScheduleStatusAction(id: string, next: string): Prom
     revalidatePath("/schedules");
     return { ok: true };
   } catch (error) {
-    console.error("更新定时任务状态失败", error);
+    console.error("更新定时任务状态失败", safeErrorForLog(error));
     return { ok: false, error: "更新定时任务状态失败，请稍后重试" };
   }
 }
