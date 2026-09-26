@@ -1,27 +1,57 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  due: [] as Array<{ id: string }>,
   claimed: [] as Array<Record<string, unknown>>,
   startRunCore: vi.fn(),
+  transaction: vi.fn(),
+  lock: vi.fn(),
+  limit: vi.fn(),
   updateSet: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
-  db: {
-    update: () => ({
-      set: (values: Record<string, unknown>) => {
-        mocks.updateSet(values);
-        return {
-          where: () => ({ returning: async () => mocks.claimed }),
-        };
+  db: (() => {
+    const client = {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            orderBy: () => ({
+              limit: (value: number) => {
+                mocks.limit(value);
+                return {
+                  for: async (...args: unknown[]) => {
+                    mocks.lock(...args);
+                    return mocks.due;
+                  },
+                };
+              },
+            }),
+          }),
+        }),
+      }),
+      update: () => ({
+        set: (values: Record<string, unknown>) => {
+          mocks.updateSet(values);
+          return {
+            where: () => ({ returning: async () => mocks.claimed }),
+          };
+        },
+      }),
+    };
+    return {
+      ...client,
+      transaction: async (run: (tx: typeof client) => unknown) => {
+        mocks.transaction();
+        return run(client);
       },
-    }),
-  },
+    };
+  })(),
 }));
 
 vi.mock("@/server/services/start-run-core", () => ({ startRunCore: mocks.startRunCore }));
 
-import { POST } from "./route";
+import { MAX_SCHEDULES_PER_TICK, POST } from "./route";
 
 const SCHEDULE_ID = "00000000-0000-4000-8000-000000000101";
 const AGENT_ID = "00000000-0000-4000-8000-000000000102";
@@ -36,8 +66,12 @@ function request(secret = "test-cron-secret") {
 
 beforeEach(() => {
   process.env.CRON_SECRET = "test-cron-secret";
+  mocks.due = [];
   mocks.claimed = [];
   mocks.startRunCore.mockReset().mockResolvedValue({ ok: true, runId: "00000000-0000-4000-8000-000000000104" });
+  mocks.transaction.mockReset();
+  mocks.lock.mockReset();
+  mocks.limit.mockReset();
   mocks.updateSet.mockReset();
 });
 
@@ -51,12 +85,14 @@ describe("定时触发入口", () => {
 
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ ok: false, error: "未授权的调用" });
+    expect(mocks.transaction).not.toHaveBeenCalled();
     expect(mocks.updateSet).not.toHaveBeenCalled();
     expect(mocks.startRunCore).not.toHaveBeenCalled();
   });
 
   it("始终使用定时任务创建时冻结的版本", async () => {
     const dueAt = new Date("2026-09-26T00:00:00.000Z");
+    mocks.due = [{ id: SCHEDULE_ID }];
     mocks.claimed = [{
       id: SCHEDULE_ID,
       agentId: AGENT_ID,
@@ -72,6 +108,9 @@ describe("定时触发入口", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, claimed: 1, started: 1, failed: 0 });
+    expect(mocks.transaction).toHaveBeenCalledOnce();
+    expect(mocks.limit).toHaveBeenCalledWith(MAX_SCHEDULES_PER_TICK);
+    expect(mocks.lock).toHaveBeenCalledWith("update", { skipLocked: true });
     expect(mocks.startRunCore).toHaveBeenCalledWith({
       agentId: AGENT_ID,
       versionId: VERSION_ID,
