@@ -1,9 +1,10 @@
 "use server";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { AgentManifest } from "@/contracts/manifest";
 import { ScheduleSpec, type ScheduleActionResult } from "@/contracts/schedule";
-import { agentVersions, schedules } from "@/db/schema";
+import { agents, agentVersions, schedules } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { nextOccurrence } from "@/server/domain/schedule-spec";
@@ -25,16 +26,22 @@ export async function updateScheduleStatusAction(id: string, next: string): Prom
     let resumedAt: Date | undefined;
     if (parsed.data === "active") {
       const [version] = await db
-        .select({ status: agentVersions.status })
+        .select({ manifest: agentVersions.manifest })
         .from(agentVersions)
+        .innerJoin(agents, and(
+          eq(agents.id, schedule.agentId),
+          eq(agents.workspaceId, schedule.workspaceId),
+          isNull(agents.archivedAt),
+        ))
         .where(and(
           eq(agentVersions.id, schedule.versionId),
+          eq(agentVersions.agentId, schedule.agentId),
           eq(agentVersions.workspaceId, DEMO_WORKSPACE_ID),
+          inArray(agentVersions.status, ["production", "retired"]),
         ))
         .limit(1);
-      if (!version || version.status !== "production") {
-        return { ok: false, error: "绑定的助手版本已不是生产版本，请重新创建定时任务" };
-      }
+      if (!version) return { ok: false, error: "绑定的助手版本不可用或助手已停用，请重新创建定时任务" };
+      if (!AgentManifest.safeParse(version.manifest).success) return { ok: false, error: "绑定的助手版本信息不完整，请重新发布后再创建定时任务" };
       const spec = ScheduleSpec.safeParse(schedule.spec);
       if (!spec.success) return { ok: false, error: "定时设置已损坏，请重新创建定时任务" };
       resumedAt = nextOccurrence(spec.data, new Date()) ?? undefined;

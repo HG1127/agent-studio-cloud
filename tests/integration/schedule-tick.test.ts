@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { POST as tick } from "@/app/api/schedules/tick/route";
 import { listScheduleableAgents } from "@/server/queries/schedules";
+import { updateScheduleStatusAction } from "@/server/actions/update-schedule-status";
 
 const AGENT_ID = "00000000-0000-4000-8000-0000000000e9";
 const VERSION_ID = "00000000-0000-4000-8000-0000000000ea";
@@ -14,6 +15,8 @@ const SCHEDULE_ONCE = "00000000-0000-4000-8000-0000000000ec";
 const SCHEDULE_PAUSED = "00000000-0000-4000-8000-0000000000ed";
 const SCHEDULE_FAILING = "00000000-0000-4000-8000-0000000000ee";
 const DRAFT_AGENT_ID = "00000000-0000-4000-8000-0000000000ef";
+const RETIRED_VERSION_ID = "00000000-0000-4000-8000-0000000000f0";
+const RETIRED_SCHEDULE_ID = "00000000-0000-4000-8000-0000000000f1";
 
 const manifest = AgentManifest.parse({
   schemaVersion: "4.0",
@@ -42,12 +45,13 @@ beforeAll(async () => {
   await db.insert(agents).values({ id: AGENT_ID, workspaceId: DEMO_WORKSPACE_ID, name: "定时测试助手", intentText: "定时触发的测试助手", createdBy: DEMO_USER_ID });
   await db.insert(agents).values({ id: DRAFT_AGENT_ID, workspaceId: DEMO_WORKSPACE_ID, name: "未发布测试助手", intentText: "尚未发布的测试助手", createdBy: DEMO_USER_ID });
   await db.insert(agentVersions).values({ id: VERSION_ID, agentId: AGENT_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, version: 1, status: "production", manifest });
+  await db.insert(agentVersions).values({ id: RETIRED_VERSION_ID, agentId: DRAFT_AGENT_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, version: 1, status: "retired", manifest });
 });
 
 afterAll(async () => {
   await db.delete(runs).where(eq(runs.agentId, AGENT_ID));
-  await db.delete(schedules).where(inArray(schedules.id, [SCHEDULE_DUE, SCHEDULE_ONCE, SCHEDULE_PAUSED, SCHEDULE_FAILING]));
-  await db.delete(agentVersions).where(eq(agentVersions.agentId, AGENT_ID));
+  await db.delete(schedules).where(inArray(schedules.id, [SCHEDULE_DUE, SCHEDULE_ONCE, SCHEDULE_PAUSED, SCHEDULE_FAILING, RETIRED_SCHEDULE_ID]));
+  await db.delete(agentVersions).where(inArray(agentVersions.agentId, [AGENT_ID, DRAFT_AGENT_ID]));
   await db.delete(agents).where(inArray(agents.id, [AGENT_ID, DRAFT_AGENT_ID]));
 });
 
@@ -66,6 +70,22 @@ describe("调度 tick 接口", () => {
 
     expect(options.some((option) => option.id === AGENT_ID)).toBe(true);
     expect(options.some((option) => option.id === DRAFT_AGENT_ID)).toBe(false);
+  });
+
+  it("暂停任务可继续使用创建时冻结的历史生产版本", async () => {
+    await insertSchedule({
+      id: RETIRED_SCHEDULE_ID,
+      agentId: DRAFT_AGENT_ID,
+      versionId: RETIRED_VERSION_ID,
+      status: "paused",
+      nextRunAt: new Date(Date.now() - 60_000),
+    });
+
+    await expect(updateScheduleStatusAction(RETIRED_SCHEDULE_ID, "active")).resolves.toEqual({ ok: true });
+    const [schedule] = await db.select().from(schedules).where(eq(schedules.id, RETIRED_SCHEDULE_ID)).limit(1);
+    expect(schedule?.status).toBe("active");
+    expect(schedule?.versionId).toBe(RETIRED_VERSION_ID);
+    expect(schedule?.nextRunAt.getTime()).toBeGreaterThan(Date.now());
   });
 
   it("无密钥或未配密钥返回 401", async () => {
