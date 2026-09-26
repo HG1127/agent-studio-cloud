@@ -6,6 +6,7 @@ const draft = WorkflowDraft.parse({
   id: "draft",
   rootAgent: { id: "agent", name: "客服助手", role: "客服" },
   memoryPolicy: { taskContext: true, longTerm: false },
+  outputContract: { fields: [{ path: "result", label: "检索退货资料", required: true, sourceNodeId: "knowledge" }] },
   nodes: {
     start: { id: "start", title: "收到任务", type: "trigger", next: "knowledge" },
     knowledge: { id: "knowledge", title: "检索退货资料", type: "knowledge", next: "review", knowledge: { space: "业务资料库", query: "检索退货资料" } },
@@ -19,6 +20,7 @@ describe("updateWorkflowNode", () => {
     const next = updateWorkflowNode(draft, "knowledge", { ...draft.nodes.knowledge, title: "检索海蓝灯塔二四资料" });
     expect(next.nodes.knowledge.knowledge?.query).toBe("检索海蓝灯塔二四资料");
     expect(next.nodes.review.quality?.requiredOutputTitles).toEqual(["检索海蓝灯塔二四资料"]);
+    expect(next.outputContract?.fields[0].label).toBe("检索海蓝灯塔二四资料");
   });
 
   it("用户单独指定的检索内容在改名后保留", () => {
@@ -28,5 +30,16 @@ describe("updateWorkflowNode", () => {
       knowledge: { space: "业务资料库", query: "退货政策" },
     });
     expect(next.nodes.knowledge.knowledge?.query).toBe("退货政策");
+  });
+
+  it("节点改名时保留员工自定义的交付显示名称", () => {
+    const custom = WorkflowDraft.parse({
+      ...draft,
+      outputContract: { fields: [{ path: "result", label: "最终业务依据", required: true, sourceNodeId: "knowledge" }] },
+    });
+
+    const next = updateWorkflowNode(custom, "knowledge", { ...custom.nodes.knowledge, title: "检索新资料" });
+
+    expect(next.outputContract?.fields[0].label).toBe("最终业务依据");
   });
 });

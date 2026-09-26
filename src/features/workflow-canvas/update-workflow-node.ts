@@ -26,5 +26,13 @@ export function updateWorkflowNode(draft: WorkflowDraft, nodeId: string, node: W
       }];
     }),
   );
-  return { ...draft, nodes };
+  const outputContract = draft.outputContract ? {
+    fields: draft.outputContract.fields.map((field) => {
+      const sourceId = field.sourceNodeId ?? field.path.split(".")[0];
+      return sourceId === nodeId && field.label === previous.title
+        ? { ...field, label: node.title }
+        : field;
+    }),
+  } : undefined;
+  return { ...draft, nodes, ...(outputContract ? { outputContract } : {}) };
 }
