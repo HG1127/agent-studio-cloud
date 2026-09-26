@@ -20,6 +20,7 @@ const RUN_ID_2 = "00000000-0000-4000-8000-0000000000a6";
 const CROSS_VERSION_ID = "00000000-0000-4000-8000-0000000000a7";
 const OTHER_WS = "00000000-0000-4000-8000-0000000000af";
 const CASE_UPDATED_AT = new Date("2026-09-25T00:00:00.000Z");
+const REQUEST_ID = "00000000-0000-4000-8000-0000000000b0";
 
 const manifest = AgentManifest.parse({
   schemaVersion: "4.0",
@@ -191,6 +192,38 @@ describe("自动验收并发启动", () => {
     expect(successful.some((result) => result.resumed)).toBe(true);
     const active = await db.select().from(evaluationRuns).where(eq(evaluationRuns.agentId, AGENT_ID));
     expect(active).toHaveLength(1);
+  });
+
+  it("同一请求在整轮已完成后重试仍复用原验收", async () => {
+    await insertFixture();
+    const first = await prepareEvaluationRun(AGENT_ID, REQUEST_ID);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    await db.update(evaluationRuns).set({ status: "completed", finishedAt: new Date() })
+      .where(eq(evaluationRuns.id, first.evaluationId));
+
+    const repeated = await prepareEvaluationRun(AGENT_ID, REQUEST_ID);
+    expect(repeated).toMatchObject({
+      ok: true,
+      evaluationId: first.evaluationId,
+      resumed: true,
+      cases: [],
+    });
+    const stored = await db.select().from(evaluationRuns).where(eq(evaluationRuns.agentId, AGENT_ID));
+    expect(stored).toHaveLength(1);
+  });
+
+  it("旧页面的新请求不会借用另一请求正在运行的验收", async () => {
+    await insertFixture();
+    expect((await prepareEvaluationRun(AGENT_ID, REQUEST_ID)).ok).toBe(true);
+
+    await expect(prepareEvaluationRun(
+      AGENT_ID,
+      "00000000-0000-4000-8000-0000000000b1",
+    )).resolves.toEqual({
+      ok: false,
+      error: "已有一轮自动验收正在运行，请刷新页面后点检查并继续",
+    });
   });
 
   it("验收运行期间拒绝新增编辑和停用样例", async () => {

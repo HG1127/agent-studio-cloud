@@ -20,6 +20,7 @@ export const evaluationRuns = pgTable("evaluation_runs", {
   createdBy: uuid("created_by").notNull(),
   agentId: uuid("agent_id").notNull(),
   versionId: uuid("version_id").notNull(),
+  requestId: uuid("request_id"),
   status: text("status").notNull().default("running"),
   totalCount: integer("total_count").notNull().default(0),
   passedCount: integer("passed_count").notNull().default(0),
@@ -28,7 +29,10 @@ export const evaluationRuns = pgTable("evaluation_runs", {
   finishedAt: timestamp("finished_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [index("evaluation_runs_workspace_agent_idx").on(t.workspaceId, t.agentId, t.createdAt)]);
+}, (t) => [
+  uniqueIndex("evaluation_runs_workspace_request_unique").on(t.workspaceId, t.requestId),
+  index("evaluation_runs_workspace_agent_idx").on(t.workspaceId, t.agentId, t.createdAt),
+]);
 
 export const evaluationCaseResults = pgTable("evaluation_case_results", {
   id: uuid("id").primaryKey().defaultRandom(),

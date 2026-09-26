@@ -297,10 +297,12 @@ export async function setEvaluationCaseArchivedAction(input: unknown): Promise<E
   }
 }
 
-export async function startEvaluationAction(agentId: string): Promise<EvaluationActionResult> {
-  if (!z.string().uuid().safeParse(agentId).success) return { ok: false, error: "助手信息不正确" };
+export async function startEvaluationAction(agentId: string, requestId?: string): Promise<EvaluationActionResult> {
+  if (!z.string().uuid().safeParse(agentId).success || (requestId && !z.string().uuid().safeParse(requestId).success)) {
+    return { ok: false, error: "助手或验收请求信息不正确" };
+  }
   try {
-    const prepared = await prepareEvaluationRun(agentId);
+    const prepared = await prepareEvaluationRun(agentId, requestId);
     if (!prepared.ok) return prepared;
     await runBounded(prepared.cases, EVALUATION_START_CONCURRENCY, async (testCase) => {
       try {

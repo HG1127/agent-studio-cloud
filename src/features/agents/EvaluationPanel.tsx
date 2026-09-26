@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { EvaluationExpectation as EvaluationExpectationSchema, MAX_EVALUATION_CASES, MAX_EVALUATION_EXPECTATIONS, type EvaluationCaseView, type EvaluationExpectation, type EvaluationRunView } from "@/contracts/evaluation";
@@ -68,6 +68,7 @@ export function EvaluationPanel({
   hasMoreArchived?: boolean;
   versionsPage?: number;
 }) {
+  const evaluationRequestIdRef = useRef<string | null>(null);
   const router = useRouter();
   const [name, setName] = useState("");
   const [inputText, setInputText] = useState('{"input":"请处理这条验收任务"}');
@@ -170,9 +171,16 @@ export function EvaluationPanel({
     setError(null);
     setNotice(null);
     try {
-      const result = await startEvaluationAction(agentId);
+      const requestId = evaluationRunning
+        ? undefined
+        : evaluationRequestIdRef.current ?? crypto.randomUUID();
+      if (requestId) evaluationRequestIdRef.current = requestId;
+      const result = await startEvaluationAction(agentId, requestId);
       if (!result.ok) setError(result.error);
-      else router.refresh();
+      else {
+        evaluationRequestIdRef.current = null;
+        router.refresh();
+      }
     } catch {
       setError("启动自动验收失败，请稍后重试");
     } finally {

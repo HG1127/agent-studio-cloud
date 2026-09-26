@@ -1,0 +1,2 @@
+ALTER TABLE "evaluation_runs" ADD COLUMN "request_id" uuid;--> statement-breakpoint
+CREATE UNIQUE INDEX "evaluation_runs_workspace_request_unique" ON "evaluation_runs" USING btree ("workspace_id","request_id");

@@ -23,6 +23,7 @@ vi.mock("@/server/actions/evaluations", () => ({
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: refreshMock }) }));
 
 const AGENT_ID = "00000000-0000-4000-8000-000000000031";
+const REQUEST_ID = "00000000-0000-4000-8000-000000000036";
 const CASES = [{
   id: "00000000-0000-4000-8000-000000000032",
   name: "客户续约",
@@ -34,6 +35,7 @@ const CASES = [{
 
 describe("EvaluationPanel", () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     createMock.mockReset();
     generateMock.mockReset();
     updateMock.mockReset();
@@ -91,6 +93,7 @@ describe("EvaluationPanel", () => {
   });
 
   it("批量运行已有样例并展示验收汇总", async () => {
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(REQUEST_ID);
     startMock.mockResolvedValue({ ok: true });
     const user = userEvent.setup();
     render(<EvaluationPanel agentId={AGENT_ID} cases={CASES} runs={[{
@@ -116,7 +119,7 @@ describe("EvaluationPanel", () => {
     expect(screen.getByText("结果未包含“续约”")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "查看运行" })).toHaveAttribute("href", "/runs/00000000-0000-4000-8000-000000000034");
     await user.click(screen.getByRole("button", { name: "运行全部样例" }));
-    await waitFor(() => expect(startMock).toHaveBeenCalledWith(AGENT_ID));
+    await waitFor(() => expect(startMock).toHaveBeenCalledWith(AGENT_ID, REQUEST_ID));
   });
 
   it("已有一轮验收运行时锁定样例但允许检查并继续", async () => {
@@ -136,13 +139,29 @@ describe("EvaluationPanel", () => {
     const resume = screen.getByRole("button", { name: "检查并继续" });
     expect(resume).toBeEnabled();
     await user.click(resume);
-    await waitFor(() => expect(startMock).toHaveBeenCalledWith(AGENT_ID));
+    await waitFor(() => expect(startMock).toHaveBeenCalledWith(AGENT_ID, undefined));
     expect(screen.getByRole("status")).toHaveTextContent("验收运行期间样例已锁定");
     expect(screen.getByLabelText("样例名称")).toBeDisabled();
     expect(screen.getByLabelText("运行输入")).toBeDisabled();
     expect(screen.getByLabelText("结果应包含")).toBeDisabled();
     expect(screen.getByRole("button", { name: "编辑" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "归档" })).toBeDisabled();
+  });
+
+  it("网络异常后使用同一请求标识重试整轮验收", async () => {
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(REQUEST_ID);
+    startMock.mockRejectedValueOnce(new Error("response lost")).mockResolvedValueOnce({ ok: true });
+    const user = userEvent.setup();
+    render(<EvaluationPanel agentId={AGENT_ID} cases={CASES} runs={[]} />);
+
+    await user.click(screen.getByRole("button", { name: "运行全部样例" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("启动自动验收失败");
+    await user.click(screen.getByRole("button", { name: "运行全部样例" }));
+
+    await waitFor(() => expect(startMock).toHaveBeenCalledTimes(2));
+    expect(startMock).toHaveBeenNthCalledWith(1, AGENT_ID, REQUEST_ID);
+    expect(startMock).toHaveBeenNthCalledWith(2, AGENT_ID, REQUEST_ID);
+    expect(globalThis.crypto.randomUUID).toHaveBeenCalledOnce();
   });
 
   it("编辑样例时更新输入和常用断言并保留高级断言", async () => {

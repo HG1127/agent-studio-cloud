@@ -13,7 +13,7 @@ function safeCases<T extends { input: unknown }>(cases: T[]): Array<Omit<T, "inp
   }));
 }
 
-export async function prepareEvaluationRun(agentId: string) {
+export async function prepareEvaluationRun(agentId: string, requestId?: string) {
   return db.transaction(async (tx) => {
     const [lockedAgent] = await tx
       .select({ id: agents.id, name: agents.name })
@@ -22,8 +22,58 @@ export async function prepareEvaluationRun(agentId: string) {
       .for("update")
       .limit(1);
     if (!lockedAgent) return { ok: false as const, error: "找不到这个助手，请刷新页面后重试" };
+    const loadEvaluation = async (evaluation: { id: string; agentId: string; versionId: string; status: string }) => {
+      if (evaluation.agentId !== agentId) {
+        return { ok: false as const, error: "这次验收请求已经用于其他助手，请重新操作" };
+      }
+      const cases = evaluation.status === "running"
+        ? await tx
+            .select({ id: evaluationCases.id, input: evaluationCases.input })
+            .from(evaluationCaseResults)
+            .innerJoin(evaluationCases, eq(evaluationCases.id, evaluationCaseResults.evaluationCaseId))
+            .where(and(
+              eq(evaluationCaseResults.evaluationRunId, evaluation.id),
+              eq(evaluationCaseResults.status, "running"),
+              eq(evaluationCaseResults.workspaceId, DEMO_WORKSPACE_ID),
+              eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID),
+            ))
+            .limit(MAX_EVALUATION_CASES + 1)
+        : [];
+      if (cases.length > MAX_EVALUATION_CASES) {
+        return { ok: false as const, error: `自动验收最多支持 ${MAX_EVALUATION_CASES} 条样例` };
+      }
+      return {
+        ok: true as const,
+        evaluationId: evaluation.id,
+        versionId: evaluation.versionId,
+        cases: safeCases(cases),
+        resumed: true as const,
+      };
+    };
+    if (requestId) {
+      const [requested] = await tx
+        .select({
+          id: evaluationRuns.id,
+          agentId: evaluationRuns.agentId,
+          versionId: evaluationRuns.versionId,
+          status: evaluationRuns.status,
+        })
+        .from(evaluationRuns)
+        .where(and(
+          eq(evaluationRuns.workspaceId, DEMO_WORKSPACE_ID),
+          eq(evaluationRuns.requestId, requestId),
+        ))
+        .limit(1);
+      if (requested) return loadEvaluation(requested);
+    }
     const [runningEvaluation] = await tx
-      .select({ id: evaluationRuns.id })
+      .select({
+        id: evaluationRuns.id,
+        agentId: evaluationRuns.agentId,
+        versionId: evaluationRuns.versionId,
+        status: evaluationRuns.status,
+        requestId: evaluationRuns.requestId,
+      })
       .from(evaluationRuns)
       .where(and(
         eq(evaluationRuns.agentId, agentId),
@@ -32,34 +82,10 @@ export async function prepareEvaluationRun(agentId: string) {
       ))
       .limit(1);
     if (runningEvaluation) {
-      const [evaluation] = await tx
-        .select({ versionId: evaluationRuns.versionId })
-        .from(evaluationRuns)
-        .where(and(
-          eq(evaluationRuns.id, runningEvaluation.id),
-          eq(evaluationRuns.workspaceId, DEMO_WORKSPACE_ID),
-        ))
-        .limit(1);
-      const cases = await tx
-        .select({ id: evaluationCases.id, input: evaluationCases.input })
-        .from(evaluationCaseResults)
-        .innerJoin(evaluationCases, eq(evaluationCases.id, evaluationCaseResults.evaluationCaseId))
-        .where(and(
-          eq(evaluationCaseResults.evaluationRunId, runningEvaluation.id),
-          eq(evaluationCaseResults.status, "running"),
-          eq(evaluationCaseResults.workspaceId, DEMO_WORKSPACE_ID),
-          eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID),
-        ))
-        .limit(MAX_EVALUATION_CASES + 1);
-      if (!evaluation) return { ok: false as const, error: "自动验收记录不完整，请稍后重试" };
-      if (cases.length > MAX_EVALUATION_CASES) return { ok: false as const, error: `自动验收最多支持 ${MAX_EVALUATION_CASES} 条样例` };
-      return {
-        ok: true as const,
-        evaluationId: runningEvaluation.id,
-        versionId: evaluation.versionId,
-        cases: safeCases(cases),
-        resumed: true as const,
-      };
+      if (requestId && runningEvaluation.requestId && runningEvaluation.requestId !== requestId) {
+        return { ok: false as const, error: "已有一轮自动验收正在运行，请刷新页面后点检查并继续" };
+      }
+      return loadEvaluation(runningEvaluation);
     }
     const [version] = await tx
       .select({ id: agentVersions.id })
@@ -91,6 +117,7 @@ export async function prepareEvaluationRun(agentId: string) {
       createdBy: DEMO_USER_ID,
       agentId,
       versionId: version.id,
+      requestId,
       status: "running",
       totalCount: cases.length,
     }).returning({ id: evaluationRuns.id });

@@ -33,6 +33,7 @@ import { startEvaluationAction } from "@/server/actions/evaluations";
 const AGENT_ID = "00000000-0000-4000-8000-0000000000a1";
 const VERSION_ID = "00000000-0000-4000-8000-0000000000a2";
 const EVALUATION_ID = "00000000-0000-4000-8000-0000000000a3";
+const REQUEST_ID = "00000000-0000-4000-8000-0000000000a4";
 
 beforeEach(() => {
   mocks.prepare.mockReset();
@@ -69,8 +70,9 @@ describe("批量启动自动验收", () => {
       return { ok: true, runId: sourceKey.slice(-36) };
     });
 
-    await expect(startEvaluationAction(AGENT_ID)).resolves.toEqual({ ok: true });
+    await expect(startEvaluationAction(AGENT_ID, REQUEST_ID)).resolves.toEqual({ ok: true });
 
+    expect(mocks.prepare).toHaveBeenCalledWith(AGENT_ID, REQUEST_ID);
     expect(peak).toBe(5);
     expect(mocks.startRun).toHaveBeenCalledTimes(8);
     expect(mocks.markFailure).toHaveBeenCalledTimes(2);
@@ -93,5 +95,13 @@ describe("批量启动自动验收", () => {
     expect(mocks.startRun).not.toHaveBeenCalled();
     expect(mocks.reconcileSummary).toHaveBeenCalledOnce();
     expect(mocks.reconcileSummary).toHaveBeenCalledWith(EVALUATION_ID);
+  });
+
+  it("拒绝无效请求标识且不创建验收批次", async () => {
+    await expect(startEvaluationAction(AGENT_ID, "bad")).resolves.toEqual({
+      ok: false,
+      error: "助手或验收请求信息不正确",
+    });
+    expect(mocks.prepare).not.toHaveBeenCalled();
   });
 });
