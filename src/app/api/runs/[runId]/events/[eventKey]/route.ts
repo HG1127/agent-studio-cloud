@@ -10,6 +10,13 @@ import { getPendingWait, getPendingWaitHook } from "@/server/queries/runs";
 import { hasCrossSiteOrigin, hasSameOrigin } from "@/server/security/request-origin";
 import { matchesWaitEventToken } from "@/server/security/wait-event-token";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import {
+  claimWaitEventSubmission,
+  findWaitEventSubmission,
+  markWaitEventSubmissionAccepted,
+  waitEventSubmissionMatches,
+  waitEventWasResumed,
+} from "@/server/services/wait-event-submission";
 
 export const dynamic = "force-dynamic";
 
@@ -53,6 +60,25 @@ export async function POST(req: Request, { params }: { params: Promise<{ runId: 
     return Response.json({ ok: false, error }, { status: 400 });
   }
   const { runId, eventKey } = parsedParams.data;
+  const submissionToken = req.headers.get("x-wait-event-token");
+  if (submissionToken) {
+    try {
+      const receipt = await findWaitEventSubmission(submissionToken);
+      if (receipt) {
+        if (!waitEventSubmissionMatches(receipt, { runId, eventKey, payload: payload.data })) {
+          return Response.json({ ok: false, error: "这项提交凭据已经用于另一条消息" }, { status: 409 });
+        }
+        if (receipt.status === "accepted") return Response.json({ ok: true });
+        if (await waitEventWasResumed(receipt.runId, receipt.hookToken)) {
+          await markWaitEventSubmissionAccepted(receipt.id, receipt.attemptToken);
+          return Response.json({ ok: true });
+        }
+      }
+    } catch (error) {
+      console.error("读取等待消息回执失败", safeErrorForLog(error));
+      return Response.json({ ok: false, error: "暂时无法读取消息提交状态，请稍后重试" }, { status: 500 });
+    }
+  }
   let run: { status: string } | undefined;
   let pendingWait: Awaited<ReturnType<typeof getPendingWait>>;
   let pendingHook: Awaited<ReturnType<typeof getPendingWaitHook>>;
@@ -75,7 +101,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ runId: 
   if (!pendingWait || pendingWait.eventKey !== eventKey) {
     return Response.json({ ok: false, error: "消息未匹配到当前等待步骤" }, { status: 409 });
   }
-  if (pendingHook?.submissionToken && !matchesWaitEventToken(req.headers.get("x-wait-event-token"), pendingHook.submissionToken)) {
+  if (pendingHook?.submissionToken && !matchesWaitEventToken(submissionToken, pendingHook.submissionToken)) {
     return Response.json({ ok: false, error: "消息提交凭据无效，请刷新页面后重试" }, { status: 403 });
   }
   if (!pendingHook?.submissionToken && !hasSameOrigin(req)) {
@@ -85,11 +111,61 @@ export async function POST(req: Request, { params }: { params: Promise<{ runId: 
   if (payloadError) {
     return Response.json({ ok: false, error: payloadError }, { status: 400 });
   }
+  let claimed: Awaited<ReturnType<typeof claimWaitEventSubmission>> | null = null;
+  if (pendingHook?.submissionToken) {
+    try {
+      claimed = await claimWaitEventSubmission({
+        runId,
+        eventKey,
+        submissionToken: pendingHook.submissionToken,
+        payload: payload.data,
+        hookToken: pendingHook.hookToken,
+      });
+    } catch (error) {
+      console.error("保存等待消息回执失败", safeErrorForLog(error));
+      return Response.json({ ok: false, error: "暂时无法保存消息，请稍后重试" }, { status: 500 });
+    }
+    if (claimed.state === "accepted") return Response.json({ ok: true });
+    if (claimed.state === "conflict") {
+      return Response.json({ ok: false, error: "这项提交凭据已经用于另一条消息" }, { status: 409 });
+    }
+    if (claimed.state === "processing") {
+      return Response.json(
+        { ok: false, error: "消息正在处理，请稍后使用相同内容重试" },
+        { status: 503, headers: { "retry-after": "2" } },
+      );
+    }
+  }
   try {
-    await resumeHook(pendingHook?.hookToken ?? `wait:${runId}:${eventKey}`, payload.data);
+    const hookToken = claimed?.state === "claimed"
+      ? claimed.hookToken
+      : pendingHook?.hookToken ?? `wait:${runId}:${eventKey}`;
+    const resumePayload = claimed?.state === "claimed" ? claimed.payload : payload.data;
+    await resumeHook(hookToken, resumePayload);
+    if (claimed?.state === "claimed") {
+      try {
+        await markWaitEventSubmissionAccepted(claimed.id, claimed.attemptToken);
+      } catch (error) {
+        console.error("确认等待消息回执失败", safeErrorForLog(error));
+      }
+    }
     return Response.json({ ok: true });
   } catch (error) {
     console.error("恢复等待中的运行失败", safeErrorForLog(error));
+    if (claimed?.state === "claimed") {
+      try {
+        if (await waitEventWasResumed(runId, claimed.hookToken)) {
+          await markWaitEventSubmissionAccepted(claimed.id, claimed.attemptToken);
+          return Response.json({ ok: true });
+        }
+      } catch (verifyError) {
+        console.error("确认等待消息恢复结果失败", safeErrorForLog(verifyError));
+      }
+      return Response.json(
+        { ok: false, error: "消息提交结果仍在确认，请稍后使用相同内容重试" },
+        { status: 503, headers: { "retry-after": "2" } },
+      );
+    }
     return Response.json({ ok: false, error: "消息未匹配到等待步骤，或已经处理过" }, { status: 409 });
   }
 }

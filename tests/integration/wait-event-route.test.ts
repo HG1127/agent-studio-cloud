@@ -5,7 +5,7 @@ const { resumeHookMock } = vi.hoisted(() => ({ resumeHookMock: vi.fn() }));
 vi.mock("workflow/api", () => ({ resumeHook: resumeHookMock }));
 
 import { POST } from "@/app/api/runs/[runId]/events/[eventKey]/route";
-import { runs, traceEvents } from "@/db/schema";
+import { runs, traceEvents, waitEventSubmissions } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { getPendingWait } from "@/server/queries/runs";
@@ -14,6 +14,13 @@ const RUN_ID = "00000000-0000-4000-8000-0000000000b3";
 
 afterEach(async () => {
   resumeHookMock.mockReset();
+  try {
+    await db.delete(waitEventSubmissions).where(eq(waitEventSubmissions.runId, RUN_ID));
+  } catch (error) {
+    const code = (error as { code?: string; cause?: { code?: string } } | null)?.code
+      ?? (error as { cause?: { code?: string } } | null)?.cause?.code;
+    if (code !== "42P01") throw error;
+  }
   await db.delete(traceEvents).where(eq(traceEvents.runId, RUN_ID));
   await db.delete(runs).where(eq(runs.id, RUN_ID));
 });
@@ -81,6 +88,91 @@ describe("外部消息恢复接口", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
     expect(resumeHookMock).toHaveBeenCalledWith(`wait:${RUN_ID}:wait_customer:7`, { customerId: "C-100" });
+  });
+
+  it("相同凭据与消息在成功后可安全重试", async () => {
+    resumeHookMock.mockResolvedValue(undefined);
+    await insertWaitingRun();
+    const request = () => new Request(`http://localhost/api/runs/${RUN_ID}/events/customer.profile.updated`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-wait-event-token": "submission-token" },
+      body: JSON.stringify({ customerId: "C-100", complete: true }),
+    });
+    const context = { params: Promise.resolve({ runId: RUN_ID, eventKey: "customer.profile.updated" }) };
+
+    expect((await POST(request(), context)).status).toBe(200);
+    await db.update(runs).set({ status: "running" }).where(eq(runs.id, RUN_ID));
+    expect((await POST(request(), context)).status).toBe(200);
+    expect(resumeHookMock).toHaveBeenCalledOnce();
+  });
+
+  it("同一凭据不能改换消息内容重试", async () => {
+    resumeHookMock.mockResolvedValue(undefined);
+    await insertWaitingRun();
+    const context = { params: Promise.resolve({ runId: RUN_ID, eventKey: "customer.profile.updated" }) };
+    const first = new Request(`http://localhost/api/runs/${RUN_ID}/events/customer.profile.updated`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-wait-event-token": "submission-token" },
+      body: JSON.stringify({ customerId: "C-100" }),
+    });
+    expect((await POST(first, context)).status).toBe(200);
+
+    const changed = new Request(`http://localhost/api/runs/${RUN_ID}/events/customer.profile.updated`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-wait-event-token": "submission-token" },
+      body: JSON.stringify({ customerId: "C-200" }),
+    });
+    const response = await POST(changed, context);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ ok: false, error: "这项提交凭据已经用于另一条消息" });
+    expect(resumeHookMock).toHaveBeenCalledOnce();
+  });
+
+  it("恢复调用结果不确定时返回可重试响应并保留回执", async () => {
+    resumeHookMock.mockRejectedValue(new Error("workflow response lost"));
+    await insertWaitingRun();
+    const response = await POST(
+      new Request(`http://localhost/api/runs/${RUN_ID}/events/customer.profile.updated`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-wait-event-token": "submission-token" },
+        body: JSON.stringify({ customerId: "C-100" }),
+      }),
+      { params: Promise.resolve({ runId: RUN_ID, eventKey: "customer.profile.updated" }) },
+    );
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("2");
+    expect(await response.json()).toEqual({ ok: false, error: "消息提交结果仍在确认，请稍后使用相同内容重试" });
+    const [receipt] = await db.select().from(waitEventSubmissions).where(eq(waitEventSubmissions.runId, RUN_ID));
+    expect(receipt?.status).toBe("processing");
+  });
+
+  it("响应丢失但等待已经继续时确认重复提交成功", async () => {
+    await insertWaitingRun();
+    resumeHookMock.mockImplementation(async () => {
+      await db.insert(traceEvents).values({
+        runId: RUN_ID,
+        workspaceId: DEMO_WORKSPACE_ID,
+        createdBy: DEMO_USER_ID,
+        seq: 2,
+        nodeId: "wait_customer",
+        kind: "wait.resumed",
+        title: "等待已继续",
+      });
+      throw new Error("workflow response lost");
+    });
+    const response = await POST(
+      new Request(`http://localhost/api/runs/${RUN_ID}/events/customer.profile.updated`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-wait-event-token": "submission-token" },
+        body: JSON.stringify({ customerId: "C-100" }),
+      }),
+      { params: Promise.resolve({ runId: RUN_ID, eventKey: "customer.profile.updated" }) },
+    );
+
+    expect(response.status).toBe(200);
+    const [receipt] = await db.select().from(waitEventSubmissions).where(eq(waitEventSubmissions.runId, RUN_ID));
+    expect(receipt?.status).toBe("accepted");
   });
 
   it("仍可恢复升级前已经挂起的旧格式等待", async () => {
