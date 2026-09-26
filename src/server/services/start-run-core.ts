@@ -554,6 +554,12 @@ export async function startRunCore(args: {
     if (!version) {
       return { ok: false, error: "这个助手还没有发布版本，请先发布后再运行" };
     }
+    const usableVersion = args.sourceType === "evaluation"
+      ? version.status === "candidate" || version.status === "production"
+      : version.status === "production" || version.status === "retired";
+    if (!usableVersion) {
+      return { ok: false, error: "这个版本不能用于本次运行，请重新选择已发布版本" };
+    }
     const manifestParsed = AgentManifest.safeParse(version.manifest);
     if (!manifestParsed.success) {
       return { ok: false, error: "这个助手的版本信息不完整，请重新发布后再运行" };

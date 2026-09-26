@@ -241,6 +241,21 @@ describe("运行启动句柄恢复", () => {
     ]));
   });
 
+  it("候选版本只能用于验收，历史生产版本仍可手动重跑", async () => {
+    await db.update(agentVersions).set({ status: "candidate" }).where(eq(agentVersions.id, VERSION_ID));
+
+    const manualCandidate = await startRunCore({ agentId: AGENT_ID, versionId: VERSION_ID, input: {}, sourceType: "manual" });
+    expect(manualCandidate).toEqual({ ok: false, error: "这个版本不能用于本次运行，请重新选择已发布版本" });
+    expect(startMock).not.toHaveBeenCalled();
+
+    const evaluationCandidate = await startRunCore({ agentId: AGENT_ID, versionId: VERSION_ID, input: {}, sourceType: "evaluation" });
+    expect(evaluationCandidate.ok).toBe(true);
+
+    await db.update(agentVersions).set({ status: "retired" }).where(eq(agentVersions.id, VERSION_ID));
+    const manualRetired = await startRunCore({ agentId: AGENT_ID, versionId: VERSION_ID, input: {}, sourceType: "manual" });
+    expect(manualRetired.ok).toBe(true);
+  });
+
   it("验收运行启动失败时直接落定样例与验收汇总", async () => {
     await db.insert(evaluationCases).values({
       id: CASE_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID,
