@@ -2,15 +2,16 @@
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { AgentManifest } from "@/contracts/manifest";
-import { ScheduleCreateInput } from "@/contracts/schedule";
+import { ScheduleCreateInput, type ScheduleActionResult } from "@/contracts/schedule";
 import { agentVersions, agents, schedules } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { validateRunInput } from "@/server/domain/runtime/run-input";
 import { nextOccurrence } from "@/server/domain/schedule-spec";
+import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { validationMessage } from "@/server/domain/validation-message";
 
-export async function createScheduleAction(raw: unknown): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function createScheduleAction(raw: unknown): Promise<ScheduleActionResult> {
   const parsed = ScheduleCreateInput.safeParse(raw);
   if (!parsed.success) {
     return { ok: false, error: validationMessage(parsed.error, "定时设置不完整，请检查频率与时间后重试") };
@@ -47,7 +48,7 @@ export async function createScheduleAction(raw: unknown): Promise<{ ok: true } |
     revalidatePath("/schedules");
     return { ok: true };
   } catch (error) {
-    console.error("创建定时任务失败", error);
+    console.error("创建定时任务失败", safeErrorForLog(error));
     return { ok: false, error: "创建定时任务失败，请稍后重试" };
   }
 }

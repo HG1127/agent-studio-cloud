@@ -398,7 +398,7 @@ describe("助手协作运行", () => {
         const [finished] = await db.select().from(runs).where(eq(runs.id, parent.id)).limit(1);
         const nodeId = index === 0 ? "research" : "handoff";
         expect(finished?.result).toMatchObject({
-          [nodeId]: { status: "failed", error: expect.stringContaining("输入") },
+          [nodeId]: { status: "failed", error: expect.stringContaining(index === 0 ? "输入" : "交接内容") },
           fallback: { summary: expect.stringContaining("补充") },
         });
         expect(await db.select().from(runs).where(or(

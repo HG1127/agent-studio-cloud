@@ -105,6 +105,9 @@ test("创建定时任务并经 tick 接口开出定时运行", async ({ page, re
   await page.waitForURL(/\/runs\/[0-9a-f-]+$/);
   await expect(page.getByRole("heading", { name: agentName, exact: true })).toBeVisible();
   const runInput = page.locator("section").filter({ has: page.getByRole("heading", { name: "运行输入", exact: true }) });
+  const inputDetails = runInput.getByText("查看输入数据（开发者数据）", { exact: true });
+  if (await inputDetails.count()) await inputDetails.click();
+  await expect(runInput.locator("pre")).toContainText(input.input);
   expect(JSON.parse(await runInput.locator("pre").innerText())).toEqual(input);
   await expect(page.locator("header").getByText("已完成", { exact: true })).toBeVisible({ timeout: 90_000 });
 });

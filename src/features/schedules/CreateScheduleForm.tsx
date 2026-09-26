@@ -1,6 +1,7 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import type { ScheduleAgentOption } from "@/contracts/schedule";
 import { createScheduleAction } from "@/server/actions/create-schedule";
 
 type Kind = "once" | "interval" | "daily" | "weekly" | "monthly";
@@ -20,7 +21,7 @@ const KIND_OPTIONS: Array<{ value: Kind; label: string }> = [
 ];
 const WEEKDAY_LABELS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
-export function CreateScheduleForm({ agents }: { agents: { id: string; name: string }[] }) {
+export function CreateScheduleForm({ agents }: { agents: ScheduleAgentOption[] }) {
   const router = useRouter();
   const [agentId, setAgentId] = useState(agents[0]?.id ?? "");
   const [kind, setKind] = useState<Kind>("daily");

@@ -57,7 +57,9 @@ jobs:
         run: |
           CI_BRANCH="ci-${{ github.run_id }}-${{ github.run_attempt }}"
           npx --yes neonctl@5 branches create --name "$CI_BRANCH" --project-id ${{ vars.NEON_PROJECT_ID }} --api-key "$NEON_API_KEY" --output json > /dev/null
-          BRANCH_URL=$(npx --yes neonctl@5 connection-string "$CI_BRANCH" --project-id ${{ vars.NEON_PROJECT_ID }} --database-name neondb --role-name neondb_owner --api-key "$NEON_API_KEY")
+          # 分支会复制主库数据；在临时分支上新建空库，避免线上数据与固定集成测试夹具冲突。
+          npx --yes neonctl@5 databases create --name ci_test --branch "$CI_BRANCH" --project-id ${{ vars.NEON_PROJECT_ID }} --owner-name neondb_owner --api-key "$NEON_API_KEY" --output json > /dev/null
+          BRANCH_URL=$(npx --yes neonctl@5 connection-string "$CI_BRANCH" --project-id ${{ vars.NEON_PROJECT_ID }} --database-name ci_test --role-name neondb_owner --api-key "$NEON_API_KEY")
           if [[ "$BRANCH_URL" != postgres://* && "$BRANCH_URL" != postgresql://* ]]; then
             echo "::error::Neon 临时分支未返回有效连接串"
             exit 1

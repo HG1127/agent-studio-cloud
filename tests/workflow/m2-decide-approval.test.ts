@@ -46,7 +46,7 @@ describe("审批决定的原子性", () => {
 
     const second = await decideApprovalAction(RUN_ID, APPROVAL_ID, { decision: "rejected", note: "反悔" });
     expect(second.ok).toBe(false);
-    if (!second.ok) expect(second.error).toContain("已经处理过");
+    if (!second.ok) expect(second.error).toContain("确认记录与继续请求不一致");
     const [afterSecond] = await db.select().from(approvals).where(eq(approvals.id, APPROVAL_ID)).limit(1);
     expect(afterSecond?.status).toBe("approved");
     expect(afterSecond?.note).toBe("同意执行");

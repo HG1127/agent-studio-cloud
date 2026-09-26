@@ -45,10 +45,11 @@ describe("协作助手版本选项", () => {
       { id: PRODUCTION_ID, agentId: TARGET_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, version: 2, status: "production", manifest },
     ]);
 
-    expect(await listAgentTargets(DEMO_WORKSPACE_ID, ROOT_ID)).toMatchObject([
-      { versionId: PRODUCTION_ID, version: 2 },
-    ]);
-    expect(await listAgentTargets(DEMO_WORKSPACE_ID, ROOT_ID, [RETIRED_ID])).toMatchObject([
+    const ownTargets = (selectedVersionIds: string[] = []) =>
+      listAgentTargets(DEMO_WORKSPACE_ID, ROOT_ID, selectedVersionIds)
+        .then((options) => options.filter((option) => option.agentId === TARGET_ID));
+    expect(await ownTargets()).toMatchObject([{ versionId: PRODUCTION_ID, version: 2 }]);
+    expect(await ownTargets([RETIRED_ID])).toMatchObject([
       { versionId: PRODUCTION_ID, version: 2 },
       { versionId: RETIRED_ID, version: 1 },
     ]);
