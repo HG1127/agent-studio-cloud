@@ -235,6 +235,23 @@ export const RunStepReport = z.object({
 });
 export type RunStepReport = z.infer<typeof RunStepReport>;
 
+export const RunStepView = z.object({
+  id: z.string().uuid(),
+  runId: z.string().uuid(),
+  nodeId: z.string(),
+  nodeTitle: z.string().nullable(),
+  nodeType: z.string(),
+  status: z.enum(["pending", "running", "succeeded", "failed"]),
+  attempt: z.number().int().nullable(),
+  output: z.unknown().nullable(),
+  error: z.string().nullable(),
+  startedAt: z.date().nullable(),
+  finishedAt: z.date().nullable(),
+  createdAt: z.date(),
+  updatedAt: z.date(),
+});
+export type RunStepView = z.infer<typeof RunStepView>;
+
 export const RunReportFile = z.object({
   format: z.literal("agent-studio-cloud-run"),
   formatVersion: z.literal(1),

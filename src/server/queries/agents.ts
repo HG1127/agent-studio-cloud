@@ -1,6 +1,12 @@
 import { and, desc, eq, ilike, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { AgentSummary, AgentTargetOption, type AgentTargetOption as AgentTargetOptionType } from "@/contracts/agent";
+import {
+  AgentDetailView,
+  AgentSummary,
+  AgentTargetOption,
+  type AgentDetailView as AgentDetailViewType,
+  type AgentTargetOption as AgentTargetOptionType,
+} from "@/contracts/agent";
 import { AgentManifest } from "@/contracts/manifest";
 import { WorkflowDraft } from "@/contracts/workflow";
 import { db } from "@/lib/db";
@@ -62,17 +68,16 @@ export async function listArchivedAgents(workspaceId: string, options?: { query?
   return listAgentsByArchivedState(workspaceId, true, options);
 }
 
-export interface AgentDetail {
-  agent: typeof agents.$inferSelect;
-  draft: WorkflowDraft | null;
-  draftUpdatedAt: string | null;
-  currentVersion: typeof agentVersions.$inferSelect | null;
-}
-
-export async function getAgentDetail(agentId: string, workspaceId: string): Promise<AgentDetail | null> {
+export async function getAgentDetail(agentId: string, workspaceId: string): Promise<AgentDetailViewType | null> {
   if (!z.string().uuid().safeParse(agentId).success) return null;
   const [agent] = await db
-    .select()
+    .select({
+      id: agents.id,
+      name: agents.name,
+      description: agents.description,
+      intentText: agents.intentText,
+      updatedAt: agents.updatedAt,
+    })
     .from(agents)
     .where(and(eq(agents.id, agentId), isNull(agents.archivedAt), eq(agents.workspaceId, workspaceId)))
     .limit(1);
@@ -84,7 +89,7 @@ export async function getAgentDetail(agentId: string, workspaceId: string): Prom
     .orderBy(desc(workflowDefinitions.createdAt))
     .limit(1);
   const [currentVersion] = await db
-    .select()
+    .select({ id: agentVersions.id, manifest: agentVersions.manifest })
     .from(agentVersions)
     .where(and(
       eq(agentVersions.agentId, agentId),
@@ -95,12 +100,13 @@ export async function getAgentDetail(agentId: string, workspaceId: string): Prom
     .limit(1);
   // 草稿写入时已过契约校验；读取再 safeParse 一次，坏数据降级为空草稿而不是让页面崩掉
   const parsed = definition ? WorkflowDraft.safeParse(definition.draft) : null;
-  return {
+  const detail = AgentDetailView.safeParse({
     agent,
     draft: parsed?.success ? parsed.data : null,
     draftUpdatedAt: parsed?.success && definition ? definition.updatedAt.toISOString() : null,
     currentVersion: currentVersion ?? null,
-  };
+  });
+  return detail.success ? detail.data : null;
 }
 
 export async function listAgentTargets(

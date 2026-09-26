@@ -33,6 +33,23 @@ export const AgentSummary = z.object({
 });
 export type AgentSummary = z.infer<typeof AgentSummary>;
 
+export const AgentDetailView = z.object({
+  agent: z.object({
+    id: z.string().uuid(),
+    name: z.string(),
+    description: z.string().nullable(),
+    intentText: z.string(),
+    updatedAt: z.date(),
+  }),
+  draft: WorkflowDraft.nullable(),
+  draftUpdatedAt: z.string().nullable(),
+  currentVersion: z.object({
+    id: z.string().uuid(),
+    manifest: z.unknown(),
+  }).nullable(),
+});
+export type AgentDetailView = z.infer<typeof AgentDetailView>;
+
 export const AgentArchiveInput = z.object({
   agentId: z.string().uuid(),
   archived: z.boolean(),

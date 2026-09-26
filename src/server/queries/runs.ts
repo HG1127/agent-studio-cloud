@@ -6,12 +6,14 @@ import {
   PendingWaitView,
   type PendingWaitView as PendingWaitViewType,
   RunAgentOption,
+  RunStepView,
+  type RunStepView as RunStepViewType,
   type RunListFilters,
   RunSummary,
   RunView,
 } from "@/contracts/run";
 import { AgentManifest } from "@/contracts/manifest";
-import { agentVersions, agents, approvals, runSteps, runs, traceEvents, type Run, type RunStep } from "@/db/schema";
+import { agentVersions, agents, approvals, runSteps, runs, traceEvents, type Run } from "@/db/schema";
 import { db } from "@/lib/db";
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
 import { isRunStartLeaseExpired } from "@/server/services/run-start-lease";
@@ -256,13 +258,14 @@ export async function getRunContext(runId: string, workspaceId: string): Promise
   return row?.context ?? null;
 }
 
-export async function listRunSteps(runId: string, workspaceId: string): Promise<RunStep[]> {
+export async function listRunSteps(runId: string, workspaceId: string): Promise<RunStepViewType[]> {
   if (!RUN_ID.safeParse(runId).success) return [];
-  return db
+  const rows = await db
     .select()
     .from(runSteps)
     .where(and(eq(runSteps.runId, runId), eq(runSteps.workspaceId, workspaceId)))
     .orderBy(asc(runSteps.startedAt), asc(runSteps.createdAt));
+  return parseQueryRows("运行步骤", RunStepView, rows);
 }
 
 export async function listApprovals(runId: string, workspaceId: string): Promise<ApprovalView[]> {

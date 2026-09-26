@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { AgentCreateInput } from "@/contracts/agent";
-import { ApprovalDecisionInput, MAX_RUN_INPUT_BYTES, RunStartInput, WaitEventPayload } from "@/contracts/run";
+import { AgentCreateInput, AgentDetailView } from "@/contracts/agent";
+import { ApprovalDecisionInput, MAX_RUN_INPUT_BYTES, RunStartInput, RunStepView, WaitEventPayload } from "@/contracts/run";
 
 const uuid = "550e8400-e29b-41d4-a716-446655440000";
 
@@ -37,6 +37,56 @@ describe("AgentCreateInput", () => {
       intentText: "一".repeat(9),
     });
     expect(result.success).toBe(false);
+  });
+});
+
+describe("前端查询契约", () => {
+  it("校验助手详情和运行步骤的稳定投影", () => {
+    expect(AgentDetailView.safeParse({
+      agent: {
+        id: uuid,
+        name: "周报助手",
+        description: null,
+        intentText: "整理每周工作进展",
+        updatedAt: new Date(),
+      },
+      draft: null,
+      draftUpdatedAt: null,
+      currentVersion: { id: uuid, manifest: { schemaVersion: "4.0" } },
+    }).success).toBe(true);
+    expect(RunStepView.safeParse({
+      id: uuid,
+      runId: uuid,
+      nodeId: "summary",
+      nodeTitle: "整理周报",
+      nodeType: "ai",
+      status: "succeeded",
+      attempt: 1,
+      output: { summary: "完成" },
+      error: null,
+      startedAt: new Date(),
+      finishedAt: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }).success).toBe(true);
+  });
+
+  it("拒绝未知的运行步骤状态", () => {
+    expect(RunStepView.safeParse({
+      id: uuid,
+      runId: uuid,
+      nodeId: "summary",
+      nodeTitle: null,
+      nodeType: "ai",
+      status: "done",
+      attempt: 1,
+      output: null,
+      error: null,
+      startedAt: null,
+      finishedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }).success).toBe(false);
   });
 });
 
