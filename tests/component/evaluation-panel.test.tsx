@@ -83,6 +83,13 @@ describe("EvaluationPanel", () => {
     expect(refreshMock).toHaveBeenCalledOnce();
   });
 
+  it("重复生成相同样例时提示复用已有结果", async () => {
+    generateMock.mockResolvedValue({ ok: true, createdCount: 2, reused: true });
+    render(<EvaluationPanel agentId={AGENT_ID} cases={[]} runs={[]} />);
+    await userEvent.click(screen.getByRole("button", { name: "从流程生成样例" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("发布版本对应的 2 条样例已经存在，无需重复生成");
+  });
+
   it("批量运行已有样例并展示验收汇总", async () => {
     startMock.mockResolvedValue({ ok: true });
     const user = userEvent.setup();

@@ -1,5 +1,6 @@
 import type { EvaluationExpectation } from "@/contracts/evaluation";
 import type { AgentManifest } from "@/contracts/manifest";
+import { jsonValuesEqual } from "@/server/domain/json-value";
 
 const MAX_EXPECTATIONS_PER_CASE = 20;
 
@@ -7,6 +8,28 @@ export interface GeneratedEvaluationCase {
   name: string;
   input: Record<string, unknown>;
   expectations: EvaluationExpectation[];
+}
+
+interface ComparableEvaluationCase {
+  name: string;
+  input: unknown;
+  expectations: unknown;
+}
+
+export function evaluationCaseSetsEqual(
+  current: readonly ComparableEvaluationCase[],
+  generated: readonly ComparableEvaluationCase[],
+): boolean {
+  if (current.length !== generated.length) return false;
+  const unmatched = [...generated];
+  return current.every((testCase) => {
+    const matchIndex = unmatched.findIndex((candidate) => candidate.name === testCase.name
+      && jsonValuesEqual(candidate.input, testCase.input)
+      && jsonValuesEqual(candidate.expectations, testCase.expectations));
+    if (matchIndex < 0) return false;
+    unmatched.splice(matchIndex, 1);
+    return true;
+  });
 }
 
 function sampleValue(field: AgentManifest["inputContract"]["fields"][number]): unknown {

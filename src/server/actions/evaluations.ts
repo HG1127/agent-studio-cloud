@@ -21,7 +21,7 @@ import { startRunCore } from "@/server/services/start-run-core";
 import { runBounded } from "@/server/domain/run-bounded";
 import { validationMessage } from "@/server/domain/validation-message";
 import { auditEventValues } from "@/server/audit/event-values";
-import { generateEvaluationCases } from "@/server/domain/evaluation-cases";
+import { evaluationCaseSetsEqual, generateEvaluationCases } from "@/server/domain/evaluation-cases";
 import { redactCredentialData } from "@/server/domain/security/redact-sensitive";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { jsonValuesEqual } from "@/server/domain/json-value";
@@ -42,14 +42,15 @@ export async function generateEvaluationCasesAction(agentId: string): Promise<Ev
         eq(evaluationRuns.status, "running"),
       )).limit(1);
       if (running) return { ok: false as const, error: "自动验收运行期间不能生成验收样例" };
-      const [active] = await tx.select({ count: count() }).from(evaluationCases).where(and(
+      const active = await tx.select({
+        name: evaluationCases.name,
+        input: evaluationCases.input,
+        expectations: evaluationCases.expectations,
+      }).from(evaluationCases).where(and(
         eq(evaluationCases.agentId, agentId),
         eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID),
         isNull(evaluationCases.archivedAt),
       ));
-      if ((active?.count ?? 0) > 0) {
-        return { ok: false as const, error: "已有启用中的验收样例；如需重新生成，请先归档现有样例" };
-      }
       const [version] = await tx.select({ manifest: agentVersions.manifest }).from(agentVersions).where(and(
         eq(agentVersions.agentId, agentId),
         eq(agentVersions.workspaceId, DEMO_WORKSPACE_ID),
@@ -58,6 +59,12 @@ export async function generateEvaluationCasesAction(agentId: string): Promise<Ev
       const manifest = version ? AgentManifest.safeParse(version.manifest) : null;
       if (!manifest?.success) return { ok: false as const, error: "请先发布一个可验收版本" };
       const generated = generateEvaluationCases(manifest.data).slice(0, MAX_EVALUATION_CASES);
+      if (active.length > 0) {
+        if (evaluationCaseSetsEqual(active, generated)) {
+          return { ok: true as const, createdCount: generated.length, reused: true as const };
+        }
+        return { ok: false as const, error: "已有启用中的验收样例；如需重新生成，请先归档现有样例" };
+      }
       await tx.insert(evaluationCases).values(generated.map((testCase) => ({
         workspaceId: DEMO_WORKSPACE_ID,
         createdBy: DEMO_USER_ID,

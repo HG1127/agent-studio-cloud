@@ -188,7 +188,9 @@ export function EvaluationPanel({
       const result = await generateEvaluationCasesAction(agentId);
       if (!result.ok) setError(result.error);
       else {
-        setNotice(`已从发布版本生成 ${result.createdCount} 条可编辑样例`);
+        setNotice(result.reused
+          ? `发布版本对应的 ${result.createdCount} 条样例已经存在，无需重复生成`
+          : `已从发布版本生成 ${result.createdCount} 条可编辑样例`);
         router.refresh();
       }
     } catch {

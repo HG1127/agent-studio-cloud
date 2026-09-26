@@ -7,7 +7,7 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 import { agentVersions, agents, evaluationCaseResults, evaluationCases, evaluationRuns, runs } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
-import { createEvaluationCaseAction, setEvaluationCaseArchivedAction, startEvaluationAction, updateEvaluationCaseAction } from "@/server/actions/evaluations";
+import { createEvaluationCaseAction, generateEvaluationCasesAction, setEvaluationCaseArchivedAction, startEvaluationAction, updateEvaluationCaseAction } from "@/server/actions/evaluations";
 import { completeEvaluationForRun } from "@/server/services/evaluation-state";
 import { prepareEvaluationRun } from "@/server/services/evaluation-start";
 
@@ -67,6 +67,18 @@ async function insertFixture() {
 }
 
 describe("自动验收并发启动", () => {
+  it("响应丢失后重复生成相同验收样例时复用已有集合", async () => {
+    await insertFixture();
+    await db.update(evaluationCases).set({ name: "基础流程检查" }).where(eq(evaluationCases.id, CASE_ID));
+
+    expect(await generateEvaluationCasesAction(AGENT_ID)).toEqual({
+      ok: true,
+      createdCount: 1,
+      reused: true,
+    });
+    expect(await db.select().from(evaluationCases).where(eq(evaluationCases.agentId, AGENT_ID))).toHaveLength(1);
+  });
+
   it("重复保存完全相同的验收样例时复用已有记录", async () => {
     await insertFixture();
 

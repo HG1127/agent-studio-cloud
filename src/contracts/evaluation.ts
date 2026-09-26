@@ -91,7 +91,7 @@ export const EvaluationActionResult = z.discriminatedUnion("ok", [
 export type EvaluationActionResult = z.infer<typeof EvaluationActionResult>;
 
 export const EvaluationGenerateResult = z.discriminatedUnion("ok", [
-  z.object({ ok: z.literal(true), createdCount: z.number().int().positive() }),
+  z.object({ ok: z.literal(true), createdCount: z.number().int().positive(), reused: z.boolean().optional() }),
   z.object({ ok: z.literal(false), error: z.string() }),
 ]);
 export type EvaluationGenerateResult = z.infer<typeof EvaluationGenerateResult>;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AgentManifest } from "@/contracts/manifest";
-import { generateEvaluationCases } from "@/server/domain/evaluation-cases";
+import { evaluationCaseSetsEqual, generateEvaluationCases } from "@/server/domain/evaluation-cases";
 
 function manifest(outputCount: number) {
   return AgentManifest.parse({
@@ -62,5 +62,14 @@ describe("从发布契约生成验收样例", () => {
     expect(generateEvaluationCases(manifest(0))).toEqual([
       expect.objectContaining({ name: "基础流程检查", expectations: [] }),
     ]);
+  });
+
+  it("忽略顺序识别已经完整生成的相同样例集合", () => {
+    const generated = generateEvaluationCases(manifest(50));
+    expect(evaluationCaseSetsEqual([...generated].reverse(), generated)).toBe(true);
+    expect(evaluationCaseSetsEqual([
+      { ...generated[0], name: "人工修改过的样例" },
+      generated[1],
+    ], generated)).toBe(false);
   });
 });
