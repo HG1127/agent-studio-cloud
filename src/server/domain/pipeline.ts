@@ -260,6 +260,10 @@ export function stableStringify(value: unknown): string {
   return JSON.stringify(value) ?? "null";
 }
 
+export function workflowFingerprint(draft: WorkflowDraft): string {
+  return createHash("sha256").update(stableStringify(draft)).digest("hex");
+}
+
 export type ManifestAuditStatus = AgentManifest["designAudit"]["status"];
 
 // manifest 里的审计状态按问题计数推导（旧系统 status 是 blocked/review/ready，语义不同不沿用）
@@ -353,7 +357,7 @@ export function buildManifest(
   return AgentManifest.parse({
     schemaVersion: "4.0",
     workflowSnapshot: draft,
-    workflowFingerprint: createHash("sha256").update(stableStringify(draft)).digest("hex"),
+    workflowFingerprint: workflowFingerprint(draft),
     inputContract: inputContractFor(draft),
     outputContract: draft.outputContract ?? { fields: [] },
     requirementCoverage: asRecord(audit.requirementCoverage),

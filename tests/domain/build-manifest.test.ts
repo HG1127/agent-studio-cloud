@@ -7,7 +7,7 @@ import golden1 from "../fixtures/domain/plan-golden-1.json";
 import { AgentManifest } from "@/contracts/manifest";
 import { WorkflowDraft, type WorkflowDraft as WorkflowDraftType } from "@/contracts/workflow";
 import { auditWorkflow, type AuditIssue } from "@/server/domain/audit";
-import { buildManifest, deriveDesignAuditStatus, filterPublishBlockers, stableStringify } from "@/server/domain/pipeline";
+import { buildManifest, deriveDesignAuditStatus, filterPublishBlockers, stableStringify, workflowFingerprint } from "@/server/domain/pipeline";
 
 const draft: WorkflowDraftType = WorkflowDraft.parse(golden1.output.workflow);
 const options = { modelId: "test-model", mock: true, connectionId: null, knowledgeSnapshot: [] };
@@ -34,6 +34,17 @@ describe("stableStringify", () => {
 
   it("输出是合法 JSON 且保留数组、null 与字符串转义", () => {
     expect(JSON.parse(stableStringify({ a: [1, null, "x\"y"], u: undefined }))).toEqual({ a: [1, null, 'x"y'] });
+  });
+});
+
+describe("workflowFingerprint", () => {
+  it("流程内容变化时生成不同指纹", () => {
+    const renamed = WorkflowDraft.parse({
+      ...draft,
+      rootAgent: { ...draft.rootAgent, name: `${draft.rootAgent.name}-新名称` },
+    });
+
+    expect(workflowFingerprint(renamed)).not.toBe(workflowFingerprint(draft));
   });
 });
 

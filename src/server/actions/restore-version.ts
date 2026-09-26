@@ -22,6 +22,8 @@ import { validateOutputContract } from "@/server/domain/runtime/output-contract"
 import { validateWaitContracts } from "@/server/domain/runtime/wait-contract";
 import { validateWorkflowRoutes } from "@/server/domain/runtime/workflow-routes";
 import { validateInlineWorkflows } from "@/server/domain/runtime/inline-workflow";
+import { auditWorkflow } from "@/server/domain/audit";
+import { deriveDesignAuditStatus, filterPublishBlockers, workflowFingerprint } from "@/server/domain/pipeline";
 
 export async function restoreVersionAction(agentId: string, versionId: string): Promise<RestoreVersionResult> {
   if (!z.string().uuid().safeParse(agentId).success || !z.string().uuid().safeParse(versionId).success) {
@@ -70,6 +72,7 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
             ?? validateWorkflowRoutes(workflow)
             ?? validateInlineWorkflows(workflow);
           if (runtimeIssue) return { kind: "runtime-incompatible" as const, error: runtimeIssue };
+          const restoredWorkflow = bindWorkflowRootAgent(workflow, agent);
           const toolIssue = workflowToolRegistrationIssue(manifest.data.workflowSnapshot, getToolRegistration);
           if (toolIssue) return { kind: "tool-unavailable" as const, error: toolIssue };
           let collaborationKnowledgeSourceIds: string[] = [];
@@ -150,9 +153,23 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
               return { kind: "knowledge-unavailable" as const, error: "协作助手使用的知识资料已归档或尚未完成解析，请先恢复资料" };
             }
           }
+          const designAudit = auditWorkflow(restoredWorkflow);
+          const { blocking: designBlockers } = filterPublishBlockers(designAudit.issues, restoredWorkflow);
+          if (designBlockers.length > 0) {
+            return {
+              kind: "design-incompatible" as const,
+              issues: designBlockers.slice(0, 5).map((issue) => issue.title),
+            };
+          }
           const restoredManifest = {
             ...manifest.data,
-            workflowSnapshot: bindWorkflowRootAgent(manifest.data.workflowSnapshot, agent),
+            workflowSnapshot: restoredWorkflow,
+            workflowFingerprint: workflowFingerprint(restoredWorkflow),
+            designAudit: {
+              status: deriveDesignAuditStatus(designAudit.counts),
+              issueCount: designAudit.issues.length,
+              criticalCount: designAudit.counts.critical,
+            },
           };
           const [currentProduction] = await tx
             .select({
@@ -249,6 +266,9 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
         if (restoreOutcome.kind === "manifest-invalid") return { ok: false, error: "历史版本格式过旧，无法直接恢复" };
         if (restoreOutcome.kind === "runtime-incompatible") {
           return { ok: false, error: `${restoreOutcome.error}，无法恢复这个历史版本` };
+        }
+        if (restoreOutcome.kind === "design-incompatible") {
+          return { ok: false, error: `历史版本不再符合当前发布检查：${restoreOutcome.issues.join("、")}` };
         }
         if (restoreOutcome.kind === "tool-unavailable") {
           return { ok: false, error: `${restoreOutcome.error}，无法恢复这个历史版本` };

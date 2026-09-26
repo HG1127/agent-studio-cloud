@@ -8,6 +8,7 @@ import { agentVersions, agents, evaluationRuns } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { restoreVersionAction } from "@/server/actions/restore-version";
+import { workflowFingerprint } from "@/server/domain/pipeline";
 
 const AGENT_ID = "00000000-0000-4000-8000-0000000000d1";
 const CURRENT_ID = "00000000-0000-4000-8000-0000000000d2";
@@ -25,16 +26,40 @@ const manifest = AgentManifest.parse({
     startNodeId: "start",
     rootAgent: { id: "agent", name: "恢复测试助手", role: "owner" },
     nodes: {
-      start: { id: "start", title: "开始", type: "trigger", next: "end", requirementIds: [], businessSpec: null },
+      start: { id: "start", title: "收到恢复请求", type: "trigger", next: "work", requirementIds: [], businessSpec: null },
+      work: {
+        id: "work",
+        title: "生成恢复结果",
+        type: "ai",
+        purpose: "根据输入生成恢复结果",
+        modelClass: "default",
+        next: "deliver",
+        requirementIds: [],
+        businessSpec: {
+          grounding: { status: "strong", score: 1 },
+          doneWhen: ["result 字段已经生成"],
+          evidence: ["用户要求生成恢复结果"],
+        },
+      },
+      deliver: {
+        id: "deliver",
+        title: "整理最终结果",
+        type: "system",
+        next: "end",
+        system: { kind: "deliver_output" },
+        description: "整理本次运行中已形成的业务结果",
+        controlPlane: { kind: "delivery", hiddenByDefault: true },
+        ui: { visibility: "control" },
+      },
       end: { id: "end", title: "结束", type: "end", next: null, requirementIds: [], businessSpec: null },
     },
     variables: [],
     memoryPolicy: { taskContext: true, longTerm: false },
-    outputContract: { fields: [] },
+    outputContract: { fields: [{ path: "result", label: "恢复结果", required: true, sourceNodeId: "work" }] },
     ui: { positions: {} },
   },
   inputContract: { fields: [] },
-  outputContract: { fields: [] },
+  outputContract: { fields: [{ path: "result", label: "恢复结果", required: true, sourceNodeId: "work" }] },
   resourceSelection: { model: { modelId: "mock", mock: true, connectionId: null } },
   designAudit: { status: "passed", issueCount: 0, criticalCount: 0 },
   knowledgeSnapshot: [],
@@ -154,6 +179,9 @@ describe("恢复历史版本", () => {
       name: "恢复测试助手",
       role: "owner",
     });
+    const restoredManifest = AgentManifest.parse(restored.manifest);
+    expect(restoredManifest.workflowFingerprint).toBe(workflowFingerprint(restoredManifest.workflowSnapshot));
+    expect(restoredManifest.designAudit.criticalCount).toBe(0);
   });
 
   it("重复恢复同一个历史版本时复用刚创建的正式版本", async () => {
@@ -176,15 +204,20 @@ describe("恢复历史版本", () => {
       workflowSnapshot: {
         ...manifest.workflowSnapshot,
         nodes: {
-          start: { id: "start", title: "开始", type: "trigger", next: "knowledge" },
+          ...manifest.workflowSnapshot.nodes,
+          start: { ...manifest.workflowSnapshot.nodes.start, next: "knowledge" },
           knowledge: {
             id: "knowledge",
             title: "查询业务资料",
             type: "knowledge",
-            next: "end",
+            next: "work",
             knowledge: { space: "业务资料库", sourceIds: [missingSourceId] },
+            businessSpec: {
+              grounding: { status: "strong", score: 1 },
+              doneWhen: ["资料检索结果已经写入步骤输出"],
+              evidence: ["用户要求查询业务资料"],
+            },
           },
-          end: { id: "end", title: "结束", type: "end", next: null },
         },
       },
       knowledgeSnapshot: [missingSourceId],
@@ -208,12 +241,13 @@ describe("恢复历史版本", () => {
       workflowSnapshot: {
         ...manifest.workflowSnapshot,
         nodes: {
-          start: { id: "start", title: "开始", type: "trigger", next: "tool" },
+          ...manifest.workflowSnapshot.nodes,
+          start: { ...manifest.workflowSnapshot.nodes.start, next: "tool" },
           tool: {
             id: "tool",
             title: "更新客户",
             type: "tool",
-            next: "end",
+            next: "work",
             tool: {
               connector: "客户系统",
               action: "update_customer",
@@ -222,8 +256,12 @@ describe("恢复历史版本", () => {
               registryToolId: "missing.tool",
               protocol: "http-json",
             },
+            businessSpec: {
+              grounding: { status: "strong", score: 1 },
+              doneWhen: ["客户系统回执已经返回"],
+              evidence: ["用户要求更新客户"],
+            },
           },
-          end: { id: "end", title: "结束", type: "end", next: null },
         },
       },
     });
@@ -247,8 +285,8 @@ describe("恢复历史版本", () => {
       workflowSnapshot: {
         ...manifest.workflowSnapshot,
         nodes: {
-          start: { id: "start", title: "开始", type: "trigger", next: "missing" },
-          end: { id: "end", title: "结束", type: "end", next: null },
+          ...manifest.workflowSnapshot.nodes,
+          start: { ...manifest.workflowSnapshot.nodes.start, next: "missing" },
         },
       },
     });
@@ -265,6 +303,29 @@ describe("恢复历史版本", () => {
     expect(versions.find((version) => version.id === CURRENT_ID)?.status).toBe("production");
   });
 
+  it("设计已经不符合当前发布检查时不会替换当前版本", async () => {
+    const brokenManifest = AgentManifest.parse({
+      ...manifest,
+      workflowFingerprint: "restore-design-gate-test",
+      workflowSnapshot: {
+        ...manifest.workflowSnapshot,
+        outputContract: { fields: [] },
+      },
+      outputContract: { fields: [] },
+    });
+    await insertVersions("retired", brokenManifest);
+
+    const result = await restoreVersionAction(AGENT_ID, SOURCE_ID);
+
+    expect(result).toEqual({
+      ok: false,
+      error: "历史版本不再符合当前发布检查：没有定义最终交付物",
+    });
+    const versions = await db.select().from(agentVersions).where(eq(agentVersions.agentId, AGENT_ID));
+    expect(versions).toHaveLength(2);
+    expect(versions.find((version) => version.id === CURRENT_ID)?.status).toBe("production");
+  });
+
   it("协作助手已经不可用时不会替换当前版本", async () => {
     const missingAgentId = "00000000-0000-4000-8000-0000000000e2";
     const missingVersionId = "00000000-0000-4000-8000-0000000000e3";
@@ -274,15 +335,20 @@ describe("恢复历史版本", () => {
       workflowSnapshot: {
         ...manifest.workflowSnapshot,
         nodes: {
-          start: { id: "start", title: "开始", type: "trigger", next: "call" },
+          ...manifest.workflowSnapshot.nodes,
+          start: { ...manifest.workflowSnapshot.nodes.start, next: "call" },
           call: {
             id: "call",
             title: "请协作助手处理",
             type: "agent_call",
-            next: "end",
+            next: "work",
             agentCall: { targetAgentId: missingAgentId, versionId: missingVersionId },
+            businessSpec: {
+              grounding: { status: "strong", score: 1 },
+              doneWhen: ["协作助手结果已经返回"],
+              evidence: ["用户要求协作处理"],
+            },
           },
-          end: { id: "end", title: "结束", type: "end", next: null },
         },
       },
     });
