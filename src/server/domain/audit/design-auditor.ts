@@ -520,7 +520,7 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
   for (const id of ids) {
     const n = nodes[id];
     if (!reach.has(id)) {
-      issues.push(issue("warning", "flow", "存在无法到达的步骤", `「${n.title}」当前没有从启动节点可达的路径。`, { nodeId: id, fixable: true, code: "unreachable" }));
+      issues.push(issue("warning", "flow", "存在无法到达的步骤", `「${n.title}」当前没有从启动节点可达的路径。`, { nodeId: id, fixable: false, code: "unreachable" }));
     }
     const outs = successors(wf, id);
     if (n.type !== "end" && !outs.length && n.type !== "subflow") {
@@ -939,7 +939,7 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
       issues.push(
         issue("critical", "logic", "目标声明被误识别为工作流节点", `「${n.title}」是整体目标/Agent构建意图，不应该作为具体执行节点。AI 可自动将其移出流程并平滑重连前后节点。`, {
           nodeId: id,
-          fixable: true,
+          fixable: false,
           code: "meta_node_detected",
         }),
       );

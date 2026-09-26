@@ -199,6 +199,23 @@ describe("直测：结构性检查", () => {
     }));
   });
 
+  it("孤立节点与疑似目标声明只提示人工处理，不允许自动删除", () => {
+    const out = auditWorkflow({
+      ...deadEndDraft,
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "assistant_step" },
+        assistant_step: { id: "assistant_step", title: "客户服务助手", type: "ai", next: "done" },
+        orphan: { id: "orphan", title: "待连接的补充步骤", type: "ai", next: "done" },
+        done: { id: "done", title: "完成", type: "end" },
+      },
+    }, {});
+
+    expect(out.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "unreachable", nodeId: "orphan", fixable: false }),
+      expect.objectContaining({ code: "meta_node_detected", nodeId: "assistant_step", fixable: false }),
+    ]));
+  });
+
   it("非法名称与不受支持类型会阻止运行输入字段发布", () => {
     const out = auditWorkflow({
       ...deadEndDraft,

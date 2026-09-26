@@ -26,7 +26,7 @@ describe("设计检查安全修复", () => {
     expect(input.outputContract).toBeUndefined();
   });
 
-  it("接回死路、删除孤立节点并补充条件兜底", () => {
+  it("接回死路、保留待连接节点并补充条件兜底", () => {
     const input = draft({
       start: { id: "start", title: "开始", type: "trigger", next: "condition" },
       condition: { id: "condition", title: "判断状态", type: "condition", condition: { source: "input.status", operator: "eq", branches: [{ label: "通过", value: "ok", next: "work" }], defaultNext: null } },
@@ -35,9 +35,23 @@ describe("设计检查安全修复", () => {
       done: { id: "done", title: "完成", type: "end" },
     });
     const result = applySafeAuditFixes(input);
-    expect(result.draft.nodes.orphan).toBeUndefined();
+    expect(result.draft.nodes.orphan).toBeDefined();
     expect(result.draft.nodes.work.next).toBeTruthy();
     expect(result.draft.nodes.condition.condition?.defaultNext).toBeTruthy();
+  });
+
+  it("不会按标题猜测并删除仍在业务路径中的节点", () => {
+    const input = draft({
+      start: { id: "start", title: "开始", type: "trigger", next: "assistant_step" },
+      assistant_step: { id: "assistant_step", title: "客户服务助手", type: "ai", next: "done" },
+      done: { id: "done", title: "完成", type: "end" },
+    });
+
+    const result = applySafeAuditFixes(input);
+
+    expect(result.draft.nodes.assistant_step).toBeDefined();
+    expect(result.draft.nodes.start.next).toBe("assistant_step");
+    expect(result.applied.some((item) => item.includes("移除误识别"))).toBe(false);
   });
 
   it("业务证据与真实目标问题只记录为跳过，不凭空伪造", () => {
