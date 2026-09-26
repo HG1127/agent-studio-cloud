@@ -35,7 +35,7 @@ export async function applyAuditFixesAction(agentId: string): Promise<AuditFixAc
       const inlineError = validateInlineWorkflows(draft.data);
       if (inlineError) return { kind: "inline-invalid" as const, error: inlineError };
       const result = applySafeAuditFixes(draft.data);
-      if (result.applied.length === 0) return { kind: "nothing-fixable" as const };
+      if (result.applied.length === 0) return { kind: "unchanged" as const, agentId: agent.id, result };
       await tx
         .update(workflowDefinitions)
         .set({ draft: bindWorkflowRootAgent(result.draft, agent), updatedAt: new Date() })
@@ -59,7 +59,6 @@ export async function applyAuditFixesAction(agentId: string): Promise<AuditFixAc
     if (outcome.kind === "definition-missing") return { ok: false, error: "找不到这个助手的流程草稿" };
     if (outcome.kind === "definition-invalid") return { ok: false, error: "流程草稿格式不完整，无法自动修复" };
     if (outcome.kind === "inline-invalid") return { ok: false, error: `流程草稿无法执行：${outcome.error}` };
-    if (outcome.kind === "nothing-fixable") return { ok: false, error: "没有可安全自动修复的问题，其余问题需要人工判断" };
     revalidatePath(`/agents/${outcome.agentId}`);
     return {
       ok: true,
@@ -67,6 +66,7 @@ export async function applyAuditFixesAction(agentId: string): Promise<AuditFixAc
       skipped: outcome.result.skipped,
       remainingCritical: outcome.result.remainingCritical,
       remainingWarnings: outcome.result.remainingWarnings,
+      ...(outcome.kind === "unchanged" ? { unchanged: true } : {}),
     };
   } catch (error) {
     console.error("自动修复流程失败", safeErrorForLog(error));

@@ -227,4 +227,22 @@ describe("助手与流程并发写入", () => {
     expect(mocks.updates[0].value.draft).toMatchObject({ rootAgent: { id: AGENT_ID, name: "需要修复的助手", role: "已修复" } });
     expect(mocks.inserts).toHaveLength(1);
   });
+
+  it("响应丢失后重试已完成的自动修复时复用当前草稿", async () => {
+    mocks.selectRows = [[{ id: AGENT_ID, name: "已经修复的助手" }], [{ id: DEFINITION_ID, draft }]];
+    mocks.applySafeAuditFixes.mockReturnValue({
+      draft,
+      applied: [],
+      skipped: ["需要人工处理"],
+      remainingCritical: 1,
+      remainingWarnings: 0,
+    });
+
+    const result = await applyAuditFixesAction(AGENT_ID);
+
+    expect(result).toMatchObject({ ok: true, applied: [], unchanged: true, remainingCritical: 1 });
+    expect(mocks.updates).toHaveLength(0);
+    expect(mocks.inserts).toHaveLength(0);
+    expect(mocks.revalidatePath).toHaveBeenCalledWith(`/agents/${AGENT_ID}`);
+  });
 });

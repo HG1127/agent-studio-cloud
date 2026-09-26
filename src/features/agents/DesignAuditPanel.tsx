@@ -38,7 +38,9 @@ export function DesignAuditPanel({ agentId, score, issues }: { agentId: string; 
         try {
           const result = await applyAuditFixesAction(agentId);
           if (result.ok) {
-            setNotice(`已完成 ${result.applied.length} 项安全修复；仍有 ${result.remainingCritical} 个阻塞问题需要人工处理。`);
+            setNotice(result.unchanged
+              ? `流程已经处于自动修复后的状态；仍有 ${result.remainingCritical} 个阻塞问题需要人工处理。`
+              : `已完成 ${result.applied.length} 项安全修复；仍有 ${result.remainingCritical} 个阻塞问题需要人工处理。`);
             router.refresh();
           } else setError(result.error);
         } catch {

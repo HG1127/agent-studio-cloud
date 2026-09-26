@@ -28,6 +28,21 @@ describe("设计检查面板", () => {
     expect(refreshMock).toHaveBeenCalledTimes(1);
   });
 
+  it("响应丢失后重试已完成的修复时提示复用当前状态", async () => {
+    actionMock.mockResolvedValue({
+      ok: true,
+      applied: [],
+      skipped: ["需要人工处理"],
+      remainingCritical: 1,
+      remainingWarnings: 0,
+      unchanged: true,
+    });
+    render(<DesignAuditPanel agentId="00000000-0000-4000-8000-000000000081" score={76} issues={[issue]} />);
+    await userEvent.click(screen.getByRole("button", { name: "应用安全修复" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("流程已经处于自动修复后的状态");
+    expect(refreshMock).toHaveBeenCalledOnce();
+  });
+
   it("没有问题时显示通过且不展示修复按钮", () => {
     render(<DesignAuditPanel agentId="00000000-0000-4000-8000-000000000081" score={100} issues={[]} />);
     expect(screen.getByText("当前设计检查通过。")).toBeInTheDocument();

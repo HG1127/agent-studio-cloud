@@ -16,6 +16,7 @@ export const AuditFixActionResult = z.discriminatedUnion("ok", [
     skipped: z.array(z.string()),
     remainingCritical: z.number().int().nonnegative(),
     remainingWarnings: z.number().int().nonnegative(),
+    unchanged: z.boolean().optional(),
   }),
   z.object({ ok: z.literal(false), error: z.string() }),
 ]);
