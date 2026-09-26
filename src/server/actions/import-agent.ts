@@ -12,6 +12,8 @@ import { auditEventValues } from "@/server/audit/event-values";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { agentIdentityMatches } from "@/server/domain/agent-identity";
 import { workflowKnowledgeSourceIds } from "@/server/domain/runtime/knowledge-snapshot";
+import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding";
+import { getToolRegistration } from "@/server/tools/tool-registry";
 
 export async function importAgentAction(input: unknown, requestId: string): Promise<ImportAgentResult> {
   if (!z.string().uuid().safeParse(requestId).success) return { ok: false, error: "导入请求信息不正确，请重新选择文件" };
@@ -84,6 +86,10 @@ export async function importAgentAction(input: unknown, requestId: string): Prom
         agentName: imported.name,
         validCollaborationKeys: new Set(validRows.map((row) => `${row.agentId}:${row.versionId}`)),
         validKnowledgeSourceIds: new Set(validKnowledgeRows.map((row) => row.id)),
+        isToolBindingValid: (tool) => {
+          const registration = getToolRegistration(tool.registryToolId);
+          return Boolean(registration && !toolRegistrationCompatibilityIssue(tool, registration));
+        },
       });
       await tx.insert(workflowDefinitions).values({
         agentId: created.id,

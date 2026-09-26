@@ -477,6 +477,33 @@ describe("NodeInspector", () => {
     }));
   });
 
+  it("导入工具失效时要求重新选择且不降级成演示成功", async () => {
+    const onNodeChange = vi.fn();
+    const user = userEvent.setup();
+    const unavailable = WorkflowNode.parse({
+      ...TOOL_NODE,
+      tool: {
+        ...TOOL_NODE.tool!,
+        registryToolId: null,
+        protocol: "unbound",
+        unresolved: true,
+      },
+    });
+    const option = {
+      id: "crm.update", name: "客户系统", description: "更新客户跟进状态", action: "update_customer",
+      scope: "customer.write", risk: "medium" as const, inputSchema: { type: "object" }, outputSchema: { type: "object" },
+    };
+    render(<NodeInspector node={unavailable} toolOptions={[option]}
+      onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
+
+    expect(screen.getByText("导入文件中的业务工具在当前环境不可用，请重新选择。")).toBeVisible();
+    expect(screen.getByLabelText("业务工具")).toHaveValue("");
+    await user.selectOptions(screen.getByLabelText("业务工具"), option.id);
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      tool: expect.objectContaining({ registryToolId: option.id, unresolved: false }),
+    }));
+  });
+
   it("工具节点可以设置总尝试次数与失败等待时间", () => {
     const onNodeChange = vi.fn();
     const { rerender } = render(<NodeInspector node={TOOL_NODE} onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);

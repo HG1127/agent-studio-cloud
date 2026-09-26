@@ -1,6 +1,6 @@
 import { AgentImportFile } from "@/contracts/agent";
 import type { AgentManifest } from "@/contracts/manifest";
-import type { WorkflowDraft } from "@/contracts/workflow";
+import type { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
 import { validateOutputContract } from "@/server/domain/runtime/output-contract";
 import { validateWaitContracts } from "@/server/domain/runtime/wait-contract";
 import { validateWorkflowRoutes } from "@/server/domain/runtime/workflow-routes";
@@ -130,31 +130,48 @@ function rebindKnowledgeNode(node: Record<string, unknown>, validSourceIds: Read
   };
 }
 
+type ToolSnapshot = NonNullable<WorkflowNode["tool"]>;
+
+function rebindToolNode(
+  node: Record<string, unknown>,
+  isToolBindingValid: (tool: ToolSnapshot) => boolean,
+): Record<string, unknown> {
+  if (node.type !== "tool" || !isRecord(node.tool)) return node;
+  const tool = node.tool as ToolSnapshot;
+  if (tool.registryToolId === "demo" || tool.protocol === "demo" || isToolBindingValid(tool)) return node;
+  return {
+    ...node,
+    tool: { ...node.tool, registryToolId: null, protocol: "unbound", unresolved: true },
+  };
+}
+
 function rebindPortableNode(
   node: Record<string, unknown>,
   validKeys: ReadonlySet<string>,
   validSourceIds: ReadonlySet<string>,
+  isToolBindingValid: (tool: ToolSnapshot) => boolean,
 ): Record<string, unknown> {
-  return rebindKnowledgeNode(rebindCollaborationNode(node, validKeys), validSourceIds);
+  return rebindKnowledgeNode(rebindToolNode(rebindCollaborationNode(node, validKeys), isToolBindingValid), validSourceIds);
 }
 
 function rebindTopLevelNode(
   node: Record<string, unknown>,
   validKeys: ReadonlySet<string>,
   validSourceIds: ReadonlySet<string>,
+  isToolBindingValid: (tool: ToolSnapshot) => boolean,
 ): Record<string, unknown> {
-  const rebound = rebindPortableNode(node, validKeys, validSourceIds);
+  const rebound = rebindPortableNode(node, validKeys, validSourceIds, isToolBindingValid);
   if (isRecord(node.subflow) && Array.isArray(node.subflow.steps)) {
     rebound.subflow = {
       ...node.subflow,
-      steps: node.subflow.steps.map((step) => isRecord(step) ? rebindPortableNode(step, validKeys, validSourceIds) : step),
+      steps: node.subflow.steps.map((step) => isRecord(step) ? rebindPortableNode(step, validKeys, validSourceIds, isToolBindingValid) : step),
     };
   }
   if (isRecord(node.parallel) && Array.isArray(node.parallel.branches)) {
     rebound.parallel = {
       ...node.parallel,
       branches: node.parallel.branches.map((branch) => isRecord(branch) && Array.isArray(branch.steps)
-        ? { ...branch, steps: branch.steps.map((step) => isRecord(step) ? rebindPortableNode(step, validKeys, validSourceIds) : step) }
+        ? { ...branch, steps: branch.steps.map((step) => isRecord(step) ? rebindPortableNode(step, validKeys, validSourceIds, isToolBindingValid) : step) }
         : branch),
     };
   }
@@ -167,9 +184,15 @@ export function rebindImportedWorkflow(args: {
   agentName: string;
   validCollaborationKeys: ReadonlySet<string>;
   validKnowledgeSourceIds: ReadonlySet<string>;
+  isToolBindingValid: (tool: ToolSnapshot) => boolean;
 }): WorkflowDraft {
   const nodes = Object.fromEntries(Object.entries(args.workflow.nodes).map(
-    ([id, node]) => [id, rebindTopLevelNode(node, args.validCollaborationKeys, args.validKnowledgeSourceIds)],
+    ([id, node]) => [id, rebindTopLevelNode(
+      node,
+      args.validCollaborationKeys,
+      args.validKnowledgeSourceIds,
+      args.isToolBindingValid,
+    )],
   )) as WorkflowDraft["nodes"];
   return bindWorkflowRootAgent({
     ...args.workflow,

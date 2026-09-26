@@ -169,15 +169,17 @@ function InlineStepEditor({ label, steps, index, toolOptions, agentTargets, know
       className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
     {removable ? <button type="button" aria-label={`删除${label}`} onClick={onDelete} className="text-xs text-red-600">删除</button> : <span />}
     {type === "tool" ? <div className="grid gap-2 md:col-span-4 md:grid-cols-3">
-      <select aria-label={`${label} 业务工具`} value={String(tool?.registryToolId ?? "demo")}
+      <select aria-label={`${label} 业务工具`} value={tool?.unresolved === true ? "" : String(tool?.registryToolId ?? "demo")}
         onChange={(event) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
           ...item,
           tool: inlineToolSpec(event.target.value, String(tool?.action ?? "demo"), toolOptions),
         } : item))}
         className="rounded-md border border-gray-300 px-2 py-1.5 text-xs">
+        <option value="" disabled>请选择业务工具</option>
         <option value="demo">演示工具（不连接业务系统）</option>
         {toolOptions.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
       </select>
+      {tool?.unresolved === true ? <p className="text-xs text-amber-700 md:col-span-3">导入文件中的业务工具在当前环境不可用，请重新选择。</p> : null}
       <label className="flex items-center gap-2 text-xs text-gray-600">最多尝试
         <input aria-label={`${label} 最多尝试次数`} type="number" min={1} max={8} value={maxAttempts}
           onChange={(event) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
@@ -368,7 +370,7 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
           <label htmlFor="node-tool-target" className="text-sm font-medium">业务工具</label>
           <select
             id="node-tool-target"
-            value={node.tool?.registryToolId ?? ""}
+            value={node.tool?.unresolved === true ? "" : node.tool?.registryToolId ?? ""}
             onChange={(event) => {
               const selected = toolOptions.find((item) => item.id === event.target.value);
               onNodeChange({
@@ -394,9 +396,11 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
             }}
             className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
           >
+            <option value="" disabled>请选择业务工具</option>
             <option value="demo">演示工具（不连接业务系统）</option>
             {toolOptions.map((tool) => <option key={tool.id} value={tool.id}>{tool.name}</option>)}
           </select>
+          {node.tool?.unresolved === true ? <p className="text-xs text-amber-700">导入文件中的业务工具在当前环境不可用，请重新选择。</p> : null}
           {toolOptions.length === 0 ? <p className="text-xs text-gray-500">服务端还没有配置可用的业务工具</p> : null}
           {toolOptions.find((tool) => tool.id === node.tool?.registryToolId)?.description ? (
             <p className="text-xs text-gray-500">{toolOptions.find((tool) => tool.id === node.tool?.registryToolId)?.description}</p>

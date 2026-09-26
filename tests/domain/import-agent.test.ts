@@ -157,6 +157,7 @@ describe("助手导入格式归一化", () => {
       agentName: "导入副本",
       validCollaborationKeys: new Set(["target-a:version-a"]),
       validKnowledgeSourceIds: new Set(),
+      isToolBindingValid: () => true,
     });
     expect(rebound).toMatchObject({ versionId: null, rootAgent: { id: "new-agent", name: "导入副本" } });
     expect(rebound.nodes.call.agentCall).toMatchObject({ targetAgentId: "target-a", versionId: "version-a" });
@@ -215,6 +216,7 @@ describe("助手导入格式归一化", () => {
       agentName: "导入副本",
       validCollaborationKeys: new Set(["target-a:version-a"]),
       validKnowledgeSourceIds: new Set(),
+      isToolBindingValid: () => true,
     });
     const subflowSteps = rebound.nodes.group.subflow?.steps as Array<Record<string, unknown>>;
     const parallelSteps = rebound.nodes.parallel.parallel?.branches[0].steps as Array<Record<string, unknown>>;
@@ -247,11 +249,52 @@ describe("助手导入格式归一化", () => {
       agentName: "导入副本",
       validCollaborationKeys: new Set(),
       validKnowledgeSourceIds: new Set([available]),
+      isToolBindingValid: () => true,
     });
 
     expect(rebound.nodes.knowledge.knowledge).toMatchObject({
       sourceIds: [available],
       selectionRequired: true,
     });
+  });
+
+  it("清理当前环境不可用的顶层和内嵌业务工具绑定", () => {
+    const externalTool = {
+      connector: "客户系统",
+      action: "update_customer",
+      scope: "customer.write",
+      risk: "medium" as const,
+      registryToolId: "crm.update",
+      protocol: "http-json",
+      inputSchema: { type: "object" },
+      outputSchema: { type: "object" },
+    };
+    const withTools = WorkflowDraft.parse({
+      ...workflow,
+      nodes: {
+        start: { id: "start", title: "开始", type: "trigger", next: "tool" },
+        tool: { id: "tool", title: "更新客户", type: "tool", tool: externalTool, next: "group" },
+        group: {
+          id: "group",
+          title: "一组步骤",
+          type: "subflow",
+          subflow: { name: "工具处理", steps: [{ id: "nested", title: "再次更新", type: "tool", tool: externalTool }] },
+          next: "done",
+        },
+        done: { id: "done", title: "结束", type: "end" },
+      },
+    });
+
+    const rebound = rebindImportedWorkflow({
+      workflow: withTools,
+      agentId: "new-agent",
+      agentName: "导入副本",
+      validCollaborationKeys: new Set(),
+      validKnowledgeSourceIds: new Set(),
+      isToolBindingValid: () => false,
+    });
+    const nested = rebound.nodes.group.subflow?.steps[0] as Record<string, unknown>;
+    expect(rebound.nodes.tool.tool).toMatchObject({ registryToolId: null, protocol: "unbound", unresolved: true });
+    expect(nested.tool).toMatchObject({ registryToolId: null, protocol: "unbound", unresolved: true });
   });
 });
