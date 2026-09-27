@@ -19,6 +19,7 @@ export const RunFeedbackView = z.object({
   runId: z.string().uuid(),
   rating: RunFeedbackRating,
   note: z.string().nullable(),
+  // 历史关联保留在数据库；面向界面只返回启用中的验收样例 ID。
   evaluationCaseId: z.string().uuid().nullable(),
   updatedAt: z.string(),
 });
@@ -31,6 +32,7 @@ export const RunImprovementFeedbackView = z.object({
   agentName: z.string(),
   agentArchived: z.boolean(),
   note: z.string(),
+  // 归档样例不算已加入验收，便于从原反馈恢复同一份样例。
   evaluationCaseId: z.string().uuid().nullable(),
   updatedAt: z.string(),
 });
