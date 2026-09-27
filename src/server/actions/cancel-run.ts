@@ -1,7 +1,6 @@
 "use server";
 
 import { and, eq, inArray, like, or, sql } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { CancelRunResult } from "@/contracts/run";
 import { approvals, runs } from "@/db/schema";
@@ -13,6 +12,7 @@ import { isRunStartLeaseExpired, RUN_START_LEASE_KEY } from "@/server/services/r
 import { cancelWorkflowRunIfPresent } from "@/server/services/cancel-workflow-run";
 import { appendTrace } from "@/server/steps/trace-step";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
 const LIVE_STATUSES = ["queued", "running", "waiting_approval", "waiting_event"];
 
@@ -95,9 +95,11 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
       const rootRunId = await recoverCancelledCollaboration(runId);
       await appendCancellationTrace(rootRunId);
       await reconcileTerminalEvaluationRun(rootRunId);
-      revalidatePath(`/runs/${runId}`);
-      if (rootRunId !== runId) revalidatePath(`/runs/${rootRunId}`);
-      revalidatePath("/runs");
+      revalidatePathsAfterCommit([
+        `/runs/${runId}`,
+        ...(rootRunId !== runId ? [`/runs/${rootRunId}`] : []),
+        "/runs",
+      ], "run-cancel-resume");
       return { ok: true };
     }
     if (!LIVE_STATUSES.includes(run.status)) return { ok: false, error: "这次运行已经结束，无法取消" };
@@ -204,9 +206,11 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
       const recoveredRootRunId = await recoverCancelledCollaboration(rootRunId);
       await appendCancellationTrace(recoveredRootRunId);
       await reconcileTerminalEvaluationRun(recoveredRootRunId);
-      revalidatePath(`/runs/${runId}`);
-      if (recoveredRootRunId !== runId) revalidatePath(`/runs/${recoveredRootRunId}`);
-      revalidatePath("/runs");
+      revalidatePathsAfterCommit([
+        `/runs/${runId}`,
+        ...(recoveredRootRunId !== runId ? [`/runs/${recoveredRootRunId}`] : []),
+        "/runs",
+      ], "run-cancel-recover");
       return { ok: true };
     }
     // 先提交数据库终态，再停止执行引擎。即使平台取消接口瞬时失败，后续步骤也会被终态守卫拒绝，
@@ -217,9 +221,11 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
     ]);
     await appendCancellationTrace(rootRunId);
     await completeEvaluationForRun(rootRunId, null, "运行已取消");
-    revalidatePath(`/runs/${runId}`);
-    if (rootRunId !== runId) revalidatePath(`/runs/${rootRunId}`);
-    revalidatePath("/runs");
+    revalidatePathsAfterCommit([
+      `/runs/${runId}`,
+      ...(rootRunId !== runId ? [`/runs/${rootRunId}`] : []),
+      "/runs",
+    ], "run-cancel");
     return { ok: true };
   } catch (error) {
     console.error("取消运行失败：", safeErrorForLog(error));

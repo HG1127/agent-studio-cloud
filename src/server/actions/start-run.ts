@@ -1,8 +1,8 @@
 "use server";
-import { revalidatePath } from "next/cache";
 import { RunStartInput, type StartRunResult } from "@/contracts/run";
 import { validationMessage } from "@/server/domain/validation-message";
 import { startRunCore } from "@/server/services/start-run-core";
+import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
 export async function startRunAction(input: RunStartInput): Promise<StartRunResult> {
   const parsedInput = RunStartInput.safeParse(input);
@@ -16,8 +16,7 @@ export async function startRunAction(input: RunStartInput): Promise<StartRunResu
     sourceKey: parsedInput.data.requestId ? `manual:${parsedInput.data.requestId}` : null,
   });
   if (result.ok) {
-    revalidatePath(`/agents/${parsedInput.data.agentId}`);
-    revalidatePath("/agents");
+    revalidatePathsAfterCommit([`/agents/${parsedInput.data.agentId}`, "/agents"], "run-start");
   }
   return result;
 }

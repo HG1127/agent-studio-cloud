@@ -65,6 +65,19 @@ describe("取消运行幂等性", () => {
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/runs");
   });
 
+  it("取消已落库后缓存刷新失败仍返回成功并尝试刷新列表", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.selectedRun = {
+      status: "cancelled", workflowRunId: "workflow-1", sourceType: "manual",
+      sourceKey: null, stepStates: {}, updatedAt: new Date(),
+    };
+    mocks.revalidatePath.mockImplementationOnce(() => { throw new Error("缓存暂时不可用"); });
+
+    await expect(cancelRunAction(RUN_ID)).resolves.toEqual({ ok: true });
+    expect(mocks.revalidatePath.mock.calls.map(([path]) => path)).toEqual([`/runs/${RUN_ID}`, "/runs"]);
+    vi.restoreAllMocks();
+  });
+
   it("已经正常完成的运行仍然不能取消", async () => {
     mocks.selectedRun = {
       status: "completed",

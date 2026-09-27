@@ -74,6 +74,24 @@ describe("已记录确认的运行恢复", () => {
     expect(mocks.updates).toBe(0);
   });
 
+  it("继续已保存的确认后缓存刷新失败仍返回成功", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.rows = [
+      [{ id: APPROVAL_ID, status: "approved", note: null }],
+      [{ agentId: AGENT_ID, status: "waiting_approval" }],
+    ];
+    mocks.revalidatePath.mockImplementationOnce(() => { throw new Error("缓存暂时不可用"); });
+
+    await expect(decideApprovalAction(RUN_ID, APPROVAL_ID, {
+      decision: "approved", resumeOnly: true,
+    })).resolves.toEqual({ ok: true });
+
+    expect(mocks.resumeHook).toHaveBeenCalledOnce();
+    expect(mocks.revalidatePath.mock.calls.map(([path]) => path)).toEqual([
+      `/runs/${RUN_ID}`, "/runs", "/", `/agents/${AGENT_ID}`, "/agents",
+    ]);
+  });
+
   it("旧页面重复提交相同决定时直接继续已保存的确认", async () => {
     mocks.rows = [
       [{ id: APPROVAL_ID, status: "approved", note: "同意执行" }],
@@ -145,6 +163,25 @@ describe("已记录确认的运行恢复", () => {
       decision: "approved",
       note: "同意，[已隐藏敏感信息]",
     });
+  });
+
+  it("新确认已保存并恢复后缓存刷新失败不误报确认失败", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.rows = [
+      [{ id: APPROVAL_ID, status: "pending", note: null }],
+      [{ agentId: AGENT_ID, status: "waiting_approval" }],
+      [{ status: "waiting_approval" }],
+    ];
+    mocks.returningRows = [[{ id: APPROVAL_ID }]];
+    mocks.revalidatePath.mockImplementationOnce(() => { throw new Error("缓存暂时不可用"); });
+
+    await expect(decideApprovalAction(RUN_ID, APPROVAL_ID, { decision: "approved" }))
+      .resolves.toEqual({ ok: true });
+    expect(mocks.updates).toBe(1);
+    expect(mocks.resumeHook).toHaveBeenCalledOnce();
+    expect(mocks.revalidatePath.mock.calls.map(([path]) => path)).toEqual([
+      `/runs/${RUN_ID}`, "/runs", "/", `/agents/${AGENT_ID}`, "/agents",
+    ]);
   });
 
   it("恢复失败时保留原决定供稍后重试", async () => {
