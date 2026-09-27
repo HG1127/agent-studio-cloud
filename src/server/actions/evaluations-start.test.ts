@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   revalidatePath: vi.fn(),
   updates: 0,
   updateError: false,
+  existingRun: null as { id: string; status: string } | null,
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
@@ -21,6 +22,11 @@ vi.mock("@/server/services/evaluation-state", () => ({
 }));
 vi.mock("@/lib/db", () => ({
   db: {
+    select: () => ({
+      from: () => ({
+        where: () => ({ limit: async () => mocks.existingRun ? [mocks.existingRun] : [] }),
+      }),
+    }),
     update: () => ({
       set: () => ({
         where: async () => {
@@ -49,6 +55,7 @@ beforeEach(() => {
   mocks.revalidatePath.mockReset();
   mocks.updates = 0;
   mocks.updateError = false;
+  mocks.existingRun = null;
 });
 
 describe("批量启动自动验收", () => {
@@ -121,6 +128,38 @@ describe("批量启动自动验收", () => {
     expect(mocks.markFailure).not.toHaveBeenCalled();
     expect(mocks.updates).toBe(1);
     expect(mocks.reconcileSummary).toHaveBeenCalledWith(EVALUATION_ID);
+  });
+
+  it("启动返回失败但运行已经存在时按真实运行对账", async () => {
+    const testCase = { id: "00000000-0000-4000-8000-0000000000b5", input: {} };
+    const runId = "00000000-0000-4000-8000-0000000000b6";
+    mocks.prepare.mockResolvedValue({
+      ok: true, evaluationId: EVALUATION_ID, versionId: VERSION_ID, cases: [testCase], resumed: true,
+    });
+    mocks.startRun.mockResolvedValue({ ok: false, error: "运行启动已由新的请求接管" });
+    mocks.existingRun = { id: runId, status: "completed" };
+
+    await expect(startEvaluationAction(AGENT_ID)).resolves.toEqual({ ok: true });
+
+    expect(mocks.markFailure).not.toHaveBeenCalled();
+    expect(mocks.reconcile).toHaveBeenCalledWith(runId);
+    expect(mocks.updates).toBe(1);
+  });
+
+  it("已有排队运行未启动时保留样例，提示继续检查", async () => {
+    const testCase = { id: "00000000-0000-4000-8000-0000000000b7", input: {} };
+    mocks.prepare.mockResolvedValue({
+      ok: true, evaluationId: EVALUATION_ID, versionId: VERSION_ID, cases: [testCase], resumed: true,
+    });
+    mocks.startRun.mockRejectedValue(new Error("启动状态暂时未知"));
+    mocks.existingRun = { id: "00000000-0000-4000-8000-0000000000b8", status: "queued" };
+
+    await expect(startEvaluationAction(AGENT_ID)).resolves.toEqual({
+      ok: false, error: "部分验收结果尚未对账，请点击“检查并继续”重试",
+    });
+
+    expect(mocks.markFailure).not.toHaveBeenCalled();
+    expect(mocks.reconcile).toHaveBeenCalledWith(mocks.existingRun.id);
   });
 
   it("没有待补启样例时仍重新汇总已落定结果", async () => {

@@ -12,7 +12,7 @@ import {
   type EvaluationGenerateResult,
 } from "@/contracts/evaluation";
 import { AgentManifest } from "@/contracts/manifest";
-import { agentVersions, agents, auditEvents, evaluationCaseResults, evaluationCases, evaluationRuns } from "@/db/schema";
+import { agentVersions, agents, auditEvents, evaluationCaseResults, evaluationCases, evaluationRuns, runs } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { markEvaluationStartFailure, reconcileEvaluationSummary, reconcileTerminalEvaluationRun } from "@/server/services/evaluation-state";
@@ -315,40 +315,54 @@ export async function startEvaluationAction(agentId: string, requestId?: string)
     if (!prepared.ok) return prepared;
     let needsRetry = false;
     await runBounded(prepared.cases, EVALUATION_START_CONCURRENCY, async (testCase) => {
-      let started: Awaited<ReturnType<typeof startRunCore>>;
+      const sourceKey = `evaluation:${prepared.evaluationId}:${testCase.id}`;
+      let started: Awaited<ReturnType<typeof startRunCore>> | null = null;
       try {
         started = await startRunCore({
           agentId,
           versionId: prepared.versionId,
           input: testCase.input,
           sourceType: "evaluation",
-          sourceKey: `evaluation:${prepared.evaluationId}:${testCase.id}`,
+          sourceKey,
         });
       } catch (error) {
         console.error("启动单条验收运行失败", safeErrorForLog(error));
-        // 启动异常可能发生在运行已创建之后；保留待处理状态，靠相同 sourceKey 幂等补启。
-        needsRetry = true;
-        return;
       }
-      if (!started.ok) {
+      let runId = started?.ok ? started.runId : null;
+      if (!runId) {
         try {
-          await markEvaluationStartFailure(prepared.evaluationId, testCase.id, started.error, DEMO_WORKSPACE_ID);
+          const [existing] = await db
+            .select({ id: runs.id, status: runs.status })
+            .from(runs)
+            .where(and(eq(runs.workspaceId, DEMO_WORKSPACE_ID), eq(runs.sourceKey, sourceKey)))
+            .limit(1);
+          if (existing) {
+            runId = existing.id;
+            if (existing.status === "queued") needsRetry = true;
+          } else if (started && !started.ok) {
+            await markEvaluationStartFailure(prepared.evaluationId, testCase.id, started.error, DEMO_WORKSPACE_ID);
+            return;
+          } else {
+            // 启动异常可能发生在提交运行之后；保留待处理状态供同一 sourceKey 补启。
+            needsRetry = true;
+            return;
+          }
         } catch (error) {
-          console.error("记录验收启动失败时出错", safeErrorForLog(error));
+          console.error("核对验收启动状态时出错", safeErrorForLog(error));
           needsRetry = true;
+          return;
         }
-        return;
       }
       try {
         await db
           .update(evaluationCaseResults)
-          .set({ runId: started.runId, updatedAt: new Date() })
+          .set({ runId, updatedAt: new Date() })
           .where(and(
             eq(evaluationCaseResults.evaluationRunId, prepared.evaluationId),
             eq(evaluationCaseResults.evaluationCaseId, testCase.id),
             eq(evaluationCaseResults.workspaceId, DEMO_WORKSPACE_ID),
           ));
-        await reconcileTerminalEvaluationRun(started.runId);
+        await reconcileTerminalEvaluationRun(runId);
       } catch (error) {
         console.error("验收运行已启动但结果尚未对账", safeErrorForLog(error));
         needsRetry = true;
