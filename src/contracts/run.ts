@@ -41,13 +41,22 @@ function jsonObjectIssue(value: Record<string, unknown>, options: {
     if (!Array.isArray(item) && Object.getPrototypeOf(item) !== Object.prototype && Object.getPrototypeOf(item) !== null) {
       return `${options.label}只能包含普通对象和数组`;
     }
-    const itemEntries = Array.isArray(item) ? item.map((child, index) => [String(index), child] as const) : Object.entries(item);
-    if (itemEntries.some(([key]) => key.length > maxKeyLength)) return `${options.label}的字段名不能超过 ${maxKeyLength} 个字符`;
-    if (itemEntries.some(([key]) => RESERVED_INPUT_KEYS.has(key))) return `${options.label}不能使用保留字段名`;
-    const children = itemEntries.map(([, child]) => child);
-    entries += children.length;
+    if (Array.isArray(item)) {
+      entries += item.length;
+      if (entries > maxEntries) return `${options.label}最多包含 ${maxEntries} 个数据项`;
+      for (let index = item.length - 1; index >= 0; index -= 1) {
+        stack.push({ value: item[index], depth: current.depth + 1 });
+      }
+      continue;
+    }
+    const keys = Object.keys(item);
+    entries += keys.length;
     if (entries > maxEntries) return `${options.label}最多包含 ${maxEntries} 个数据项`;
-    for (const child of children) stack.push({ value: child, depth: current.depth + 1 });
+    for (const key of keys) {
+      if (key.length > maxKeyLength) return `${options.label}的字段名不能超过 ${maxKeyLength} 个字符`;
+      if (RESERVED_INPUT_KEYS.has(key)) return `${options.label}不能使用保留字段名`;
+      stack.push({ value: (item as Record<string, unknown>)[key], depth: current.depth + 1 });
+    }
   }
   const bytes = new TextEncoder().encode(JSON.stringify(value)).byteLength;
   if (bytes <= options.maxBytes) return null;

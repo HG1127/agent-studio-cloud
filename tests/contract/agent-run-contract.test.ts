@@ -158,4 +158,12 @@ describe("WaitEventPayload", () => {
     expect(WaitEventPayload.safeParse({ items: Array.from({ length: 2_001 }, (_, index) => index) }).success).toBe(false);
     expect(WaitEventPayload.safeParse(reserved).success).toBe(false);
   });
+
+  it("超大数组在展开内容前即被拒绝", () => {
+    const oversized = Array(1_000_000) as unknown[];
+    oversized.map = () => { throw new Error("不应为超限数组构造中间列表"); };
+
+    expect(WaitEventPayload.safeParse({ items: oversized }).success).toBe(false);
+    expect(RunStartInput.safeParse({ agentId: uuid, input: { items: oversized } }).success).toBe(false);
+  });
 });
