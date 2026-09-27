@@ -44,7 +44,7 @@ export async function saveWorkflowAction(
   const expectedRevision = expectedUpdatedAt === undefined || expectedUpdatedAt === null
     ? null
     : new Date(expectedUpdatedAt);
-  if (expectedRevision && Number.isNaN(expectedRevision.getTime())) {
+  if (!expectedRevision || Number.isNaN(expectedRevision.getTime())) {
     return { ok: false, error: "流程版本信息不正确，请刷新页面后重试" };
   }
   try {
@@ -66,7 +66,7 @@ export async function saveWorkflowAction(
         .limit(1);
       if (!definition) return "definition-missing" as const;
       const storedDraft = bindWorkflowRootAgent(parsed.data, { id: agentId, name: agent.name });
-      if (expectedRevision && definition.updatedAt.getTime() !== expectedRevision.getTime()) {
+      if (definition.updatedAt.getTime() !== expectedRevision.getTime()) {
         const currentDraft = WorkflowDraft.safeParse(definition.draft);
         if (currentDraft.success && stableStringify(currentDraft.data) === stableStringify(storedDraft)) {
           return { kind: "saved" as const, updatedAt: definition.updatedAt.toISOString() };

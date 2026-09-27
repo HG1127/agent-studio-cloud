@@ -124,9 +124,17 @@ describe("助手与流程并发写入", () => {
   it("已归档或不存在的助手不能被旧页面写回流程", async () => {
     mocks.selectRows = [[]];
 
-    const result = await saveWorkflowAction(AGENT_ID, draft);
+    const result = await saveWorkflowAction(AGENT_ID, draft, DEFINITION_UPDATED_AT.toISOString());
 
     expect(result).toEqual({ ok: false, error: "找不到这个助手，或助手已归档，请刷新页面后重试" });
+    expect(mocks.updates).toHaveLength(0);
+  });
+
+  it("缺少版本戳时拒绝保存，不能绕过旧页面冲突检查", async () => {
+    const result = await saveWorkflowAction(AGENT_ID, draft);
+
+    expect(result).toEqual({ ok: false, error: "流程版本信息不正确，请刷新页面后重试" });
+    expect(mocks.lock).not.toHaveBeenCalled();
     expect(mocks.updates).toHaveLength(0);
   });
 
