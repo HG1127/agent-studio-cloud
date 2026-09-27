@@ -86,6 +86,26 @@ describe("助手与流程并发写入", () => {
     expect(mocks.inserts).toHaveLength(1);
   });
 
+  it("流程已保存后缓存刷新失败不误报保存失败", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.selectRows = [[{ name: "当前名称" }], [{ id: DEFINITION_ID, updatedAt: DEFINITION_UPDATED_AT }]];
+    mocks.revalidatePath.mockImplementationOnce(() => {
+      throw new Error("缓存暂时不可用");
+    });
+
+    try {
+      const result = await saveWorkflowAction(AGENT_ID, draft, DEFINITION_UPDATED_AT.toISOString());
+
+      expect(result).toEqual({ ok: true, updatedAt: expect.any(String) });
+      expect(mocks.updates).toHaveLength(1);
+      expect(mocks.inserts).toHaveLength(1);
+      expect(mocks.revalidatePath).toHaveBeenCalledWith(`/agents/${AGENT_ID}`);
+      expect(log).toHaveBeenCalledOnce();
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it("旧页面不会覆盖其他页面刚保存的新草稿", async () => {
     mocks.selectRows = [[{ name: "当前名称" }], [{
       id: DEFINITION_ID,

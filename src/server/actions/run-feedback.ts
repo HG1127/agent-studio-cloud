@@ -1,7 +1,6 @@
 "use server";
 
 import { and, count, eq, isNotNull, isNull } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { MAX_EVALUATION_CASES, EvaluationCaseCreateInput } from "@/contracts/evaluation";
 import {
@@ -18,6 +17,7 @@ import { validationMessage } from "@/server/domain/validation-message";
 import { redactCredentialData, redactCredentialText } from "@/server/domain/security/redact-sensitive";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { runFeedbackMatches } from "@/server/domain/run-feedback";
+import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
 export async function saveRunFeedbackAction(input: unknown): Promise<RunFeedbackSaveResult> {
   const parsed = RunFeedbackSaveInput.safeParse(input);
@@ -78,11 +78,7 @@ export async function saveRunFeedbackAction(input: unknown): Promise<RunFeedback
     });
     if (outcome.kind === "missing") return { ok: false, error: "找不到这次运行，请刷新页面后重试" };
     if (outcome.kind === "not-completed") return { ok: false, error: "运行完成后才能评价结果" };
-    try {
-      revalidatePath(`/runs/${parsed.data.runId}`);
-    } catch (error) {
-      console.error("运行反馈已保存但页面刷新失败", safeErrorForLog(error));
-    }
+    revalidatePathsAfterCommit([`/runs/${parsed.data.runId}`], "run-feedback-save");
     return { ok: true, feedback: outcome.feedback };
   } catch (error) {
     console.error("保存运行反馈失败", safeErrorForLog(error));
@@ -199,9 +195,7 @@ export async function createRegressionCaseFromRunFeedbackAction(runId: string): 
     if (outcome.kind === "limit") return { ok: false, error: `启用中的验收样例已达到 ${MAX_EVALUATION_CASES} 条上限` };
     if (outcome.kind === "changed") return { ok: false, error: "验收样例状态已经变化，请刷新页面后重试" };
     if (outcome.kind === "input-invalid") return { ok: false, error: "这次运行的历史输入不符合当前验收格式，无法自动加入" };
-    revalidatePath(`/runs/${runId}`);
-    revalidatePath(`/agents/${outcome.agentId}`);
-    revalidatePath("/memory");
+    revalidatePathsAfterCommit([`/runs/${runId}`, `/agents/${outcome.agentId}`, "/memory"], "run-feedback-regression");
     return { ok: true, evaluationCaseId: outcome.id, created: outcome.created };
   } catch (error) {
     console.error("从运行反馈创建验收样例失败", safeErrorForLog(error));

@@ -178,6 +178,20 @@ describe("批量启动自动验收", () => {
     expect(mocks.reconcileSummary).toHaveBeenCalledWith(EVALUATION_ID);
   });
 
+  it("验收已完成对账后缓存刷新失败不误报启动失败", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.prepare.mockResolvedValue({
+      ok: true, evaluationId: EVALUATION_ID, versionId: VERSION_ID, cases: [], resumed: true,
+    });
+    mocks.revalidatePath.mockImplementationOnce(() => { throw new Error("缓存暂时不可用"); });
+
+    await expect(startEvaluationAction(AGENT_ID)).resolves.toEqual({ ok: true });
+
+    expect(mocks.revalidatePath.mock.calls.map(([path]) => path)).toEqual([`/agents/${AGENT_ID}`, "/runs"]);
+    expect(log).toHaveBeenCalledOnce();
+    log.mockRestore();
+  });
+
   it("拒绝无效请求标识且不创建验收批次", async () => {
     await expect(startEvaluationAction(AGENT_ID, "bad")).resolves.toEqual({
       ok: false,

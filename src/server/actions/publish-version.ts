@@ -1,7 +1,6 @@
 "use server";
 
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { VersionSummary, type PublishVersionResult } from "@/contracts/version";
 import { PublishModelSelection } from "@/contracts/connections";
@@ -27,6 +26,7 @@ import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { getToolRegistration } from "@/server/tools/tool-registry";
 import { workflowToolRegistrationIssue } from "@/server/tools/tool-binding";
 import { isDuplicatePublishedVersion } from "@/server/domain/publish-idempotency";
+import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
 export async function publishVersionAction(agentId: string, modelSelection?: PublishModelSelection): Promise<PublishVersionResult> {
   if (!z.string().uuid().safeParse(agentId).success) {
@@ -319,7 +319,7 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
         if (publishOutcome.kind === "collaboration_invalid") {
           return { ok: false, error: `${publishOutcome.error}，请调整协作步骤后再发布`, issues: [] };
         }
-        revalidatePath(`/agents/${agentId}`);
+        revalidatePathsAfterCommit([`/agents/${agentId}`], "version-publish");
         return { ok: true, release: publishOutcome.release, version: publishOutcome.version, exempted: exempted.map((issue) => ({ title: issue.title })) };
       } catch (error) {
         if (!isUniqueViolation(error)) throw error;
