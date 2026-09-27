@@ -62,9 +62,16 @@ describe("运行模型错误脱敏", () => {
       ...manifest,
       resourceSelection: { ...manifest.resourceSelection, model: { ...manifest.resourceSelection.model, connectionId: "00000000-0000-4000-8000-000000000002" } },
     });
-    await expect(runModelStep({
-      runId: "00000000-0000-4000-8000-000000000001", node, manifest: withConnection, outputs: {}, input: {},
-    })).rejects.toThrow("读取模型连接失败，请稍后重试");
+    let thrown: unknown;
+    try {
+      await runModelStep({
+        runId: "00000000-0000-4000-8000-000000000001", node, manifest: withConnection, outputs: {}, input: {},
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(RetryableError);
+    expect((thrown as Error).message).toBe("读取模型连接失败，请稍后重试");
     expect(JSON.stringify(log.mock.calls)).not.toContain("private-connection-info");
     expect(JSON.stringify(mocks.persistStep.mock.calls)).not.toContain("private-connection-info");
     expect(mocks.generateText).not.toHaveBeenCalled();
