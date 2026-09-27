@@ -232,8 +232,14 @@ export async function launchClaimedRun(args: {
       await workflowRun.cancel();
     } catch (cancelError) {
       console.error("取消失联的工作流失败", safeErrorForLog(cancelError));
+      return { ok: true, runId: args.runId };
     }
-    await markRunStartFailed(args.runId, args.lease.token);
+    try {
+      await markRunStartFailed(args.runId, args.lease.token);
+    } catch (markError) {
+      console.error("记录运行启动失败状态时出错", safeErrorForLog(markError));
+      return { ok: true, runId: args.runId };
+    }
     return { ok: false, error: "运行启动失败，请稍后重试" };
   }
 }
@@ -320,15 +326,10 @@ export async function resumeQueuedRunStartCore(runId: string): Promise<StartRunR
     }
     return launchClaimedRun({ runId: candidate.id, manifest: manifest.data, input: input.data, lease });
   } catch (error) {
-    console.error("继续启动运行失败", safeErrorForLog(error));
-    if (claimedRun) {
-      try {
-        await markRunStartFailed(claimedRun.id, claimedRun.token, "继续启动失败，请稍后再次运行");
-      } catch (markError) {
-        console.error("记录继续启动失败状态时出错", safeErrorForLog(markError));
-      }
-    }
-    return { ok: false, error: "继续启动失败，请稍后重试" };
+    console.error("继续启动结果待确认", safeErrorForLog(error));
+    return claimedRun
+      ? { ok: true, runId: claimedRun.id }
+      : { ok: false, error: "继续启动失败，请稍后重试" };
   }
 }
 
