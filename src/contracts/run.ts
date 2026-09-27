@@ -22,15 +22,22 @@ function jsonObjectIssue(value: Record<string, unknown>, options: {
   const maxEntries = options.maxEntries ?? MAX_RUN_INPUT_ENTRIES;
   const maxKeys = options.maxKeys ?? MAX_RUN_INPUT_KEYS;
   const maxKeyLength = options.maxKeyLength ?? 100;
+  const sizeError = `${options.label}不能超过 ${options.maxBytes % 1024 === 0 ? `${options.maxBytes / 1024} KB` : `${options.maxBytes} 字节`}`;
   if (Object.keys(value).length > maxKeys) return `${options.label}最多包含 ${maxKeys} 个字段`;
   const stack: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
   const visited = new WeakSet<object>();
   let entries = 0;
+  let minimumContentChars = 0;
   while (stack.length > 0) {
     const current = stack.pop()!;
     if (current.depth > maxDepth) return `${options.label}最多嵌套 ${maxDepth} 层`;
     const item = current.value;
-    if (item === null || typeof item === "string" || typeof item === "boolean") continue;
+    if (typeof item === "string") {
+      minimumContentChars += item.length;
+      if (minimumContentChars > options.maxBytes) return sizeError;
+      continue;
+    }
+    if (item === null || typeof item === "boolean") continue;
     if (typeof item === "number") {
       if (!Number.isFinite(item)) return `${options.label}中的数字必须是有限值`;
       continue;
@@ -55,13 +62,14 @@ function jsonObjectIssue(value: Record<string, unknown>, options: {
     for (const key of keys) {
       if (key.length > maxKeyLength) return `${options.label}的字段名不能超过 ${maxKeyLength} 个字符`;
       if (RESERVED_INPUT_KEYS.has(key)) return `${options.label}不能使用保留字段名`;
+      minimumContentChars += key.length;
+      if (minimumContentChars > options.maxBytes) return sizeError;
       stack.push({ value: (item as Record<string, unknown>)[key], depth: current.depth + 1 });
     }
   }
   const bytes = new TextEncoder().encode(JSON.stringify(value)).byteLength;
   if (bytes <= options.maxBytes) return null;
-  const limit = options.maxBytes % 1024 === 0 ? `${options.maxBytes / 1024} KB` : `${options.maxBytes} 字节`;
-  return `${options.label}不能超过 ${limit}`;
+  return sizeError;
 }
 
 export const RunInputPayload = z.preprocess((value, ctx) => {
