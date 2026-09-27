@@ -1,4 +1,5 @@
 import { index, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import type { MemoryMetadata } from "@/contracts/memory";
 
 export const agentMemories = pgTable(
   "agent_memories",
@@ -10,7 +11,7 @@ export const agentMemories = pgTable(
     sourceRunId: uuid("source_run_id").notNull(),
     sourceNodeId: text("source_node_id").notNull(),
     content: text("content").notNull(),
-    metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+    metadata: jsonb("metadata").$type<MemoryMetadata>().notNull().default({}),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
