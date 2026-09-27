@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   listRunSteps: vi.fn(),
   listApprovals: vi.fn(),
   listTraceSince: vi.fn(),
+  getLatestTraceSeq: vi.fn(),
   getRunFeedback: vi.fn(),
 }));
 
@@ -15,7 +16,10 @@ vi.mock("@/server/queries/runs", () => ({
   listRunSteps: mocks.listRunSteps,
   listApprovals: mocks.listApprovals,
 }));
-vi.mock("@/server/queries/trace", () => ({ listTraceSince: mocks.listTraceSince }));
+vi.mock("@/server/queries/trace", () => ({
+  listTraceSince: mocks.listTraceSince,
+  getLatestTraceSeq: mocks.getLatestTraceSeq,
+}));
 vi.mock("@/server/queries/run-feedback", () => ({ getRunFeedback: mocks.getRunFeedback }));
 
 import { GET } from "./route";
@@ -58,6 +62,7 @@ beforeEach(() => {
         scannedCount: 2,
       }
     : { events: [], nextCursor: cursor, scannedCount: 0 });
+  mocks.getLatestTraceSeq.mockResolvedValue(2);
   mocks.listApprovals.mockResolvedValue([]);
   mocks.getRunFeedback.mockResolvedValue({
     id: "00000000-0000-4000-8000-000000000015",
@@ -95,7 +100,24 @@ describe("运行报告导出", () => {
       approvals: [],
       feedback: { rating: "needs_improvement", note: "缺少合同依据" },
     });
-    expect(mocks.listTraceSince).toHaveBeenLastCalledWith(RUN_ID, expect.any(String), 2);
+    expect(mocks.listTraceSince).toHaveBeenLastCalledWith(RUN_ID, expect.any(String), 2, 2);
+  });
+
+  it("下载期间只读取开始时已有的轨迹，不追入后续事件", async () => {
+    mocks.getLatestTraceSeq.mockResolvedValueOnce(1);
+    mocks.listTraceSince.mockImplementation(async (_runId: string, _workspaceId: string, cursor: number, maxSeq: number) => {
+      const rows = [
+        { id: "00000000-0000-4000-8000-000000000013", seq: 1, nodeId: null, kind: "run.started", level: "info", title: "已开始", detail: null, at: "2026-09-24T01:00:10.000Z" },
+        { id: "00000000-0000-4000-8000-000000000014", seq: 2, nodeId: null, kind: "step.succeeded", level: "info", title: "下载后新增", detail: null, at: "2026-09-24T01:00:20.000Z" },
+      ].filter((row) => row.seq > cursor && row.seq <= maxSeq);
+      return { events: rows, nextCursor: rows.at(-1)?.seq ?? cursor, scannedCount: rows.length };
+    });
+
+    const response = await GET(new Request("http://localhost"), { params: Promise.resolve({ runId: RUN_ID }) });
+    const report = await response.json();
+
+    expect(report.trace.map((event: { title: string }) => event.title)).toEqual(["已开始"]);
+    expect(mocks.listTraceSince.mock.calls.every((call) => call[3] === 1)).toBe(true);
   });
 
   it("大体积运行报告使用流式响应且内容保持完整", async () => {

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt } from "drizzle-orm";
+import { and, asc, desc, eq, gt, lte } from "drizzle-orm";
 import { z } from "zod";
 import { MAX_VISIBLE_TRACE_EVENTS, TraceEventView } from "@/contracts/run";
 import { traceEvents, type TraceEvent } from "@/db/schema";
@@ -57,17 +57,34 @@ export async function listRecentTrace(runId: string, workspaceId: string): Promi
   return rows.reverse().map(parseTraceEvent).filter((event): event is TraceEventView => event !== null);
 }
 
-// SSE 增量读：只取 seq 大于游标的事件（T11 裁定——SSE 走 DB 增量轮询，不消费 workflow 流）
+export async function getLatestTraceSeq(runId: string, workspaceId: string): Promise<number> {
+  if (!RUN_ID.safeParse(runId).success) return 0;
+  const [row] = await db
+    .select({ seq: traceEvents.seq })
+    .from(traceEvents)
+    .where(and(eq(traceEvents.runId, runId), eq(traceEvents.workspaceId, workspaceId)))
+    .orderBy(desc(traceEvents.seq))
+    .limit(1);
+  return row?.seq ?? 0;
+}
+
+// SSE 与报告导出都按 seq 增量读取；报告导出传入固定上界，避免下载时追入后续事件。
 export async function listTraceSince(
   runId: string,
   workspaceId: string,
   cursor: number,
+  maxSeq?: number,
 ): Promise<TraceSinceBatch> {
   if (!RUN_ID.safeParse(runId).success) return { events: [], nextCursor: cursor, scannedCount: 0 };
   const rows = await db
     .select(TRACE_VIEW_COLUMNS)
     .from(traceEvents)
-    .where(and(eq(traceEvents.runId, runId), eq(traceEvents.workspaceId, workspaceId), gt(traceEvents.seq, cursor)))
+    .where(and(
+      eq(traceEvents.runId, runId),
+      eq(traceEvents.workspaceId, workspaceId),
+      gt(traceEvents.seq, cursor),
+      maxSeq === undefined ? undefined : lte(traceEvents.seq, maxSeq),
+    ))
     .orderBy(asc(traceEvents.seq))
     .limit(TRACE_STREAM_BATCH_SIZE);
   const batch = parseTraceSinceBatch(rows, cursor);

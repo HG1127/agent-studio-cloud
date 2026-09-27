@@ -3,7 +3,7 @@ import { z } from "zod";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { redactSensitiveData } from "@/server/domain/security/redact-sensitive";
 import { getRunContext, getRunView, listApprovals, listRunSteps } from "@/server/queries/runs";
-import { listTraceSince } from "@/server/queries/trace";
+import { getLatestTraceSeq, listTraceSince } from "@/server/queries/trace";
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
 import { getRunFeedback } from "@/server/queries/run-feedback";
 import { queryUnavailableResponse, SafeQueryError, withSafeQueryError } from "@/server/security/query-error";
@@ -17,6 +17,7 @@ function safeFilename(value: string): string {
 function streamedRunReport(
   report: RunReportFile,
   firstTraceBatch: Awaited<ReturnType<typeof listTraceSince>>,
+  maxTraceSeq: number,
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   const redacted = redactSensitiveData({ ...report, trace: [] }) as RunReportFile;
@@ -45,7 +46,7 @@ function streamedRunReport(
       cursor = batch.nextCursor;
       if (batch.scannedCount > 0) {
         batch = await withSafeQueryError(
-          () => listTraceSince(report.run.id, DEMO_WORKSPACE_ID, cursor),
+          () => listTraceSince(report.run.id, DEMO_WORKSPACE_ID, cursor, maxTraceSeq),
           "run-export-trace",
         );
         return;
@@ -80,7 +81,7 @@ export async function GET(_request: Request, context: { params: Promise<{ runId:
   let reportSource: Awaited<ReturnType<typeof Promise.all<[
     ReturnType<typeof getRunContext>,
     ReturnType<typeof listRunSteps>,
-    ReturnType<typeof listTraceSince>,
+    ReturnType<typeof getLatestTraceSeq>,
     ReturnType<typeof listApprovals>,
     ReturnType<typeof getRunFeedback>,
   ]>>>;
@@ -88,7 +89,7 @@ export async function GET(_request: Request, context: { params: Promise<{ runId:
     reportSource = await withSafeQueryError(() => Promise.all([
       getRunContext(runId, DEMO_WORKSPACE_ID),
       listRunSteps(runId, DEMO_WORKSPACE_ID),
-      listTraceSince(runId, DEMO_WORKSPACE_ID, 0),
+      getLatestTraceSeq(runId, DEMO_WORKSPACE_ID),
       listApprovals(runId, DEMO_WORKSPACE_ID),
       getRunFeedback(runId, DEMO_WORKSPACE_ID),
     ]), "run-export-related");
@@ -96,7 +97,17 @@ export async function GET(_request: Request, context: { params: Promise<{ runId:
     if (error instanceof SafeQueryError) return queryUnavailableResponse();
     throw error;
   }
-  const [runContext, steps, firstTraceBatch, approvals, feedback] = reportSource;
+  const [runContext, steps, maxTraceSeq, approvals, feedback] = reportSource;
+  let firstTraceBatch: Awaited<ReturnType<typeof listTraceSince>>;
+  try {
+    firstTraceBatch = await withSafeQueryError(
+      () => listTraceSince(runId, DEMO_WORKSPACE_ID, 0, maxTraceSeq),
+      "run-export-trace-open",
+    );
+  } catch (error) {
+    if (error instanceof SafeQueryError) return queryUnavailableResponse();
+    throw error;
+  }
   const report = RunReportFile.safeParse({
     format: "agent-studio-cloud-run",
     formatVersion: 1,
@@ -124,7 +135,7 @@ export async function GET(_request: Request, context: { params: Promise<{ runId:
   const date = (run.finishedAt ?? run.startedAt ?? report.data.exportedAt).slice(0, 10);
   const filename = `${safeFilename(run.agentName)}-${date}-运行报告.json`;
   // 运行上下文与步骤结果可以超过函数的普通响应上限，下载必须保持流式传输。
-  return new Response(streamedRunReport(report.data, firstTraceBatch), {
+  return new Response(streamedRunReport(report.data, firstTraceBatch, maxTraceSeq), {
     headers: {
       "content-type": "application/json; charset=utf-8",
       "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
