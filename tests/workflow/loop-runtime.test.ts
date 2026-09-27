@@ -94,9 +94,9 @@ describe("逐项处理运行", () => {
           sourceCount: 3,
           limited: false,
           iterations: [
-            { iteration: 1, bodyOutput: { matched: "高优先级", next: "handle" } },
+            { iteration: 1, bodyOutput: expect.stringContaining("处理高优先级客户") },
             { iteration: 2, bodyOutput: { matched: "默认分支", next: "loop" } },
-            { iteration: 3, bodyOutput: { matched: "高优先级", next: "handle" } },
+            { iteration: 3, bodyOutput: expect.stringContaining("处理高优先级客户") },
           ],
         },
         check: { matched: "高优先级", next: "handle" },

@@ -193,6 +193,7 @@ export async function agentRunWorkflow(
   let lastHumanDecision: unknown = null;
   const executionLimit = workflowExecutionLimit(draft.nodes);
   let guard = 0;
+  let lastVisitedNodeId: string | null = null;
   try {
     while (currentId && guard < executionLimit) {
       guard += 1;
@@ -201,6 +202,8 @@ export async function agentRunWorkflow(
         ? draft.nodes[currentId]
         : undefined;
       if (!node) break;
+      const incomingNodeId = lastVisitedNodeId;
+      lastVisitedNodeId = node.id;
       if (node.type === "trigger") {
         currentId = node.next;
         continue;
@@ -514,7 +517,7 @@ export async function agentRunWorkflow(
           state.iterations.push({
             iteration: active.iteration,
             item: active.item,
-            bodyOutput: outputs[loop.bodyNext],
+            bodyOutput: incomingNodeId ? outputs[incomingNodeId] : null,
           });
         }
         if (state.index < state.items.length) {
