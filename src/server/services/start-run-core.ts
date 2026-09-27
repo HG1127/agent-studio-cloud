@@ -617,35 +617,16 @@ export async function startRunCore(args: {
     });
     if (preflightError) return { ok: false, error: preflightError };
     const lease = createRunStartLease();
-    const hasLockedDependencies = (manifest.knowledgeSnapshot?.length ?? 0) > 0
-      || workflowCollaborationKeys(manifest.workflowSnapshot).length > 0;
-    const created = hasLockedDependencies
-      ? await createRunWithLockedDependencies({
-          agentId,
-          workspaceId: agent.workspaceId,
-          versionId: version.id,
-          manifest,
-          input: runInput,
-          sourceType,
-          sourceKey: args.sourceKey ?? null,
-          lease,
-        })
-      : await db
-          .insert(runs)
-          .values({
-            workspaceId: agent.workspaceId,
-            createdBy: DEMO_USER_ID,
-            agentId,
-            versionId: version.id,
-            status: "queued",
-            input: runInput,
-            stepStates: withRunStartLease({}, lease),
-            sourceType,
-            sourceKey: args.sourceKey ?? null,
-          })
-          .onConflictDoNothing()
-          .returning({ id: runs.id })
-          .then(([run]) => ({ runId: run?.id ?? null, error: null }));
+    const created = await createRunWithLockedDependencies({
+      agentId,
+      workspaceId: agent.workspaceId,
+      versionId: version.id,
+      manifest,
+      input: runInput,
+      sourceType,
+      sourceKey: args.sourceKey ?? null,
+      lease,
+    });
     if (created.error) return { ok: false, error: created.error };
     if (!created.runId && args.sourceKey) {
       return await reuseExistingRun({ agentId, input: runInput, sourceType, sourceKey: args.sourceKey })

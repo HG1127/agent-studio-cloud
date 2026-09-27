@@ -209,6 +209,20 @@ describe("运行启动句柄恢复", () => {
     expect(startMock).toHaveBeenCalledOnce();
   });
 
+  it("普通运行在读取助手后才发生停用时不创建运行", async () => {
+    const transaction = db.transaction.bind(db);
+    vi.spyOn(db, "transaction").mockImplementationOnce((callback) => transaction(async (tx) => {
+      await tx.update(agents).set({ archivedAt: new Date() }).where(eq(agents.id, AGENT_ID));
+      return callback(tx);
+    }));
+
+    const result = await startRunCore({ agentId: AGENT_ID, input: {} });
+
+    expect(result).toEqual({ ok: false, error: "助手或协作助手已停用，请刷新页面后重试" });
+    expect(startMock).not.toHaveBeenCalled();
+    expect(await db.select().from(runs).where(eq(runs.agentId, AGENT_ID))).toEqual([]);
+  });
+
   it("相同来源键遇到过期排队记录时接管原运行而不新建记录", async () => {
     const sourceKey = "evaluation:00000000-0000-4000-8000-000000000703:00000000-0000-4000-8000-000000000704";
     const staleAt = new Date(Date.now() - RUN_START_LEASE_MS * 2);
