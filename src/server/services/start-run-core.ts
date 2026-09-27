@@ -210,8 +210,9 @@ export async function launchClaimedRun(args: {
     // 平台可能已接收运行但只丢了响应；保留租约供旧启动完成或过期后接管。
     return { ok: true, runId: args.runId };
   }
+  let updated: { id: string }[];
   try {
-    const updated = await db
+    updated = await db
       .update(runs)
       .set({
         workflowRunId: workflowRun.runId,
@@ -223,9 +224,6 @@ export async function launchClaimedRun(args: {
         ownsRunStartLease(args.lease.token),
       ))
       .returning({ id: runs.id });
-    if (updated.length > 0) return { ok: true, runId: args.runId };
-    await workflowRun.cancel();
-    return { ok: false, error: "运行启动已由新的请求接管，请刷新页面查看状态" };
   } catch (error) {
     console.error("运行启动句柄保存失败", safeErrorForLog(error));
     try {
@@ -235,13 +233,21 @@ export async function launchClaimedRun(args: {
       return { ok: true, runId: args.runId };
     }
     try {
-      await markRunStartFailed(args.runId, args.lease.token);
+      const failed = await markRunStartFailed(args.runId, args.lease.token);
+      if (!failed) return { ok: true, runId: args.runId };
     } catch (markError) {
       console.error("记录运行启动失败状态时出错", safeErrorForLog(markError));
       return { ok: true, runId: args.runId };
     }
     return { ok: false, error: "运行启动失败，请稍后重试" };
   }
+  if (updated.length > 0) return { ok: true, runId: args.runId };
+  try {
+    await workflowRun.cancel();
+  } catch (error) {
+    console.error("取消已被接管的工作流失败", safeErrorForLog(error));
+  }
+  return { ok: true, runId: args.runId };
 }
 
 export async function resumeQueuedRunStartCore(runId: string): Promise<StartRunResult> {

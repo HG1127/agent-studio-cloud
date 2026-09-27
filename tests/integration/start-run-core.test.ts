@@ -583,9 +583,30 @@ describe("运行启动句柄恢复", () => {
 
     const result = await startRunCore({ agentId: AGENT_ID, input: {} });
 
-    expect(result).toEqual({ ok: false, error: "运行启动失败，请稍后重试" });
+    expect(result).toMatchObject({ ok: true, runId: expect.any(String) });
     expect(cancelMock).toHaveBeenCalledOnce();
     const [run] = await db.select().from(runs).where(eq(runs.agentId, AGENT_ID));
     expect(run).toMatchObject({ status: "completed", result: { done: true }, error: null });
+    expect(result.ok && result.runId).toBe(run.id);
+  });
+
+  it("旧启动租约已被接管时返回原运行标识而不诱发新建", async () => {
+    const replacementLease = createRunStartLease();
+    startMock.mockImplementationOnce(async (_workflow, [runId]: [string]) => {
+      await db.update(runs)
+        .set({ stepStates: withRunStartLease({}, replacementLease) })
+        .where(eq(runs.id, runId));
+      return { runId: "wrun_old_handle", cancel: cancelMock };
+    });
+
+    const result = await startRunCore({ agentId: AGENT_ID, input: {}, sourceKey: "manual:00000000-0000-4000-8000-0000000007d2" });
+
+    expect(result).toMatchObject({ ok: true, runId: expect.any(String) });
+    expect(cancelMock).toHaveBeenCalledOnce();
+    const [run] = await db.select().from(runs).where(eq(runs.id, result.ok ? result.runId : ""));
+    expect(run).toMatchObject({ status: "queued", workflowRunId: null, error: null });
+    expect(readRunStartLease(run.stepStates)?.token).toBe(replacementLease.token);
+    expect(await startRunCore({ agentId: AGENT_ID, input: {}, sourceKey: "manual:00000000-0000-4000-8000-0000000007d2" })).toEqual(result);
+    expect(startMock).toHaveBeenCalledOnce();
   });
 });
