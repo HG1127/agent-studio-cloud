@@ -78,10 +78,11 @@ async function reconcileDuplicateSource(sourceId: string, suppliedBlobPathname: 
     const ingestToken = retrying ? `pending:${randomUUID()}` : null;
     const blobPathname = current.blobPathname ?? suppliedBlobPathname;
     const shouldUpdate = Boolean(current.archivedAt) || retrying || blobPathname !== current.blobPathname;
+    const updatedAt = shouldUpdate ? new Date() : current.updatedAt;
     if (shouldUpdate) {
       await tx
         .update(knowledgeSources)
-        .set({ archivedAt: null, status, error, blobPathname, parseEngine: ingestToken ?? current.parseEngine, updatedAt: new Date() })
+        .set({ archivedAt: null, status, error, blobPathname, parseEngine: ingestToken ?? current.parseEngine, updatedAt })
         .where(and(eq(knowledgeSources.id, current.id), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)));
       if (current.archivedAt) {
         await tx.insert(auditEvents).values(auditEventValues({
@@ -106,7 +107,7 @@ async function reconcileDuplicateSource(sourceId: string, suppliedBlobPathname: 
         }));
       }
     }
-    return { row: { ...current, archivedAt: null, status, error, blobPathname, parseEngine: ingestToken ?? current.parseEngine }, retrying, ingestToken };
+    return { row: { ...current, archivedAt: null, status, error, blobPathname, parseEngine: ingestToken ?? current.parseEngine, updatedAt }, retrying, ingestToken };
   });
 }
 

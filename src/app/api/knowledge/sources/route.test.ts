@@ -292,7 +292,9 @@ describe("知识原文件上传", () => {
     const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ ok: true, deduped: true, source: { status: "parsing" } });
+    expect(await response.json()).toMatchObject({
+      ok: true, deduped: true, source: { status: "parsing", parsingStalled: false },
+    });
     expect(startMock).toHaveBeenCalledOnce();
     expect(dbState.update).toHaveBeenCalledOnce();
   });
