@@ -83,6 +83,11 @@ export const RunStatus = z.enum([
 ]);
 export type RunStatus = z.infer<typeof RunStatus>;
 
+export const RunStreamDone = z.object({
+  status: z.union([RunStatus.extract(["completed", "failed", "cancelled"]), z.enum(["gone", "error"])]),
+});
+export type RunStreamDone = z.infer<typeof RunStreamDone>;
+
 export const RunSourceType = z.enum(["manual", "schedule", "agent_call", "handoff", "evaluation"]);
 export type RunSourceType = z.infer<typeof RunSourceType>;
 

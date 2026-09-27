@@ -3,6 +3,7 @@
 // 事件协议：event: trace（data 为 TraceEventView）；:ping 注释行心跳；run 终态且轨迹追平后
 // 发 event: done 并关闭连接；run 行被删除后发 done(status:"gone") 关闭，避免订阅挂住。
 import { z } from "zod";
+import { RunStreamDone } from "@/contracts/run";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { getRunStatus } from "@/server/queries/runs";
 import { hasRunTraceKind, listTraceSince } from "@/server/queries/trace";
@@ -49,6 +50,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
       };
       const pushEvent = (event: string, data: unknown, id?: number) =>
         send(`${id === undefined ? "" : `id: ${id}\n`}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      const pushDone = (status: unknown) => pushEvent("done", RunStreamDone.parse({ status }));
       const onAbort = () => {
         closed = true;
       };
@@ -67,7 +69,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
           } catch (error) {
             // 静默关流会让客户端收不到 done 而无限重连重放，必须先显式告知
             console.error(`[events] 轮询数据库异常，通知客户端后关流 run=${runId}`, safeErrorForLog(error));
-            pushEvent("done", { status: "error" });
+            pushDone("error");
             break;
           }
           for (const row of batch.events) {
@@ -76,7 +78,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
           cursor = batch.nextCursor;
           if (closed) break;
           if (currentStatus === null) {
-            pushEvent("done", { status: "gone" });
+            pushDone("gone");
             break;
           }
           if (TERMINAL_STATUSES.has(currentStatus)) {
@@ -94,7 +96,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
             if (batch.scannedCount === 0 && (
               terminalTraceObserved || Date.now() - terminalSince >= TERMINAL_TRACE_GRACE_MS
             )) {
-              pushEvent("done", { status: currentStatus });
+              pushDone(currentStatus);
               break;
             }
           } else {
