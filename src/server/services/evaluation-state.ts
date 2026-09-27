@@ -3,7 +3,7 @@ import { z } from "zod";
 import { agentVersions, auditEvents, evaluationCaseResults, evaluationCases, evaluationRuns, runs } from "@/db/schema";
 import { db } from "@/lib/db";
 import { evaluateExpectations } from "@/server/domain/evaluation";
-import { shouldPromoteEvaluation } from "@/server/domain/release-gate";
+import { shouldPromoteEvaluation, summarizeEvaluationResults } from "@/server/domain/release-gate";
 import { auditEventValues } from "@/server/audit/event-values";
 
 const EvaluationSourceKey = z.string().regex(/^evaluation:[0-9a-f-]{36}:[0-9a-f-]{36}$/i);
@@ -17,6 +17,7 @@ export async function reconcileEvaluationSummary(evaluationRunId: string): Promi
         workspaceId: evaluationRuns.workspaceId,
         createdBy: evaluationRuns.createdBy,
         status: evaluationRuns.status,
+        totalCount: evaluationRuns.totalCount,
       })
       .from(evaluationRuns)
       .where(eq(evaluationRuns.id, evaluationRunId))
@@ -30,9 +31,10 @@ export async function reconcileEvaluationSummary(evaluationRunId: string): Promi
         eq(evaluationCaseResults.evaluationRunId, evaluationRunId),
         eq(evaluationCaseResults.workspaceId, evaluation.workspaceId),
       ));
-    const passedCount = rows.filter((row) => row.status === "passed").length;
-    const failedCount = rows.filter((row) => row.status === "failed").length;
-    const complete = rows.length > 0 && passedCount + failedCount === rows.length;
+    const { passedCount, failedCount, complete } = summarizeEvaluationResults(
+      evaluation.totalCount,
+      rows.map((row) => row.status),
+    );
     if (evaluation.status !== "completed" || !complete) {
       await tx
         .update(evaluationRuns)
@@ -53,10 +55,10 @@ export async function reconcileEvaluationSummary(evaluationRunId: string): Promi
         targetType: "evaluation",
         targetId: evaluationRunId,
         summary: `自动验收完成：${passedCount} 条通过，${failedCount} 条未通过`,
-        data: { passedCount, failedCount, totalCount: rows.length },
+        data: { passedCount, failedCount, totalCount: evaluation.totalCount },
       }));
     }
-    if (!complete || !shouldPromoteEvaluation({ totalCount: rows.length, passedCount, failedCount })) return;
+    if (!complete || !shouldPromoteEvaluation({ totalCount: evaluation.totalCount, passedCount, failedCount })) return;
     const promoted = await tx
       .update(agentVersions)
       .set({ status: "production", updatedAt: new Date() })
