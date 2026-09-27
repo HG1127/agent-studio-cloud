@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentManifest } from "@/contracts/manifest";
+import { MAX_EVALUATION_CASES } from "@/contracts/evaluation";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
@@ -174,12 +175,39 @@ describe("自动验收并发启动", () => {
     const [archived] = await db.select().from(evaluationCases).where(eq(evaluationCases.id, CASE_ID));
     expect(archived.archivedAt).toEqual(archivedAt);
 
-    await db.update(evaluationCases).set({ archivedAt: null }).where(eq(evaluationCases.id, CASE_ID));
     expect(await setEvaluationCaseArchivedAction({
       caseId: CASE_ID,
       agentId: AGENT_ID,
       archived: false,
     })).toEqual({ ok: true });
+    const [restored] = await db.select().from(evaluationCases).where(eq(evaluationCases.id, CASE_ID));
+    expect(restored.archivedAt).toBeNull();
+    expect(await setEvaluationCaseArchivedAction({
+      caseId: CASE_ID,
+      agentId: AGENT_ID,
+      archived: false,
+    })).toEqual({ ok: true });
+  });
+
+  it("启用样例已达上限时不能恢复归档样例", async () => {
+    await insertFixture();
+    await db.update(evaluationCases).set({ archivedAt: new Date() }).where(eq(evaluationCases.id, CASE_ID));
+    await db.insert(evaluationCases).values(Array.from({ length: MAX_EVALUATION_CASES }, (_, index) => ({
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
+      agentId: AGENT_ID,
+      name: `启用样例 ${index + 1}`,
+      input: {},
+      expectations: [],
+    })));
+
+    expect(await setEvaluationCaseArchivedAction({
+      caseId: CASE_ID,
+      agentId: AGENT_ID,
+      archived: false,
+    })).toEqual({ ok: false, error: `每个助手最多保留 ${MAX_EVALUATION_CASES} 条启用中的验收样例` });
+    const [archived] = await db.select().from(evaluationCases).where(eq(evaluationCases.id, CASE_ID));
+    expect(archived.archivedAt).not.toBeNull();
   });
 
   it("同一助手同时发起两次时复用同一轮验收", async () => {

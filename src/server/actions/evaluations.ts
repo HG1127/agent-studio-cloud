@@ -261,6 +261,14 @@ export async function setEvaluationCaseArchivedAction(input: unknown): Promise<E
       )).limit(1);
       if (!current) return [];
       if ((current.archivedAt !== null) === parsed.data.archived) return "unchanged" as const;
+      if (!parsed.data.archived) {
+        const [active] = await tx.select({ count: count() }).from(evaluationCases).where(and(
+          eq(evaluationCases.agentId, parsed.data.agentId),
+          eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID),
+          isNull(evaluationCases.archivedAt),
+        ));
+        if ((active?.count ?? 0) >= MAX_EVALUATION_CASES) return "limit" as const;
+      }
       const rows = await tx.update(evaluationCases)
         .set({ archivedAt: parsed.data.archived ? new Date() : null, updatedAt: new Date() })
         .where(and(
@@ -284,6 +292,7 @@ export async function setEvaluationCaseArchivedAction(input: unknown): Promise<E
     });
     if (updated === "running") return { ok: false, error: "自动验收运行期间不能修改验收样例" };
     if (!updated) return { ok: false, error: "找不到这个助手，请刷新页面后重试" };
+    if (updated === "limit") return { ok: false, error: `每个助手最多保留 ${MAX_EVALUATION_CASES} 条启用中的验收样例` };
     if (updated === "unchanged") {
       revalidatePath(`/agents/${parsed.data.agentId}`);
       return { ok: true };
