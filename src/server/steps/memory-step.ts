@@ -12,6 +12,7 @@ import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 import { withSafeWorkflowError } from "@/server/security/workflow-error";
+import { memoryCandidateFilter, memoryExactMatchFilter } from "@/db/memory-candidate-filter";
 
 export async function runMemoryStep(args: {
   runId: string;
@@ -33,6 +34,7 @@ export async function runMemoryStep(args: {
     if (!run) throw new FatalError("找不到这次运行");
     const query = memory.query?.trim()
       || searchQueryFromInput(args.input);
+    const exactMatch = memoryExactMatchFilter(query);
     const rows = await withSafeWorkflowError(() => db
       .select({ content: agentMemories.content, createdAt: agentMemories.createdAt })
       .from(agentMemories)
@@ -40,8 +42,9 @@ export async function runMemoryStep(args: {
         eq(agentMemories.workspaceId, run.workspaceId),
         eq(agentMemories.agentId, run.agentId),
         isNull(agentMemories.archivedAt),
+        memoryCandidateFilter(query),
       ))
-      .orderBy(desc(agentMemories.createdAt))
+      .orderBy(...(exactMatch ? [desc(exactMatch)] : []), desc(agentMemories.createdAt), desc(agentMemories.id))
       .limit(100), "经验内容暂时无法读取，请稍后重试");
     const selected = selectRelevantMemories(query, rows, memory.limit ?? 5);
     const output = {
