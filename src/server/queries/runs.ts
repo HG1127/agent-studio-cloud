@@ -9,11 +9,13 @@ import {
   RunStepView,
   type RunStepView as RunStepViewType,
   type RunListFilters,
+  RunStatus,
+  type RunStatus as RunStatusType,
   RunSummary,
   RunView,
 } from "@/contracts/run";
 import { AgentManifest } from "@/contracts/manifest";
-import { agentVersions, agents, approvals, runSteps, runs, traceEvents, type Run } from "@/db/schema";
+import { agentVersions, agents, approvals, runSteps, runs, traceEvents } from "@/db/schema";
 import { db } from "@/lib/db";
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
 import { isRunStartLeaseExpired } from "@/server/services/run-start-lease";
@@ -237,15 +239,14 @@ export async function getRunView(runId: string, workspaceId: string): Promise<Ru
   return parsed.success ? parsed.data : null;
 }
 
-// SSE 路由与详情页共用的原始行读取（context/result 等契约外字段）
-export async function getRunRow(runId: string, workspaceId: string): Promise<Run | null> {
+export async function getRunStatus(runId: string, workspaceId: string): Promise<RunStatusType | null> {
   if (!RUN_ID.safeParse(runId).success) return null;
   const [row] = await db
-    .select()
+    .select({ status: runs.status })
     .from(runs)
     .where(and(eq(runs.id, runId), eq(runs.workspaceId, workspaceId)))
     .limit(1);
-  return row ?? null;
+  return row ? RunStatus.parse(row.status) : null;
 }
 
 export async function getRunContext(runId: string, workspaceId: string): Promise<Record<string, unknown> | null> {

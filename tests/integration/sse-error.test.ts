@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-const runRow = { id: "00000000-0000-4000-8000-0000000000f5", status: "running" };
 let calls = 0;
 
 vi.mock("@/server/queries/trace", () => ({
@@ -11,7 +10,7 @@ vi.mock("@/server/queries/trace", () => ({
   }),
 }));
 vi.mock("@/server/queries/runs", () => ({
-  getRunRow: vi.fn(async () => runRow),
+  getRunStatus: vi.fn(async () => "running"),
 }));
 
 import { GET as eventsGet } from "@/app/api/runs/[runId]/events/route";
