@@ -26,4 +26,11 @@ describe("运行 JSON 存储边界", () => {
     expect(jsonStorageIssue(circular, MAX_STEP_OUTPUT_BYTES, "步骤输出")).toBe("步骤输出必须是可保存的 JSON 数据");
     expect(jsonStorageIssue(undefined, MAX_STEP_OUTPUT_BYTES, "步骤输出")).toBe("步骤输出必须是可保存的 JSON 数据");
   });
+
+  it("拒绝序列化时会丢失或改写的嵌套值", () => {
+    for (const value of [undefined, () => "ignored", new Date("2026-09-27"), Number.NaN]) {
+      expect(jsonStorageIssue({ value }, MAX_STEP_OUTPUT_BYTES, "步骤输出"))
+        .toBe("步骤输出必须是可保存的 JSON 数据");
+    }
+  });
 });

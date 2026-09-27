@@ -89,6 +89,18 @@ describe("终态轨迹幂等写入", () => {
     expect(streamed).not.toContain("internal-resume-token-private");
   });
 
+  it("拒绝含非 JSON 值的轨迹元数据且不写数据库", async () => {
+    await expect(appendTrace({
+      runId: "run-1",
+      kind: "node.completed",
+      title: "完成",
+      data: { output: undefined },
+    })).rejects.toThrow("运行轨迹数据必须是可保存的 JSON 数据");
+
+    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.getWritable).not.toHaveBeenCalled();
+  });
+
   it("同一种终态轨迹已经存在时不再插入或写实时流", async () => {
     mocks.selectResults.push(
       [{ workspaceId: "workspace-1", createdBy: "user-1", status: "completed" }],
