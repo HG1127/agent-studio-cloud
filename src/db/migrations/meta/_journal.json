@@ -134,6 +134,20 @@
       "when": 1790404499866,
       "tag": "0018_windy_lord_hawal",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1790513849882,
+      "tag": "0019_enable-pg-trgm",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1790513897370,
+      "tag": "0020_content-trigram-indexes",
+      "breakpoints": true
     }
   ]
 }
