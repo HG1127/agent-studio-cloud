@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+export const MemoryMetadata = z.object({ nodeTitle: z.string().optional() });
+export type MemoryMetadata = z.infer<typeof MemoryMetadata>;
+
 export const MemoryView = z.object({
   id: z.string().uuid(),
   agentId: z.string().uuid(),

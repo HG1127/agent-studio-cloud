@@ -2,6 +2,7 @@
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { FatalError, getStepMetadata } from "workflow";
 import type { WorkflowNode } from "@/contracts/workflow";
+import { MemoryMetadata } from "@/contracts/memory";
 import { agentMemories, runs } from "@/db/schema";
 import { db } from "@/lib/db";
 import { buildMemoryContent } from "@/server/domain/memory/memory-content";
@@ -68,6 +69,7 @@ export async function runMemoryStep(args: {
     throw new FatalError(`步骤「${args.node.title}」指定的经验内容来源“${memory.contentFrom}”不存在`);
   }
   const sourceNodeId = `${args.node.id}:${getStepMetadata().stepId}`;
+  const metadata = MemoryMetadata.parse({ nodeTitle: args.node.title });
   await withSafeWorkflowError(() => db.transaction(async (tx) => {
     const [run] = await tx
       .select({ workspaceId: runs.workspaceId, createdBy: runs.createdBy, agentId: runs.agentId, status: runs.status })
@@ -88,11 +90,11 @@ export async function runMemoryStep(args: {
         sourceRunId: args.runId,
         sourceNodeId,
         content,
-        metadata: { nodeTitle: args.node.title },
+        metadata,
       })
       .onConflictDoUpdate({
         target: [agentMemories.sourceRunId, agentMemories.sourceNodeId],
-        set: { content, metadata: { nodeTitle: args.node.title }, updatedAt: new Date() },
+        set: { content, metadata, updatedAt: new Date() },
       });
   }), "经验内容暂时无法保存，请稍后重试");
   const output = { mode: "write", saved: true, contentLength: content.length };

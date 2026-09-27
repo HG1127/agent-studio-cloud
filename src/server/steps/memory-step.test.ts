@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkflowNode } from "@/contracts/workflow";
+import { MemoryMetadata } from "@/contracts/memory";
 
 const mocks = vi.hoisted(() => {
   const conflict = vi.fn();
@@ -64,6 +65,11 @@ describe("长期经验写入步骤", () => {
     mocks.stepId = "step-first";
   });
 
+  it("元数据契约兼容旧空记录并拒绝无效标题", () => {
+    expect(MemoryMetadata.safeParse({}).success).toBe(true);
+    expect(MemoryMetadata.safeParse({ nodeTitle: 12 }).success).toBe(false);
+  });
+
   it("重放同一写入时保留员工设置的停用状态", async () => {
     await expect(runMemoryStep({
       runId: "00000000-0000-4000-8000-000000000004",
@@ -75,6 +81,7 @@ describe("长期经验写入步骤", () => {
     expect(mocks.conflict).toHaveBeenCalledOnce();
     const options = mocks.conflict.mock.calls[0][0] as { set: Record<string, unknown> };
     expect(options.set).toMatchObject({ content: expect.any(String), metadata: { nodeTitle: "保存处理经验" } });
+    expect(MemoryMetadata.safeParse(options.set.metadata).success).toBe(true);
     expect(options.set).not.toHaveProperty("archivedAt");
   });
 
