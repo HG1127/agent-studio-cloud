@@ -167,6 +167,48 @@ describe("运行启动句柄恢复", () => {
     expect(stored[0].input).toEqual(input);
   });
 
+  it("重试已创建的运行不受后来发布的输入契约影响", async () => {
+    const sourceKey = "manual:00000000-0000-4000-8000-0000000007b5";
+    const first = await startRunCore({ agentId: AGENT_ID, input: {}, sourceKey });
+    expect(first.ok).toBe(true);
+
+    await db.update(agentVersions).set({ status: "retired" }).where(eq(agentVersions.id, VERSION_ID));
+    await db.insert(agentVersions).values({
+      id: CROSS_VERSION_ID,
+      agentId: AGENT_ID,
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
+      version: 2,
+      status: "production",
+      manifest: AgentManifest.parse({
+        ...manifest,
+        inputContract: { fields: [{ name: "brief", label: "任务说明", required: true, type: "string" }] },
+      }),
+    });
+
+    const retried = await startRunCore({ agentId: AGENT_ID, input: {}, sourceKey });
+
+    expect(retried).toEqual(first);
+    expect(startMock).toHaveBeenCalledOnce();
+    const stored = await db.select().from(runs).where(eq(runs.sourceKey, sourceKey));
+    expect(stored).toHaveLength(1);
+    expect(stored[0].versionId).toBe(VERSION_ID);
+  });
+
+  it("已创建运行在助手归档后仍可按原请求标识找回", async () => {
+    const sourceKey = "manual:00000000-0000-4000-8000-0000000007b6";
+    const first = await startRunCore({ agentId: AGENT_ID, input: {}, sourceKey });
+    expect(first.ok).toBe(true);
+    await db.update(agents).set({ archivedAt: new Date() }).where(eq(agents.id, AGENT_ID));
+
+    expect(await startRunCore({ agentId: AGENT_ID, input: {}, sourceKey })).toEqual(first);
+    expect(await startRunCore({ agentId: AGENT_ID, input: {} })).toEqual({
+      ok: false,
+      error: "找不到这个助手，请刷新页面后重试",
+    });
+    expect(startMock).toHaveBeenCalledOnce();
+  });
+
   it("相同来源键遇到过期排队记录时接管原运行而不新建记录", async () => {
     const sourceKey = "evaluation:00000000-0000-4000-8000-000000000703:00000000-0000-4000-8000-000000000704";
     const staleAt = new Date(Date.now() - RUN_START_LEASE_MS * 2);
