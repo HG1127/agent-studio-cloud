@@ -119,4 +119,35 @@ describe("定时触发入口", () => {
       sourceKey: `${SCHEDULE_ID}:${dueAt.toISOString()}`,
     });
   });
+
+  it("入口晚到时跳过旧时间槽，仍用本次到期时间作为幂等键", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-09-26T00:17:00.000Z"));
+      const dueAt = new Date("2026-09-26T00:00:00.000Z");
+      mocks.due = [{ id: SCHEDULE_ID }];
+      mocks.claimed = [{
+        id: SCHEDULE_ID,
+        agentId: AGENT_ID,
+        versionId: VERSION_ID,
+        spec: { kind: "interval", minutes: 5 },
+        input: {},
+        nextRunAt: dueAt,
+        consecutiveFailures: 0,
+        status: "active",
+      }];
+
+      const response = await POST(request());
+
+      expect(response.status).toBe(200);
+      expect(mocks.updateSet).toHaveBeenCalledWith(expect.objectContaining({
+        nextRunAt: new Date("2026-09-26T00:20:00.000Z"),
+      }));
+      expect(mocks.startRunCore).toHaveBeenCalledWith(expect.objectContaining({
+        sourceKey: `${SCHEDULE_ID}:${dueAt.toISOString()}`,
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
