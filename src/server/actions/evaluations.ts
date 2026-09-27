@@ -313,43 +313,54 @@ export async function startEvaluationAction(agentId: string, requestId?: string)
   try {
     const prepared = await prepareEvaluationRun(agentId, requestId);
     if (!prepared.ok) return prepared;
+    let needsRetry = false;
     await runBounded(prepared.cases, EVALUATION_START_CONCURRENCY, async (testCase) => {
+      let started: Awaited<ReturnType<typeof startRunCore>>;
       try {
-        const started = await startRunCore({
+        started = await startRunCore({
           agentId,
           versionId: prepared.versionId,
           input: testCase.input,
           sourceType: "evaluation",
           sourceKey: `evaluation:${prepared.evaluationId}:${testCase.id}`,
         });
-        if (started.ok) {
-          await db
-            .update(evaluationCaseResults)
-            .set({ runId: started.runId, updatedAt: new Date() })
-            .where(and(
-              eq(evaluationCaseResults.evaluationRunId, prepared.evaluationId),
-              eq(evaluationCaseResults.evaluationCaseId, testCase.id),
-              eq(evaluationCaseResults.workspaceId, DEMO_WORKSPACE_ID),
-            ));
-          await reconcileTerminalEvaluationRun(started.runId);
-          return;
-        }
-        await markEvaluationStartFailure(prepared.evaluationId, testCase.id, started.error, DEMO_WORKSPACE_ID);
       } catch (error) {
         console.error("启动单条验收运行失败", safeErrorForLog(error));
-        await markEvaluationStartFailure(
-          prepared.evaluationId,
-          testCase.id,
-          "验收运行启动失败，请稍后重新运行全部样例",
-          DEMO_WORKSPACE_ID,
-        );
+        // 启动异常可能发生在运行已创建之后；保留待处理状态，靠相同 sourceKey 幂等补启。
+        needsRetry = true;
+        return;
+      }
+      if (!started.ok) {
+        try {
+          await markEvaluationStartFailure(prepared.evaluationId, testCase.id, started.error, DEMO_WORKSPACE_ID);
+        } catch (error) {
+          console.error("记录验收启动失败时出错", safeErrorForLog(error));
+          needsRetry = true;
+        }
+        return;
+      }
+      try {
+        await db
+          .update(evaluationCaseResults)
+          .set({ runId: started.runId, updatedAt: new Date() })
+          .where(and(
+            eq(evaluationCaseResults.evaluationRunId, prepared.evaluationId),
+            eq(evaluationCaseResults.evaluationCaseId, testCase.id),
+            eq(evaluationCaseResults.workspaceId, DEMO_WORKSPACE_ID),
+          ));
+        await reconcileTerminalEvaluationRun(started.runId);
+      } catch (error) {
+        console.error("验收运行已启动但结果尚未对账", safeErrorForLog(error));
+        needsRetry = true;
       }
     });
     // 进程可能在“最后一条结果已落库、整轮汇总未完成”之间中断；即使没有待补启样例也要重新对账。
     await reconcileEvaluationSummary(prepared.evaluationId);
     revalidatePath(`/agents/${agentId}`);
     revalidatePath("/runs");
-    return { ok: true };
+    return needsRetry
+      ? { ok: false, error: "部分验收结果尚未对账，请点击“检查并继续”重试" }
+      : { ok: true };
   } catch (error) {
     console.error("启动自动验收失败", safeErrorForLog(error));
     return { ok: false, error: "启动自动验收失败，请稍后重试" };

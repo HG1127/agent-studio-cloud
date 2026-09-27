@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   reconcileSummary: vi.fn(),
   revalidatePath: vi.fn(),
   updates: 0,
+  updateError: false,
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
@@ -22,7 +23,11 @@ vi.mock("@/lib/db", () => ({
   db: {
     update: () => ({
       set: () => ({
-        where: async () => { mocks.updates += 1; return []; },
+        where: async () => {
+          mocks.updates += 1;
+          if (mocks.updateError) throw new Error("关联运行号暂时失败");
+          return [];
+        },
       }),
     }),
   },
@@ -43,6 +48,7 @@ beforeEach(() => {
   mocks.reconcileSummary.mockReset().mockResolvedValue(undefined);
   mocks.revalidatePath.mockReset();
   mocks.updates = 0;
+  mocks.updateError = false;
 });
 
 describe("批量启动自动验收", () => {
@@ -70,15 +76,51 @@ describe("批量启动自动验收", () => {
       return { ok: true, runId: sourceKey.slice(-36) };
     });
 
-    await expect(startEvaluationAction(AGENT_ID, REQUEST_ID)).resolves.toEqual({ ok: true });
+    await expect(startEvaluationAction(AGENT_ID, REQUEST_ID)).resolves.toEqual({
+      ok: false, error: "部分验收结果尚未对账，请点击“检查并继续”重试",
+    });
 
     expect(mocks.prepare).toHaveBeenCalledWith(AGENT_ID, REQUEST_ID);
     expect(peak).toBe(5);
     expect(mocks.startRun).toHaveBeenCalledTimes(8);
-    expect(mocks.markFailure).toHaveBeenCalledTimes(2);
+    expect(mocks.markFailure).toHaveBeenCalledTimes(1);
     expect(mocks.reconcile).toHaveBeenCalledTimes(6);
     expect(mocks.reconcileSummary).toHaveBeenCalledWith(EVALUATION_ID);
     expect(mocks.updates).toBe(6);
+  });
+
+  it("运行已启动但关联运行号失败时不误记样例失败", async () => {
+    const testCase = { id: "00000000-0000-4000-8000-0000000000b1", input: {} };
+    mocks.prepare.mockResolvedValue({
+      ok: true, evaluationId: EVALUATION_ID, versionId: VERSION_ID, cases: [testCase], resumed: false,
+    });
+    mocks.startRun.mockResolvedValue({ ok: true, runId: "00000000-0000-4000-8000-0000000000b2" });
+    mocks.updateError = true;
+
+    await expect(startEvaluationAction(AGENT_ID)).resolves.toEqual({
+      ok: false, error: "部分验收结果尚未对账，请点击“检查并继续”重试",
+    });
+
+    expect(mocks.markFailure).not.toHaveBeenCalled();
+    expect(mocks.reconcile).not.toHaveBeenCalled();
+    expect(mocks.reconcileSummary).toHaveBeenCalledWith(EVALUATION_ID);
+  });
+
+  it("运行已启动但终态对账失败时保留待处理样例供幂等重试", async () => {
+    const testCase = { id: "00000000-0000-4000-8000-0000000000b3", input: {} };
+    mocks.prepare.mockResolvedValue({
+      ok: true, evaluationId: EVALUATION_ID, versionId: VERSION_ID, cases: [testCase], resumed: false,
+    });
+    mocks.startRun.mockResolvedValue({ ok: true, runId: "00000000-0000-4000-8000-0000000000b4" });
+    mocks.reconcile.mockRejectedValueOnce(new Error("终态查询暂时失败"));
+
+    await expect(startEvaluationAction(AGENT_ID)).resolves.toEqual({
+      ok: false, error: "部分验收结果尚未对账，请点击“检查并继续”重试",
+    });
+
+    expect(mocks.markFailure).not.toHaveBeenCalled();
+    expect(mocks.updates).toBe(1);
+    expect(mocks.reconcileSummary).toHaveBeenCalledWith(EVALUATION_ID);
   });
 
   it("没有待补启样例时仍重新汇总已落定结果", async () => {
