@@ -6,6 +6,8 @@ import { validateWaitContracts } from "@/server/domain/runtime/wait-contract";
 import { validateWorkflowRoutes } from "@/server/domain/runtime/workflow-routes";
 import { validateInlineWorkflows } from "@/server/domain/runtime/inline-workflow";
 import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
+import { agentIdentityMatches } from "@/server/domain/agent-identity";
+import { canonicalJson } from "@/server/domain/canonical-json";
 
 export const MAX_AGENT_IMPORT_BYTES = 2 * 1024 * 1024;
 
@@ -33,6 +35,21 @@ export interface NormalizedAgentImport {
   description: string | null;
   intentText: string;
   workflow: WorkflowDraft;
+}
+
+export function importRequestMatches(
+  existing: Pick<NormalizedAgentImport, "name" | "description" | "intentText"> & {
+    id: string;
+    draft: WorkflowDraft;
+    importFingerprint: unknown;
+  },
+  imported: NormalizedAgentImport,
+  fingerprint: string,
+): boolean {
+  if (!agentIdentityMatches(existing, imported)) return false;
+  if (typeof existing.importFingerprint === "string") return existing.importFingerprint === fingerprint;
+  const expected = bindWorkflowRootAgent(imported.workflow, { id: existing.id, name: imported.name });
+  return canonicalJson({ ...existing.draft, versionId: null }) === canonicalJson({ ...expected, versionId: null });
 }
 
 function editableWorkflowFromVersion(
