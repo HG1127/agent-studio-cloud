@@ -7,7 +7,7 @@ import { agentMemories, runs } from "@/db/schema";
 import { db } from "@/lib/db";
 import { buildMemoryContent } from "@/server/domain/memory/memory-content";
 import { selectRelevantMemories } from "@/server/domain/memory/memory-search";
-import { searchQueryFromInput } from "@/server/domain/runtime/search-query";
+import { searchQueryFromContext } from "@/server/domain/runtime/search-query";
 import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
@@ -19,6 +19,7 @@ export async function runMemoryStep(args: {
   node: WorkflowNode;
   input: Record<string, unknown>;
   outputs: Record<string, unknown>;
+  currentItem?: unknown;
 }): Promise<{ output: Record<string, unknown> }> {
   "use step";
   const memory = args.node.memory;
@@ -33,7 +34,7 @@ export async function runMemoryStep(args: {
       .limit(1), "经验内容暂时无法读取，请稍后重试");
     if (!run) throw new FatalError("找不到这次运行");
     const query = memory.query?.trim()
-      || searchQueryFromInput(args.input);
+      || searchQueryFromContext(args.input, args.currentItem);
     const exactMatch = memoryExactMatchFilter(query);
     const rows = await withSafeWorkflowError(() => db
       .select({ content: agentMemories.content, createdAt: agentMemories.createdAt })

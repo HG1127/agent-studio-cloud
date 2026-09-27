@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { start } from "workflow/api";
 import { AgentManifest } from "@/contracts/manifest";
-import { runSteps, runs, traceEvents } from "@/db/schema";
+import { knowledgeChunks, knowledgeSources, runSteps, runs, traceEvents } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
@@ -173,6 +173,67 @@ describe("逐项处理运行", () => {
       });
     } finally {
       await cleanup(runId);
+    }
+  }, 240_000);
+
+  it("循环体知识步骤按当前项检索，不重复使用整次运行的问题", async () => {
+    const sourceId = "00000000-0000-4000-8000-0000000000fa";
+    const input = {
+      question: "整次运行的概括问题",
+      customers: [{ question: "甲公司退款期限" }, { question: "乙公司续约期限" }],
+    };
+    const knowledgeManifest = AgentManifest.parse({
+      ...manifest,
+      knowledgeSnapshot: [sourceId],
+      workflowSnapshot: {
+        ...manifest.workflowSnapshot,
+        id: "draft-loop-knowledge-test",
+        nodes: {
+          start: { id: "start", title: "收到任务", type: "trigger", next: "customers", requirementIds: [] },
+          customers: {
+            id: "customers", title: "逐位客户", type: "loop", next: null,
+            loop: { collectionPath: "input.customers", itemKey: "customer", maxIterations: 2, bodyNext: "lookup", exitNext: "done" },
+            requirementIds: [],
+          },
+          lookup: {
+            id: "lookup", title: "读取客户资料", type: "knowledge", next: "customers",
+            knowledge: { space: "客户资料" }, requirementIds: [],
+          },
+          done: { id: "done", title: "流程结束", type: "end", next: null, requirementIds: [] },
+        },
+      },
+    });
+    await db.insert(knowledgeSources).values({
+      id: sourceId, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID,
+      name: "客户政策", mime: "text/plain", sizeBytes: 100,
+      sha256: `loop-knowledge-${sourceId}`, status: "indexed", chunkCount: 2,
+    });
+    await db.insert(knowledgeChunks).values([
+      { workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, sourceId, chunkIndex: 0, content: "甲公司退款期限是签收后七天。", charStart: 0, charEnd: 14 },
+      { workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, sourceId, chunkIndex: 1, content: "乙公司续约期限是合同到期前三十天。", charStart: 14, charEnd: 34 },
+    ]);
+    const [row] = await db.insert(runs).values({
+      workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID,
+      agentId: AGENT_ID, versionId: VERSION_ID, status: "queued", input,
+    }).returning({ id: runs.id });
+    try {
+      const handle = await start(agentRunWorkflow, [row.id, knowledgeManifest, input]);
+      await handle.returnValue;
+      const [run] = await db.select().from(runs).where(eq(runs.id, row.id)).limit(1);
+      expect(run?.status).toBe("completed");
+      expect(run?.result).toMatchObject({
+        customers: {
+          processedCount: 2,
+          iterations: [
+            { bodyOutput: { query: "甲公司退款期限", hits: [expect.objectContaining({ excerpt: expect.stringContaining("甲公司退款期限") })] } },
+            { bodyOutput: { query: "乙公司续约期限", hits: [expect.objectContaining({ excerpt: expect.stringContaining("乙公司续约期限") })] } },
+          ],
+        },
+      });
+    } finally {
+      await cleanup(row.id);
+      await db.delete(knowledgeChunks).where(eq(knowledgeChunks.sourceId, sourceId));
+      await db.delete(knowledgeSources).where(eq(knowledgeSources.id, sourceId));
     }
   }, 240_000);
 });

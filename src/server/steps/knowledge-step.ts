@@ -9,7 +9,7 @@ import { knowledgeChunks, knowledgeSources, runs } from "@/db/schema";
 import { db } from "@/lib/db";
 import { MAX_KNOWLEDGE_SCAN_CHUNKS, scoreChunks } from "@/server/domain/knowledge/search";
 import { knowledgeSourceIdsForStep } from "@/server/domain/runtime/knowledge-snapshot";
-import { searchQueryFromInput } from "@/server/domain/runtime/search-query";
+import { searchQueryFromContext } from "@/server/domain/runtime/search-query";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 import { withSafeWorkflowError } from "@/server/security/workflow-error";
@@ -20,6 +20,7 @@ export interface RunKnowledgeStepInput {
   node: WorkflowNode;
   manifest: AgentManifest;
   input: Record<string, unknown>;
+  currentItem?: unknown;
 }
 
 export type KnowledgeReceipt = {
@@ -46,7 +47,7 @@ export async function runKnowledgeStep(args: RunKnowledgeStepInput): Promise<{ r
   const space = node.knowledge?.space?.trim() ?? "";
   if (!space) return reject(`步骤「${node.title}」知识来源未绑定`);
   const fromNode = node.knowledge?.query?.trim() ?? "";
-  const query = (fromNode || searchQueryFromInput(input)).trim();
+  const query = (fromNode || searchQueryFromContext(input, args.currentItem)).trim();
   const snapshot = manifest.knowledgeSnapshot ?? [];
   if (snapshot.length === 0) {
     return reject(`步骤「${node.title}」发布时没有可用知识来源，请先在知识库上传文档并重新发布`);

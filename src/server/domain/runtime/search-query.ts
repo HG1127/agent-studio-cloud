@@ -34,3 +34,16 @@ export function searchQueryFromInput(input: Record<string, unknown>): string {
   }
   return values.join(" ").slice(0, MAX_SEARCH_QUERY_CHARS).trim();
 }
+
+export function searchQueryFromContext(input: Record<string, unknown>, currentItem?: unknown): string {
+  if (currentItem !== undefined && currentItem !== null) {
+    const itemInput = typeof currentItem === "string"
+      ? { input: currentItem }
+      : typeof currentItem === "object" && !Array.isArray(currentItem)
+        ? currentItem as Record<string, unknown>
+        : { item: currentItem };
+    const itemQuery = searchQueryFromInput(itemInput);
+    if (itemQuery) return itemQuery;
+  }
+  return searchQueryFromInput(input);
+}

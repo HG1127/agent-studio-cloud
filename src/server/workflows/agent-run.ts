@@ -73,6 +73,7 @@ async function executeAutomaticNode(args: {
   input: Record<string, unknown>;
   outputs: Record<string, unknown>;
   depth: number;
+  currentItem?: unknown;
 }): Promise<unknown> {
   if (args.node.type === "ai") {
     return (await runModelStep(args)).output;
@@ -81,13 +82,13 @@ async function executeAutomaticNode(args: {
     return (await runToolStep({ runId: args.runId, node: args.node, input: args.input, outputs: args.outputs })).receipt;
   }
   if (args.node.type === "knowledge") {
-    return (await runKnowledgeStep({ runId: args.runId, node: args.node, manifest: args.manifest, input: args.input })).receipt;
+    return (await runKnowledgeStep({ runId: args.runId, node: args.node, manifest: args.manifest, input: args.input, currentItem: args.currentItem })).receipt;
   }
   if (args.node.type === "system") {
     return (await runInlineSystemStep({ runId: args.runId, node: args.node })).output;
   }
   if (args.node.type === "memory") {
-    return (await runMemoryStep({ runId: args.runId, node: args.node, input: args.input, outputs: args.outputs })).output;
+    return (await runMemoryStep({ runId: args.runId, node: args.node, input: args.input, outputs: args.outputs, currentItem: args.currentItem })).output;
   }
   if (args.node.type === "agent_call") {
     if (args.depth >= MAX_COLLABORATION_DEPTH) throw new FatalError(`步骤「${args.node.title}」超过助手协作层级上限`);
@@ -129,6 +130,7 @@ async function executeParallelBranch(args: {
   input: Record<string, unknown>;
   parentOutputs: Record<string, unknown>;
   depth: number;
+  currentItem?: unknown;
 }): Promise<ParallelBranchResult> {
   const branchOutputs: Record<string, unknown> = {};
   for (const node of args.branch.steps) {
@@ -139,6 +141,7 @@ async function executeParallelBranch(args: {
       input: args.input,
       outputs: { ...args.parentOutputs, ...branchOutputs },
       depth: args.depth,
+      currentItem: args.currentItem,
     });
   }
   return { id: args.branch.id, label: args.branch.label, status: "completed", outputs: branchOutputs };
@@ -151,6 +154,7 @@ async function executeSubflow(args: {
   input: Record<string, unknown>;
   parentOutputs: Record<string, unknown>;
   depth: number;
+  currentItem?: unknown;
 }): Promise<Array<{ title: string; output: unknown }>> {
   const childOutputs: Record<string, unknown> = {};
   const steps: Array<{ title: string; output: unknown }> = [];
@@ -162,6 +166,7 @@ async function executeSubflow(args: {
       input: args.input,
       outputs: { ...args.parentOutputs, ...childOutputs },
       depth: args.depth,
+      currentItem: args.currentItem,
     });
     childOutputs[node.id] = output;
     steps.push({ title: node.title, output });
@@ -249,7 +254,7 @@ export async function agentRunWorkflow(
       }
       if (node.type === "knowledge") {
         try {
-          const r = await runKnowledgeStep({ runId, node, manifest, input });
+          const r = await runKnowledgeStep({ runId, node, manifest, input, currentItem: activeLoops.at(-1)?.item });
           outputs[node.id] = r.receipt;
           currentId = node.next;
         } catch (error) {
@@ -261,7 +266,7 @@ export async function agentRunWorkflow(
       }
       if (node.type === "memory") {
         try {
-          const result = await runMemoryStep({ runId, node, input, outputs });
+          const result = await runMemoryStep({ runId, node, input, outputs, currentItem: activeLoops.at(-1)?.item });
           outputs[node.id] = result.output;
           currentId = node.next;
         } catch (error) {
@@ -561,6 +566,7 @@ export async function agentRunWorkflow(
           input,
           parentOutputs: outputs,
           depth: executionContext.depth,
+          currentItem: activeLoops.at(-1)?.item,
         })));
         const branchResults: ParallelBranchResult[] = settledBranches.map((result, index) => {
           if (result.status === "fulfilled") return result.value;
@@ -614,6 +620,7 @@ export async function agentRunWorkflow(
           input,
           parentOutputs: outputs,
           depth: executionContext.depth,
+          currentItem: activeLoops.at(-1)?.item,
         })]);
         if (settled.status === "fulfilled") {
           const output = {

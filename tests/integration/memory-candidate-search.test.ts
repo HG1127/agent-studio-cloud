@@ -28,6 +28,39 @@ beforeEach(cleanup);
 afterEach(cleanup);
 
 describe("长期经验候选召回", () => {
+  it("逐项处理优先按当前项读取经验", async () => {
+    await db.insert(runs).values({
+      id: RUN_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID,
+      agentId: AGENT_ID, versionId: VERSION_ID, status: "running", input: {},
+    });
+    await db.insert(agentMemories).values([
+      {
+        workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID,
+        agentId: AGENT_ID, sourceRunId: RUN_ID, sourceNodeId: "current-item",
+        content: "甲公司退款期限是签收后七天。",
+      },
+      {
+        workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID,
+        agentId: AGENT_ID, sourceRunId: RUN_ID, sourceNodeId: "global-input",
+        content: "整次运行概括问题需要另行总结。",
+      },
+    ]);
+    const dynamicNode = WorkflowNode.parse({
+      id: "read_memory", title: "读取经验", type: "memory", next: null,
+      memory: { mode: "read", limit: 5 },
+    });
+
+    const result = await runMemoryStep({
+      runId: RUN_ID, node: dynamicNode,
+      input: { question: "整次运行概括问题" },
+      currentItem: { question: "甲公司退款期限" },
+      outputs: {},
+    });
+
+    expect(result.output).toMatchObject({ mode: "read", foundCount: 1 });
+    expect(result.output.memories).toEqual([expect.objectContaining({ content: "甲公司退款期限是签收后七天。" })]);
+  });
+
   it("长中文任务句能召回只包含结尾主题的经验", async () => {
     const query = "请根据客户订单资料和售后服务政策梳理当前审批流程并评估相关人员反馈再确认退款期限";
     await db.insert(runs).values({
