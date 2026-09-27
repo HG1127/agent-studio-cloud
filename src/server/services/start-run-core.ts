@@ -161,7 +161,12 @@ async function createRunWithLockedDependencies(args: {
   });
 }
 
-async function markRunStartFailed(runId: string, token: string, error = "运行启动失败，请稍后重试"): Promise<void> {
+async function markRunStartFailed(
+  runId: string,
+  token: string,
+  error = "运行启动失败，请稍后重试",
+  queuedOnly = false,
+): Promise<boolean> {
   const updated = await db
     .update(runs)
     .set({
@@ -174,16 +179,17 @@ async function markRunStartFailed(runId: string, token: string, error = "运行�
     .where(and(
       eq(runs.id, runId),
       eq(runs.workspaceId, DEMO_WORKSPACE_ID),
-      inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"]),
+      queuedOnly ? eq(runs.status, "queued") : inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"]),
       ownsRunStartLease(token),
     ))
     .returning({ id: runs.id });
   if (updated.length > 0) {
     await completeEvaluationForRun(runId, null, error);
   }
+  return updated.length > 0;
 }
 
-async function launchClaimedRun(args: {
+export async function launchClaimedRun(args: {
   runId: string;
   manifest: AgentManifest;
   input: Record<string, unknown>;
@@ -199,7 +205,16 @@ async function launchClaimedRun(args: {
     ]);
   } catch (error) {
     console.error("运行启动失败", safeErrorForLog(error));
-    await markRunStartFailed(args.runId, args.lease.token);
+    // 平台可能已接收运行、只丢失了启动响应；已越过 queued 的任务不能被错误地改成失败。
+    const failedBeforeStart = await markRunStartFailed(args.runId, args.lease.token, undefined, true);
+    if (!failedBeforeStart) {
+      const [existing] = await db
+        .select({ id: runs.id })
+        .from(runs)
+        .where(and(eq(runs.id, args.runId), eq(runs.workspaceId, DEMO_WORKSPACE_ID)))
+        .limit(1);
+      if (existing) return { ok: true, runId: args.runId };
+    }
     return { ok: false, error: "运行启动失败，请稍后重试" };
   }
   try {

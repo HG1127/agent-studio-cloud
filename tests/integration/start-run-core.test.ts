@@ -405,6 +405,25 @@ describe("运行启动句柄恢复", () => {
     expect(evaluation).toMatchObject({ status: "completed", failedCount: 1 });
   });
 
+  it("启动响应丢失但执行引擎已经开始时保留运行并返回已有标识", async () => {
+    startMock.mockImplementationOnce(async (_workflow, [runId, frozenManifest, , context]: [string, AgentManifest, Record<string, unknown>, { startToken: string }]) => {
+      await initializeRun(runId, frozenManifest.workflowSnapshot, context.startToken);
+      throw new Error("模拟执行引擎已接收但启动响应丢失");
+    });
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const result = await startRunCore({ agentId: AGENT_ID, input: {}, sourceKey: "manual:00000000-0000-4000-8000-0000000007d1" });
+
+    expect(result).toMatchObject({ ok: true, runId: expect.any(String) });
+    const [run] = await db.select().from(runs).where(eq(runs.id, result.ok ? result.runId : ""));
+    expect(run.status).toBe("running");
+    expect(run.error).toBeNull();
+    expect(await startRunCore({ agentId: AGENT_ID, input: {}, sourceKey: "manual:00000000-0000-4000-8000-0000000007d1" }))
+      .toEqual(result);
+    expect(startMock).toHaveBeenCalledOnce();
+    log.mockRestore();
+  });
+
   it("句柄回写失败时取消失联工作流并把活跃运行置为失败", async () => {
     vi.spyOn(db, "update").mockImplementationOnce(() => { throw new Error("模拟句柄回写失败"); });
 
