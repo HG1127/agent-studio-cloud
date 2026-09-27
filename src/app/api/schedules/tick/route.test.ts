@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   lock: vi.fn(),
   limit: vi.fn(),
   updateSet: vi.fn(),
+  rejectAdvance: false,
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -34,7 +35,7 @@ vi.mock("@/lib/db", () => ({
         set: (values: Record<string, unknown>) => {
           mocks.updateSet(values);
           return {
-            where: () => ({ returning: async () => mocks.claimed }),
+            where: () => ({ returning: async () => mocks.rejectAdvance && mocks.updateSet.mock.calls.length === 2 ? [] : mocks.claimed }),
           };
         },
       }),
@@ -73,6 +74,7 @@ beforeEach(() => {
   mocks.lock.mockReset();
   mocks.limit.mockReset();
   mocks.updateSet.mockReset();
+  mocks.rejectAdvance = false;
 });
 
 afterEach(() => {
@@ -95,11 +97,13 @@ describe("定时触发入口", () => {
     mocks.due = [{ id: SCHEDULE_ID }];
     mocks.claimed = [{
       id: SCHEDULE_ID,
+      workspaceId: "00000000-0000-4000-8000-000000000001",
       agentId: AGENT_ID,
       versionId: VERSION_ID,
       spec: { kind: "interval", minutes: 5 },
       input: { ticket: "T-100" },
       nextRunAt: dueAt,
+      leaseUntil: new Date("2026-09-26T00:01:00.000Z"),
       consecutiveFailures: 0,
       status: "active",
     }];
@@ -128,11 +132,13 @@ describe("定时触发入口", () => {
       mocks.due = [{ id: SCHEDULE_ID }];
       mocks.claimed = [{
         id: SCHEDULE_ID,
+        workspaceId: "00000000-0000-4000-8000-000000000001",
         agentId: AGENT_ID,
         versionId: VERSION_ID,
         spec: { kind: "interval", minutes: 5 },
         input: {},
         nextRunAt: dueAt,
+        leaseUntil: new Date("2026-09-26T00:18:00.000Z"),
         consecutiveFailures: 0,
         status: "active",
       }];
@@ -149,5 +155,28 @@ describe("定时触发入口", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("领取后任务被暂停时不再启动运行", async () => {
+    mocks.due = [{ id: SCHEDULE_ID }];
+    mocks.claimed = [{
+      id: SCHEDULE_ID,
+      workspaceId: "00000000-0000-4000-8000-000000000001",
+      agentId: AGENT_ID,
+      versionId: VERSION_ID,
+      spec: { kind: "interval", minutes: 5 },
+      input: {},
+      nextRunAt: new Date("2026-09-26T00:00:00.000Z"),
+      leaseUntil: new Date("2026-09-26T00:01:00.000Z"),
+      consecutiveFailures: 0,
+      status: "active",
+    }];
+    mocks.rejectAdvance = true;
+
+    const response = await POST(request());
+
+    expect(await response.json()).toEqual({ ok: true, claimed: 1, started: 0, failed: 0 });
+    expect(mocks.startRunCore).not.toHaveBeenCalled();
+    expect(mocks.updateSet).toHaveBeenCalledTimes(2);
   });
 });

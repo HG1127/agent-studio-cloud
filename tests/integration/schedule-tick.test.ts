@@ -21,6 +21,7 @@ const SCHEDULE_FAILING = "00000000-0000-4000-8000-0000000000ee";
 const DRAFT_AGENT_ID = "00000000-0000-4000-8000-0000000000ef";
 const RETIRED_VERSION_ID = "00000000-0000-4000-8000-0000000000f0";
 const RETIRED_SCHEDULE_ID = "00000000-0000-4000-8000-0000000000f1";
+const PAUSED_DURING_START_ID = "00000000-0000-4000-8000-0000000000f2";
 
 const manifest = AgentManifest.parse({
   schemaVersion: "4.0",
@@ -56,7 +57,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await db.delete(runs).where(eq(runs.agentId, AGENT_ID));
-  await db.delete(schedules).where(inArray(schedules.id, [SCHEDULE_DUE, SCHEDULE_ONCE, SCHEDULE_PAUSED, SCHEDULE_FAILING, RETIRED_SCHEDULE_ID]));
+  await db.delete(schedules).where(inArray(schedules.id, [SCHEDULE_DUE, SCHEDULE_ONCE, SCHEDULE_PAUSED, SCHEDULE_FAILING, RETIRED_SCHEDULE_ID, PAUSED_DURING_START_ID]));
   await db.delete(agentVersions).where(inArray(agentVersions.agentId, [AGENT_ID, DRAFT_AGENT_ID]));
   await db.delete(agents).where(inArray(agents.id, [AGENT_ID, DRAFT_AGENT_ID]));
 });
@@ -155,5 +156,19 @@ describe("调度 tick 接口", () => {
     expect(schedule?.status).toBe("error");
     expect(schedule?.consecutiveFailures).toBe(3);
     expect(schedule?.lastError).toBeTruthy();
+  }, 240_000);
+
+  it("启动失败期间被暂停的任务不会被失败回写重新启用", async () => {
+    await insertSchedule({ id: PAUSED_DURING_START_ID });
+    startMock.mockImplementationOnce(async () => {
+      expect(await updateScheduleStatusAction(PAUSED_DURING_START_ID, "paused")).toEqual({ ok: true });
+      throw new Error("模拟工作流启动失败");
+    });
+
+    const response = await tick(authedRequest());
+    expect((await response.json()).failed).toBe(1);
+    const [schedule] = await db.select().from(schedules).where(eq(schedules.id, PAUSED_DURING_START_ID)).limit(1);
+    expect(schedule?.status).toBe("paused");
+    expect(schedule?.leaseUntil).toBeNull();
   }, 240_000);
 });
