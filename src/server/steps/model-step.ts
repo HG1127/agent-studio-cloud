@@ -80,7 +80,7 @@ export async function runModelStep(args: RunModelStepInput): Promise<{ output: s
             .from(modelConnections)
             .where(and(eq(modelConnections.id, manifestModel.connectionId), isNull(modelConnections.archivedAt)))
             .limit(1)
-            .catch(() => { throw new Error("读取模型连接失败，请稍后重试"); })
+            .catch(() => { throw new RetryableError("读取模型连接失败，请稍后重试", { retryAfter: "2s" }); })
         )[0] ?? null
       : null;
     target = resolveModelTarget({
@@ -95,7 +95,7 @@ export async function runModelStep(args: RunModelStepInput): Promise<{ output: s
     });
   } catch (error) {
     const reason = error instanceof Error ? error.message : "模型配置无效";
-    // 配置类失败不可重试：重试同样会失败，直接判死并落失败状态
+    // 配置错误不可重试；读取连接的暂时失败保留 SDK 的重试语义。
     console.error("[model-step] 模型配置无效：", reason);
     await persistStep({
       runId: args.runId,
@@ -105,6 +105,7 @@ export async function runModelStep(args: RunModelStepInput): Promise<{ output: s
       status: "failed",
       error: reason,
     });
+    if (FatalError.is(error) || RetryableError.is(error)) throw error;
     throw new FatalError(reason);
   }
   try {
@@ -130,7 +131,7 @@ export async function runModelStep(args: RunModelStepInput): Promise<{ output: s
     });
     return { output };
   } catch (error) {
-    if (error instanceof FatalError) throw error;
+    if (FatalError.is(error) || RetryableError.is(error)) throw error;
     const retryable = isTransientModelError(error);
     const reason = retryable
       ? "模型服务暂时不可用，稍后自动重试"
