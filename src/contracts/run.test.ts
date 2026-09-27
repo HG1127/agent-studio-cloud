@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { RunStreamDone, SaveWorkflowResult } from "@/contracts/run";
+import { RunReportFile, RunReportIntegrity, RunStreamDone, SaveWorkflowResult } from "@/contracts/run";
 
 describe("流程保存结果契约", () => {
   it("接受带版本时间的成功结果和可显示的失败结果", () => {
@@ -23,5 +23,17 @@ describe("运行流结束消息契约", () => {
   it("拒绝仍在运行的状态和未知状态", () => {
     expect(RunStreamDone.safeParse({ status: "running" }).success).toBe(false);
     expect(RunStreamDone.safeParse({ status: "unexpected" }).success).toBe(false);
+  });
+});
+
+describe("运行报告完整性契约", () => {
+  it("接受按类别统计的遗漏数量并拒绝负数", () => {
+    const integrity = { omittedSteps: 1, omittedTraceEvents: 2, omittedApprovals: 0, omittedFeedback: 1 };
+    expect(RunReportIntegrity.safeParse(integrity).success).toBe(true);
+    expect(RunReportIntegrity.safeParse({ ...integrity, omittedSteps: -1 }).success).toBe(false);
+  });
+
+  it("仍能读取没有完整性字段的旧格式报告", () => {
+    expect(RunReportFile.shape.integrity.safeParse(undefined).success).toBe(true);
   });
 });

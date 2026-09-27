@@ -257,6 +257,14 @@ export const RunStepView = z.object({
 });
 export type RunStepView = z.infer<typeof RunStepView>;
 
+export const RunReportIntegrity = z.object({
+  omittedSteps: z.number().int().nonnegative(),
+  omittedTraceEvents: z.number().int().nonnegative(),
+  omittedApprovals: z.number().int().nonnegative(),
+  omittedFeedback: z.number().int().nonnegative(),
+});
+export type RunReportIntegrity = z.infer<typeof RunReportIntegrity>;
+
 export const RunReportFile = z.object({
   format: z.literal("agent-studio-cloud-run"),
   formatVersion: z.literal(1),
@@ -267,6 +275,7 @@ export const RunReportFile = z.object({
   trace: z.array(TraceEventView),
   approvals: z.array(ApprovalView),
   feedback: RunFeedbackView.nullable().default(null),
+  integrity: RunReportIntegrity.optional(),
 });
 export type RunReportFile = z.infer<typeof RunReportFile>;
 

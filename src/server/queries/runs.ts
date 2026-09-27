@@ -260,23 +260,38 @@ export async function getRunContext(runId: string, workspaceId: string): Promise
 }
 
 export async function listRunSteps(runId: string, workspaceId: string): Promise<RunStepViewType[]> {
-  if (!RUN_ID.safeParse(runId).success) return [];
+  return (await listRunStepsForReport(runId, workspaceId)).steps;
+}
+
+export async function listRunStepsForReport(runId: string, workspaceId: string): Promise<{
+  steps: RunStepViewType[];
+  omittedCount: number;
+}> {
+  if (!RUN_ID.safeParse(runId).success) return { steps: [], omittedCount: 0 };
   const rows = await db
     .select()
     .from(runSteps)
     .where(and(eq(runSteps.runId, runId), eq(runSteps.workspaceId, workspaceId)))
     .orderBy(asc(runSteps.startedAt), asc(runSteps.createdAt));
-  return parseQueryRows("运行步骤", RunStepView, rows);
+  const steps = parseQueryRows("运行步骤", RunStepView, rows);
+  return { steps, omittedCount: rows.length - steps.length };
 }
 
 export async function listApprovals(runId: string, workspaceId: string): Promise<ApprovalView[]> {
-  if (!RUN_ID.safeParse(runId).success) return [];
+  return (await listApprovalsForReport(runId, workspaceId)).approvals;
+}
+
+export async function listApprovalsForReport(runId: string, workspaceId: string): Promise<{
+  approvals: ApprovalView[];
+  omittedCount: number;
+}> {
+  if (!RUN_ID.safeParse(runId).success) return { approvals: [], omittedCount: 0 };
   const rows = await db
     .select()
     .from(approvals)
     .where(and(eq(approvals.runId, runId), eq(approvals.workspaceId, workspaceId)))
     .orderBy(asc(approvals.createdAt));
-  return parseQueryRows("确认记录", ApprovalView, rows.map((row) => ({
+  const valid = parseQueryRows("确认记录", ApprovalView, rows.map((row) => ({
       id: row.id,
       runId: row.runId,
       nodeId: row.nodeId,
@@ -288,4 +303,5 @@ export async function listApprovals(runId: string, workspaceId: string): Promise
       note: row.note ? redactCredentialText(row.note) : null,
       decidedAt: row.decidedAt?.toISOString() ?? null,
     })));
+  return { approvals: valid, omittedCount: rows.length - valid.length };
 }

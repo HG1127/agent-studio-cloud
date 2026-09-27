@@ -14,7 +14,16 @@ import { redactCredentialText } from "@/server/domain/security/redact-sensitive"
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
 
 export async function getRunFeedback(runId: string, workspaceId: string): Promise<RunFeedbackViewType | null> {
-  if (!z.string().uuid().safeParse(runId).success || !z.string().uuid().safeParse(workspaceId).success) return null;
+  return (await getRunFeedbackForReport(runId, workspaceId)).feedback;
+}
+
+export async function getRunFeedbackForReport(runId: string, workspaceId: string): Promise<{
+  feedback: RunFeedbackViewType | null;
+  omittedCount: number;
+}> {
+  if (!z.string().uuid().safeParse(runId).success || !z.string().uuid().safeParse(workspaceId).success) {
+    return { feedback: null, omittedCount: 0 };
+  }
   const [row] = await db
     .select({ feedback: runFeedback, activeCaseId: evaluationCases.id })
     .from(runFeedback)
@@ -26,14 +35,16 @@ export async function getRunFeedback(runId: string, workspaceId: string): Promis
     ))
     .where(and(eq(runFeedback.runId, runId), eq(runFeedback.workspaceId, workspaceId)))
     .limit(1);
-  if (!row) return null;
+  if (!row) return { feedback: null, omittedCount: 0 };
   const parsed = RunFeedbackView.safeParse({
     ...row.feedback,
     evaluationCaseId: row.activeCaseId,
     note: row.feedback.note ? redactCredentialText(row.feedback.note) : null,
     updatedAt: row.feedback.updatedAt.toISOString(),
   });
-  return parsed.success ? parsed.data : null;
+  return parsed.success
+    ? { feedback: parsed.data, omittedCount: 0 }
+    : { feedback: null, omittedCount: 1 };
 }
 
 export async function listImprovementFeedback(options: {
