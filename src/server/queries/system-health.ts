@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import migrationJournal from "@/db/migrations/meta/_journal.json";
 
 export const LATEST_MIGRATION_WHEN = migrationJournal.entries.at(-1)?.when;
@@ -35,6 +36,8 @@ export const REQUIRED_DATABASE_OBJECTS = [
   "public.wait_event_submissions_token_unique",
   "public.wait_event_submissions_run_created_idx",
   "public.evaluation_runs_workspace_request_unique",
+  "public.knowledge_chunks_content_trgm_idx",
+  "public.agent_memories_content_trgm_idx",
 ] as const;
 
 export const REQUIRED_DATABASE_COLUMNS = [
@@ -81,5 +84,14 @@ export async function isDatabaseReady() {
     select coalesce(max(created_at), 0) >= ${LATEST_MIGRATION_WHEN} as current
     from drizzle.__drizzle_migrations
   `);
-  return migrationRows[0]?.current === true;
+  if (migrationRows[0]?.current !== true) return false;
+  const tenantRows = await db.execute<{ ready: boolean }>(sql`
+    select
+      exists (select 1 from public.workspaces where id = ${DEMO_WORKSPACE_ID})
+      and exists (
+        select 1 from public.users
+        where id = ${DEMO_USER_ID} and workspace_id = ${DEMO_WORKSPACE_ID}
+      ) as ready
+  `);
+  return tenantRows[0]?.ready === true;
 }
