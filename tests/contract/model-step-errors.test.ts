@@ -55,9 +55,9 @@ describe("运行模型错误脱敏", () => {
 
   it("读取连接失败时不把数据库诊断写入日志和运行错误", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
-    mocks.select.mockReturnValue({ from: () => ({ where: () => ({
+    mocks.select.mockReturnValue({ from: () => ({ innerJoin: () => ({ where: () => ({
       limit: () => Promise.reject(new Error("database private-connection-info")),
-    }) }) });
+    }) }) }) });
     const withConnection = AgentManifest.parse({
       ...manifest,
       resourceSelection: { ...manifest.resourceSelection, model: { ...manifest.resourceSelection.model, connectionId: "00000000-0000-4000-8000-000000000002" } },
