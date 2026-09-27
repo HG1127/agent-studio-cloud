@@ -265,4 +265,8 @@ export const RunReportFile = z.object({
 });
 export type RunReportFile = z.infer<typeof RunReportFile>;
 
-export type SaveWorkflowResult = { ok: true; updatedAt: string } | { ok: false; error: string };
+export const SaveWorkflowResult = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), updatedAt: z.iso.datetime() }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+export type SaveWorkflowResult = z.infer<typeof SaveWorkflowResult>;
