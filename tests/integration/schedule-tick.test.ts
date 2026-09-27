@@ -25,6 +25,7 @@ const RETIRED_SCHEDULE_ID = "00000000-0000-4000-8000-0000000000f1";
 const PAUSED_DURING_START_ID = "00000000-0000-4000-8000-0000000000f2";
 const OTHER_WORKSPACE_SCHEDULE_ID = "00000000-0000-4000-8000-0000000000f3";
 const OTHER_WORKSPACE_ID = "00000000-0000-4000-8000-0000000000f4";
+const RECOVERABLE_SCHEDULE_ID = "00000000-0000-4000-8000-0000000000f6";
 const createdScheduleIds: string[] = [];
 
 const manifest = AgentManifest.parse({
@@ -63,7 +64,7 @@ afterEach(() => revalidatePathMock.mockReset());
 
 afterAll(async () => {
   await db.delete(runs).where(eq(runs.agentId, AGENT_ID));
-  await db.delete(schedules).where(inArray(schedules.id, [SCHEDULE_DUE, SCHEDULE_ONCE, SCHEDULE_PAUSED, SCHEDULE_FAILING, RETIRED_SCHEDULE_ID, PAUSED_DURING_START_ID, OTHER_WORKSPACE_SCHEDULE_ID, ...createdScheduleIds]));
+  await db.delete(schedules).where(inArray(schedules.id, [SCHEDULE_DUE, SCHEDULE_ONCE, SCHEDULE_PAUSED, SCHEDULE_FAILING, RETIRED_SCHEDULE_ID, PAUSED_DURING_START_ID, OTHER_WORKSPACE_SCHEDULE_ID, RECOVERABLE_SCHEDULE_ID, ...createdScheduleIds]));
   await db.delete(agentVersions).where(inArray(agentVersions.agentId, [AGENT_ID, DRAFT_AGENT_ID]));
   await db.delete(agents).where(inArray(agents.id, [AGENT_ID, DRAFT_AGENT_ID]));
 });
@@ -154,6 +155,38 @@ describe("调度 tick 接口", () => {
     const secondBody = await second.json();
     expect(secondBody.claimed).toBe(0);
     expect(await runsFor(SCHEDULE_DUE)).toHaveLength(1);
+  }, 240_000);
+
+  it("启动期间保留到期槽位，成功后才推进，供中断后的同一槽位重试", async () => {
+    const dueAt = new Date(Date.now() - 60_000);
+    await insertSchedule({ id: RECOVERABLE_SCHEDULE_ID, nextRunAt: dueAt });
+    startMock.mockImplementationOnce(async () => {
+      const [duringStart] = await db.select().from(schedules).where(eq(schedules.id, RECOVERABLE_SCHEDULE_ID)).limit(1);
+      expect(duringStart?.nextRunAt).toEqual(dueAt);
+      expect(duringStart?.status).toBe("active");
+      expect(duringStart?.leaseUntil).not.toBeNull();
+      return { runId: "schedule-workflow-recoverable", cancel: vi.fn() };
+    });
+
+    const response = await tick(authedRequest());
+
+    expect((await response.json()).started).toBe(1);
+    const [afterStart] = await db.select().from(schedules).where(eq(schedules.id, RECOVERABLE_SCHEDULE_ID)).limit(1);
+    expect(afterStart?.nextRunAt.getTime()).toBeGreaterThan(Date.now());
+    expect(afterStart?.leaseUntil).toBeNull();
+    const matchingRuns = await db.select().from(runs).where(eq(runs.sourceKey, `${RECOVERABLE_SCHEDULE_ID}:${dueAt.toISOString()}`));
+    expect(matchingRuns).toHaveLength(1);
+    const startsBeforeRetry = startMock.mock.calls.length;
+    // 模拟工作流已启动，但推进到期时间的数据库写入没有落盘。
+    await db.update(schedules).set({ nextRunAt: dueAt }).where(eq(schedules.id, RECOVERABLE_SCHEDULE_ID));
+    const retry = await tick(authedRequest());
+    expect((await retry.json()).started).toBe(1);
+    expect(startMock).toHaveBeenCalledTimes(startsBeforeRetry);
+    const afterRetry = await db.select().from(runs).where(eq(runs.sourceKey, `${RECOVERABLE_SCHEDULE_ID}:${dueAt.toISOString()}`));
+    expect(afterRetry).toHaveLength(1);
+    const [recoveredSchedule] = await db.select().from(schedules).where(eq(schedules.id, RECOVERABLE_SCHEDULE_ID)).limit(1);
+    expect(recoveredSchedule?.nextRunAt.getTime()).toBeGreaterThan(Date.now());
+    expect(recoveredSchedule?.lastRunId).toBe(matchingRuns[0].id);
   }, 240_000);
 
   it("一次性任务到期：先开跑这一次再归档", async () => {
