@@ -2,7 +2,7 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { AgentManifest } from "@/contracts/manifest";
-import { ScheduleSpec, type ScheduleActionResult } from "@/contracts/schedule";
+import { ScheduleCreateSpec, type ScheduleActionResult } from "@/contracts/schedule";
 import { agents, agentVersions, schedules } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
@@ -45,7 +45,7 @@ export async function updateScheduleStatusAction(id: string, next: string): Prom
         .limit(1);
       if (!version) return { ok: false, error: "绑定的助手版本不可用或助手已停用，请重新创建定时任务" };
       if (!AgentManifest.safeParse(version.manifest).success) return { ok: false, error: "绑定的助手版本信息不完整，请重新发布后再创建定时任务" };
-      const spec = ScheduleSpec.safeParse(schedule.spec);
+      const spec = ScheduleCreateSpec.safeParse(schedule.spec);
       if (!spec.success) return { ok: false, error: "定时设置已损坏，请重新创建定时任务" };
       resumedAt = nextOccurrence(spec.data, new Date()) ?? undefined;
       if (!resumedAt) return { ok: false, error: "一次性任务的执行时间已经过去，请重新创建定时任务" };

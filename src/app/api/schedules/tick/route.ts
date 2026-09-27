@@ -2,7 +2,7 @@
 // 原子抢占 = 事务内按到期顺序 SKIP LOCKED 分批领取；拿到启动结果后再推进 next_run_at；
 // 一次性任务到期先开跑这一次再归档；spec 损坏直接归档不开跑；start 失败计数 3 次停跑。
 import { and, asc, eq, inArray, isNull, lt, lte, or } from "drizzle-orm";
-import { ScheduleSpec } from "@/contracts/schedule";
+import { ScheduleCreateSpec } from "@/contracts/schedule";
 import { schedules } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
@@ -67,7 +67,7 @@ async function handle(req: Request) {
       eq(schedules.leaseUntil, claimedLease),
     );
     const occurrenceKey = schedule.nextRunAt.toISOString();
-    const parsedSpec = ScheduleSpec.safeParse(schedule.spec);
+    const parsedSpec = ScheduleCreateSpec.safeParse(schedule.spec);
     if (!parsedSpec.success) {
       await db
         .update(schedules)

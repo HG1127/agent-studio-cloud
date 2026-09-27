@@ -5,18 +5,27 @@ const TimeSlot = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "时间格式应�
 const TimeSlots = z.array(TimeSlot).min(1).max(5);
 export const MAX_SCHEDULE_INTERVAL_MINUTES = 365 * 24 * 60;
 
-export const ScheduleSpec = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("once"), at: z.iso.datetime() }),
-  z.object({ kind: z.literal("interval"), minutes: z.number().int().min(5).max(MAX_SCHEDULE_INTERVAL_MINUTES, "间隔不能超过一年") }),
-  z.object({ kind: z.literal("daily"), times: TimeSlots }),
-  z.object({ kind: z.literal("weekly"), weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7), times: TimeSlots }),
-  z.object({ kind: z.literal("monthly"), days: z.array(z.number().int().min(1).max(28)).min(1).max(28), times: TimeSlots }),
-]);
+const OnceSpec = z.object({ kind: z.literal("once"), at: z.iso.datetime() });
+const IntervalSpec = z.object({ kind: z.literal("interval"), minutes: z.number().int().min(5) });
+const DailySpec = z.object({ kind: z.literal("daily"), times: TimeSlots });
+const WeeklySpec = z.object({ kind: z.literal("weekly"), weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7), times: TimeSlots });
+const MonthlySpec = z.object({ kind: z.literal("monthly"), days: z.array(z.number().int().min(1).max(28)).min(1).max(28), times: TimeSlots });
+
+export const ScheduleSpec = z.discriminatedUnion("kind", [OnceSpec, IntervalSpec, DailySpec, WeeklySpec, MonthlySpec]);
 export type ScheduleSpec = z.infer<typeof ScheduleSpec>;
+
+export const ScheduleCreateSpec = z.discriminatedUnion("kind", [
+  OnceSpec,
+  IntervalSpec.extend({ minutes: IntervalSpec.shape.minutes.max(MAX_SCHEDULE_INTERVAL_MINUTES, "间隔不能超过一年") }),
+  DailySpec,
+  WeeklySpec,
+  MonthlySpec,
+]);
+export type ScheduleCreateSpec = z.infer<typeof ScheduleCreateSpec>;
 
 export const ScheduleCreateInput = z.object({
   agentId: z.string().uuid(),
-  spec: ScheduleSpec,
+  spec: ScheduleCreateSpec,
   input: RunInputPayload.default({}),
 });
 export type ScheduleCreateInput = z.infer<typeof ScheduleCreateInput>;

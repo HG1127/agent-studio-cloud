@@ -9,7 +9,8 @@ import { agentVersions, agents, runs, schedules } from "@/db/schema";
 import { db } from "@/lib/db";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { POST as tick } from "@/app/api/schedules/tick/route";
-import { listScheduleableAgents } from "@/server/queries/schedules";
+import { listScheduleableAgents, listSchedules } from "@/server/queries/schedules";
+import { MAX_SCHEDULE_INTERVAL_MINUTES } from "@/contracts/schedule";
 import { createScheduleAction } from "@/server/actions/create-schedule";
 import { updateScheduleStatusAction } from "@/server/actions/update-schedule-status";
 
@@ -27,6 +28,7 @@ const OTHER_WORKSPACE_SCHEDULE_ID = "00000000-0000-4000-8000-0000000000f3";
 const OTHER_WORKSPACE_ID = "00000000-0000-4000-8000-0000000000f4";
 const RECOVERABLE_SCHEDULE_ID = "00000000-0000-4000-8000-0000000000f6";
 const IDEMPOTENT_STATUS_ID = "00000000-0000-4000-8000-0000000000f7";
+const LEGACY_INTERVAL_ID = "00000000-0000-4000-8000-0000000000f8";
 const createdScheduleIds: string[] = [];
 
 const manifest = AgentManifest.parse({
@@ -65,7 +67,7 @@ afterEach(() => revalidatePathMock.mockReset());
 
 afterAll(async () => {
   await db.delete(runs).where(eq(runs.agentId, AGENT_ID));
-  await db.delete(schedules).where(inArray(schedules.id, [SCHEDULE_DUE, SCHEDULE_ONCE, SCHEDULE_PAUSED, SCHEDULE_FAILING, RETIRED_SCHEDULE_ID, PAUSED_DURING_START_ID, OTHER_WORKSPACE_SCHEDULE_ID, RECOVERABLE_SCHEDULE_ID, IDEMPOTENT_STATUS_ID, ...createdScheduleIds]));
+  await db.delete(schedules).where(inArray(schedules.id, [SCHEDULE_DUE, SCHEDULE_ONCE, SCHEDULE_PAUSED, SCHEDULE_FAILING, RETIRED_SCHEDULE_ID, PAUSED_DURING_START_ID, OTHER_WORKSPACE_SCHEDULE_ID, RECOVERABLE_SCHEDULE_ID, IDEMPOTENT_STATUS_ID, LEGACY_INTERVAL_ID, ...createdScheduleIds]));
   await db.delete(agentVersions).where(inArray(agentVersions.agentId, [AGENT_ID, DRAFT_AGENT_ID]));
   await db.delete(agents).where(inArray(agents.id, [AGENT_ID, DRAFT_AGENT_ID]));
 });
@@ -220,6 +222,23 @@ describe("调度 tick 接口", () => {
     expect(schedule?.status).toBe("archived");
     const rows = await db.select().from(runs).where(eq(runs.agentId, AGENT_ID));
     expect(rows.filter((row) => row.sourceKey?.startsWith(SCHEDULE_ONCE))).toHaveLength(1);
+  }, 240_000);
+
+  it("历史超长间隔仍能在列表找到，到期后安全停用而不启动运行", async () => {
+    await insertSchedule({
+      id: LEGACY_INTERVAL_ID,
+      spec: { kind: "interval", minutes: MAX_SCHEDULE_INTERVAL_MINUTES + 1 },
+    });
+    expect((await listSchedules()).find((schedule) => schedule.id === LEGACY_INTERVAL_ID)?.spec)
+      .toEqual({ kind: "interval", minutes: MAX_SCHEDULE_INTERVAL_MINUTES + 1 });
+    const startsBefore = startMock.mock.calls.length;
+
+    const response = await tick(authedRequest());
+
+    expect(await response.json()).toMatchObject({ claimed: 1, started: 0, failed: 0 });
+    const [schedule] = await db.select().from(schedules).where(eq(schedules.id, LEGACY_INTERVAL_ID));
+    expect(schedule).toMatchObject({ status: "archived", lastError: "定时规格不完整，已停止" });
+    expect(startMock).toHaveBeenCalledTimes(startsBefore);
   }, 240_000);
 
   it("暂停的调度不被领取", async () => {
