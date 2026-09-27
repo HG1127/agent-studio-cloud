@@ -184,7 +184,7 @@ export async function agentRunWorkflow(
   const draft = manifest.workflowSnapshot;
   await initializeRun(runId, draft, executionContext.startToken);
   let currentId: string | null = draft.startNodeId;
-  const outputs: Record<string, unknown> = {};
+  let outputs: Record<string, unknown> = {};
   const loopStates: Record<string, {
     items: unknown[];
     sourceCount: number;
@@ -192,9 +192,11 @@ export async function agentRunWorkflow(
     sourceMissing: boolean;
     index: number;
     iterations: Array<{ iteration: number; item: unknown; bodyOutput: unknown }>;
+    baselineOutputs: Record<string, unknown>;
+    baselineRepairAttempts: Record<string, number>;
   }> = {};
   const activeLoops: Array<{ loopId: string; iteration: number; total: number; item: unknown }> = [];
-  const qualityRepairAttempts: Record<string, number> = {};
+  let qualityRepairAttempts: Record<string, number> = {};
   let lastHumanDecision: unknown = null;
   const executionLimit = workflowExecutionLimit(draft.nodes);
   let guard = 0;
@@ -516,7 +518,13 @@ export async function agentRunWorkflow(
             currentId = handled.next;
             continue;
           }
-          state = loopStates[node.id] = { ...collection, index: 0, iterations: [] };
+          state = loopStates[node.id] = {
+            ...collection,
+            index: 0,
+            iterations: [],
+            baselineOutputs: { ...outputs },
+            baselineRepairAttempts: { ...qualityRepairAttempts },
+          };
         }
         const active = activeLoops.at(-1);
         if (active?.loopId === node.id && active.iteration > state.iterations.length) {
@@ -527,6 +535,11 @@ export async function agentRunWorkflow(
           });
         }
         if (state.index < state.items.length) {
+          if (state.index > 0) {
+            // 下一项不能借用上一项的步骤产出或返工次数，保留入循环前的上游上下文。
+            outputs = { ...state.baselineOutputs };
+            qualityRepairAttempts = { ...state.baselineRepairAttempts };
+          }
           const item = state.items[state.index];
           state.index += 1;
           const frame = { loopId: node.id, iteration: state.index, total: state.items.length, item };

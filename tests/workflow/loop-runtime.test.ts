@@ -128,6 +128,57 @@ describe("逐项处理运行", () => {
     }
   }, 240_000);
 
+  it("上一项的产出不能让下一项跳过的交付检查误判通过", async () => {
+    const isolatedManifest = AgentManifest.parse({
+      ...manifest,
+      workflowSnapshot: {
+        ...manifest.workflowSnapshot,
+        id: "draft-loop-output-isolation-test",
+        nodes: {
+          start: { id: "start", title: "收到任务", type: "trigger", next: "items", requirementIds: [] },
+          items: {
+            id: "items", title: "逐项处理", type: "loop", next: null,
+            loop: { collectionPath: "input.items", itemKey: "item", maxIterations: 2, bodyNext: "check", exitNext: "done" },
+            requirementIds: [],
+          },
+          check: {
+            id: "check", title: "判断是否生成", type: "condition", next: null,
+            condition: {
+              source: "context.currentItem.generate", operator: "eq",
+              branches: [{ label: "需要生成", value: true, next: "write" }], defaultNext: "quality",
+            },
+            requirementIds: [],
+          },
+          write: {
+            id: "write", title: "生成交付内容", type: "ai", next: "quality",
+            retry: { maxAttempts: 1, backoffMs: 50 }, requirementIds: [],
+          },
+          quality: {
+            id: "quality", title: "检查本项交付", type: "rule", next: "items", onErrorNext: "items",
+            quality: { requiredOutputTitles: ["生成交付内容"], minOutputCount: 1, checkToolReceipts: false, checkHumanBoundary: false },
+            requirementIds: [],
+          },
+          done: { id: "done", title: "流程结束", type: "end", next: null, requirementIds: [] },
+        },
+      },
+    });
+    const runId = await runWith({ items: [{ generate: true }, { generate: false }] }, isolatedManifest);
+    try {
+      const [run] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+      expect(run?.result).toMatchObject({
+        items: {
+          processedCount: 2,
+          iterations: [
+            { bodyOutput: { passed: true } },
+            { bodyOutput: { status: "failed", error: expect.stringContaining("还没有形成结果") } },
+          ],
+        },
+      });
+    } finally {
+      await cleanup(runId);
+    }
+  }, 240_000);
+
   it("内层循环逐个读取当前外层项的列表，不沿用上一个客户的处理状态", async () => {
     const nestedManifest = AgentManifest.parse({
       ...manifest,
