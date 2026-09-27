@@ -227,6 +227,56 @@ describe("逐项处理运行", () => {
     }
   }, 240_000);
 
+  it("内层步骤走备用路径返回外层循环时清理内层状态", async () => {
+    const fallbackManifest = AgentManifest.parse({
+      ...manifest,
+      workflowSnapshot: {
+        ...manifest.workflowSnapshot,
+        id: "draft-nested-loop-fallback-test",
+        nodes: {
+          start: { id: "start", title: "收到任务", type: "trigger", next: "customers", requirementIds: [] },
+          customers: {
+            id: "customers", title: "逐位客户", type: "loop", next: null,
+            loop: { collectionPath: "input.customers", itemKey: "customer", maxIterations: 2, bodyNext: "orders", exitNext: "done" },
+            requirementIds: [],
+          },
+          orders: {
+            id: "orders", title: "逐笔订单", type: "loop", next: null,
+            loop: { collectionPath: "context.currentItem.orders", itemKey: "order", maxIterations: 2, bodyNext: "send", exitNext: "customers" },
+            requirementIds: [],
+          },
+          send: {
+            id: "send", title: "发送订单", type: "tool", next: "orders", onErrorNext: "customers", requirementIds: [],
+          },
+          done: { id: "done", title: "流程结束", type: "end", next: null, requirementIds: [] },
+        },
+      },
+    });
+    const runId = await runWith({
+      customers: [
+        { id: "C-1", orders: [{ id: "O-1" }] },
+        { id: "C-2", orders: [{ id: "O-2" }] },
+      ],
+    }, fallbackManifest);
+    try {
+      const [run] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+      expect(run?.status).toBe("completed");
+      expect(run?.result).toMatchObject({
+        customers: {
+          processedCount: 2,
+          iterations: [
+            { item: { id: "C-1" }, bodyOutput: { status: "failed" } },
+            { item: { id: "C-2" }, bodyOutput: { status: "failed" } },
+          ],
+        },
+      });
+      const [sendStep] = await db.select().from(runSteps).where(and(eq(runSteps.runId, runId), eq(runSteps.nodeId, "send"))).limit(1);
+      expect(sendStep?.attempt).toBe(2);
+    } finally {
+      await cleanup(runId);
+    }
+  }, 240_000);
+
   it("循环体知识步骤按当前项检索，不重复使用整次运行的问题", async () => {
     const sourceId = "00000000-0000-4000-8000-0000000000fa";
     const input = {

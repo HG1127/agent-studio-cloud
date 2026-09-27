@@ -502,6 +502,10 @@ export async function agentRunWorkflow(
       if (node.type === "loop") {
         const loop = node.loop;
         if (!loop?.bodyNext || !loop.exitNext) throw new FatalError(`步骤「${node.title}」的逐项处理路径不完整`);
+        const ancestorIndex = activeLoops.findLastIndex((frame) => frame.loopId === node.id);
+        if (ancestorIndex >= 0 && ancestorIndex < activeLoops.length - 1) {
+          for (const abandoned of activeLoops.splice(ancestorIndex + 1)) delete loopStates[abandoned.loopId];
+        }
         let state = loopStates[node.id];
         if (!state) {
           const collection = resolveLoopCollection({
