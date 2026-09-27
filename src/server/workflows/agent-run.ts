@@ -502,6 +502,7 @@ export async function agentRunWorkflow(
             maxIterations: loop.maxIterations,
             input,
             outputs,
+            currentItem: activeLoops.at(-1)?.item,
           });
           if (collection.sourceMissing) {
             const error = new FatalError(`步骤「${node.title}」没有在“${loop.collectionPath}”找到可逐项处理的列表`);
@@ -545,6 +546,7 @@ export async function agentRunWorkflow(
         };
         outputs[node.id] = output;
         await completeLoop({ runId, node, output });
+        delete loopStates[node.id];
         currentId = loop.exitNext;
         continue;
       }

@@ -29,6 +29,30 @@ describe("resolveLoopCollection", () => {
     })).toEqual({ items: ["A", "B"], sourceCount: 2, limited: false, sourceMissing: false });
   });
 
+  it("内层循环从当前外层项读取列表，空列表不误认为缺失", () => {
+    expect(resolveLoopCollection({
+      collectionPath: "context.currentItem.orders",
+      maxIterations: 3,
+      input: {},
+      outputs: {},
+      currentItem: { id: "C-1", orders: ["O-1", "O-2"] },
+    })).toEqual({ items: ["O-1", "O-2"], sourceCount: 2, limited: false, sourceMissing: false });
+    expect(resolveLoopCollection({
+      collectionPath: "context.currentItem.orders",
+      maxIterations: 3,
+      input: {},
+      outputs: {},
+      currentItem: { id: "C-2", orders: [] },
+    })).toEqual({ items: [], sourceCount: 0, limited: false, sourceMissing: false });
+    expect(resolveLoopCollection({
+      collectionPath: "context.currentItem.orders",
+      maxIterations: 3,
+      input: { repeatCount: 2 },
+      outputs: {},
+      currentItem: { id: "C-3" },
+    })).toEqual({ items: [], sourceCount: 0, limited: false, sourceMissing: true });
+  });
+
   it("没有集合时用 repeatCount 形成受控次数", () => {
     expect(resolveLoopCollection({
       collectionPath: "context.records",

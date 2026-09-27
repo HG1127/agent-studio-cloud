@@ -20,15 +20,18 @@ export function resolveLoopCollection(args: {
   maxIterations: number;
   input: Record<string, unknown>;
   outputs: Record<string, unknown>;
+  currentItem?: unknown;
 }): LoopCollection {
-  const context = runEvalContext({ input: args.input, outputs: args.outputs });
+  const context = runEvalContext({ input: args.input, outputs: args.outputs, currentItem: args.currentItem });
   const resolved = resolvePath(args.collectionPath, context);
   let items: unknown[] | null = Array.isArray(resolved) ? resolved : null;
-  if (!items && args.collectionPath.startsWith("context.")) {
+  const currentItemPath = args.collectionPath === "context.currentItem"
+    || args.collectionPath.startsWith("context.currentItem.");
+  if (!items && args.collectionPath.startsWith("context.") && !currentItemPath) {
     const fallback = resolvePath(`input.${args.collectionPath.slice("context.".length)}`, context);
     items = Array.isArray(fallback) ? fallback : null;
   }
-  if (!items) {
+  if (!items && !currentItemPath) {
     const count = Math.max(0, Math.min(Number(args.input.repeatCount ?? 0), 100));
     if (count > 0) items = Array.from({ length: count }, (_, index) => index + 1);
   }
