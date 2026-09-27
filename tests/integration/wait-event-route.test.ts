@@ -175,7 +175,7 @@ describe("外部消息恢复接口", () => {
     expect(receipt?.status).toBe("accepted");
   });
 
-  it("等待状态已经前进但完成轨迹尚未落库时确认重复提交成功", async () => {
+  it("等待状态已经前进但结果轨迹尚未落库时仍保持待确认", async () => {
     resumeHookMock.mockRejectedValue(new Error("workflow response lost"));
     await insertWaitingRun();
     const request = () => new Request(`http://localhost/api/runs/${RUN_ID}/events/customer.profile.updated`, {
@@ -189,10 +189,43 @@ describe("外部消息恢复接口", () => {
 
     const repeated = await POST(request(), context);
 
-    expect(repeated.status).toBe(200);
+    expect(repeated.status).toBe(503);
+    expect(resumeHookMock).toHaveBeenCalledOnce();
+    let [receipt] = await db.select().from(waitEventSubmissions).where(eq(waitEventSubmissions.runId, RUN_ID));
+    expect(receipt?.status).toBe("processing");
+
+    await db.insert(traceEvents).values({
+      runId: RUN_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID,
+      seq: 2, nodeId: "wait_customer", kind: "wait.resumed", title: "等待已继续",
+    });
+    expect((await POST(request(), context)).status).toBe(200);
+    [receipt] = await db.select().from(waitEventSubmissions).where(eq(waitEventSubmissions.runId, RUN_ID));
+    expect(receipt?.status).toBe("accepted");
+  });
+
+  it("等待超时后不能把未接收的消息误标为成功", async () => {
+    resumeHookMock.mockRejectedValue(new Error("timeout won"));
+    await insertWaitingRun();
+    const request = () => new Request(`http://localhost/api/runs/${RUN_ID}/events/customer.profile.updated`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-wait-event-token": "submission-token" },
+      body: JSON.stringify({ customerId: "C-100" }),
+    });
+    const context = { params: Promise.resolve({ runId: RUN_ID, eventKey: "customer.profile.updated" }) };
+    expect((await POST(request(), context)).status).toBe(503);
+    await db.update(runs).set({ status: "completed" }).where(eq(runs.id, RUN_ID));
+    await db.insert(traceEvents).values({
+      runId: RUN_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID,
+      seq: 2, nodeId: "wait_customer", kind: "wait.timed_out", title: "等待已超时",
+    });
+
+    const repeated = await POST(request(), context);
+
+    expect(repeated.status).toBe(409);
+    expect(await repeated.json()).toEqual({ ok: false, error: "等待已超时，消息未被接收" });
     expect(resumeHookMock).toHaveBeenCalledOnce();
     const [receipt] = await db.select().from(waitEventSubmissions).where(eq(waitEventSubmissions.runId, RUN_ID));
-    expect(receipt?.status).toBe("accepted");
+    expect(receipt?.status).toBe("processing");
   });
 
   it("仍可恢复升级前已经挂起的旧格式等待", async () => {

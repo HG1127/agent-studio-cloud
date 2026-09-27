@@ -10,14 +10,13 @@ import { getPendingWait, getPendingWaitHook } from "@/server/queries/runs";
 import { hasCrossSiteOrigin, hasSameOrigin } from "@/server/security/request-origin";
 import { matchesWaitEventToken } from "@/server/security/wait-event-token";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
-import { runStatusConfirmsWaitEventSubmission } from "@/server/domain/wait-event-submission";
 import { readBoundedRequestText } from "@/server/security/bounded-request-body";
 import {
   claimWaitEventSubmission,
   findWaitEventSubmission,
   markWaitEventSubmissionAccepted,
   waitEventSubmissionMatches,
-  waitEventWasResumed,
+  waitEventOutcome,
 } from "@/server/services/wait-event-submission";
 
 export const dynamic = "force-dynamic";
@@ -66,9 +65,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ runId: 
           return Response.json({ ok: false, error: "这项提交凭据已经用于另一条消息" }, { status: 409 });
         }
         if (receipt.status === "accepted") return Response.json({ ok: true });
-        if (await waitEventWasResumed(receipt.runId, receipt.hookToken)) {
+        const outcome = await waitEventOutcome(receipt.runId, receipt.hookToken);
+        if (outcome === "resumed") {
           await markWaitEventSubmissionAccepted(receipt.id, receipt.attemptToken);
           return Response.json({ ok: true });
+        }
+        if (outcome === "timed_out") {
+          return Response.json({ ok: false, error: "等待已超时，消息未被接收" }, { status: 409 });
         }
         processingReceipt = receipt;
       }
@@ -94,14 +97,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ runId: 
   }
   if (!run) return Response.json({ ok: false, error: "找不到这次运行" }, { status: 404 });
   if (run.status !== "waiting_event") {
-    if (processingReceipt && runStatusConfirmsWaitEventSubmission(run.status)) {
-      try {
-        await markWaitEventSubmissionAccepted(processingReceipt.id, processingReceipt.attemptToken);
-        return Response.json({ ok: true });
-      } catch (error) {
-        console.error("确认等待消息回执失败", safeErrorForLog(error));
-        return Response.json({ ok: false, error: "暂时无法确认消息提交结果，请稍后重试" }, { status: 500 });
-      }
+    if (processingReceipt && ["running", "completed"].includes(run.status)) {
+      // 运行也可能因等待超时而前进；没有该次等待的恢复轨迹，不能确认消息已被接收。
+      return Response.json(
+        { ok: false, error: "消息提交结果仍在确认，请稍后使用相同内容重试" },
+        { status: 503, headers: { "retry-after": "2" } },
+      );
     }
     return Response.json({ ok: false, error: "这次运行当前没有等待外部消息" }, { status: 409 });
   }
@@ -161,9 +162,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ runId: 
     console.error("恢复等待中的运行失败", safeErrorForLog(error));
     if (claimed?.state === "claimed") {
       try {
-        if (await waitEventWasResumed(runId, claimed.hookToken)) {
+        const outcome = await waitEventOutcome(runId, claimed.hookToken);
+        if (outcome === "resumed") {
           await markWaitEventSubmissionAccepted(claimed.id, claimed.attemptToken);
           return Response.json({ ok: true });
+        }
+        if (outcome === "timed_out") {
+          return Response.json({ ok: false, error: "等待已超时，消息未被接收" }, { status: 409 });
         }
       } catch (verifyError) {
         console.error("确认等待消息恢复结果失败", safeErrorForLog(verifyError));
