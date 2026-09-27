@@ -20,9 +20,12 @@ export async function updateScheduleStatusAction(id: string, next: string): Prom
     const [schedule] = await db
       .select()
       .from(schedules)
-      .where(and(eq(schedules.id, id), eq(schedules.workspaceId, DEMO_WORKSPACE_ID), isNull(schedules.archivedAt)))
+      .where(and(eq(schedules.id, id), eq(schedules.workspaceId, DEMO_WORKSPACE_ID)))
       .limit(1);
-    if (!schedule) return { ok: false, error: "找不到这条定时任务，请刷新页面后重试" };
+    if (!schedule || (schedule.archivedAt && parsed.data !== "archived")) {
+      return { ok: false, error: "找不到这条定时任务，请刷新页面后重试" };
+    }
+    if (schedule.status === parsed.data) return { ok: true };
     let resumedAt: Date | undefined;
     if (parsed.data === "active") {
       const [version] = await db
@@ -58,9 +61,23 @@ export async function updateScheduleStatusAction(id: string, next: string): Prom
         lastError: parsed.data === "active" ? null : undefined,
         updatedAt: new Date(),
       })
-      .where(and(eq(schedules.id, id), eq(schedules.workspaceId, DEMO_WORKSPACE_ID), isNull(schedules.archivedAt)))
+      .where(and(
+        eq(schedules.id, id),
+        eq(schedules.workspaceId, DEMO_WORKSPACE_ID),
+        eq(schedules.status, schedule.status),
+        isNull(schedules.archivedAt),
+      ))
       .returning({ id: schedules.id });
-    if (updated.length === 0) return { ok: false, error: "定时任务状态已经变化，请刷新页面后重试" };
+    if (updated.length === 0) {
+      const [current] = await db
+        .select({ status: schedules.status })
+        .from(schedules)
+        .where(and(eq(schedules.id, id), eq(schedules.workspaceId, DEMO_WORKSPACE_ID)))
+        .limit(1);
+      return current?.status === parsed.data
+        ? { ok: true }
+        : { ok: false, error: "定时任务状态已经变化，请刷新页面后重试" };
+    }
     revalidatePathsAfterCommit(["/schedules"], "schedule-status");
     return { ok: true };
   } catch (error) {

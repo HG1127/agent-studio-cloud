@@ -26,6 +26,7 @@ const PAUSED_DURING_START_ID = "00000000-0000-4000-8000-0000000000f2";
 const OTHER_WORKSPACE_SCHEDULE_ID = "00000000-0000-4000-8000-0000000000f3";
 const OTHER_WORKSPACE_ID = "00000000-0000-4000-8000-0000000000f4";
 const RECOVERABLE_SCHEDULE_ID = "00000000-0000-4000-8000-0000000000f6";
+const IDEMPOTENT_STATUS_ID = "00000000-0000-4000-8000-0000000000f7";
 const createdScheduleIds: string[] = [];
 
 const manifest = AgentManifest.parse({
@@ -64,7 +65,7 @@ afterEach(() => revalidatePathMock.mockReset());
 
 afterAll(async () => {
   await db.delete(runs).where(eq(runs.agentId, AGENT_ID));
-  await db.delete(schedules).where(inArray(schedules.id, [SCHEDULE_DUE, SCHEDULE_ONCE, SCHEDULE_PAUSED, SCHEDULE_FAILING, RETIRED_SCHEDULE_ID, PAUSED_DURING_START_ID, OTHER_WORKSPACE_SCHEDULE_ID, RECOVERABLE_SCHEDULE_ID, ...createdScheduleIds]));
+  await db.delete(schedules).where(inArray(schedules.id, [SCHEDULE_DUE, SCHEDULE_ONCE, SCHEDULE_PAUSED, SCHEDULE_FAILING, RETIRED_SCHEDULE_ID, PAUSED_DURING_START_ID, OTHER_WORKSPACE_SCHEDULE_ID, RECOVERABLE_SCHEDULE_ID, IDEMPOTENT_STATUS_ID, ...createdScheduleIds]));
   await db.delete(agentVersions).where(inArray(agentVersions.agentId, [AGENT_ID, DRAFT_AGENT_ID]));
   await db.delete(agents).where(inArray(agents.id, [AGENT_ID, DRAFT_AGENT_ID]));
 });
@@ -79,6 +80,27 @@ async function insertSchedule(overrides?: Partial<typeof schedules.$inferInsert>
 }
 
 describe("调度 tick 接口", () => {
+  it("重复恢复已启用任务不重算到期时间或清除领取租约，重复归档也视为成功", async () => {
+    const dueAt = new Date(Date.now() - 60_000);
+    const leaseUntil = new Date(Date.now() + 60_000);
+    await insertSchedule({
+      id: IDEMPOTENT_STATUS_ID,
+      spec: { kind: "once", at: dueAt.toISOString() },
+      nextRunAt: dueAt,
+      leaseUntil,
+      consecutiveFailures: 1,
+    });
+
+    expect(await updateScheduleStatusAction(IDEMPOTENT_STATUS_ID, "active")).toEqual({ ok: true });
+    const [unchanged] = await db.select().from(schedules).where(eq(schedules.id, IDEMPOTENT_STATUS_ID)).limit(1);
+    expect(unchanged?.nextRunAt).toEqual(dueAt);
+    expect(unchanged?.leaseUntil).toEqual(leaseUntil);
+    expect(unchanged?.consecutiveFailures).toBe(1);
+
+    expect(await updateScheduleStatusAction(IDEMPOTENT_STATUS_ID, "archived")).toEqual({ ok: true });
+    expect(await updateScheduleStatusAction(IDEMPOTENT_STATUS_ID, "archived")).toEqual({ ok: true });
+  });
+
   it("可定时助手只包含已有生产版本的助手", async () => {
     const options = await listScheduleableAgents();
 
