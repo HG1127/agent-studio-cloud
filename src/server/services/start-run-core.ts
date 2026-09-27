@@ -30,6 +30,7 @@ import { qualityOutputReferenceIssue } from "@/server/domain/runtime/quality-che
 import { workflowCollaborationKeys } from "@/server/domain/import-agent";
 import { inspectCollaborationVersionGraph } from "@/server/domain/runtime/collaboration-dependencies";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { jsonValuesEqual } from "@/server/domain/json-value";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding";
 
@@ -610,6 +611,7 @@ export async function startRunCore(args: {
           id: runs.id,
           agentId: runs.agentId,
           sourceType: runs.sourceType,
+          input: runs.input,
           status: runs.status,
           workflowRunId: runs.workflowRunId,
           stepStates: runs.stepStates,
@@ -622,6 +624,9 @@ export async function startRunCore(args: {
       if (!existing) return { ok: false, error: "运行启动冲突，请稍后重试" };
       if (existing.agentId !== agentId || existing.sourceType !== sourceType) {
         return { ok: false, error: "这项请求标识已经用于另一项运行，请重新发起" };
+      }
+      if (sourceType === "manual" && !jsonValuesEqual(existing.input, runInput)) {
+        return { ok: false, error: "运行输入已改变，请重新发起" };
       }
       if (existing.status === "failed" && !existing.workflowRunId) {
         return { ok: false, error: existing.error ?? "运行启动失败，请稍后重试" };

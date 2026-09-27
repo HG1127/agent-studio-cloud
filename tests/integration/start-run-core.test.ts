@@ -143,6 +143,30 @@ describe("运行启动句柄恢复", () => {
     expect(startMock).toHaveBeenCalledOnce();
   });
 
+  it("手动运行相同请求标识只复用输入一致的运行", async () => {
+    const sourceKey = "manual:00000000-0000-4000-8000-0000000007b4";
+    const input = { brief: "原始输入", options: { priority: 1, tags: ["甲", "乙"] } };
+    const first = await startRunCore({ agentId: AGENT_ID, input, sourceKey });
+    const same = await startRunCore({
+      agentId: AGENT_ID,
+      input: { options: { tags: ["甲", "乙"], priority: 1 }, brief: "原始输入" },
+      sourceKey,
+    });
+    const changed = await startRunCore({
+      agentId: AGENT_ID,
+      input: { ...input, brief: "修改后的输入" },
+      sourceKey,
+    });
+
+    expect(first.ok).toBe(true);
+    expect(same).toEqual(first);
+    expect(changed).toEqual({ ok: false, error: "运行输入已改变，请重新发起" });
+    expect(startMock).toHaveBeenCalledOnce();
+    const stored = await db.select().from(runs).where(eq(runs.sourceKey, sourceKey));
+    expect(stored).toHaveLength(1);
+    expect(stored[0].input).toEqual(input);
+  });
+
   it("相同来源键遇到过期排队记录时接管原运行而不新建记录", async () => {
     const sourceKey = "evaluation:00000000-0000-4000-8000-000000000703:00000000-0000-4000-8000-000000000704";
     const staleAt = new Date(Date.now() - RUN_START_LEASE_MS * 2);
