@@ -1,6 +1,5 @@
 "use server";
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { AgentManifest } from "@/contracts/manifest";
 import { ScheduleCreateInput, type ScheduleActionResult } from "@/contracts/schedule";
 import { agentVersions, agents, schedules } from "@/db/schema";
@@ -10,6 +9,7 @@ import { validateRunInput } from "@/server/domain/runtime/run-input";
 import { nextOccurrence } from "@/server/domain/schedule-spec";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { validationMessage } from "@/server/domain/validation-message";
+import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
 export async function createScheduleAction(raw: unknown): Promise<ScheduleActionResult> {
   const parsed = ScheduleCreateInput.safeParse(raw);
@@ -45,7 +45,7 @@ export async function createScheduleAction(raw: unknown): Promise<ScheduleAction
       workspaceId: agent.workspaceId, agentId, versionId: version.id,
       status: "active", spec, input, nextRunAt: next, createdBy: DEMO_USER_ID,
     });
-    revalidatePath("/schedules");
+    revalidatePathsAfterCommit(["/schedules"], "schedule-create");
     return { ok: true };
   } catch (error) {
     console.error("创建定时任务失败", safeErrorForLog(error));

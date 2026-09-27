@@ -1,15 +1,16 @@
 import { eq, inArray } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-const { startMock } = vi.hoisted(() => ({ startMock: vi.fn() }));
+const { startMock, revalidatePathMock } = vi.hoisted(() => ({ startMock: vi.fn(), revalidatePathMock: vi.fn() }));
 vi.mock("workflow/api", () => ({ start: startMock }));
-vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 import { AgentManifest } from "@/contracts/manifest";
 import { agentVersions, agents, runs, schedules } from "@/db/schema";
 import { db } from "@/lib/db";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { POST as tick } from "@/app/api/schedules/tick/route";
 import { listScheduleableAgents } from "@/server/queries/schedules";
+import { createScheduleAction } from "@/server/actions/create-schedule";
 import { updateScheduleStatusAction } from "@/server/actions/update-schedule-status";
 
 const AGENT_ID = "00000000-0000-4000-8000-0000000000e9";
@@ -24,6 +25,7 @@ const RETIRED_SCHEDULE_ID = "00000000-0000-4000-8000-0000000000f1";
 const PAUSED_DURING_START_ID = "00000000-0000-4000-8000-0000000000f2";
 const OTHER_WORKSPACE_SCHEDULE_ID = "00000000-0000-4000-8000-0000000000f3";
 const OTHER_WORKSPACE_ID = "00000000-0000-4000-8000-0000000000f4";
+const createdScheduleIds: string[] = [];
 
 const manifest = AgentManifest.parse({
   schemaVersion: "4.0",
@@ -57,9 +59,11 @@ beforeAll(async () => {
   await db.insert(agentVersions).values({ id: RETIRED_VERSION_ID, agentId: DRAFT_AGENT_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, version: 1, status: "retired", manifest });
 });
 
+afterEach(() => revalidatePathMock.mockReset());
+
 afterAll(async () => {
   await db.delete(runs).where(eq(runs.agentId, AGENT_ID));
-  await db.delete(schedules).where(inArray(schedules.id, [SCHEDULE_DUE, SCHEDULE_ONCE, SCHEDULE_PAUSED, SCHEDULE_FAILING, RETIRED_SCHEDULE_ID, PAUSED_DURING_START_ID, OTHER_WORKSPACE_SCHEDULE_ID]));
+  await db.delete(schedules).where(inArray(schedules.id, [SCHEDULE_DUE, SCHEDULE_ONCE, SCHEDULE_PAUSED, SCHEDULE_FAILING, RETIRED_SCHEDULE_ID, PAUSED_DURING_START_ID, OTHER_WORKSPACE_SCHEDULE_ID, ...createdScheduleIds]));
   await db.delete(agentVersions).where(inArray(agentVersions.agentId, [AGENT_ID, DRAFT_AGENT_ID]));
   await db.delete(agents).where(inArray(agents.id, [AGENT_ID, DRAFT_AGENT_ID]));
 });
@@ -79,6 +83,32 @@ describe("调度 tick 接口", () => {
 
     expect(options.some((option) => option.id === AGENT_ID)).toBe(true);
     expect(options.some((option) => option.id === DRAFT_AGENT_ID)).toBe(false);
+  });
+
+  it("创建或更新已提交后缓存刷新失败仍返回成功", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const before = await db.select({ id: schedules.id }).from(schedules).where(eq(schedules.agentId, AGENT_ID));
+      const beforeIds = new Set(before.map((row) => row.id));
+      revalidatePathMock.mockImplementationOnce(() => { throw new Error("缓存暂时不可用"); });
+      expect(await createScheduleAction({
+        agentId: AGENT_ID,
+        spec: { kind: "interval", minutes: 5 },
+        input: { testCase: "cache-failure" },
+      })).toEqual({ ok: true });
+      const after = await db.select({ id: schedules.id }).from(schedules).where(eq(schedules.agentId, AGENT_ID));
+      const createdId = after.find((row) => !beforeIds.has(row.id))?.id;
+      expect(createdId).toBeDefined();
+      createdScheduleIds.push(createdId!);
+      revalidatePathMock.mockImplementationOnce(() => { throw new Error("缓存暂时不可用"); });
+      expect(await updateScheduleStatusAction(createdId!, "paused")).toEqual({ ok: true });
+      const [schedule] = await db.select().from(schedules).where(eq(schedules.id, createdId!)).limit(1);
+      expect(schedule?.status).toBe("paused");
+      expect(revalidatePathMock).toHaveBeenCalledTimes(2);
+      expect(log).toHaveBeenCalledTimes(2);
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it("暂停任务可继续使用创建时冻结的历史生产版本", async () => {

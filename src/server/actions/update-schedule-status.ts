@@ -1,6 +1,5 @@
 "use server";
 import { and, eq, inArray, isNull } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { AgentManifest } from "@/contracts/manifest";
 import { ScheduleSpec, type ScheduleActionResult } from "@/contracts/schedule";
@@ -9,6 +8,7 @@ import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { nextOccurrence } from "@/server/domain/schedule-spec";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
 const Next = z.enum(["paused", "active", "archived"]);
 
@@ -61,7 +61,7 @@ export async function updateScheduleStatusAction(id: string, next: string): Prom
       .where(and(eq(schedules.id, id), eq(schedules.workspaceId, DEMO_WORKSPACE_ID), isNull(schedules.archivedAt)))
       .returning({ id: schedules.id });
     if (updated.length === 0) return { ok: false, error: "定时任务状态已经变化，请刷新页面后重试" };
-    revalidatePath("/schedules");
+    revalidatePathsAfterCommit(["/schedules"], "schedule-status");
     return { ok: true };
   } catch (error) {
     console.error("更新定时任务状态失败", safeErrorForLog(error));

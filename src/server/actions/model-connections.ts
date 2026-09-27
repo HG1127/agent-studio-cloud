@@ -3,7 +3,6 @@
 import { generateText } from "ai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { and, eq, isNull, sql } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import {
   ModelConnectionSaveInput,
@@ -16,6 +15,7 @@ import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { isTransientModelError, realModelsEnabled } from "@/lib/model";
 import { apiKeyHint, decryptApiKey, encryptApiKey, resolveEncryptionKey } from "@/server/domain/crypto";
+import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
 class EndpointKeyRequiredError extends Error {}
 
@@ -57,7 +57,7 @@ export async function saveModelConnectionAction(input: unknown): Promise<ModelCo
       return created.id;
     });
     if (!id) return { ok: false, error: "连接不存在或已删除，请刷新页面后重试" };
-    revalidatePath("/settings");
+    revalidatePathsAfterCommit(["/settings"], "model-connection-save");
     return { ok: true, id };
   } catch (error) {
     if (error instanceof EndpointKeyRequiredError) return { ok: false, error: "更改服务地址时，请重新填写密钥" };
@@ -74,7 +74,7 @@ export async function deleteModelConnectionAction(id: string): Promise<ModelConn
       .where(and(eq(modelConnections.id, id), eq(modelConnections.workspaceId, DEMO_WORKSPACE_ID), isNull(modelConnections.archivedAt)))
       .returning({ id: modelConnections.id });
     if (!removed) return { ok: false, error: "连接不存在或已删除，请刷新页面后重试" };
-    revalidatePath("/settings");
+    revalidatePathsAfterCommit(["/settings"], "model-connection-delete");
     return { ok: true };
   } catch {
     return { ok: false, error: "删除连接失败，请稍后重试" };
