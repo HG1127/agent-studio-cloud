@@ -19,6 +19,7 @@ export const agentMemories = pgTable(
   (t) => [
     uniqueIndex("agent_memories_run_node_unique").on(t.sourceRunId, t.sourceNodeId),
     index("agent_memories_workspace_agent_idx").on(t.workspaceId, t.agentId, t.createdAt),
+    index("agent_memories_content_trgm_idx").using("gin", t.content.op("gin_trgm_ops")),
   ],
 );
 export type AgentMemory = typeof agentMemories.$inferSelect;

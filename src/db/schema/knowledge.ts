@@ -42,6 +42,9 @@ export const knowledgeChunks = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("knowledge_chunks_source_index_unique").on(t.sourceId, t.chunkIndex)],
+  (t) => [
+    uniqueIndex("knowledge_chunks_source_index_unique").on(t.sourceId, t.chunkIndex),
+    index("knowledge_chunks_content_trgm_idx").using("gin", t.content.op("gin_trgm_ops")),
+  ],
 );
 export type KnowledgeChunk = typeof knowledgeChunks.$inferSelect;
