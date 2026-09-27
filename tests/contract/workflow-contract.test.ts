@@ -130,6 +130,24 @@ describe("WorkflowDraft", () => {
     expect(draft.nodes.handoff).not.toHaveProperty("contract");
   });
 
+  it("内嵌交接步骤尚未选择目标时仍可保存草稿", () => {
+    const draft = WorkflowDraft.parse({
+      ...baseDraft,
+      nodes: {
+        ...baseDraft.nodes,
+        group: {
+          id: "group", title: "准备材料", type: "subflow",
+          subflow: { name: "准备材料", steps: [{ id: "handoff", title: "交接", type: "handoff", contract: undefined }] },
+        },
+      },
+    });
+    expect(draft.nodes.group.subflow?.steps[0]).not.toHaveProperty("contract");
+    expect(WorkflowDraft.safeParse({
+      ...baseDraft,
+      businessGrounding: { missing: undefined },
+    }).success).toBe(false);
+  });
+
   it("拒绝对象原型名称和标识错位的顶层步骤", () => {
     const inheritedNameNodes = { ...baseDraft.nodes } as Record<string, unknown>;
     Object.defineProperty(inheritedNameNodes, "toString", {
