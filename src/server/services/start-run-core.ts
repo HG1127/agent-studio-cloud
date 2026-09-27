@@ -30,6 +30,7 @@ import { qualityOutputReferenceIssue } from "@/server/domain/runtime/quality-che
 import { workflowCollaborationKeys } from "@/server/domain/import-agent";
 import { inspectCollaborationVersionGraph } from "@/server/domain/runtime/collaboration-dependencies";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { jsonValuesEqual } from "@/server/domain/json-value";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding";
 
@@ -521,6 +522,44 @@ async function validateRuntimePreflight(args: {
   return `以下步骤暂不支持自动执行：${names}，请调整流程后再运行`;
 }
 
+async function reuseExistingRun(args: {
+  agentId: string;
+  input: Record<string, unknown>;
+  sourceType: "manual" | "schedule" | "evaluation";
+  sourceKey: string;
+}): Promise<StartRunResult | null> {
+  const [existing] = await db
+    .select({
+      id: runs.id,
+      agentId: runs.agentId,
+      sourceType: runs.sourceType,
+      input: runs.input,
+      status: runs.status,
+      workflowRunId: runs.workflowRunId,
+      stepStates: runs.stepStates,
+      updatedAt: runs.updatedAt,
+      error: runs.error,
+    })
+    .from(runs)
+    .where(and(eq(runs.workspaceId, DEMO_WORKSPACE_ID), eq(runs.sourceKey, args.sourceKey)))
+    .limit(1);
+  if (!existing) return null;
+  if (existing.agentId !== args.agentId || existing.sourceType !== args.sourceType) {
+    return { ok: false, error: "这项请求标识已经用于另一项运行，请重新发起" };
+  }
+  if (args.sourceType === "manual" && !jsonValuesEqual(existing.input, args.input)) {
+    return { ok: false, error: "运行输入已改变，请重新发起" };
+  }
+  if (existing.status === "failed" && !existing.workflowRunId) {
+    return { ok: false, error: existing.error ?? "运行启动失败，请稍后重试" };
+  }
+  if (existing.status === "queued" && !existing.workflowRunId
+    && isRunStartLeaseExpired(existing.stepStates, existing.updatedAt)) {
+    return resumeQueuedRunStartCore(existing.id);
+  }
+  return { ok: true, runId: existing.id };
+}
+
 export async function startRunCore(args: {
   agentId: string;
   input: Record<string, unknown>;
@@ -536,6 +575,10 @@ export async function startRunCore(args: {
   }
   const runInput = parsedRunInput.data;
   try {
+    if (args.sourceKey) {
+      const existing = await reuseExistingRun({ agentId, input: runInput, sourceType, sourceKey: args.sourceKey });
+      if (existing) return existing;
+    }
     const [agent] = await db
       .select()
       .from(agents)
@@ -574,63 +617,20 @@ export async function startRunCore(args: {
     });
     if (preflightError) return { ok: false, error: preflightError };
     const lease = createRunStartLease();
-    const hasLockedDependencies = (manifest.knowledgeSnapshot?.length ?? 0) > 0
-      || workflowCollaborationKeys(manifest.workflowSnapshot).length > 0;
-    const created = hasLockedDependencies
-      ? await createRunWithLockedDependencies({
-          agentId,
-          workspaceId: agent.workspaceId,
-          versionId: version.id,
-          manifest,
-          input: runInput,
-          sourceType,
-          sourceKey: args.sourceKey ?? null,
-          lease,
-        })
-      : await db
-          .insert(runs)
-          .values({
-            workspaceId: agent.workspaceId,
-            createdBy: DEMO_USER_ID,
-            agentId,
-            versionId: version.id,
-            status: "queued",
-            input: runInput,
-            stepStates: withRunStartLease({}, lease),
-            sourceType,
-            sourceKey: args.sourceKey ?? null,
-          })
-          .onConflictDoNothing()
-          .returning({ id: runs.id })
-          .then(([run]) => ({ runId: run?.id ?? null, error: null }));
+    const created = await createRunWithLockedDependencies({
+      agentId,
+      workspaceId: agent.workspaceId,
+      versionId: version.id,
+      manifest,
+      input: runInput,
+      sourceType,
+      sourceKey: args.sourceKey ?? null,
+      lease,
+    });
     if (created.error) return { ok: false, error: created.error };
     if (!created.runId && args.sourceKey) {
-      const [existing] = await db
-        .select({
-          id: runs.id,
-          agentId: runs.agentId,
-          sourceType: runs.sourceType,
-          status: runs.status,
-          workflowRunId: runs.workflowRunId,
-          stepStates: runs.stepStates,
-          updatedAt: runs.updatedAt,
-          error: runs.error,
-        })
-        .from(runs)
-        .where(and(eq(runs.workspaceId, agent.workspaceId), eq(runs.sourceKey, args.sourceKey)))
-        .limit(1);
-      if (!existing) return { ok: false, error: "运行启动冲突，请稍后重试" };
-      if (existing.agentId !== agentId || existing.sourceType !== sourceType) {
-        return { ok: false, error: "这项请求标识已经用于另一项运行，请重新发起" };
-      }
-      if (existing.status === "failed" && !existing.workflowRunId) {
-        return { ok: false, error: existing.error ?? "运行启动失败，请稍后重试" };
-      }
-      if (existing.status === "queued" && !existing.workflowRunId
-        && isRunStartLeaseExpired(existing.stepStates, existing.updatedAt)) {
-        return resumeQueuedRunStartCore(existing.id);
-      }
-      return { ok: true, runId: existing.id };
+      return await reuseExistingRun({ agentId, input: runInput, sourceType, sourceKey: args.sourceKey })
+        ?? { ok: false, error: "运行启动冲突，请稍后重试" };
     }
     if (!created.runId) return { ok: false, error: "运行启动冲突，请稍后重试" };
     return launchClaimedRun({ runId: created.runId, manifest, input: runInput, lease });
