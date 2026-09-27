@@ -1,6 +1,5 @@
 "use server";
 import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { KnowledgeArchiveInput, type KnowledgeArchiveResult } from "@/contracts/knowledge";
 import { agentVersions, agents, auditEvents, knowledgeSources, runs } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
@@ -9,6 +8,7 @@ import { auditEventValues } from "@/server/audit/event-values";
 import { restoredKnowledgeStatus } from "@/server/domain/knowledge/source-state";
 import { activeVersionDependingOnKnowledgeSource, liveRunDependingOnKnowledgeSource } from "@/server/domain/runtime/collaboration-dependencies";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
 export async function setKnowledgeSourceArchivedAction(input: unknown): Promise<KnowledgeArchiveResult> {
   const parsed = KnowledgeArchiveInput.safeParse(input);
@@ -101,7 +101,7 @@ export async function setKnowledgeSourceArchivedAction(input: unknown): Promise<
         : { ok: false, error: `助手「${updated.inUseBy}」的当前版本或待验收版本仍在使用这份资料，请先发布不再使用它的新版本` };
     }
     if (!updated) return { ok: false, error: "知识资料状态已经变化，请刷新页面后重试" };
-    revalidatePath("/knowledge");
+    revalidatePathsAfterCommit(["/knowledge"], "knowledge-archive");
     return { ok: true };
   } catch (error) {
     console.error("更新知识资料状态失败", safeErrorForLog(error));

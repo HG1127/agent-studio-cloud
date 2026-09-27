@@ -1,7 +1,6 @@
 "use server";
 
 import { and, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { AgentArchiveInput, type AgentArchiveResult } from "@/contracts/agent";
 import { agents, agentVersions, auditEvents, evaluationRuns, runs, schedules } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
@@ -9,6 +8,7 @@ import { db } from "@/lib/db";
 import { auditEventValues } from "@/server/audit/event-values";
 import { activeVersionDependingOnAgent, liveRunDependingOnAgent } from "@/server/domain/runtime/collaboration-dependencies";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
 export async function setAgentArchivedAction(input: unknown): Promise<AgentArchiveResult> {
   const parsed = AgentArchiveInput.safeParse(input);
@@ -117,9 +117,7 @@ export async function setAgentArchivedAction(input: unknown): Promise<AgentArchi
       return { ok: false, error: `助手「${updated.inUseBy}」的当前版本或待验收版本仍在使用它，请先调整并重新发布` };
     }
     if (!updated) return { ok: false, error: "助手状态已经变化，请刷新页面后重试" };
-    revalidatePath("/agents");
-    revalidatePath(`/agents/${parsed.data.agentId}`);
-    revalidatePath("/schedules");
+    revalidatePathsAfterCommit(["/agents", `/agents/${parsed.data.agentId}`, "/schedules"], "agent-archive");
     return { ok: true };
   } catch (error) {
     console.error("更新助手状态失败", safeErrorForLog(error));

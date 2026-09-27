@@ -1,13 +1,13 @@
 "use server";
 
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { MemoryArchiveInput, type MemoryArchiveResult } from "@/contracts/memory";
 import { agentMemories, agents, auditEvents } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { auditEventValues } from "@/server/audit/event-values";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
 export async function setMemoryArchivedAction(input: MemoryArchiveInput): Promise<MemoryArchiveResult> {
   const parsed = MemoryArchiveInput.safeParse(input);
@@ -49,7 +49,7 @@ export async function setMemoryArchivedAction(input: MemoryArchiveInput): Promis
       return true;
     });
     if (!updated) return { ok: false, error: "经验状态已经变化，请刷新页面后重试" };
-    revalidatePath("/memory");
+    revalidatePathsAfterCommit(["/memory"], "memory-archive");
     return { ok: true };
   } catch (error) {
     console.error("更新经验状态失败", safeErrorForLog(error));

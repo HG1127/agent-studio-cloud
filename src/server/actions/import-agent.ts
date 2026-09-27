@@ -1,7 +1,6 @@
 "use server";
 
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { ImportAgentResult } from "@/contracts/agent";
 import { agents, agentVersions, auditEvents, knowledgeSources, workflowDefinitions } from "@/db/schema";
@@ -14,6 +13,7 @@ import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { workflowKnowledgeSourceIds } from "@/server/domain/runtime/knowledge-snapshot";
 import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding";
 import { getToolRegistration } from "@/server/tools/tool-registry";
+import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
 async function findExistingImport(requestId: string) {
   const [existing] = await db.select({
@@ -132,13 +132,13 @@ export async function importAgentAction(input: unknown, requestId: string): Prom
       }));
       return created.id;
     });
-    revalidatePath("/agents");
+    revalidatePathsAfterCommit(["/agents"], "agent-import");
     return { ok: true, agentId };
   } catch (error) {
     try {
       const existing = await findExistingImport(requestId);
       if (existing && existingImportMatches(existing, imported, fingerprint)) {
-        revalidatePath("/agents");
+        revalidatePathsAfterCommit(["/agents"], "agent-import-recover");
         return { ok: true, agentId: existing.id };
       }
     } catch (recoveryError) {

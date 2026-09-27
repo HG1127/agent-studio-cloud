@@ -1,7 +1,6 @@
 "use server";
 
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { AgentUpdateInput, type AgentUpdateResult } from "@/contracts/agent";
 import { WorkflowDraft } from "@/contracts/workflow";
 import { agents, auditEvents, workflowDefinitions } from "@/db/schema";
@@ -10,6 +9,7 @@ import { db } from "@/lib/db";
 import { auditEventValues } from "@/server/audit/event-values";
 import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
 export async function updateAgentAction(input: unknown): Promise<AgentUpdateResult> {
   const parsed = AgentUpdateInput.safeParse(input);
@@ -63,10 +63,7 @@ export async function updateAgentAction(input: unknown): Promise<AgentUpdateResu
     if (result.kind === "stale") return { ok: false, error: "助手信息已在其他页面发生变化；你的修改仍保留在本页，请刷新核对后再保存" };
     if (result.kind === "definition-missing") return { ok: false, error: "找不到这个助手的流程草稿" };
     if (result.kind === "definition-invalid") return { ok: false, error: "流程草稿格式不完整，暂时无法修改名称" };
-    revalidatePath("/agents");
-    revalidatePath(`/agents/${result.agentId}`);
-    revalidatePath("/runs");
-    revalidatePath("/schedules");
+    revalidatePathsAfterCommit(["/agents", `/agents/${result.agentId}`, "/runs", "/schedules"], "agent-update");
     return { ok: true, updatedAt: result.updatedAt };
   } catch (error) {
     console.error("更新助手信息失败", safeErrorForLog(error));

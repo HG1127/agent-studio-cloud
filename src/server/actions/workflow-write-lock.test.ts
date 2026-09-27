@@ -193,6 +193,28 @@ describe("助手与流程并发写入", () => {
     expect(mocks.inserts).toHaveLength(1);
   });
 
+  it("助手信息已更新后缓存刷新失败仍返回成功并尝试全部路径", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.selectRows = [[{ id: AGENT_ID, name: "旧名称", updatedAt: AGENT_UPDATED_AT }], [{ id: DEFINITION_ID, draft }]];
+    mocks.revalidatePath.mockImplementationOnce(() => { throw new Error("缓存暂时不可用"); });
+
+    try {
+      await expect(updateAgentAction({
+        agentId: AGENT_ID,
+        name: "新名称",
+        description: "新说明",
+        expectedUpdatedAt: AGENT_UPDATED_AT.toISOString(),
+      })).resolves.toEqual({ ok: true, updatedAt: expect.any(String) });
+      expect(mocks.updates).toHaveLength(2);
+      expect(mocks.revalidatePath.mock.calls.map(([path]) => path)).toEqual([
+        "/agents", `/agents/${AGENT_ID}`, "/runs", "/schedules",
+      ]);
+      expect(log).toHaveBeenCalledOnce();
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it("旧页面不会覆盖其他页面刚保存的助手信息", async () => {
     mocks.selectRows = [[{
       id: AGENT_ID,
@@ -254,6 +276,24 @@ describe("助手与流程并发写入", () => {
     expect(mocks.updates).toHaveLength(1);
     expect(mocks.updates[0].value.draft).toMatchObject({ rootAgent: { id: AGENT_ID, name: "需要修复的助手", role: "已修复" } });
     expect(mocks.inserts).toHaveLength(1);
+  });
+
+  it("自动修复已保存后缓存刷新失败仍返回修复结果", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.selectRows = [[{ id: AGENT_ID, name: "需要修复的助手" }], [{ id: DEFINITION_ID, draft }]];
+    mocks.applySafeAuditFixes.mockReturnValue({
+      draft: { ...draft, rootAgent: { ...draft.rootAgent, role: "已修复" } },
+      applied: ["补充安全边界"], skipped: [], remainingCritical: 0, remainingWarnings: 0,
+    });
+    mocks.revalidatePath.mockImplementationOnce(() => { throw new Error("缓存暂时不可用"); });
+
+    try {
+      await expect(applyAuditFixesAction(AGENT_ID)).resolves.toMatchObject({ ok: true, applied: ["补充安全边界"] });
+      expect(mocks.updates).toHaveLength(1);
+      expect(log).toHaveBeenCalledOnce();
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it("响应丢失后重试已完成的自动修复时复用当前草稿", async () => {
