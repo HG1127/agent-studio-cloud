@@ -36,54 +36,54 @@ export async function saveRunFeedbackAction(input: unknown): Promise<RunFeedback
         .from(runFeedback)
         .where(and(eq(runFeedback.runId, run.id), eq(runFeedback.workspaceId, DEMO_WORKSPACE_ID)))
         .limit(1);
-      if (existing && runFeedbackMatches(existing, { rating: parsed.data.rating, note: storedNote })) {
-        return { kind: "saved" as const, row: existing };
+      let saved = existing;
+      if (!existing || !runFeedbackMatches(existing, { rating: parsed.data.rating, note: storedNote })) {
+        const values = { rating: parsed.data.rating, note: storedNote, updatedAt: new Date() };
+        [saved] = existing
+          ? await tx.update(runFeedback).set(values).where(and(
+              eq(runFeedback.id, existing.id), eq(runFeedback.workspaceId, DEMO_WORKSPACE_ID),
+            )).returning()
+          : await tx.insert(runFeedback).values({
+              workspaceId: DEMO_WORKSPACE_ID,
+              createdBy: DEMO_USER_ID,
+              runId: run.id,
+              agentId: run.agentId,
+              ...values,
+            }).returning();
+        await tx.insert(auditEvents).values(auditEventValues({
+          workspaceId: DEMO_WORKSPACE_ID,
+          createdBy: DEMO_USER_ID,
+          action: "run.feedback_saved",
+          targetType: "run",
+          targetId: run.id,
+          summary: `${existing ? "更新" : "提交"}运行结果反馈：${parsed.data.rating === "useful" ? "有用" : "需要改进"}`,
+          data: { rating: parsed.data.rating },
+        }));
       }
-      const now = new Date();
-      const values = {
-        rating: parsed.data.rating,
-        note: storedNote,
-        updatedAt: now,
-      };
-      const [saved] = existing
-        ? await tx.update(runFeedback).set(values).where(and(
-            eq(runFeedback.id, existing.id), eq(runFeedback.workspaceId, DEMO_WORKSPACE_ID),
-          )).returning()
-        : await tx.insert(runFeedback).values({
-            workspaceId: DEMO_WORKSPACE_ID,
-            createdBy: DEMO_USER_ID,
-            runId: run.id,
-            agentId: run.agentId,
-            ...values,
-          }).returning();
-      await tx.insert(auditEvents).values(auditEventValues({
-        workspaceId: DEMO_WORKSPACE_ID,
-        createdBy: DEMO_USER_ID,
-        action: "run.feedback_saved",
-        targetType: "run",
-        targetId: run.id,
-        summary: `${existing ? "更新" : "提交"}运行结果反馈：${parsed.data.rating === "useful" ? "有用" : "需要改进"}`,
-        data: { rating: parsed.data.rating },
-      }));
-      return { kind: "saved" as const, row: saved };
+      if (!saved) throw new Error("运行反馈写入后未返回记录");
+      const [activeCase] = saved.evaluationCaseId
+        ? await tx.select({ id: evaluationCases.id }).from(evaluationCases).where(and(
+            eq(evaluationCases.id, saved.evaluationCaseId),
+            eq(evaluationCases.agentId, saved.agentId),
+            eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID),
+            isNull(evaluationCases.archivedAt),
+          )).limit(1)
+        : [];
+      const feedback = RunFeedbackView.parse({
+        ...saved,
+        evaluationCaseId: activeCase?.id ?? null,
+        updatedAt: saved.updatedAt.toISOString(),
+      });
+      return { kind: "saved" as const, feedback };
     });
     if (outcome.kind === "missing") return { ok: false, error: "找不到这次运行，请刷新页面后重试" };
     if (outcome.kind === "not-completed") return { ok: false, error: "运行完成后才能评价结果" };
-    const [activeCase] = outcome.row.evaluationCaseId
-      ? await db.select({ id: evaluationCases.id }).from(evaluationCases).where(and(
-          eq(evaluationCases.id, outcome.row.evaluationCaseId),
-          eq(evaluationCases.agentId, outcome.row.agentId),
-          eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID),
-          isNull(evaluationCases.archivedAt),
-        )).limit(1)
-      : [];
-    const feedback = RunFeedbackView.parse({
-      ...outcome.row,
-      evaluationCaseId: activeCase?.id ?? null,
-      updatedAt: outcome.row.updatedAt.toISOString(),
-    });
-    revalidatePath(`/runs/${parsed.data.runId}`);
-    return { ok: true, feedback };
+    try {
+      revalidatePath(`/runs/${parsed.data.runId}`);
+    } catch (error) {
+      console.error("运行反馈已保存但页面刷新失败", safeErrorForLog(error));
+    }
+    return { ok: true, feedback: outcome.feedback };
   } catch (error) {
     console.error("保存运行反馈失败", safeErrorForLog(error));
     return { ok: false, error: "保存运行反馈失败，请稍后重试" };
