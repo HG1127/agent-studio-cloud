@@ -123,6 +123,15 @@ export async function invokeHttpTool(args: {
     if (!output || typeof output !== "object" || Array.isArray(output)) {
       return { ok: false, error: "业务系统返回的不是 JSON 对象", retryable: false };
     }
+    if (Object.hasOwn(output, "ok") && (output as Record<string, unknown>).ok !== true) {
+      return {
+        ok: false,
+        error: (output as Record<string, unknown>).ok === false
+          ? "业务系统回执表明操作未完成"
+          : "业务系统回执的 ok 字段必须是布尔值",
+        retryable: false,
+      };
+    }
     return { ok: true, output: output as Record<string, unknown> };
   } catch {
     return { ok: false, error: "业务系统返回的不是有效 JSON", retryable: false };

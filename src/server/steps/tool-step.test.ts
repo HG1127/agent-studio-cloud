@@ -54,10 +54,13 @@ describe("真实工具步骤", () => {
     expect(JSON.stringify(mocks.appendTrace.mock.calls)).not.toContain("receipt-1");
   });
 
-  it("保留业务系统显式返回的不成功回执供门禁拦截", async () => {
+  it("不把业务系统显式失败的回执记录成成功步骤", async () => {
     mocks.invokeHttpTool.mockResolvedValue({ ok: true, output: { ok: false, receiptId: "receipt-rejected" } });
     await expect(runToolStep({ runId: "run-1", node, input: {}, outputs: {} }))
-      .resolves.toEqual({ receipt: { ok: false, receiptId: "receipt-rejected" } });
+      .rejects.toThrow("业务系统回执表明操作未完成");
+    expect(mocks.persistStep).toHaveBeenLastCalledWith(expect.objectContaining({ status: "failed" }));
+    expect(mocks.persistStep).not.toHaveBeenCalledWith(expect.objectContaining({ status: "succeeded" }));
+    expect(JSON.stringify(mocks.appendTrace.mock.calls)).not.toContain("receipt-rejected");
   });
 
   it("拒绝不符合冻结契约的业务回执", async () => {
