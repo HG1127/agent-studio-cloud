@@ -71,6 +71,15 @@ describe("WorkflowDraft", () => {
     }).success).toBe(false);
   });
 
+  it("拒绝自由字段中会被 JSON 序列化静默改写的值", () => {
+    for (const value of [undefined, () => "ignored", new Date("2026-09-27"), Number.NaN]) {
+      expect(WorkflowDraft.safeParse({
+        ...baseDraft,
+        businessGrounding: { source: value },
+      }).success).toBe(false);
+    }
+  });
+
   it("拒绝对象原型名称和标识错位的顶层步骤", () => {
     const inheritedNameNodes = { ...baseDraft.nodes } as Record<string, unknown>;
     Object.defineProperty(inheritedNameNodes, "toString", {

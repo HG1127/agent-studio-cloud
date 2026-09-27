@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { JsonStorageValue } from "./json";
 
 const RESERVED_FIELD_NAMES: ReadonlySet<string> = new Set(["__proto__", "prototype", "constructor"]);
 const RESERVED_WORKFLOW_NODE_IDS: ReadonlySet<string> = new Set([
@@ -166,6 +167,10 @@ export const WorkflowDraft = z.object({
     }
   }
   try {
+    if (!JsonStorageValue.safeParse(draft).success) {
+      ctx.addIssue({ code: "custom", message: "流程草稿必须是可保存的 JSON 数据" });
+      return;
+    }
     const bytes = new TextEncoder().encode(JSON.stringify(draft)).byteLength;
     if (bytes > MAX_WORKFLOW_BYTES) ctx.addIssue({ code: "custom", message: "流程草稿不能超过 1MB" });
   } catch {
