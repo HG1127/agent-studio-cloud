@@ -56,6 +56,19 @@ beforeEach(() => {
 });
 
 describe("等待消息回执的终态确认", () => {
+  it("拒绝含无效 UTF-8 的 JSON，且不读取回执或恢复运行", async () => {
+    const response = await POST(new Request(`http://localhost/api/runs/${RUN_ID}/events/${EVENT_KEY}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-wait-event-token": "submission-token" },
+      body: new Uint8Array([123, 34, 120, 34, 58, 34, 255, 34, 125]),
+    }), context());
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ ok: false, error: "消息内容必须是 JSON 对象" });
+    expect(mocks.findReceipt).not.toHaveBeenCalled();
+    expect(mocks.resumeHook).not.toHaveBeenCalled();
+  });
+
   it("运行已完成但缺少恢复轨迹时不能误回成功", async () => {
     const response = await POST(request(), context());
 
