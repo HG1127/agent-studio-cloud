@@ -10,6 +10,9 @@ const safeFieldPath = (value: string) => value.split(".").every((segment) => seg
 const safeTopLevelNodeId = (value: string) => value.length <= 200
   && /^[A-Za-z0-9_-]+$/.test(value)
   && !RESERVED_WORKFLOW_NODE_IDS.has(value);
+const omitUndefined = <T extends object>(value: T): T => Object.fromEntries(
+  Object.entries(value).filter(([, item]) => item !== undefined),
+) as T;
 
 export const MAX_WORKFLOW_NODES = 200;
 export const MAX_WORKFLOW_BYTES = 1024 * 1024;
@@ -138,7 +141,7 @@ export const WorkflowNode = z.object({
   toAgent: z.object({ id: z.string(), name: z.string().optional(), versionId: z.string().optional() }).optional(),
   contract: HandoffContract.optional(),
   businessSpec: z.record(z.string(), z.unknown()).nullable().default(null),
-});
+}).transform(omitUndefined);
 export const WorkflowDraft = z.object({
   id: z.string(), versionId: z.string().nullable().default(null),
   startNodeId: z.string().default("start"),

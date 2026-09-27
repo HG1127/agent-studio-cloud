@@ -119,6 +119,17 @@ describe("WorkflowDraft", () => {
     expect(branch?.rules?.[0]).not.toHaveProperty("value");
   });
 
+  it("节点编辑器清空可选交接配置时不保留 undefined 字段", () => {
+    const draft = WorkflowDraft.parse({
+      ...baseDraft,
+      nodes: {
+        ...baseDraft.nodes,
+        handoff: { id: "handoff", title: "交接", type: "handoff", contract: undefined },
+      },
+    });
+    expect(draft.nodes.handoff).not.toHaveProperty("contract");
+  });
+
   it("拒绝对象原型名称和标识错位的顶层步骤", () => {
     const inheritedNameNodes = { ...baseDraft.nodes } as Record<string, unknown>;
     Object.defineProperty(inheritedNameNodes, "toString", {
