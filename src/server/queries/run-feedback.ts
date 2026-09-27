@@ -49,7 +49,7 @@ export async function listImprovementFeedback(options: {
       agentId ? eq(runFeedback.agentId, agentId) : undefined,
       query ? ilike(runFeedback.note, `%${escapeLikePattern(query)}%`) : undefined,
     ))
-    .orderBy(desc(runFeedback.updatedAt))
+    .orderBy(desc(runFeedback.updatedAt), desc(runFeedback.id))
     .limit(limit)
     .offset(offset);
   return parseQueryRows("待改进运行反馈", RunImprovementFeedbackView, rows.map(({ feedback, agentName, agentArchivedAt }) => ({

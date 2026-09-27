@@ -21,7 +21,7 @@ export async function listEvaluationCases(
       eq(evaluationCases.workspaceId, workspaceId),
       archived ? isNotNull(evaluationCases.archivedAt) : isNull(evaluationCases.archivedAt),
     ))
-    .orderBy(desc(evaluationCases.createdAt))
+    .orderBy(desc(evaluationCases.createdAt), desc(evaluationCases.id))
     .limit(limit)
     .offset(offset);
   return parseQueryRows("验收样例列表", EvaluationCaseView, rows.map((row) => ({
@@ -50,7 +50,7 @@ export async function listEvaluationRuns(
       eq(agentVersions.agentId, agentId),
       eq(agentVersions.workspaceId, workspaceId),
     ))
-    .orderBy(desc(evaluationRuns.createdAt))
+    .orderBy(desc(evaluationRuns.createdAt), desc(evaluationRuns.id))
     .limit(limit)
     .offset(offset);
   if (rows.length === 0) return [];

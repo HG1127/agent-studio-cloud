@@ -46,7 +46,7 @@ async function listAgentsByArchivedState(
       ) : undefined,
     ))
     .groupBy(agents.id)
-    .orderBy(desc(agents.updatedAt))
+    .orderBy(desc(agents.updatedAt), desc(agents.id))
     .limit(limit)
     .offset(offset);
   return parseQueryRows("助手列表", AgentSummary, rows.map((row) => ({
