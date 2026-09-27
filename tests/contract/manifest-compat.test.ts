@@ -43,4 +43,12 @@ describe("manifest 模型冻结向后兼容", () => {
     expect(AgentManifest.safeParse({ ...base, ...model, inputContract: { fields: [{ name: "x".repeat(201) }] } }).success).toBe(false);
     expect(AgentManifest.safeParse({ ...base, ...model, inputContract: { fields: [{ name: "brief", label: "字".repeat(201) }] } }).success).toBe(false);
   });
+
+  it("拒绝发布快照自由字段中的非 JSON 值", () => {
+    const model = { resourceSelection: { model: { modelId: "mock", mock: true } } };
+    for (const value of [undefined, () => "ignored", new Date("2026-09-27"), Number.NaN]) {
+      expect(AgentManifest.safeParse({ ...base, ...model, requirementCoverage: { source: value } }).success).toBe(false);
+      expect(AgentManifest.safeParse({ ...base, ...model, complexityProfile: { source: value } }).success).toBe(false);
+    }
+  });
 });
