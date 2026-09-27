@@ -227,6 +227,40 @@ describe("取消运行", () => {
     expect(approval).toMatchObject({ status: "rejected", note: "运行已取消，确认未继续" });
   });
 
+  it("从已取消的协作子运行重试时补偿整个取消链的执行引擎", async () => {
+    await insertWaitingRun();
+    await db.insert(runs).values([
+      {
+        id: CHILD_RUN_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID,
+        agentId: "00000000-0000-4000-8000-0000000000c6", versionId: "00000000-0000-4000-8000-0000000000c7",
+        workflowRunId: "workflow-child-test", status: "running", input: {},
+        sourceType: "agent_call", sourceKey: `agent-call:${RUN_ID}:research`,
+      },
+      {
+        id: GRANDCHILD_RUN_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID,
+        agentId: "00000000-0000-4000-8000-0000000000c8", versionId: "00000000-0000-4000-8000-0000000000c9",
+        workflowRunId: "workflow-grandchild-test", status: "waiting_event", input: {},
+        sourceType: "handoff", sourceKey: `handoff:${CHILD_RUN_ID}:delivery`,
+      },
+    ]);
+    cancelMock.mockRejectedValueOnce(new Error("暂时不可用")).mockResolvedValue(undefined);
+    getRunMock.mockReturnValue({ cancel: cancelMock });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    expect(await cancelRunAction(RUN_ID)).toEqual({ ok: true });
+    getRunMock.mockClear();
+    cancelMock.mockClear();
+    expect(await cancelRunAction(CHILD_RUN_ID)).toEqual({ ok: true });
+
+    expect(getRunMock.mock.calls.map(([id]) => id)).toEqual(expect.arrayContaining([
+      "workflow-cancel-test", "workflow-child-test", "workflow-grandchild-test",
+    ]));
+    expect(cancelMock).toHaveBeenCalledTimes(3);
+    expect(appendTraceMock).toHaveBeenLastCalledWith(expect.objectContaining({ runId: RUN_ID, kind: "run.cancelled" }));
+    expect(revalidatePathMock).toHaveBeenCalledWith(`/runs/${RUN_ID}`);
+    errorSpy.mockRestore();
+  });
+
   it("等待确认的运行失败时同步关闭尚未处理的确认", async () => {
     await insertWaitingRun();
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);

@@ -26,6 +26,54 @@ async function cancelWorkflowRunsBestEffort(workflowRunIds: ReadonlyArray<string
   }
 }
 
+async function recoverCancelledCollaboration(runId: string): Promise<string> {
+  let rootRunId = runId;
+  const [initial] = await db
+    .select({ sourceType: runs.sourceType, sourceKey: runs.sourceKey, workflowRunId: runs.workflowRunId })
+    .from(runs)
+    .where(and(eq(runs.id, runId), eq(runs.workspaceId, DEMO_WORKSPACE_ID), eq(runs.status, "cancelled")))
+    .limit(1);
+  if (!initial) return runId;
+  let root = initial;
+  for (let depth = 0; depth < MAX_COLLABORATION_DEPTH; depth += 1) {
+    const parentId = parseCollaborationParentId(root);
+    if (!parentId) break;
+    const [parent] = await db
+      .select({ sourceType: runs.sourceType, sourceKey: runs.sourceKey, workflowRunId: runs.workflowRunId })
+      .from(runs)
+      .where(and(eq(runs.id, parentId), eq(runs.workspaceId, DEMO_WORKSPACE_ID), eq(runs.status, "cancelled")))
+      .limit(1);
+    if (!parent) break;
+    rootRunId = parentId;
+    root = parent;
+  }
+
+  const workflowRunIds = root.workflowRunId ? [root.workflowRunId] : [];
+  const seen = new Set([rootRunId]);
+  let parents = [rootRunId];
+  for (let depth = 0; depth < MAX_COLLABORATION_DEPTH && parents.length > 0; depth += 1) {
+    const children = await db
+      .select({ id: runs.id, status: runs.status, workflowRunId: runs.workflowRunId })
+      .from(runs)
+      .where(and(
+        eq(runs.workspaceId, DEMO_WORKSPACE_ID),
+        or(...parents.flatMap((parentId) => [
+          like(runs.sourceKey, `agent-call:${parentId}:%`),
+          like(runs.sourceKey, `handoff:${parentId}:%`),
+        ])),
+      ));
+    const fresh = children.filter((child) => !seen.has(child.id));
+    fresh.forEach((child) => seen.add(child.id));
+    parents = fresh.map((child) => child.id);
+    workflowRunIds.push(...fresh
+      .filter((child) => child.status === "cancelled")
+      .map((child) => child.workflowRunId)
+      .filter((id): id is string => Boolean(id)));
+  }
+  await cancelWorkflowRunsBestEffort(workflowRunIds);
+  return rootRunId;
+}
+
 export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
   if (!z.string().uuid().safeParse(runId).success) return { ok: false, error: "运行信息不正确，请刷新页面后重试" };
   try {
@@ -44,10 +92,11 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
     if (!run) return { ok: false, error: "找不到这次运行" };
     if (run.status === "cancelled") {
       // 首次请求可能已写入取消终态、但执行引擎停止或验收汇总失败；重复请求负责补偿。
-      if (run.workflowRunId) await cancelWorkflowRunsBestEffort([run.workflowRunId]);
-      await appendCancellationTrace(runId);
-      await reconcileTerminalEvaluationRun(runId);
+      const rootRunId = await recoverCancelledCollaboration(runId);
+      await appendCancellationTrace(rootRunId);
+      await reconcileTerminalEvaluationRun(rootRunId);
       revalidatePath(`/runs/${runId}`);
+      if (rootRunId !== runId) revalidatePath(`/runs/${rootRunId}`);
       revalidatePath("/runs");
       return { ok: true };
     }
@@ -152,11 +201,11 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
         .where(and(eq(runs.id, rootRunId), eq(runs.workspaceId, DEMO_WORKSPACE_ID)))
         .limit(1);
       if (current?.status !== "cancelled") return { ok: false, error: "运行已在取消前结束，请刷新页面查看结果" };
-      if (root.workflowRunId) await cancelWorkflowRunsBestEffort([root.workflowRunId]);
-      await appendCancellationTrace(rootRunId);
-      await reconcileTerminalEvaluationRun(rootRunId);
+      const recoveredRootRunId = await recoverCancelledCollaboration(rootRunId);
+      await appendCancellationTrace(recoveredRootRunId);
+      await reconcileTerminalEvaluationRun(recoveredRootRunId);
       revalidatePath(`/runs/${runId}`);
-      if (rootRunId !== runId) revalidatePath(`/runs/${rootRunId}`);
+      if (recoveredRootRunId !== runId) revalidatePath(`/runs/${recoveredRootRunId}`);
       revalidatePath("/runs");
       return { ok: true };
     }
