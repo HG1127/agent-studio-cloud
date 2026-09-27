@@ -2,6 +2,7 @@ import { and, asc, desc, eq, ilike, inArray, isNotNull, isNull } from "drizzle-o
 import { z } from "zod";
 import { knowledgeChunks, knowledgeSources } from "@/db/schema";
 import { KnowledgeSearchResult, KnowledgeSourceView, type KnowledgeSourceView as KnowledgeSourceViewType } from "@/contracts/knowledge";
+import { MAX_KNOWLEDGE_SOURCES_PER_NODE, MAX_WORKFLOW_NODES } from "@/contracts/workflow";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { MAX_KNOWLEDGE_SCAN_CHUNKS, scoreChunks } from "@/server/domain/knowledge/search";
@@ -11,7 +12,8 @@ import { escapeLikePattern } from "@/server/domain/search-pattern";
 import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 import { knowledgeCandidateFilter, knowledgeExactMatchFilter } from "@/db/knowledge-candidate-filter";
 
-const MAX_PICKER_SELECTED_SOURCES = 200;
+const MAX_PICKER_SELECTED_SOURCES = MAX_WORKFLOW_NODES * MAX_KNOWLEDGE_SOURCES_PER_NODE;
+const PICKER_SELECTED_BATCH_SIZE = 1_000;
 
 function knowledgeSourceView(row: typeof knowledgeSources.$inferSelect, archived = false) {
   return {
@@ -63,11 +65,16 @@ export async function listKnowledgeSourcesForPicker(
       .where(indexedSources)
       .orderBy(desc(knowledgeSources.createdAt))
       .limit(recentLimit),
-    selectedIds.length > 0
-      ? db.select().from(knowledgeSources)
-        .where(and(indexedSources, inArray(knowledgeSources.id, selectedIds)))
-        .orderBy(desc(knowledgeSources.createdAt))
-      : Promise.resolve([] as Array<typeof knowledgeSources.$inferSelect>),
+    (async () => {
+      const rows: Array<typeof knowledgeSources.$inferSelect> = [];
+      for (let offset = 0; offset < selectedIds.length; offset += PICKER_SELECTED_BATCH_SIZE) {
+        const batch = selectedIds.slice(offset, offset + PICKER_SELECTED_BATCH_SIZE);
+        rows.push(...await db.select().from(knowledgeSources)
+          .where(and(indexedSources, inArray(knowledgeSources.id, batch)))
+          .orderBy(desc(knowledgeSources.createdAt)));
+      }
+      return rows;
+    })(),
   ]);
   const mergedRows = [...new Map(
     [...selectedRows, ...recentRows].map((row) => [row.id, row]),

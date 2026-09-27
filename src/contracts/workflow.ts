@@ -21,6 +21,7 @@ const InlineStepData = z.record(z.string(), z.unknown()).transform((step) => {
 });
 
 export const MAX_WORKFLOW_NODES = 200;
+export const MAX_KNOWLEDGE_SOURCES_PER_NODE = 100;
 export const MAX_WORKFLOW_BYTES = 1024 * 1024;
 export const MAX_CONDITION_BRANCHES = 20;
 export const MAX_PARALLEL_BRANCHES = 8;
@@ -119,7 +120,7 @@ export const WorkflowNode = z.object({
   knowledge: z.object({
     space: z.string(),
     query: z.string().optional(),
-    sourceIds: z.array(z.string().uuid()).max(100).optional(),
+    sourceIds: z.array(z.string().uuid()).max(MAX_KNOWLEDGE_SOURCES_PER_NODE).optional(),
     selectionRequired: z.boolean().optional(),
   }).optional(),
   condition: z.object({
