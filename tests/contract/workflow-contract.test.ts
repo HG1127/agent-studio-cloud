@@ -80,6 +80,45 @@ describe("WorkflowDraft", () => {
     }
   });
 
+  it("条件编辑器显式清空可选规则时仍可保存草稿", () => {
+    const parsed = WorkflowDraft.safeParse({
+      ...baseDraft,
+      nodes: {
+        ...baseDraft.nodes,
+        condition: {
+          id: "condition", title: "判断", type: "condition",
+          condition: {
+            source: "input.ready",
+            branches: [{ label: "是", value: true, next: "done", rules: undefined, mode: undefined }],
+            defaultNext: "done",
+          },
+        },
+      },
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.nodes.condition.condition?.branches[0]).not.toHaveProperty("rules");
+      expect(parsed.data.nodes.condition.condition?.branches[0]).not.toHaveProperty("mode");
+    }
+  });
+
+  it("条件规则未填写比较值时不会保留 undefined 字段", () => {
+    const branch = WorkflowDraft.parse({
+      ...baseDraft,
+      nodes: {
+        ...baseDraft.nodes,
+        condition: {
+          id: "condition", title: "判断", type: "condition",
+          condition: {
+            source: "input.ready",
+            branches: [{ label: "是", next: "done", rules: [{ source: "input.ready", operator: "exists", value: undefined }] }],
+          },
+        },
+      },
+    }).nodes.condition.condition?.branches[0];
+    expect(branch?.rules?.[0]).not.toHaveProperty("value");
+  });
+
   it("拒绝对象原型名称和标识错位的顶层步骤", () => {
     const inheritedNameNodes = { ...baseDraft.nodes } as Record<string, unknown>;
     Object.defineProperty(inheritedNameNodes, "toString", {
