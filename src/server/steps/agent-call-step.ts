@@ -1,6 +1,6 @@
 "use step";
 import { and, eq, inArray, isNull } from "drizzle-orm";
-import { FatalError, getStepMetadata } from "workflow";
+import { FatalError, getStepMetadata, RetryableError } from "workflow";
 import { AgentManifest, type AgentManifest as AgentManifestType } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { agents, agentVersions, runs } from "@/db/schema";
@@ -32,7 +32,8 @@ export async function beginAgentCall(args: {
   let chain;
   try {
     chain = await loadCollaborationChain(args.runId, parent.workspaceId);
-  } catch {
+  } catch (error) {
+    if (RetryableError.is(error)) throw error;
     throw new FatalError(`步骤「${args.node.title}」无法确认助手协作调用链`);
   }
   const chainIssue = validateCollaborationTarget(chain, call.targetAgentId);
