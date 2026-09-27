@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildMemoryContent } from "@/server/domain/memory/memory-content";
-import { selectRelevantMemories } from "@/server/domain/memory/memory-search";
+import { memoryCandidateTerms, selectRelevantMemories } from "@/server/domain/memory/memory-search";
 
 describe("长期经验运行逻辑", () => {
   it("保存前隐藏敏感字段并保留业务结果", () => {
@@ -41,6 +41,14 @@ describe("长期经验运行逻辑", () => {
     const approval = { content: "采购审批需要负责人确认", createdAt: new Date("2026-02-01") };
 
     expect(selectRelevantMemories("请参考客户续约的历史经验", [approval, renewal], 5)).toEqual([renewal]);
+  });
+
+  it("候选词覆盖完整词及中文三字片段，空查询保持最近记录语义", () => {
+    const terms = memoryCandidateTerms("请参考客户续约的历史经验");
+    expect(terms).toContain("请参考客户续约的历史经验");
+    expect(terms).toContain("客户续");
+    expect(terms).toHaveLength(new Set(terms).size);
+    expect(memoryCandidateTerms("，。 ")).toEqual([]);
   });
 
   it("显式内容来源不存在时不回退保存全部运行数据", () => {
