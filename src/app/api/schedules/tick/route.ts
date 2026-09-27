@@ -7,6 +7,7 @@ import { schedules } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { nextOccurrenceAfterDue } from "@/server/domain/schedule-spec";
+import { recoverStaleQueuedRuns } from "@/server/services/recover-stale-runs";
 import { startRunCore } from "@/server/services/start-run-core";
 
 export const dynamic = "force-dynamic";
@@ -115,6 +116,7 @@ async function handle(req: Request) {
         .where(stillClaimed);
     }
   }
+  await recoverStaleQueuedRuns();
   return Response.json({ ok: true, claimed: claimed.length, started, failed });
 }
 

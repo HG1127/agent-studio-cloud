@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   due: [] as Array<{ id: string }>,
   claimed: [] as Array<Record<string, unknown>>,
   startRunCore: vi.fn(),
+  recoverStaleQueuedRuns: vi.fn(),
   transaction: vi.fn(),
   lock: vi.fn(),
   limit: vi.fn(),
@@ -51,6 +52,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("@/server/services/start-run-core", () => ({ startRunCore: mocks.startRunCore }));
+vi.mock("@/server/services/recover-stale-runs", () => ({ recoverStaleQueuedRuns: mocks.recoverStaleQueuedRuns }));
 
 import { MAX_SCHEDULES_PER_TICK, POST } from "./route";
 
@@ -70,6 +72,7 @@ beforeEach(() => {
   mocks.due = [];
   mocks.claimed = [];
   mocks.startRunCore.mockReset().mockResolvedValue({ ok: true, runId: "00000000-0000-4000-8000-000000000104" });
+  mocks.recoverStaleQueuedRuns.mockReset().mockResolvedValue(undefined);
   mocks.transaction.mockReset();
   mocks.lock.mockReset();
   mocks.limit.mockReset();
@@ -90,6 +93,14 @@ describe("定时触发入口", () => {
     expect(mocks.transaction).not.toHaveBeenCalled();
     expect(mocks.updateSet).not.toHaveBeenCalled();
     expect(mocks.startRunCore).not.toHaveBeenCalled();
+    expect(mocks.recoverStaleQueuedRuns).not.toHaveBeenCalled();
+  });
+
+  it("没有到期定时任务时仍检查过期的排队运行", async () => {
+    const response = await POST(request());
+
+    expect(await response.json()).toEqual({ ok: true, claimed: 0, started: 0, failed: 0 });
+    expect(mocks.recoverStaleQueuedRuns).toHaveBeenCalledOnce();
   });
 
   it("始终使用定时任务创建时冻结的版本", async () => {
@@ -122,6 +133,7 @@ describe("定时触发入口", () => {
       sourceType: "schedule",
       sourceKey: `${SCHEDULE_ID}:${dueAt.toISOString()}`,
     });
+    expect(mocks.recoverStaleQueuedRuns).toHaveBeenCalledOnce();
   });
 
   it("入口晚到时跳过旧时间槽，仍用本次到期时间作为幂等键", async () => {

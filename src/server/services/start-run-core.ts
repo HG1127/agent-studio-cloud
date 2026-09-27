@@ -20,6 +20,8 @@ import { completeEvaluationForRun } from "@/server/services/evaluation-state";
 import {
   createRunStartLease,
   isRunStartLeaseExpired,
+  MAX_RUN_START_ATTEMPTS,
+  readRunStartLease,
   RUN_START_LEASE_KEY,
   withRunStartLease,
   type RunStartLease,
@@ -204,18 +206,9 @@ export async function launchClaimedRun(args: {
       { depth: 0, startToken: args.lease.token },
     ]);
   } catch (error) {
-    console.error("运行启动失败", safeErrorForLog(error));
-    // 平台可能已接收运行、只丢失了启动响应；已越过 queued 的任务不能被错误地改成失败。
-    const failedBeforeStart = await markRunStartFailed(args.runId, args.lease.token, undefined, true);
-    if (!failedBeforeStart) {
-      const [existing] = await db
-        .select({ id: runs.id })
-        .from(runs)
-        .where(and(eq(runs.id, args.runId), eq(runs.workspaceId, DEMO_WORKSPACE_ID)))
-        .limit(1);
-      if (existing) return { ok: true, runId: args.runId };
-    }
-    return { ok: false, error: "运行启动失败，请稍后重试" };
+    console.error("运行启动结果待确认", safeErrorForLog(error));
+    // 平台可能已接收运行但只丢了响应；保留租约供旧启动完成或过期后接管。
+    return { ok: true, runId: args.runId };
   }
   try {
     const updated = await db
@@ -260,17 +253,18 @@ export async function resumeQueuedRunStartCore(runId: string): Promise<StartRunR
         stepStates: runs.stepStates,
         updatedAt: runs.updatedAt,
         manifest: agentVersions.manifest,
+        existingAgentId: agents.id,
+        agentArchivedAt: agents.archivedAt,
       })
       .from(runs)
-      .innerJoin(agentVersions, and(
+      .leftJoin(agentVersions, and(
         eq(agentVersions.id, runs.versionId),
         eq(agentVersions.agentId, runs.agentId),
         eq(agentVersions.workspaceId, runs.workspaceId),
       ))
-      .innerJoin(agents, and(
+      .leftJoin(agents, and(
         eq(agents.id, runs.agentId),
         eq(agents.workspaceId, runs.workspaceId),
-        isNull(agents.archivedAt),
       ))
       .where(and(
         eq(runs.id, runId),
@@ -283,7 +277,13 @@ export async function resumeQueuedRunStartCore(runId: string): Promise<StartRunR
     if (!isRunStartLeaseExpired(candidate.stepStates, candidate.updatedAt)) {
       return { ok: false, error: "运行仍在启动中，请稍后刷新页面" };
     }
-    const lease = createRunStartLease();
+    const previousLease = readRunStartLease(candidate.stepStates);
+    if (previousLease && previousLease.attempt >= MAX_RUN_START_ATTEMPTS) {
+      const error = "运行多次启动未获确认，请重新发起";
+      const failed = await markRunStartFailed(candidate.id, previousLease.token, error, true);
+      return failed ? { ok: false, error } : { ok: true, runId: candidate.id };
+    }
+    const lease = createRunStartLease(new Date(), (previousLease?.attempt ?? 0) + 1);
     const [claimed] = await db
       .update(runs)
       .set({ stepStates: withRunStartLease(candidate.stepStates, lease), updatedAt: new Date() })
@@ -297,6 +297,11 @@ export async function resumeQueuedRunStartCore(runId: string): Promise<StartRunR
       .returning({ id: runs.id });
     if (!claimed) return { ok: true, runId: candidate.id };
     claimedRun = { id: candidate.id, token: lease.token };
+    if (!candidate.existingAgentId || candidate.agentArchivedAt) {
+      const error = "助手已停用，无法继续启动";
+      await markRunStartFailed(candidate.id, lease.token, error, true);
+      return { ok: false, error };
+    }
     const manifest = AgentManifest.safeParse(candidate.manifest);
     const input = RunInputPayload.safeParse(candidate.input);
     if (!manifest.success || !input.success) {

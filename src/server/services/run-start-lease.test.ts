@@ -20,6 +20,7 @@ describe("运行启动租约", () => {
     expect(states.prepare).toEqual({ status: "done" });
     expect(states[RUN_START_LEASE_KEY]).toEqual(first);
     expect(readRunStartLease(states)).toEqual(first);
+    expect(createRunStartLease(now, 2).attempt).toBe(2);
   });
 
   it("按租约过期时间判断能否接管，并兼容没有租约的旧记录", () => {
@@ -31,5 +32,6 @@ describe("运行启动租约", () => {
     expect(isRunStartLeaseExpired(states, updatedAt, new Date(updatedAt.getTime() + 1_000))).toBe(false);
     expect(isRunStartLeaseExpired({}, updatedAt, new Date(updatedAt.getTime() + RUN_START_LEASE_MS))).toBe(true);
     expect(readRunStartLease({ [RUN_START_LEASE_KEY]: { token: "bad", expiresAt: "bad" } })).toBeNull();
+    expect(readRunStartLease({ [RUN_START_LEASE_KEY]: { token: lease.token, expiresAt: lease.expiresAt } })?.attempt).toBe(1);
   });
 });

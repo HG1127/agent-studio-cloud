@@ -9,7 +9,8 @@ import { agents, agentVersions, evaluationCaseResults, evaluationCases, evaluati
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { resumeQueuedRunStartCore, startRunCore } from "@/server/services/start-run-core";
-import { createRunStartLease, readRunStartLease, RUN_START_LEASE_MS, withRunStartLease } from "@/server/services/run-start-lease";
+import { MAX_STALE_RUNS_PER_TICK, recoverStaleQueuedRuns } from "@/server/services/recover-stale-runs";
+import { createRunStartLease, MAX_RUN_START_ATTEMPTS, readRunStartLease, RUN_START_LEASE_MS, withRunStartLease } from "@/server/services/run-start-lease";
 import { initializeRun } from "@/server/steps/run-state";
 
 const AGENT_ID = "00000000-0000-4000-8000-0000000007a1";
@@ -253,6 +254,70 @@ describe("运行启动句柄恢复", () => {
     expect(await db.select().from(runs).where(eq(runs.sourceKey, sourceKey))).toHaveLength(1);
   });
 
+  it("自动接管达到启动次数上限后终结排队运行", async () => {
+    const staleAt = new Date(Date.now() - RUN_START_LEASE_MS * 2);
+    const [pending] = await db.insert(runs).values({
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
+      agentId: AGENT_ID,
+      versionId: VERSION_ID,
+      status: "queued",
+      input: {},
+      stepStates: withRunStartLease({}, createRunStartLease(staleAt, MAX_RUN_START_ATTEMPTS)),
+      updatedAt: staleAt,
+    }).returning({ id: runs.id });
+
+    await recoverStaleQueuedRuns();
+
+    const [failed] = await db.select().from(runs).where(eq(runs.id, pending.id));
+    expect(failed).toMatchObject({ status: "failed", error: "运行多次启动未获确认，请重新发起" });
+    expect(readRunStartLease(failed.stepStates)).toBeNull();
+    expect(startMock).not.toHaveBeenCalled();
+  });
+
+  it("每轮只接管固定数量的过期排队运行", async () => {
+    const staleAt = new Date(Date.now() - RUN_START_LEASE_MS * 2);
+    const inserted = await db.insert(runs).values(Array.from({ length: MAX_STALE_RUNS_PER_TICK + 1 }, () => ({
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
+      agentId: AGENT_ID,
+      versionId: VERSION_ID,
+      status: "queued",
+      input: {},
+      stepStates: withRunStartLease({}, createRunStartLease(staleAt)),
+      updatedAt: staleAt,
+    }))).returning({ id: runs.id });
+
+    await recoverStaleQueuedRuns();
+
+    const after = await db.select().from(runs).where(inArray(runs.id, inserted.map((run) => run.id)));
+    expect(after.filter((run) => run.workflowRunId === "wrun_test_handle")).toHaveLength(MAX_STALE_RUNS_PER_TICK);
+    expect(after.filter((run) => run.workflowRunId === null)).toHaveLength(1);
+    expect(startMock).toHaveBeenCalledTimes(MAX_STALE_RUNS_PER_TICK);
+  });
+
+  it("助手停用后的过期排队运行不永久积压，也不会启动工作流", async () => {
+    const staleAt = new Date(Date.now() - RUN_START_LEASE_MS * 2);
+    const [pending] = await db.insert(runs).values({
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
+      agentId: AGENT_ID,
+      versionId: VERSION_ID,
+      status: "queued",
+      input: {},
+      stepStates: withRunStartLease({}, createRunStartLease(staleAt)),
+      updatedAt: staleAt,
+    }).returning({ id: runs.id });
+    await db.update(agents).set({ archivedAt: new Date() }).where(eq(agents.id, AGENT_ID));
+
+    await recoverStaleQueuedRuns();
+
+    const [failed] = await db.select().from(runs).where(eq(runs.id, pending.id));
+    expect(failed).toMatchObject({ status: "failed", error: "助手已停用，无法继续启动" });
+    expect(readRunStartLease(failed.stepStates)).toBeNull();
+    expect(startMock).not.toHaveBeenCalled();
+  });
+
   it("恢复过期排队运行时重新校验冻结版本的输入契约", async () => {
     const requiredInputManifest = AgentManifest.parse({
       ...manifest,
@@ -376,7 +441,7 @@ describe("运行启动句柄恢复", () => {
     expect(manualRetired.ok).toBe(true);
   });
 
-  it("验收运行启动失败时直接落定样例与验收汇总", async () => {
+  it("验收启动响应丢失时保留待处理样例并在租约过期后补启同一运行", async () => {
     await db.insert(evaluationCases).values({
       id: CASE_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID,
       agentId: AGENT_ID, name: "启动失败样例", input: {}, expectations: [],
@@ -390,19 +455,36 @@ describe("运行启动句柄恢复", () => {
       evaluationRunId: EVALUATION_ID, evaluationCaseId: CASE_ID, status: "running",
     });
     startMock.mockRejectedValueOnce(new Error("模拟工作流启动失败"));
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const sourceKey = `evaluation:${EVALUATION_ID}:${CASE_ID}`;
 
     const result = await startRunCore({
       agentId: AGENT_ID,
       input: {},
       sourceType: "evaluation",
-      sourceKey: `evaluation:${EVALUATION_ID}:${CASE_ID}`,
+      sourceKey,
     });
 
-    expect(result).toEqual({ ok: false, error: "运行启动失败，请稍后重试" });
+    expect(result).toMatchObject({ ok: true, runId: expect.any(String) });
+    const [pending] = await db.select().from(runs).where(eq(runs.sourceKey, sourceKey));
+    expect(pending).toMatchObject({ status: "queued", workflowRunId: null, error: null });
+    expect(readRunStartLease(pending.stepStates)).not.toBeNull();
     const [caseResult] = await db.select().from(evaluationCaseResults).where(eq(evaluationCaseResults.evaluationRunId, EVALUATION_ID));
     const [evaluation] = await db.select().from(evaluationRuns).where(eq(evaluationRuns.id, EVALUATION_ID));
-    expect(caseResult).toMatchObject({ status: "failed", error: "运行启动失败，请稍后重试" });
-    expect(evaluation).toMatchObject({ status: "completed", failedCount: 1 });
+    expect(caseResult).toMatchObject({ status: "running", error: null });
+    expect(evaluation).toMatchObject({ status: "running", failedCount: 0 });
+    expect(await startRunCore({ agentId: AGENT_ID, input: {}, sourceType: "evaluation", sourceKey })).toEqual(result);
+    expect(startMock).toHaveBeenCalledOnce();
+
+    const staleAt = new Date(Date.now() - RUN_START_LEASE_MS * 2);
+    await db.update(runs)
+      .set({ stepStates: withRunStartLease(pending.stepStates, createRunStartLease(staleAt)), updatedAt: staleAt })
+      .where(eq(runs.id, pending.id));
+    await recoverStaleQueuedRuns();
+    const [resumed] = await db.select().from(runs).where(eq(runs.id, pending.id));
+    expect(resumed).toMatchObject({ status: "queued", workflowRunId: "wrun_test_handle", error: null });
+    expect(startMock).toHaveBeenCalledTimes(2);
+    log.mockRestore();
   });
 
   it("启动响应丢失但执行引擎已经开始时保留运行并返回已有标识", async () => {

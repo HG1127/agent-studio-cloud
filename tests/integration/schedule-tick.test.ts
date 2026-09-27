@@ -269,7 +269,7 @@ describe("调度 tick 接口", () => {
     expect(schedule?.lastError).toBeTruthy();
   }, 240_000);
 
-  it("启动失败期间被暂停的任务不会被失败回写重新启用", async () => {
+  it("启动结果不确定期间被暂停的任务不会被后续回写重新启用", async () => {
     await insertSchedule({ id: PAUSED_DURING_START_ID });
     startMock.mockImplementationOnce(async () => {
       expect(await updateScheduleStatusAction(PAUSED_DURING_START_ID, "paused")).toEqual({ ok: true });
@@ -277,9 +277,12 @@ describe("调度 tick 接口", () => {
     });
 
     const response = await tick(authedRequest());
-    expect((await response.json()).failed).toBe(1);
+    expect(await response.json()).toMatchObject({ started: 1, failed: 0 });
     const [schedule] = await db.select().from(schedules).where(eq(schedules.id, PAUSED_DURING_START_ID)).limit(1);
     expect(schedule?.status).toBe("paused");
     expect(schedule?.leaseUntil).toBeNull();
+    const pending = await db.select().from(runs).where(eq(runs.sourceKey, `${PAUSED_DURING_START_ID}:${schedule?.nextRunAt.toISOString()}`));
+    expect(pending).toHaveLength(1);
+    expect(pending[0].status).toBe("queued");
   }, 240_000);
 });
