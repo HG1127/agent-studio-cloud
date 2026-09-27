@@ -44,6 +44,15 @@ describe("写入动作校验提示", () => {
     expect(result).toEqual({ ok: false, error: "运行输入不能超过 100 KB" });
   });
 
+  it("超长定时间隔在写库前返回明确错误", async () => {
+    const result = await createScheduleAction({
+      agentId: AGENT_ID,
+      spec: { kind: "interval", minutes: Number.MAX_SAFE_INTEGER },
+      input: {},
+    });
+    expect(result).toEqual({ ok: false, error: "间隔不能超过一年" });
+  });
+
   it("验收样例整体过大时返回具体限制", async () => {
     const result = await createEvaluationCaseAction({
       agentId: AGENT_ID,

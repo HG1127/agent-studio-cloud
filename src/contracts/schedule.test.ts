@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { ScheduleActionResult, ScheduleAgentOption, ScheduleView } from "@/contracts/schedule";
+import { MAX_SCHEDULE_INTERVAL_MINUTES, ScheduleActionResult, ScheduleAgentOption, ScheduleSpec, ScheduleView } from "@/contracts/schedule";
 
 const ID = "00000000-0000-4000-8000-000000000301";
 
 describe("定时任务前后端共享契约", () => {
+  it("间隔时间不能大到使触发日期无效", () => {
+    expect(ScheduleSpec.safeParse({ kind: "interval", minutes: MAX_SCHEDULE_INTERVAL_MINUTES }).success).toBe(true);
+    expect(ScheduleSpec.safeParse({ kind: "interval", minutes: MAX_SCHEDULE_INTERVAL_MINUTES + 1 }).success).toBe(false);
+    expect(ScheduleSpec.safeParse({ kind: "interval", minutes: Number.MAX_SAFE_INTEGER }).success).toBe(false);
+  });
+
   it("只接受可识别的助手选项", () => {
     expect(ScheduleAgentOption.safeParse({ id: ID, name: "客服助手" }).success).toBe(true);
     expect(ScheduleAgentOption.safeParse({ id: "not-a-uuid", name: "客服助手" }).success).toBe(false);
