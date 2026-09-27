@@ -1,0 +1,1 @@
+CREATE INDEX "run_feedback_workspace_case_idx" ON "run_feedback" USING btree ("workspace_id","evaluation_case_id");

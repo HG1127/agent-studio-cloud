@@ -14,5 +14,6 @@ export const runFeedback = pgTable("run_feedback", {
 }, (t) => [
   uniqueIndex("run_feedback_workspace_run_unique").on(t.workspaceId, t.runId),
   index("run_feedback_workspace_agent_updated_idx").on(t.workspaceId, t.agentId, t.updatedAt),
+  index("run_feedback_workspace_case_idx").on(t.workspaceId, t.evaluationCaseId),
 ]);
 export type RunFeedback = typeof runFeedback.$inferSelect;

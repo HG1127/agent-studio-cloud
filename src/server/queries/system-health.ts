@@ -33,6 +33,7 @@ export const REQUIRED_DATABASE_OBJECTS = [
   "public.knowledge_sources_workspace_archived_created_idx",
   "public.run_feedback_workspace_run_unique",
   "public.run_feedback_workspace_agent_updated_idx",
+  "public.run_feedback_workspace_case_idx",
   "public.wait_event_submissions_token_unique",
   "public.wait_event_submissions_run_created_idx",
   "public.evaluation_runs_workspace_request_unique",

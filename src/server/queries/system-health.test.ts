@@ -18,6 +18,7 @@ describe("数据库就绪检查", () => {
       "public.run_feedback",
       "public.run_feedback_workspace_run_unique",
       "public.run_feedback_workspace_agent_updated_idx",
+      "public.run_feedback_workspace_case_idx",
       "public.runs_workspace_source_key_unique",
       "public.wait_event_submissions",
       "public.wait_event_submissions_token_unique",

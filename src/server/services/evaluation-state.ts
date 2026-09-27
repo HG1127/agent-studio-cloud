@@ -1,6 +1,6 @@
 import { and, eq, ne } from "drizzle-orm";
 import { z } from "zod";
-import { agentVersions, auditEvents, evaluationCaseResults, evaluationCases, evaluationRuns, runs } from "@/db/schema";
+import { agentVersions, auditEvents, evaluationCaseResults, evaluationCases, evaluationRuns, runFeedback, runs } from "@/db/schema";
 import { db } from "@/lib/db";
 import { evaluateExpectations } from "@/server/domain/evaluation";
 import { shouldPromoteEvaluation, summarizeEvaluationResults } from "@/server/domain/release-gate";
@@ -107,10 +107,16 @@ export async function completeEvaluationForRun(
     .from(evaluationCases)
     .where(and(eq(evaluationCases.id, evaluationCaseId), eq(evaluationCases.workspaceId, run.workspaceId)))
     .limit(1);
+  const [linkedFeedback] = !runError && result && testCase?.expectations.length === 0
+    ? await db.select({ id: runFeedback.id }).from(runFeedback).where(and(
+        eq(runFeedback.evaluationCaseId, evaluationCaseId),
+        eq(runFeedback.workspaceId, run.workspaceId),
+      )).limit(1)
+    : [];
   const outcome = runError
     ? { passed: false, errors: [runError] }
     : testCase && result
-      ? evaluateExpectations(result, testCase.expectations)
+      ? evaluateExpectations(result, testCase.expectations, { feedbackRegression: Boolean(linkedFeedback) })
       : { passed: false, errors: ["验收样例或运行结果不存在"] };
   await db
     .update(evaluationCaseResults)
