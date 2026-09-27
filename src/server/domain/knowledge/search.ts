@@ -53,10 +53,13 @@ export function hanTrigrams(token: string): string[] {
     const chars = Array.from(match[0]);
     for (let index = 0; index <= chars.length - 3; index += 1) {
       grams.add(chars.slice(index, index + 3).join(""));
-      if (grams.size >= MAX_TRIGRAMS_PER_TOKEN) return [...grams];
     }
   }
-  return [...grams];
+  const candidates = [...grams];
+  if (candidates.length <= MAX_TRIGRAMS_PER_TOKEN) return candidates;
+  // 候选 SQL 的词数仍受限，但长任务句要覆盖末尾的业务主题。
+  return Array.from({ length: MAX_TRIGRAMS_PER_TOKEN }, (_, index) =>
+    candidates[Math.floor(index * (candidates.length - 1) / (MAX_TRIGRAMS_PER_TOKEN - 1))]);
 }
 
 export function knowledgeCandidateTerms(query: string): string[] {
