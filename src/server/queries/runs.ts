@@ -56,7 +56,7 @@ export async function listRuns(
       filters.sourceType ? eq(runs.sourceType, filters.sourceType) : undefined,
       filters.agentId ? eq(runs.agentId, filters.agentId) : undefined,
     ))
-    .orderBy(desc(runs.createdAt))
+    .orderBy(desc(runs.createdAt), desc(runs.id))
     .limit(limit)
     .offset(offset);
   return parseQueryRows("运行列表", RunSummary, rows.map((row) => ({

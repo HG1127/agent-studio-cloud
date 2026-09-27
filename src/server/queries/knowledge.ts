@@ -38,7 +38,7 @@ export async function listKnowledgeSources(
       archived ? isNotNull(knowledgeSources.archivedAt) : isNull(knowledgeSources.archivedAt),
       query ? ilike(knowledgeSources.name, `%${escapeLikePattern(query)}%`) : undefined,
     ))
-    .orderBy(desc(knowledgeSources.createdAt))
+    .orderBy(desc(knowledgeSources.createdAt), desc(knowledgeSources.id))
     .limit(limit)
     .offset(offset);
   return parseQueryRows("知识资料列表", KnowledgeSourceView, rows.map((row) => knowledgeSourceView(row, archived)));

@@ -30,7 +30,7 @@ export async function listMemories(filters: {
       agentId ? eq(agentMemories.agentId, agentId) : undefined,
       query ? ilike(agentMemories.content, `%${escapeLikePattern(query)}%`) : undefined,
     ))
-    .orderBy(desc(agentMemories.createdAt))
+    .orderBy(desc(agentMemories.createdAt), desc(agentMemories.id))
     .limit(limit)
     .offset(offset);
   return parseQueryRows("经验列表", MemoryView, rows.map(({ memory, agentName }) => ({
