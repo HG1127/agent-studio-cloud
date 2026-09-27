@@ -9,6 +9,7 @@ const dbState = vi.hoisted(() => ({
   insertRows: [] as unknown[],
   auditRows: [] as Array<Record<string, unknown>>,
   update: vi.fn(),
+  updateValues: [] as Array<Record<string, unknown>>,
   updateRows: [] as unknown[],
   selectError: null as Error | null,
 }));
@@ -42,7 +43,8 @@ vi.mock("@/lib/db", () => ({
         };
       },
     }),
-    update: () => ({ set: () => ({ where: (...args: unknown[]) => {
+    update: () => ({ set: (value: Record<string, unknown>) => ({ where: (...args: unknown[]) => {
+      dbState.updateValues.push(value);
       dbState.update(...args);
       return { returning: async () => dbState.updateRows };
     } }) }),
@@ -64,6 +66,7 @@ afterEach(() => {
   dbState.insertRows = [];
   dbState.auditRows = [];
   dbState.update.mockReset();
+  dbState.updateValues = [];
   dbState.updateRows = [];
   dbState.selectError = null;
 });
@@ -279,6 +282,28 @@ describe("知识原文件上传", () => {
     }));
   });
 
+  it("更正扩展名重传失败资料时同步保存解析所用的名称和类型", async () => {
+    dbState.rows = [{
+      id: "00000000-0000-4000-8000-0000000000f3", name: "退款规则.json", mime: "application/json",
+      sizeBytes: 12, status: "failed", chunkCount: 0, charCount: 0, error: "上次格式不正确",
+      createdAt: new Date("2026-09-24T00:00:00Z"), blobPathname: null, archivedAt: null,
+    }];
+    const form = new FormData();
+    form.set("file", new File(["退款规则内容"], "退款规则.txt", { type: "text/plain" }));
+
+    const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, deduped: true, source: {
+      name: "退款规则.txt", mime: "text/plain", status: "parsing",
+    } });
+    expect(dbState.updateValues[0]).toMatchObject({ name: "退款规则.txt", mime: "text/plain", status: "parsing" });
+    expect(startMock.mock.calls[0]?.[1]?.[0]).toMatchObject({ filename: "退款规则.txt", mime: "text/plain" });
+    expect(dbState.auditRows).toContainEqual(expect.objectContaining({
+      action: "knowledge.reingested", summary: "重新解析知识资料「退款规则.txt」",
+    }));
+  });
+
   it("重新上传长时间停在解析中的同一文件会恢复入库任务", async () => {
     dbState.rows = [{
       id: "00000000-0000-4000-8000-0000000000f3", name: "售后手册.txt", mime: "text/plain",
@@ -308,12 +333,14 @@ describe("知识原文件上传", () => {
     };
     dbState.selectQueue = [[failed], [{ ...failed, status: "parsing", error: null, updatedAt: new Date() }]];
     const form = new FormData();
-    form.set("file", new File(["退货说明"], "售后手册.txt", { type: "text/plain" }));
+    form.set("file", new File(["退货说明"], "后来改名.md", { type: "text/markdown" }));
 
     const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ ok: true, deduped: true, source: { status: "parsing" } });
+    expect(await response.json()).toMatchObject({ ok: true, deduped: true, source: {
+      name: "售后手册.txt", mime: "text/plain", status: "parsing",
+    } });
     expect(startMock).not.toHaveBeenCalled();
     expect(dbState.update).not.toHaveBeenCalled();
   });

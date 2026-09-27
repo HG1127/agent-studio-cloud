@@ -56,7 +56,12 @@ function storageUnavailable() {
   return Response.json({ ok: false, error: "私有文件存储暂不可用，请检查配置后重试" }, { status: 503 });
 }
 
-async function reconcileDuplicateSource(sourceId: string, suppliedBlobPathname: string | null) {
+async function reconcileDuplicateSource(
+  sourceId: string,
+  suppliedBlobPathname: string | null,
+  filename: string,
+  suppliedMime: string,
+) {
   return db.transaction(async (tx) => {
     // 重新锁定并读取，避免两个失败重传请求都基于锁外的旧状态启动解析任务。
     const [current] = await tx
@@ -76,13 +81,17 @@ async function reconcileDuplicateSource(sourceId: string, suppliedBlobPathname: 
         : current.status;
     const error = retrying ? null : current.error;
     const ingestToken = retrying ? `pending:${randomUUID()}` : null;
+    const name = retrying ? filename : current.name;
+    const mime = retrying
+      ? suppliedMime || (filename === current.name ? current.mime : `application/${filename.split(".").pop()?.toLowerCase() ?? "octet-stream"}`)
+      : current.mime;
     const blobPathname = current.blobPathname ?? suppliedBlobPathname;
     const shouldUpdate = Boolean(current.archivedAt) || retrying || blobPathname !== current.blobPathname;
     const updatedAt = shouldUpdate ? new Date() : current.updatedAt;
     if (shouldUpdate) {
       await tx
         .update(knowledgeSources)
-        .set({ archivedAt: null, status, error, blobPathname, parseEngine: ingestToken ?? current.parseEngine, updatedAt })
+        .set({ name, mime, archivedAt: null, status, error, blobPathname, parseEngine: ingestToken ?? current.parseEngine, updatedAt })
         .where(and(eq(knowledgeSources.id, current.id), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)));
       if (current.archivedAt) {
         await tx.insert(auditEvents).values(auditEventValues({
@@ -91,7 +100,7 @@ async function reconcileDuplicateSource(sourceId: string, suppliedBlobPathname: 
           action: "knowledge.restored",
           targetType: "knowledge",
           targetId: current.id,
-          summary: `通过重新上传恢复知识资料「${current.name}」`,
+          summary: `通过重新上传恢复知识资料「${name}」`,
           data: {},
         }));
       }
@@ -102,12 +111,12 @@ async function reconcileDuplicateSource(sourceId: string, suppliedBlobPathname: 
           action: "knowledge.reingested",
           targetType: "knowledge",
           targetId: current.id,
-          summary: `重新解析知识资料「${current.name}」`,
+          summary: `重新解析知识资料「${name}」`,
           data: { previousStatus: current.status },
         }));
       }
     }
-    return { row: { ...current, archivedAt: null, status, error, blobPathname, parseEngine: ingestToken ?? current.parseEngine, updatedAt }, retrying, ingestToken };
+    return { row: { ...current, name, mime, archivedAt: null, status, error, blobPathname, parseEngine: ingestToken ?? current.parseEngine, updatedAt }, retrying, ingestToken };
   });
 }
 
@@ -171,7 +180,7 @@ async function handleUpload(req: Request) {
     }
     let reconciled: Awaited<ReturnType<typeof reconcileDuplicateSource>>;
     try {
-      reconciled = await reconcileDuplicateSource(duplicate.id, blobPathname);
+      reconciled = await reconcileDuplicateSource(duplicate.id, blobPathname, file.name, file.type);
     } catch (error) {
       await removeUnusedOriginal(uploadedBlobPathname, null, blobToken);
       throw error;
@@ -185,8 +194,8 @@ async function handleUpload(req: Request) {
       try {
         await start(knowledgeIngestWorkflow, [{
           sourceId: duplicate.id,
-          filename: file.name,
-          mime: file.type || duplicate.mime,
+          filename: reconciled.row.name,
+          mime: reconciled.row.mime,
           content: new Blob([bytes]).stream(),
           ingestToken: reconciled.ingestToken!,
         }]);
@@ -261,7 +270,7 @@ async function handleUpload(req: Request) {
     }
     let reconciled: Awaited<ReturnType<typeof reconcileDuplicateSource>>;
     try {
-      reconciled = await reconcileDuplicateSource(concurrent.id, blobPathname);
+      reconciled = await reconcileDuplicateSource(concurrent.id, blobPathname, file.name, file.type);
     } catch (error) {
       await removeUnusedOriginal(blobPathname, null, blobToken);
       throw error;
@@ -275,8 +284,8 @@ async function handleUpload(req: Request) {
       try {
         await start(knowledgeIngestWorkflow, [{
           sourceId: concurrent.id,
-          filename: file.name,
-          mime: file.type || concurrent.mime,
+          filename: reconciled.row.name,
+          mime: reconciled.row.mime,
           content: new Blob([bytes]).stream(),
           ingestToken: reconciled.ingestToken!,
         }]);
