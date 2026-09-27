@@ -59,6 +59,15 @@ export function hanTrigrams(token: string): string[] {
   return [...grams];
 }
 
+export function knowledgeCandidateTerms(query: string): string[] {
+  const terms = new Set<string>();
+  for (const token of tokenize(query)) {
+    terms.add(token);
+    for (const gram of hanTrigrams(token)) terms.add(gram);
+  }
+  return [...terms];
+}
+
 function excerptAroundMatch(content: string, matchIndex: number): string {
   if (content.length <= EXCERPT_CHARS) return content;
   const start = Math.min(

@@ -13,6 +13,7 @@ import { searchQueryFromInput } from "@/server/domain/runtime/search-query";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 import { withSafeWorkflowError } from "@/server/security/workflow-error";
+import { knowledgeCandidateFilter, knowledgeExactMatchFilter } from "@/db/knowledge-candidate-filter";
 
 export interface RunKnowledgeStepInput {
   runId: string;
@@ -71,16 +72,17 @@ export async function runKnowledgeStep(args: RunKnowledgeStepInput): Promise<{ r
         eq(knowledgeSources.workspaceId, run.workspaceId),
         eq(knowledgeSources.status, "indexed"),
         isNull(knowledgeSources.archivedAt),
+        knowledgeCandidateFilter(query),
       ),
     )
-    .orderBy(desc(knowledgeSources.createdAt), asc(knowledgeSources.id), asc(knowledgeChunks.chunkIndex))
+    .orderBy(desc(knowledgeExactMatchFilter(query)), desc(knowledgeSources.createdAt), asc(knowledgeSources.id), asc(knowledgeChunks.chunkIndex))
     .limit(MAX_KNOWLEDGE_SCAN_CHUNKS + 1), "知识检索暂时不可用，请稍后重试");
   const truncated = rows.length > MAX_KNOWLEDGE_SCAN_CHUNKS;
   const scannedRows = rows.slice(0, MAX_KNOWLEDGE_SCAN_CHUNKS);
   const hits = scoreChunks(query, scannedRows, { limit: 8 });
   if (hits.length === 0) {
     return reject(truncated
-      ? `步骤「${node.title}」仅检查了最近 ${MAX_KNOWLEDGE_SCAN_CHUNKS} 个资料分片，没有找到与任务相关的内容；请缩小已发布资料范围后重试`
+      ? `步骤「${node.title}」仅检查了最近 ${MAX_KNOWLEDGE_SCAN_CHUNKS} 个匹配查询词的资料分片，没有找到与任务相关的内容；请缩小已发布资料范围后重试`
       : `步骤「${node.title}」在知识库中没有找到与任务相关的内容`);
   }
   const receipt: KnowledgeReceipt = {
@@ -98,7 +100,7 @@ export async function runKnowledgeStep(args: RunKnowledgeStepInput): Promise<{ r
     nodeId: node.id,
     kind: "knowledge.receipt",
     title: `「${node.title}」已从知识库找到 ${hits.length} 条相关内容`,
-    detail: truncated ? `资料较多，本次只检查了最近 ${MAX_KNOWLEDGE_SCAN_CHUNKS} 个分片` : null,
+    detail: truncated ? `匹配查询词的资料较多，本次只检查了最近 ${MAX_KNOWLEDGE_SCAN_CHUNKS} 个分片` : null,
     data: { scannedCount: receipt.scannedCount, truncated: receipt.truncated, hitCount: receipt.hitCount },
   });
   return { receipt };
