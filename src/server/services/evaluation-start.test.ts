@@ -3,6 +3,7 @@ import { REGRESSION_EXPECTATION_REQUIRED } from "@/server/domain/evaluation";
 
 const mocks = vi.hoisted(() => {
   const selectRows: unknown[][] = [];
+  const insertedValues: unknown[] = [];
   const select = vi.fn(() => {
     const rows = selectRows.shift() ?? [];
     const query = {
@@ -17,13 +18,13 @@ const mocks = vi.hoisted(() => {
   });
   const insert = vi.fn(() => {
     const query = {
-      values: () => query,
+      values: (value: unknown) => { insertedValues.push(value); return query; },
       returning: async () => [{ id: "00000000-0000-4000-8000-0000000000a5" }],
       then: (resolve: (value: unknown[]) => unknown) => Promise.resolve([]).then(resolve),
     };
     return query;
   });
-  return { selectRows, select, insert };
+  return { selectRows, insertedValues, select, insert };
 });
 
 vi.mock("@/lib/db", () => ({ db: {
@@ -37,6 +38,7 @@ const CASE_ID = "00000000-0000-4000-8000-0000000000a2";
 
 beforeEach(() => {
   mocks.selectRows.length = 0;
+  mocks.insertedValues.length = 0;
   mocks.select.mockClear();
   mocks.insert.mockClear();
 });
@@ -47,7 +49,7 @@ describe("改进回归样例的启动门禁", () => {
       [{ id: AGENT_ID, name: "客户助手" }],
       [],
       [{ id: "00000000-0000-4000-8000-0000000000a3" }],
-      [{ id: CASE_ID, input: {}, expectations: [] }],
+      [{ id: CASE_ID, name: "基础检查", input: {}, expectations: [] }],
       [{ id: "00000000-0000-4000-8000-0000000000a4" }],
     );
 
@@ -61,7 +63,7 @@ describe("改进回归样例的启动门禁", () => {
       [{ id: AGENT_ID, name: "客户助手" }],
       [],
       [{ id: "00000000-0000-4000-8000-0000000000a3" }],
-      [{ id: CASE_ID, input: {}, expectations: [] }],
+      [{ id: CASE_ID, name: "基础检查", input: {}, expectations: [] }],
       [],
     );
 
@@ -71,5 +73,23 @@ describe("改进回归样例的启动门禁", () => {
       resumed: false,
     });
     expect(mocks.insert).toHaveBeenCalledTimes(3);
+    expect(mocks.insertedValues[1]).toEqual([expect.objectContaining({
+      evaluationCaseId: CASE_ID,
+      caseSnapshot: { name: "基础检查", input: {}, expectations: [] },
+    })]);
+  });
+
+  it("补启未完成的验收时使用启动时冻结的输入", async () => {
+    mocks.selectRows.push(
+      [{ id: AGENT_ID, name: "客户助手" }],
+      [{ id: "00000000-0000-4000-8000-0000000000a5", agentId: AGENT_ID, versionId: "00000000-0000-4000-8000-0000000000a3", status: "running" }],
+      [{ id: CASE_ID, input: { question: "后改的问题" }, caseSnapshot: {
+        name: "启动时样例", input: { question: "原问题" }, expectations: [],
+      } }],
+    );
+
+    await expect(prepareEvaluationRun(AGENT_ID, "00000000-0000-4000-8000-0000000000a6"))
+      .resolves.toMatchObject({ ok: true, cases: [{ id: CASE_ID, input: { question: "原问题" } }], resumed: true });
+    expect(mocks.insert).not.toHaveBeenCalled();
   });
 });

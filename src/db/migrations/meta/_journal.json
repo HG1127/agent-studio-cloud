@@ -155,6 +155,13 @@
       "when": 1790520532628,
       "tag": "0021_secret_the_executioner",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1790524952656,
+      "tag": "0022_same_mysterio",
+      "breakpoints": true
     }
   ]
 }

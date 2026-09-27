@@ -1,0 +1,1 @@
+ALTER TABLE "evaluation_case_results" ADD COLUMN "case_snapshot" jsonb;

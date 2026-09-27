@@ -33,6 +33,12 @@ describe("数据库就绪检查", () => {
       requireNotNull: false,
       allowDefault: false,
     });
+    expect(REQUIRED_DATABASE_COLUMNS).toContainEqual({
+      tableName: "evaluation_case_results",
+      columnName: "case_snapshot",
+      requireNotNull: false,
+      allowDefault: false,
+    });
     expect(LATEST_MIGRATION_WHEN).toBe(migrationJournal.entries.at(-1)?.when);
   });
 

@@ -11,6 +11,7 @@ import { db } from "@/lib/db";
 import { createEvaluationCaseAction, generateEvaluationCasesAction, setEvaluationCaseArchivedAction, startEvaluationAction, updateEvaluationCaseAction } from "@/server/actions/evaluations";
 import { completeEvaluationForRun, reconcileEvaluationSummary } from "@/server/services/evaluation-state";
 import { prepareEvaluationRun } from "@/server/services/evaluation-start";
+import { listEvaluationRuns } from "@/server/queries/evaluations";
 
 const AGENT_ID = "00000000-0000-4000-8000-0000000000a1";
 const VERSION_ID = "00000000-0000-4000-8000-0000000000a2";
@@ -297,6 +298,35 @@ describe("自动验收并发启动", () => {
 
     const [result] = await db.select().from(evaluationCaseResults).where(eq(evaluationCaseResults.evaluationRunId, prepared.evaluationId));
     expect(result).toMatchObject({ status: "passed", error: null, runId: RUN_ID });
+  });
+
+  it("验收结果保留启动时样例名称与条件，不随样例后续修改", async () => {
+    await insertFixture();
+    await db.update(evaluationCases)
+      .set({ expectations: [{ path: "answer", operator: "equals", value: "通过" }] })
+      .where(eq(evaluationCases.id, CASE_ID));
+    const prepared = await prepareEvaluationRun(AGENT_ID);
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+    await db.update(evaluationCases).set({
+      name: "后来修改的名称",
+      expectations: [{ path: "answer", operator: "equals", value: "未通过" }],
+    }).where(eq(evaluationCases.id, CASE_ID));
+    await db.insert(runs).values({
+      id: RUN_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID,
+      agentId: AGENT_ID, versionId: VERSION_ID, status: "completed", input: {}, result: { answer: "通过" },
+      sourceType: "evaluation", sourceKey: `evaluation:${prepared.evaluationId}:${CASE_ID}`,
+    });
+
+    await completeEvaluationForRun(RUN_ID, { answer: "通过" });
+
+    const [result] = await db.select().from(evaluationCaseResults)
+      .where(eq(evaluationCaseResults.evaluationRunId, prepared.evaluationId));
+    expect(result).toMatchObject({ status: "passed", caseSnapshot: {
+      name: "基础样例", input: {}, expectations: [{ path: "answer", operator: "equals", value: "通过" }],
+    } });
+    const [history] = await listEvaluationRuns(AGENT_ID, DEMO_WORKSPACE_ID);
+    expect(history.results[0].caseName).toBe("基础样例");
   });
 
   it("检查并继续时对账已经结束但尚未汇总的运行", async () => {

@@ -1,5 +1,6 @@
 import { and, eq, ne } from "drizzle-orm";
 import { z } from "zod";
+import { EvaluationCaseSnapshot } from "@/contracts/evaluation";
 import { agentVersions, auditEvents, evaluationCaseResults, evaluationCases, evaluationRuns, runFeedback, runs } from "@/db/schema";
 import { db } from "@/lib/db";
 import { evaluateExpectations } from "@/server/domain/evaluation";
@@ -102,12 +103,24 @@ export async function completeEvaluationForRun(
     .limit(1);
   if (run?.sourceType !== "evaluation" || !run.sourceKey || !EvaluationSourceKey.safeParse(run.sourceKey).success) return;
   const [, evaluationRunId, evaluationCaseId] = run.sourceKey.split(":");
-  const [testCase] = await db
-    .select({ expectations: evaluationCases.expectations })
-    .from(evaluationCases)
-    .where(and(eq(evaluationCases.id, evaluationCaseId), eq(evaluationCases.workspaceId, run.workspaceId)))
+  const [caseResult] = await db
+    .select({ caseSnapshot: evaluationCaseResults.caseSnapshot, expectations: evaluationCases.expectations })
+    .from(evaluationCaseResults)
+    .leftJoin(evaluationCases, and(
+      eq(evaluationCases.id, evaluationCaseResults.evaluationCaseId),
+      eq(evaluationCases.workspaceId, evaluationCaseResults.workspaceId),
+    ))
+    .where(and(
+      eq(evaluationCaseResults.evaluationRunId, evaluationRunId),
+      eq(evaluationCaseResults.evaluationCaseId, evaluationCaseId),
+      eq(evaluationCaseResults.workspaceId, run.workspaceId),
+    ))
     .limit(1);
-  const [linkedFeedback] = !runError && result && testCase?.expectations.length === 0
+  const snapshot = caseResult?.caseSnapshot == null ? null : EvaluationCaseSnapshot.safeParse(caseResult.caseSnapshot);
+  const expectations = snapshot === null
+    ? caseResult?.expectations
+    : snapshot.success ? snapshot.data.expectations : undefined;
+  const [linkedFeedback] = !runError && result && expectations?.length === 0
     ? await db.select({ id: runFeedback.id }).from(runFeedback).where(and(
         eq(runFeedback.evaluationCaseId, evaluationCaseId),
         eq(runFeedback.workspaceId, run.workspaceId),
@@ -115,8 +128,8 @@ export async function completeEvaluationForRun(
     : [];
   const outcome = runError
     ? { passed: false, errors: [runError] }
-    : testCase && result
-      ? evaluateExpectations(result, testCase.expectations, { feedbackRegression: Boolean(linkedFeedback) })
+    : expectations && result
+      ? evaluateExpectations(result, expectations, { feedbackRegression: Boolean(linkedFeedback) })
       : { passed: false, errors: ["验收样例或运行结果不存在"] };
   await db
     .update(evaluationCaseResults)

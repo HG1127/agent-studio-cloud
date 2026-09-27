@@ -49,6 +49,7 @@ export const REQUIRED_DATABASE_COLUMNS = [
   { tableName: "knowledge_chunks", columnName: "created_by", requireNotNull: true, allowDefault: false },
   { tableName: "knowledge_chunks", columnName: "updated_at", requireNotNull: true, allowDefault: true },
   { tableName: "evaluation_runs", columnName: "request_id", requireNotNull: false, allowDefault: false },
+  { tableName: "evaluation_case_results", columnName: "case_snapshot", requireNotNull: false, allowDefault: false },
 ] as const;
 
 export async function isDatabaseReady() {

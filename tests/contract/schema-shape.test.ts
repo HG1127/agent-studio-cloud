@@ -245,6 +245,7 @@ describe("M1 schema 形状", () => {
     expect(expectColumn(evaluationRuns, "versionId", "version_id", "PgUUID").notNull).toBe(true);
     expect(expectColumn(evaluationCaseResults, "evaluationRunId", "evaluation_run_id", "PgUUID").notNull).toBe(true);
     expect(expectColumn(evaluationCaseResults, "evaluationCaseId", "evaluation_case_id", "PgUUID").notNull).toBe(true);
+    expect(expectColumn(evaluationCaseResults, "caseSnapshot", "case_snapshot", "PgJsonb").notNull).toBe(false);
   });
 
   it("运行反馈表按工作区和运行去重并关联回归样例", () => {

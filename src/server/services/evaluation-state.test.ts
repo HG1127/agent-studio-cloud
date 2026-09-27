@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => {
     const rows = selectRows.shift() ?? [];
     const query = {
       from: () => query,
+      leftJoin: () => query,
       where: () => query,
       for: () => query,
       limit: async () => rows,
@@ -17,7 +18,10 @@ const mocks = vi.hoisted(() => {
   });
   const update = vi.fn(() => ({ set: (values: unknown) => {
     updateValues.push(values);
-    return { where: async () => [] };
+    return { where: () => ({
+      returning: async () => [],
+      then: (resolve: (value: unknown[]) => unknown) => Promise.resolve([]).then(resolve),
+    }) };
   } }));
   const insert = vi.fn(() => ({ values: async () => [] }));
   return { selectRows, updateValues, select, update, insert };
@@ -49,7 +53,7 @@ describe("改进回归样例的结果判定", () => {
   it("已开始的验收也不能把空条件回归样例算作通过", async () => {
     mocks.selectRows.push(
       [{ sourceType: "evaluation", sourceKey: `evaluation:${EVALUATION_ID}:${CASE_ID}`, workspaceId: WORKSPACE_ID }],
-      [{ expectations: [] }],
+      [{ caseSnapshot: null, expectations: [] }],
       [{ id: "00000000-0000-4000-8000-0000000000a3" }],
       [{ agentId: "00000000-0000-4000-8000-0000000000a4", versionId: "00000000-0000-4000-8000-0000000000a5", workspaceId: WORKSPACE_ID, createdBy: "00000000-0000-4000-8000-0000000000a6", status: "running", totalCount: 1 }],
       [{ status: "failed" }],
@@ -60,5 +64,34 @@ describe("改进回归样例的结果判定", () => {
     expect(mocks.updateValues[0]).toMatchObject({ status: "failed", error: REGRESSION_EXPECTATION_REQUIRED });
     expect(mocks.updateValues[1]).toMatchObject({ status: "completed", passedCount: 0, failedCount: 1 });
     expect(mocks.update).toHaveBeenCalledTimes(2);
+  });
+
+  it("结果判定使用启动时冻结的条件而非样例当前条件", async () => {
+    mocks.selectRows.push(
+      [{ sourceType: "evaluation", sourceKey: `evaluation:${EVALUATION_ID}:${CASE_ID}`, workspaceId: WORKSPACE_ID }],
+      [{ caseSnapshot: { name: "初始样例", input: {}, expectations: [{ path: "answer", operator: "equals", value: "通过" }] },
+        expectations: [{ path: "answer", operator: "equals", value: "后来修改" }] }],
+      [{ agentId: "00000000-0000-4000-8000-0000000000a4", versionId: "00000000-0000-4000-8000-0000000000a5", workspaceId: WORKSPACE_ID, createdBy: "00000000-0000-4000-8000-0000000000a6", status: "running", totalCount: 1 }],
+      [{ status: "passed" }],
+    );
+
+    await completeEvaluationForRun("run-1", { answer: "通过" });
+
+    expect(mocks.updateValues[0]).toMatchObject({ status: "passed", error: null });
+    expect(mocks.updateValues[1]).toMatchObject({ status: "completed", passedCount: 1, failedCount: 0 });
+  });
+
+  it("快照损坏时不退回可编辑样例条件而误判通过", async () => {
+    mocks.selectRows.push(
+      [{ sourceType: "evaluation", sourceKey: `evaluation:${EVALUATION_ID}:${CASE_ID}`, workspaceId: WORKSPACE_ID }],
+      [{ caseSnapshot: { name: "初始样例", input: {}, expectations: [{ path: "answer", operator: "equals" }] },
+        expectations: [{ path: "answer", operator: "equals", value: "通过" }] }],
+      [{ agentId: "00000000-0000-4000-8000-0000000000a4", versionId: "00000000-0000-4000-8000-0000000000a5", workspaceId: WORKSPACE_ID, createdBy: "00000000-0000-4000-8000-0000000000a6", status: "running", totalCount: 1 }],
+      [{ status: "failed" }],
+    );
+
+    await completeEvaluationForRun("run-1", { answer: "通过" });
+
+    expect(mocks.updateValues[0]).toMatchObject({ status: "failed" });
   });
 });
