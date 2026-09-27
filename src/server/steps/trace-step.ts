@@ -5,6 +5,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { FatalError, getWritable } from "workflow";
 import { db } from "@/lib/db";
 import { runs, traceEvents } from "@/db/schema";
+import { JsonStorageRecord } from "@/contracts/json";
 import { writeTraceStreamBestEffort } from "@/server/domain/trace-stream";
 import { canAppendTraceToRun, isTerminalTraceKind } from "@/server/domain/trace-state";
 import { redactSensitiveData, redactSensitiveText } from "@/server/domain/security/redact-sensitive";
@@ -54,6 +55,9 @@ export async function appendTrace(event: AppendTraceInput): Promise<void> {
       ? { ...(event.data ?? {}), _dedupeKey: dedupeKey }
       : event.data ?? null,
   };
+  if (base.data !== null && !JsonStorageRecord.safeParse(base.data).success) {
+    throw new FatalError("运行轨迹数据必须是可保存的 JSON 数据");
+  }
   // 与取消、失败和完成共用运行行锁：终态检查与轨迹插入处于同一事务，
   // 并行步骤也按运行串行分配 seq，不再依赖唯一键冲突重试。
   const seq = await withSafeWorkflowError(() => db.transaction(async (tx) => {
