@@ -30,9 +30,15 @@ const FORBIDDEN_TOOL_HEADER_NAMES = new Set([
 
 function safeHeaders(headers: Record<string, string>): boolean {
   const names = Object.keys(headers);
-  return names.length <= 20 && names.every((name) =>
-    !/[\r\n:]/.test(name) && !FORBIDDEN_TOOL_HEADER_NAMES.has(name.toLowerCase()))
-    && Object.values(headers).every((value) => !/[\r\n]/.test(value));
+  if (names.length > 20
+    || names.some((name) => /[\r\n:]/.test(name) || FORBIDDEN_TOOL_HEADER_NAMES.has(name.toLowerCase()))
+    || Object.values(headers).some((value) => /[\r\n]/.test(value))) return false;
+  try {
+    new Headers(headers);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function parseToolRegistry(raw: string | undefined): ToolRegistration[] {
