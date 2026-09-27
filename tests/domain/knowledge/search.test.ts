@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { scoreChunks, tokenize } from "@/server/domain/knowledge/search";
+import { knowledgeCandidateTerms, scoreChunks, tokenize } from "@/server/domain/knowledge/search";
 
 const docs = [
   { sourceId: "s1", sourceName: "售后手册", chunkIndex: 0, content: "开头即说明退货政策：签收后 7 天内可退。" },
@@ -74,5 +74,15 @@ describe("scoreChunks", () => {
 
     expect(tokens).toHaveLength(32);
     expect(longToken).toHaveLength(200);
+  });
+
+  it("候选词覆盖打分器可命中的完整词和中文三字片段", () => {
+    expect(knowledgeCandidateTerms("refund policy")).toEqual(["refund", "policy"]);
+    const terms = knowledgeCandidateTerms("检索海蓝灯塔二四资料");
+    expect(terms).toContain("检索海蓝灯塔二四资料");
+    expect(terms).toContain("海蓝灯");
+    expect(terms).toContain("灯塔二");
+    expect(terms).toHaveLength(new Set(terms).size);
+    expect(knowledgeCandidateTerms("  ，。  ")).toEqual([]);
   });
 });

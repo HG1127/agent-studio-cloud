@@ -9,6 +9,7 @@ import { parseQueryRows } from "@/server/queries/parse-query-rows";
 import { isKnowledgeParsingStalled } from "@/server/domain/knowledge/source-state";
 import { escapeLikePattern } from "@/server/domain/search-pattern";
 import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
+import { knowledgeCandidateFilter, knowledgeExactMatchFilter } from "@/db/knowledge-candidate-filter";
 
 const MAX_PICKER_SELECTED_SOURCES = 200;
 
@@ -91,8 +92,9 @@ export async function searchKnowledgeChunks(query: string) {
       eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID),
       eq(knowledgeSources.status, "indexed"),
       isNull(knowledgeSources.archivedAt),
+      knowledgeCandidateFilter(normalized),
     ))
-    .orderBy(desc(knowledgeSources.createdAt), asc(knowledgeChunks.chunkIndex))
+    .orderBy(desc(knowledgeExactMatchFilter(normalized)), desc(knowledgeSources.createdAt), asc(knowledgeChunks.chunkIndex))
     .limit(MAX_KNOWLEDGE_SCAN_CHUNKS + 1);
   return KnowledgeSearchResult.parse({
     query: normalized,
