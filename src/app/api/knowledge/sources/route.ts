@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { del, put } from "@vercel/blob";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { start } from "workflow/api";
 import { MAX_KNOWLEDGE_FILENAME_LENGTH } from "@/contracts/knowledge";
 import { auditEvents, knowledgeSources } from "@/db/schema";
@@ -259,34 +259,40 @@ async function handleUpload(req: Request) {
       await removeUnusedOriginal(blobPathname, null, blobToken);
       return Response.json({ ok: false, error: "资料记录创建失败，请稍后重试" }, { status: 500 });
     }
-    let effectiveBlobPathname = concurrent.blobPathname;
-    if (!effectiveBlobPathname && blobPathname) {
-      const [adopted] = await db
-        .update(knowledgeSources)
-        .set({ blobPathname, updatedAt: new Date() })
-        .where(and(
-          eq(knowledgeSources.id, concurrent.id),
-          eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID),
-          isNull(knowledgeSources.blobPathname),
-        ))
-        .returning({ blobPathname: knowledgeSources.blobPathname });
-      if (adopted?.blobPathname) {
-        effectiveBlobPathname = adopted.blobPathname;
-      } else {
-        const [latest] = await db
-          .select({ blobPathname: knowledgeSources.blobPathname })
-          .from(knowledgeSources)
-          .where(and(eq(knowledgeSources.id, concurrent.id), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)))
-          .limit(1);
-        effectiveBlobPathname = latest?.blobPathname ?? null;
+    let reconciled: Awaited<ReturnType<typeof reconcileDuplicateSource>>;
+    try {
+      reconciled = await reconcileDuplicateSource(concurrent.id, blobPathname);
+    } catch (error) {
+      await removeUnusedOriginal(blobPathname, null, blobToken);
+      throw error;
+    }
+    if (!reconciled) {
+      await removeUnusedOriginal(blobPathname, null, blobToken);
+      return Response.json({ ok: false, error: "资料记录已经不存在，请重新上传" }, { status: 409 });
+    }
+    await removeUnusedOriginal(blobPathname, reconciled.row.blobPathname, blobToken);
+    if (reconciled.retrying) {
+      try {
+        await start(knowledgeIngestWorkflow, [{
+          sourceId: concurrent.id,
+          filename: file.name,
+          mime: file.type || concurrent.mime,
+          content: new Blob([bytes]).stream(),
+          ingestToken: reconciled.ingestToken!,
+        }]);
+      } catch (startError) {
+        console.error("知识重新入库工作流启动失败：", safeErrorForLog(startError));
+        await db.update(knowledgeSources).set({ status: "failed", error: "解析任务启动失败，请重新上传", parseEngine: null, updatedAt: new Date() }).where(and(
+          eq(knowledgeSources.id, concurrent.id), eq(knowledgeSources.parseEngine, reconciled.ingestToken!),
+        ));
+        return Response.json({ ok: false, error: "解析任务启动失败，请重新上传" }, { status: 500 });
       }
     }
-    await removeUnusedOriginal(blobPathname, effectiveBlobPathname, blobToken);
     return Response.json({
       ok: true,
       deduped: true,
-      blobStored: Boolean(effectiveBlobPathname),
-      source: toView({ ...concurrent, blobPathname: effectiveBlobPathname }),
+      blobStored: Boolean(reconciled.row.blobPathname),
+      source: toView(reconciled.row),
     });
   }
   try {

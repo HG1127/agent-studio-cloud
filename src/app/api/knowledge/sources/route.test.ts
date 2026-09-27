@@ -324,7 +324,7 @@ describe("知识原文件上传", () => {
       sizeBytes: 12, status: "parsing", chunkCount: 0, charCount: 0, error: null,
       createdAt: new Date("2026-09-24T00:00:00Z"), blobPathname: null, archivedAt: null,
     };
-    dbState.selectQueue = [[], [concurrent]];
+    dbState.selectQueue = [[], [concurrent], [concurrent]];
     dbState.insertRows = [];
     const form = new FormData();
     form.set("file", new File(["退货说明"], "售后手册.txt", { type: "text/plain" }));
@@ -348,7 +348,7 @@ describe("知识原文件上传", () => {
       sizeBytes: 12, status: "parsing", chunkCount: 0, charCount: 0, error: null,
       createdAt: new Date("2026-09-24T00:00:00Z"), blobPathname: "knowledge/retained.txt", archivedAt: null,
     };
-    dbState.selectQueue = [[], [concurrent]];
+    dbState.selectQueue = [[], [concurrent], [concurrent]];
     dbState.insertRows = [];
     put.mockResolvedValue({ pathname: "knowledge/unused.txt" });
     const form = new FormData();
@@ -362,14 +362,14 @@ describe("知识原文件上传", () => {
     expect(startMock).not.toHaveBeenCalled();
   });
 
-  it("补写原文件地址竞争失败时保留胜出地址并清理本请求 Blob", async () => {
+  it("锁内发现另一请求已补存原文件时采用胜出地址并清理本请求 Blob", async () => {
     process.env.BLOB_READ_WRITE_TOKEN = "test-token";
     const concurrent = {
       id: "00000000-0000-4000-8000-0000000000f4", name: "售后手册.txt", mime: "text/plain",
       sizeBytes: 12, status: "parsing", chunkCount: 0, charCount: 0, error: null,
       createdAt: new Date("2026-09-24T00:00:00Z"), blobPathname: null, archivedAt: null,
     };
-    dbState.selectQueue = [[], [concurrent], [{ blobPathname: "knowledge/winner.txt" }]];
+    dbState.selectQueue = [[], [concurrent], [{ ...concurrent, blobPathname: "knowledge/winner.txt" }]];
     dbState.insertRows = [];
     dbState.updateRows = [];
     put.mockResolvedValue({ pathname: "knowledge/unused.txt" });
@@ -380,8 +380,50 @@ describe("知识原文件上传", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ ok: true, deduped: true, blobStored: true });
-    expect(dbState.update).toHaveBeenCalledOnce();
+    expect(dbState.update).not.toHaveBeenCalled();
     expect(del).toHaveBeenCalledWith("knowledge/unused.txt", { token: "test-token" });
+  });
+
+  it("并发创建记录已解析失败时重新领取同一来源的解析任务", async () => {
+    const failed = {
+      id: "00000000-0000-4000-8000-0000000000f4", name: "售后手册.txt", mime: "text/plain",
+      sizeBytes: 12, status: "failed", chunkCount: 0, charCount: 0, error: "首次解析启动失败",
+      createdAt: new Date("2026-09-24T00:00:00Z"), updatedAt: new Date("2026-09-24T00:00:00Z"),
+      blobPathname: null, archivedAt: null,
+    };
+    dbState.selectQueue = [[], [failed], [failed]];
+    dbState.insertRows = [];
+    const form = new FormData();
+    form.set("file", new File(["退货说明"], "售后手册.txt", { type: "text/plain" }));
+
+    const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, deduped: true, source: { status: "parsing", error: null } });
+    expect(startMock).toHaveBeenCalledOnce();
+    expect(dbState.auditRows).toContainEqual(expect.objectContaining({
+      action: "knowledge.reingested", data: { previousStatus: "failed" },
+    }));
+  });
+
+  it("并发创建记录已经归档时恢复来源并保留已有分片", async () => {
+    const archived = {
+      id: "00000000-0000-4000-8000-0000000000f4", name: "售后手册.txt", mime: "text/plain",
+      sizeBytes: 12, status: "archived", chunkCount: 2, charCount: 100, error: null,
+      createdAt: new Date("2026-09-24T00:00:00Z"), updatedAt: new Date("2026-09-24T00:00:00Z"),
+      blobPathname: null, archivedAt: new Date("2026-09-24T01:00:00Z"),
+    };
+    dbState.selectQueue = [[], [archived], [archived]];
+    dbState.insertRows = [];
+    const form = new FormData();
+    form.set("file", new File(["退货说明"], "售后手册.txt", { type: "text/plain" }));
+
+    const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, deduped: true, source: { status: "indexed", chunkCount: 2 } });
+    expect(startMock).not.toHaveBeenCalled();
+    expect(dbState.auditRows).toContainEqual(expect.objectContaining({ action: "knowledge.restored" }));
   });
 
   it("首次上传时原子记录上传操作并启动解析", async () => {
