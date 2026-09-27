@@ -7,7 +7,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { FatalError, RetryableError } from "workflow";
 import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
-import { modelConnections } from "@/db/schema";
+import { modelConnections, runs } from "@/db/schema";
 import { db } from "@/lib/db";
 import { isTransientModelError, realModelsEnabled } from "@/lib/model";
 import { resolveEncryptionKey } from "@/server/domain/crypto";
@@ -78,6 +78,7 @@ export async function runModelStep(args: RunModelStepInput): Promise<{ output: s
               modelIds: modelConnections.modelIds,
             })
             .from(modelConnections)
+            .innerJoin(runs, and(eq(runs.id, args.runId), eq(runs.workspaceId, modelConnections.workspaceId)))
             .where(and(eq(modelConnections.id, manifestModel.connectionId), isNull(modelConnections.archivedAt)))
             .limit(1)
             .catch(() => { throw new RetryableError("读取模型连接失败，请稍后重试", { retryAfter: "2s" }); })
