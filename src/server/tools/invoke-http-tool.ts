@@ -17,13 +17,16 @@ async function cancelResponseBody(response: Response): Promise<void> {
   }
 }
 
-async function readBoundedBody(response: Response): Promise<string | null> {
+async function readBoundedBody(response: Response): Promise<
+  | { ok: true; text: string }
+  | { ok: false; reason: "too_large" | "invalid_encoding" }
+> {
   const declared = Number(response.headers.get("content-length") ?? 0);
   if (declared > MAX_TOOL_RESPONSE_BYTES) {
     await cancelResponseBody(response);
-    return null;
+    return { ok: false, reason: "too_large" };
   }
-  if (!response.body) return "";
+  if (!response.body) return { ok: true, text: "" };
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -33,8 +36,8 @@ async function readBoundedBody(response: Response): Promise<string | null> {
       if (done) break;
       size += value.byteLength;
       if (size > MAX_TOOL_RESPONSE_BYTES) {
-        await reader.cancel();
-        return null;
+        await reader.cancel().catch(() => undefined);
+        return { ok: false, reason: "too_large" };
       }
       chunks.push(value);
     }
@@ -47,7 +50,11 @@ async function readBoundedBody(response: Response): Promise<string | null> {
     body.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return new TextDecoder().decode(body);
+  try {
+    return { ok: true, text: new TextDecoder("utf-8", { fatal: true }).decode(body) };
+  } catch {
+    return { ok: false, reason: "invalid_encoding" };
+  }
 }
 
 export async function invokeHttpTool(args: {
@@ -96,13 +103,20 @@ export async function invokeHttpTool(args: {
       retryable,
     };
   }
-  let raw: string | null;
+  let bodyResult: Awaited<ReturnType<typeof readBoundedBody>>;
   try {
-    raw = await readBoundedBody(response);
+    bodyResult = await readBoundedBody(response);
   } catch {
     return { ok: false, error: "业务系统返回中断，稍后自动重试", retryable: true };
   }
-  if (raw === null) return { ok: false, error: "业务系统返回内容超过 1 MB", retryable: false };
+  if (!bodyResult.ok) {
+    return {
+      ok: false,
+      error: bodyResult.reason === "too_large" ? "业务系统返回内容超过 1 MB" : "业务系统返回内容不是有效 UTF-8 文本",
+      retryable: false,
+    };
+  }
+  const raw = bodyResult.text;
   if (!raw.trim()) return { ok: true, output: { ok: true } };
   try {
     const output: unknown = JSON.parse(raw);
