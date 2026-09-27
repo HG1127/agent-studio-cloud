@@ -5,7 +5,7 @@ import { and, asc, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { ScheduleSpec } from "@/contracts/schedule";
 import { schedules } from "@/db/schema";
 import { db } from "@/lib/db";
-import { nextOccurrence } from "@/server/domain/schedule-spec";
+import { nextOccurrenceAfterDue } from "@/server/domain/schedule-spec";
 import { startRunCore } from "@/server/services/start-run-core";
 
 export const dynamic = "force-dynamic";
@@ -58,7 +58,7 @@ async function handle(req: Request) {
         .where(eq(schedules.id, schedule.id));
       continue;
     }
-    const next = nextOccurrence(parsedSpec.data, schedule.nextRunAt);
+    const next = nextOccurrenceAfterDue(parsedSpec.data, schedule.nextRunAt, new Date());
     // 先推进/收口再开跑：进程中断也不会对同一槽位重复开 run（runs.source_key 唯一索引兜底幂等）
     await db
       .update(schedules)
