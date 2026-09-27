@@ -3,7 +3,6 @@
 import { randomUUID } from "node:crypto";
 import { get } from "@vercel/blob";
 import { and, eq, isNull } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { start } from "workflow/api";
 import { z } from "zod";
 import type { KnowledgeRetryResult } from "@/contracts/knowledge";
@@ -14,6 +13,7 @@ import { auditEventValues } from "@/server/audit/event-values";
 import { knowledgeIngestWorkflow } from "@/server/workflows/knowledge-ingest";
 import { isKnowledgeParsingStalled } from "@/server/domain/knowledge/source-state";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
 async function cancelBlobStream(stream: ReadableStream<Uint8Array>): Promise<void> {
   try {
@@ -49,7 +49,7 @@ export async function retryKnowledgeSourceAction(sourceId: string): Promise<Know
     if (!source) return { ok: false, error: "找不到这份知识资料，请刷新页面后重试" };
     const parsingStalled = isKnowledgeParsingStalled(source);
     if (source.status === "parsing" && !parsingStalled) {
-      revalidatePath("/knowledge");
+      revalidatePathsAfterCommit(["/knowledge"], "knowledge-retry-resume");
       return { ok: true };
     }
     if (source.status !== "failed" && !parsingStalled) {
@@ -133,7 +133,7 @@ export async function retryKnowledgeSourceAction(sourceId: string): Promise<Know
         ));
       return { ok: false, error: "解析任务启动失败，请稍后重试" };
     }
-    revalidatePath("/knowledge");
+    revalidatePathsAfterCommit(["/knowledge"], "knowledge-retry");
     return { ok: true };
   } catch (error) {
     console.error("重新解析知识资料失败", safeErrorForLog(error));

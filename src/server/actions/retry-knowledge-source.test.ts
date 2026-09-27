@@ -103,6 +103,16 @@ describe("重新解析知识资料", () => {
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/knowledge");
   });
 
+  it("重新解析已启动后缓存刷新失败仍返回成功", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.rows = [[source], [source]];
+    mocks.revalidatePath.mockImplementationOnce(() => { throw new Error("缓存暂时不可用"); });
+
+    await expect(retryKnowledgeSourceAction(SOURCE_ID)).resolves.toEqual({ ok: true });
+    expect(mocks.start).toHaveBeenCalledOnce();
+    expect(mocks.updates[0]).toMatchObject({ status: "parsing" });
+  });
+
   it("解析任务长时间没有更新时允许从原文件恢复", async () => {
     vi.spyOn(Date, "now").mockReturnValue(new Date("2026-09-25T12:10:01.000Z").getTime());
     const stalled = { ...source, status: "parsing", updatedAt: new Date("2026-09-25T12:05:00.000Z") };
@@ -125,6 +135,16 @@ describe("重新解析知识资料", () => {
     expect(mocks.get).not.toHaveBeenCalled();
     expect(mocks.start).not.toHaveBeenCalled();
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/knowledge");
+  });
+
+  it("复用正常解析中的任务时缓存刷新失败也保持成功结果", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(Date, "now").mockReturnValue(new Date("2026-09-25T12:09:59.000Z").getTime());
+    mocks.rows = [[{ ...source, status: "parsing", updatedAt: new Date("2026-09-25T12:05:00.000Z") }]];
+    mocks.revalidatePath.mockImplementationOnce(() => { throw new Error("缓存暂时不可用"); });
+
+    await expect(retryKnowledgeSourceAction(SOURCE_ID)).resolves.toEqual({ ok: true });
+    expect(mocks.start).not.toHaveBeenCalled();
   });
 
   it("锁内状态已变化时不重复启动解析", async () => {
