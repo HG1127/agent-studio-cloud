@@ -180,7 +180,7 @@ describe("重新解析知识资料", () => {
     expect(mocks.start).not.toHaveBeenCalled();
   });
 
-  it("工作流启动失败时把资料恢复成可重试失败状态", async () => {
+  it("工作流启动回执丢失时保留解析令牌和原文件流", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const stream = new ReadableStream({ start(controller) { controller.close(); } });
     const cancel = vi.spyOn(stream, "cancel");
@@ -190,15 +190,13 @@ describe("重新解析知识资料", () => {
 
     await expect(retryKnowledgeSourceAction(SOURCE_ID)).resolves.toEqual({
       ok: false,
-      error: "解析任务启动失败，请稍后重试",
+      error: "解析任务启动状态未确认，资料已保存；请稍后刷新，若长时间未完成请重试",
     });
 
-    expect(mocks.updates.at(-1)).toMatchObject({
-      status: "failed",
-      error: "解析任务启动失败，请稍后重试",
-      parseEngine: null,
-    });
-    expect(cancel).toHaveBeenCalledOnce();
+    expect(mocks.updates).toHaveLength(1);
+    expect(mocks.updates[0]).toMatchObject({ status: "parsing", parseEngine: expect.stringMatching(/^pending:/) });
+    expect(cancel).not.toHaveBeenCalled();
+    expect(mocks.revalidatePath).toHaveBeenCalledWith("/knowledge");
   });
 
   it("原文件暂时无法读取时给出可行动提示", async () => {

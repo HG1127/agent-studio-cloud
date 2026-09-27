@@ -12,7 +12,7 @@ import {
 } from "@/server/domain/knowledge/text-limits";
 import { knowledgeIngestWorkflow } from "@/server/workflows/knowledge-ingest";
 import { auditEventValues } from "@/server/audit/event-values";
-import { isKnowledgeParsingStalled } from "@/server/domain/knowledge/source-state";
+import { isKnowledgeParsingStalled, KNOWLEDGE_START_UNCONFIRMED_ERROR } from "@/server/domain/knowledge/source-state";
 import { hasCrossSiteOrigin } from "@/server/security/request-origin";
 import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
@@ -54,6 +54,10 @@ async function removeUnusedOriginal(pathname: string | null, retainedPathname: s
 function storageUnavailable() {
   console.error("[knowledge-upload] 私有文件存储写入失败");
   return Response.json({ ok: false, error: "私有文件存储暂不可用，请检查配置后重试" }, { status: 503 });
+}
+
+function startUnconfirmedResponse() {
+  return Response.json({ ok: false, error: KNOWLEDGE_START_UNCONFIRMED_ERROR }, { status: 503 });
 }
 
 async function reconcileDuplicateSource(
@@ -200,11 +204,9 @@ async function handleUpload(req: Request) {
           ingestToken: reconciled.ingestToken!,
         }]);
       } catch (startError) {
-        console.error("知识重新入库工作流启动失败：", safeErrorForLog(startError));
-        await db.update(knowledgeSources).set({ status: "failed", error: "解析任务启动失败，请重新上传", parseEngine: null, updatedAt: new Date() }).where(and(
-          eq(knowledgeSources.id, duplicate.id), eq(knowledgeSources.parseEngine, reconciled.ingestToken!),
-        ));
-        return Response.json({ ok: false, error: "解析任务启动失败，请重新上传" }, { status: 500 });
+        console.error("知识重新入库工作流启动状态未确认：", safeErrorForLog(startError));
+        // 启动响应可能在任务已持久化后丢失；保留令牌，避免抹掉随后成功的入库结果。
+        return startUnconfirmedResponse();
       }
     }
     return Response.json({
@@ -290,11 +292,8 @@ async function handleUpload(req: Request) {
           ingestToken: reconciled.ingestToken!,
         }]);
       } catch (startError) {
-        console.error("知识重新入库工作流启动失败：", safeErrorForLog(startError));
-        await db.update(knowledgeSources).set({ status: "failed", error: "解析任务启动失败，请重新上传", parseEngine: null, updatedAt: new Date() }).where(and(
-          eq(knowledgeSources.id, concurrent.id), eq(knowledgeSources.parseEngine, reconciled.ingestToken!),
-        ));
-        return Response.json({ ok: false, error: "解析任务启动失败，请重新上传" }, { status: 500 });
+        console.error("知识重新入库工作流启动状态未确认：", safeErrorForLog(startError));
+        return startUnconfirmedResponse();
       }
     }
     return Response.json({
@@ -307,11 +306,8 @@ async function handleUpload(req: Request) {
   try {
     await start(knowledgeIngestWorkflow, [{ sourceId: row.id, filename: file.name, mime: row.mime, content: new Blob([bytes]).stream(), ingestToken }]);
   } catch (error) {
-    console.error("知识入库工作流启动失败：", safeErrorForLog(error));
-    await db.update(knowledgeSources).set({ status: "failed", error: "解析任务启动失败，请重试上传", parseEngine: null, updatedAt: new Date() }).where(and(
-      eq(knowledgeSources.id, row.id), eq(knowledgeSources.parseEngine, ingestToken),
-    ));
-    return Response.json({ ok: false, error: "解析任务启动失败，请重试上传" }, { status: 500 });
+    console.error("知识入库工作流启动状态未确认：", safeErrorForLog(error));
+    return startUnconfirmedResponse();
   }
   return Response.json({ ok: true, deduped: false, blobStored: blobPathname !== null, source: toView(row) });
 }

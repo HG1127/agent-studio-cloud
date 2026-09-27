@@ -282,6 +282,27 @@ describe("知识原文件上传", () => {
     }));
   });
 
+  it("重复上传时启动回执丢失不撤销已领取的解析任务", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    dbState.rows = [{
+      id: "00000000-0000-4000-8000-0000000000f3", name: "售后手册.txt", mime: "text/plain",
+      sizeBytes: 12, status: "failed", chunkCount: 0, charCount: 0, error: "上次解析超时",
+      createdAt: new Date("2026-09-24T00:00:00Z"), blobPathname: null, archivedAt: null,
+    }];
+    startMock.mockRejectedValue(new Error("启动响应丢失"));
+    const form = new FormData();
+    form.set("file", new File(["退货说明"], "售后手册.txt", { type: "text/plain" }));
+
+    const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      ok: false, error: "解析任务启动状态未确认，资料已保存；请稍后刷新，若长时间未完成请重试",
+    });
+    expect(dbState.updateValues).toHaveLength(1);
+    expect(dbState.updateValues[0]).toMatchObject({ status: "parsing", parseEngine: expect.stringMatching(/^pending:/) });
+  });
+
   it("更正扩展名重传失败资料时同步保存解析所用的名称和类型", async () => {
     dbState.rows = [{
       id: "00000000-0000-4000-8000-0000000000f3", name: "退款规则.json", mime: "application/json",
@@ -474,5 +495,26 @@ describe("知识原文件上传", () => {
       summary: "上传知识资料「退款规则.md」",
     }));
     expect(startMock).toHaveBeenCalledOnce();
+  });
+
+  it("首次上传的启动回执丢失时保留资料与解析令牌", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    dbState.insertRows = [{
+      id: "00000000-0000-4000-8000-0000000000f5", name: "退款规则.md", mime: "text/markdown",
+      sizeBytes: 12, status: "parsing", chunkCount: 0, charCount: 0, error: null,
+      createdAt: new Date("2026-09-25T00:00:00Z"), blobPathname: null, archivedAt: null,
+    }];
+    startMock.mockRejectedValue(new Error("启动响应丢失"));
+    const form = new FormData();
+    form.set("file", new File(["退款规则内容"], "退款规则.md", { type: "text/markdown" }));
+
+    const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      ok: false, error: "解析任务启动状态未确认，资料已保存；请稍后刷新，若长时间未完成请重试",
+    });
+    expect(dbState.update).not.toHaveBeenCalled();
+    expect(startMock.mock.calls[0]?.[1]?.[0]).toMatchObject({ ingestToken: expect.stringMatching(/^pending:/) });
   });
 });

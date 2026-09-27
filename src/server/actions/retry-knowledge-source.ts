@@ -11,7 +11,7 @@ import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { auditEventValues } from "@/server/audit/event-values";
 import { knowledgeIngestWorkflow } from "@/server/workflows/knowledge-ingest";
-import { isKnowledgeParsingStalled } from "@/server/domain/knowledge/source-state";
+import { isKnowledgeParsingStalled, KNOWLEDGE_START_UNCONFIRMED_ERROR } from "@/server/domain/knowledge/source-state";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
@@ -121,17 +121,10 @@ export async function retryKnowledgeSourceAction(sourceId: string): Promise<Know
         ingestToken,
       }]);
     } catch (error) {
-      console.error("知识重新解析工作流启动失败", safeErrorForLog(error));
-      await cancelBlobStream(blob.stream);
-      await db
-        .update(knowledgeSources)
-        .set({ status: "failed", error: "解析任务启动失败，请稍后重试", parseEngine: null, updatedAt: new Date() })
-        .where(and(
-          eq(knowledgeSources.id, claimed.id),
-          eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID),
-          eq(knowledgeSources.parseEngine, ingestToken),
-        ));
-      return { ok: false, error: "解析任务启动失败，请稍后重试" };
+      console.error("知识重新解析工作流启动状态未确认", safeErrorForLog(error));
+      // 无法区分确实未启动和仅丢失启动回执；原流与令牌须留给可能已开始的工作流。
+      revalidatePathsAfterCommit(["/knowledge"], "knowledge-retry-unconfirmed");
+      return { ok: false, error: KNOWLEDGE_START_UNCONFIRMED_ERROR };
     }
     revalidatePathsAfterCommit(["/knowledge"], "knowledge-retry");
     return { ok: true };
