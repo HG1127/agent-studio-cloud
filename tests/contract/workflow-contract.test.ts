@@ -71,6 +71,83 @@ describe("WorkflowDraft", () => {
     }).success).toBe(false);
   });
 
+  it("拒绝自由字段中会被 JSON 序列化静默改写的值", () => {
+    for (const value of [undefined, () => "ignored", new Date("2026-09-27"), Number.NaN]) {
+      expect(WorkflowDraft.safeParse({
+        ...baseDraft,
+        businessGrounding: { source: value },
+      }).success).toBe(false);
+    }
+  });
+
+  it("条件编辑器显式清空可选规则时仍可保存草稿", () => {
+    const parsed = WorkflowDraft.safeParse({
+      ...baseDraft,
+      nodes: {
+        ...baseDraft.nodes,
+        condition: {
+          id: "condition", title: "判断", type: "condition",
+          condition: {
+            source: "input.ready",
+            branches: [{ label: "是", value: true, next: "done", rules: undefined, mode: undefined }],
+            defaultNext: "done",
+          },
+        },
+      },
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.nodes.condition.condition?.branches[0]).not.toHaveProperty("rules");
+      expect(parsed.data.nodes.condition.condition?.branches[0]).not.toHaveProperty("mode");
+    }
+  });
+
+  it("条件规则未填写比较值时不会保留 undefined 字段", () => {
+    const branch = WorkflowDraft.parse({
+      ...baseDraft,
+      nodes: {
+        ...baseDraft.nodes,
+        condition: {
+          id: "condition", title: "判断", type: "condition",
+          condition: {
+            source: "input.ready",
+            branches: [{ label: "是", next: "done", rules: [{ source: "input.ready", operator: "exists", value: undefined }] }],
+          },
+        },
+      },
+    }).nodes.condition.condition?.branches[0];
+    expect(branch?.rules?.[0]).not.toHaveProperty("value");
+  });
+
+  it("节点编辑器清空可选交接配置时不保留 undefined 字段", () => {
+    const draft = WorkflowDraft.parse({
+      ...baseDraft,
+      nodes: {
+        ...baseDraft.nodes,
+        handoff: { id: "handoff", title: "交接", type: "handoff", contract: undefined },
+      },
+    });
+    expect(draft.nodes.handoff).not.toHaveProperty("contract");
+  });
+
+  it("内嵌交接步骤尚未选择目标时仍可保存草稿", () => {
+    const draft = WorkflowDraft.parse({
+      ...baseDraft,
+      nodes: {
+        ...baseDraft.nodes,
+        group: {
+          id: "group", title: "准备材料", type: "subflow",
+          subflow: { name: "准备材料", steps: [{ id: "handoff", title: "交接", type: "handoff", contract: undefined }] },
+        },
+      },
+    });
+    expect(draft.nodes.group.subflow?.steps[0]).not.toHaveProperty("contract");
+    expect(WorkflowDraft.safeParse({
+      ...baseDraft,
+      businessGrounding: { missing: undefined },
+    }).success).toBe(false);
+  });
+
   it("拒绝对象原型名称和标识错位的顶层步骤", () => {
     const inheritedNameNodes = { ...baseDraft.nodes } as Record<string, unknown>;
     Object.defineProperty(inheritedNameNodes, "toString", {
