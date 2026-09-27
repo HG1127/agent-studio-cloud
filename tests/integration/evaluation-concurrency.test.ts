@@ -8,7 +8,7 @@ import { agentVersions, agents, evaluationCaseResults, evaluationCases, evaluati
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { createEvaluationCaseAction, generateEvaluationCasesAction, setEvaluationCaseArchivedAction, startEvaluationAction, updateEvaluationCaseAction } from "@/server/actions/evaluations";
-import { completeEvaluationForRun } from "@/server/services/evaluation-state";
+import { completeEvaluationForRun, reconcileEvaluationSummary } from "@/server/services/evaluation-state";
 import { prepareEvaluationRun } from "@/server/services/evaluation-start";
 
 const AGENT_ID = "00000000-0000-4000-8000-0000000000a1";
@@ -298,6 +298,33 @@ describe("自动验收并发启动", () => {
     const [result] = await db.select().from(evaluationCaseResults).where(eq(evaluationCaseResults.evaluationRunId, prepared.evaluationId));
     expect(evaluation).toMatchObject({ status: "completed", passedCount: 1, failedCount: 0 });
     expect(result).toMatchObject({ status: "passed", runId: RUN_ID, error: null });
+  });
+
+  it("缺少一条预期结果时不能把候选版本误晋级", async () => {
+    await insertFixture();
+    await db.insert(evaluationCases).values({
+      id: CASE_ID_2,
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
+      agentId: AGENT_ID,
+      name: "另一条样例",
+      input: {},
+      expectations: [],
+    });
+    const prepared = await prepareEvaluationRun(AGENT_ID);
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+    await db.update(evaluationCaseResults).set({ status: "passed" })
+      .where(eq(evaluationCaseResults.evaluationCaseId, CASE_ID));
+    await db.delete(evaluationCaseResults).where(eq(evaluationCaseResults.evaluationCaseId, CASE_ID_2));
+
+    await reconcileEvaluationSummary(prepared.evaluationId);
+
+    const [evaluation] = await db.select().from(evaluationRuns).where(eq(evaluationRuns.id, prepared.evaluationId));
+    const [version] = await db.select().from(agentVersions).where(eq(agentVersions.id, VERSION_ID));
+    expect(evaluation).toMatchObject({ status: "running", totalCount: 2, passedCount: 1, failedCount: 0 });
+    expect(evaluation.finishedAt).toBeNull();
+    expect(version.status).toBe("candidate");
   });
 
   it("多个样例同时完成时汇总不会被较早的部分结果覆盖", async () => {
