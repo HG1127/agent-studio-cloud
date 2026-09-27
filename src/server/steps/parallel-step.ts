@@ -50,7 +50,7 @@ export async function finishParallel(args: {
       status: args.output.status,
       completedCount: args.output.completedCount,
       failedCount: args.output.failedCount,
-      selectedBranchId: args.output.selectedBranchId,
+      selectedBranchId: args.output.selectedBranchId ?? null,
     },
   });
 }
