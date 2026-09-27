@@ -31,28 +31,40 @@ const MAX_SCHEMA_FIELDS = 100;
 const MAX_SCHEMA_CHOICES = 100;
 const MAX_PATTERN_LENGTH = 200;
 const MAX_PATTERN_INPUT_LENGTH = 4096;
+const MAX_VALUE_DEPTH = 32;
+const MAX_VALUE_NODES = 50_000;
 
-function unsafeJsonValueKey(value: unknown): { path: string; key: string } | null {
-  const stack: Array<{ value: unknown; path: string }> = [{ value, path: "消息" }];
+function jsonValueSafetyIssue(value: unknown): string | null {
+  const stack: Array<{ value: unknown; path: string; depth: number }> = [{ value, path: "消息", depth: 0 }];
   const visited = new WeakSet<object>();
+  let visitedNodes = 0;
   while (stack.length > 0) {
     const current = stack.pop()!;
+    visitedNodes += 1;
+    if (visitedNodes > MAX_VALUE_NODES) return `消息内容不能超过 ${MAX_VALUE_NODES} 项`;
+    if (current.depth > MAX_VALUE_DEPTH) return `${current.path}内容层级超过 ${MAX_VALUE_DEPTH} 层`;
     if (!current.value || typeof current.value !== "object") continue;
     if (visited.has(current.value)) continue;
     visited.add(current.value);
     if (Array.isArray(current.value)) {
+      if (visitedNodes + stack.length + current.value.length > MAX_VALUE_NODES) {
+        return `消息内容不能超过 ${MAX_VALUE_NODES} 项`;
+      }
       for (let index = current.value.length - 1; index >= 0; index -= 1) {
-        stack.push({ value: current.value[index], path: `${current.path}[${index}]` });
+        stack.push({ value: current.value[index], path: `${current.path}[${index}]`, depth: current.depth + 1 });
       }
       continue;
     }
     const entries = Object.entries(current.value as Record<string, unknown>);
+    if (visitedNodes + stack.length + entries.length > MAX_VALUE_NODES) {
+      return `消息内容不能超过 ${MAX_VALUE_NODES} 项`;
+    }
     for (const [key] of entries) {
-      if (!isSafeDataPathSegment(key)) return { path: current.path, key };
+      if (!isSafeDataPathSegment(key)) return `${current.path}不能使用保留字段名“${key}”`;
     }
     for (let index = entries.length - 1; index >= 0; index -= 1) {
       const [key, child] = entries[index];
-      stack.push({ value: child, path: `${current.path}.${key}` });
+      stack.push({ value: child, path: `${current.path}.${key}`, depth: current.depth + 1 });
     }
   }
   return null;
@@ -237,8 +249,8 @@ export function validateJsonSchemaDefinition(schema: Record<string, unknown>): s
 }
 
 export function validateJsonObjectSchema(payload: Record<string, unknown>, schema: Record<string, unknown>): string | null {
-  const unsafe = unsafeJsonValueKey(payload);
-  if (unsafe) return `${unsafe.path}不能使用保留字段名“${unsafe.key}”`;
+  const unsafe = jsonValueSafetyIssue(payload);
+  if (unsafe) return unsafe;
   const schemaError = validateJsonSchemaDefinition(schema);
   if (schemaError) return schemaError;
   return validateValue(payload, schema, "消息", 0);

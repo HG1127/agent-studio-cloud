@@ -133,6 +133,16 @@ describe("外部消息字段校验", () => {
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
   });
 
+  it("宽松契约也限制外部消息值的层级和项目数", () => {
+    let nested: Record<string, unknown> = { value: "ok" };
+    for (let depth = 0; depth < 33; depth += 1) nested = { child: nested };
+
+    expect(validateJsonObjectSchema(nested, { type: "object" })).toContain("内容层级超过 32 层");
+    expect(validateJsonObjectSchema({ items: Array(50_001).fill(0) }, { type: "object" }))
+      .toBe("消息内容不能超过 50000 项");
+    expect(validateJsonObjectSchema({ items: Array(100).fill(0) }, { type: "object" })).toBeNull();
+  });
+
   it("限制外部消息正则和字段契约复杂度", () => {
     expect(validateJsonObjectSchema({}, {
       type: "object",
