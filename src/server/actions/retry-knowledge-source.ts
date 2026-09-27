@@ -66,42 +66,48 @@ export async function retryKnowledgeSourceAction(sourceId: string): Promise<Know
     }
     if (!blob?.stream) return { ok: false, error: "原文件不存在或暂时无法读取，请重新上传同一文件" };
     const ingestToken = `pending:${randomUUID()}`;
-    const claimed = await db.transaction(async (tx) => {
-      const [current] = await tx
-        .select({
-          id: knowledgeSources.id,
-          name: knowledgeSources.name,
-          mime: knowledgeSources.mime,
-          status: knowledgeSources.status,
-          blobPathname: knowledgeSources.blobPathname,
-          updatedAt: knowledgeSources.updatedAt,
-        })
-        .from(knowledgeSources)
-        .where(and(
-          eq(knowledgeSources.id, sourceId),
-          eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID),
-          isNull(knowledgeSources.archivedAt),
-        ))
-        .for("update")
-        .limit(1);
-      if (!current
-        || (current.status !== "failed" && !isKnowledgeParsingStalled(current))
-        || current.blobPathname !== source.blobPathname) return null;
-      await tx
-        .update(knowledgeSources)
-        .set({ status: "parsing", error: null, parseEngine: ingestToken, updatedAt: new Date() })
-        .where(and(eq(knowledgeSources.id, current.id), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)));
-      await tx.insert(auditEvents).values(auditEventValues({
-        workspaceId: DEMO_WORKSPACE_ID,
-        createdBy: DEMO_USER_ID,
-        action: "knowledge.reingested",
-        targetType: "knowledge",
-        targetId: current.id,
-        summary: `重新解析知识资料「${current.name}」`,
-        data: { previousStatus: current.status },
-      }));
-      return current;
-    });
+    let claimed: typeof source | null;
+    try {
+      claimed = await db.transaction(async (tx) => {
+        const [current] = await tx
+          .select({
+            id: knowledgeSources.id,
+            name: knowledgeSources.name,
+            mime: knowledgeSources.mime,
+            status: knowledgeSources.status,
+            blobPathname: knowledgeSources.blobPathname,
+            updatedAt: knowledgeSources.updatedAt,
+          })
+          .from(knowledgeSources)
+          .where(and(
+            eq(knowledgeSources.id, sourceId),
+            eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID),
+            isNull(knowledgeSources.archivedAt),
+          ))
+          .for("update")
+          .limit(1);
+        if (!current
+          || (current.status !== "failed" && !isKnowledgeParsingStalled(current))
+          || current.blobPathname !== source.blobPathname) return null;
+        await tx
+          .update(knowledgeSources)
+          .set({ status: "parsing", error: null, parseEngine: ingestToken, updatedAt: new Date() })
+          .where(and(eq(knowledgeSources.id, current.id), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)));
+        await tx.insert(auditEvents).values(auditEventValues({
+          workspaceId: DEMO_WORKSPACE_ID,
+          createdBy: DEMO_USER_ID,
+          action: "knowledge.reingested",
+          targetType: "knowledge",
+          targetId: current.id,
+          summary: `重新解析知识资料「${current.name}」`,
+          data: { previousStatus: current.status },
+        }));
+        return current;
+      });
+    } catch (error) {
+      await cancelBlobStream(blob.stream);
+      throw error;
+    }
     if (!claimed) {
       await cancelBlobStream(blob.stream);
       return { ok: false, error: "资料状态已经变化，请刷新页面查看最新状态" };

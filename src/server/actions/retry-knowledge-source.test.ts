@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   get: vi.fn(),
   start: vi.fn(),
   revalidatePath: vi.fn(),
+  transactionError: null as Error | null,
 }));
 
 vi.mock("@/lib/db", () => {
@@ -28,7 +29,10 @@ vi.mock("@/lib/db", () => {
       values: async (value: Record<string, unknown>) => { mocks.audits.push(value); },
     }),
   };
-  return { db: { ...client, transaction: async (run: (tx: typeof client) => unknown) => run(client) } };
+  return { db: { ...client, transaction: async (run: (tx: typeof client) => unknown) => {
+    if (mocks.transactionError) throw mocks.transactionError;
+    return run(client);
+  } } };
 });
 
 vi.mock("@vercel/blob", () => ({ get: mocks.get }));
@@ -57,6 +61,7 @@ beforeEach(() => {
   });
   mocks.start.mockReset().mockResolvedValue(undefined);
   mocks.revalidatePath.mockReset();
+  mocks.transactionError = null;
 });
 
 afterEach(() => {
@@ -136,6 +141,23 @@ describe("重新解析知识资料", () => {
     expect(mocks.updates).toHaveLength(0);
     expect(mocks.start).not.toHaveBeenCalled();
     expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("领取解析任务的数据库事务失败时关闭已打开的原文件流", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const stream = new ReadableStream({ start(controller) { controller.close(); } });
+    const cancel = vi.spyOn(stream, "cancel");
+    mocks.get.mockResolvedValue({ stream });
+    mocks.rows = [[source]];
+    mocks.transactionError = new Error("数据库暂不可用");
+
+    await expect(retryKnowledgeSourceAction(SOURCE_ID)).resolves.toEqual({
+      ok: false,
+      error: "重新解析失败，请稍后重试",
+    });
+
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(mocks.start).not.toHaveBeenCalled();
   });
 
   it("工作流启动失败时把资料恢复成可重试失败状态", async () => {
