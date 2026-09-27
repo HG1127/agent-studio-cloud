@@ -529,6 +529,7 @@ export async function startRunCore(args: {
   versionId?: string;
 }): Promise<StartRunResult> {
   const { agentId } = args;
+  const sourceType = args.sourceType ?? "manual";
   const parsedRunInput = RunInputPayload.safeParse(args.input);
   if (!parsedRunInput.success) {
     return { ok: false, error: parsedRunInput.error.issues[0]?.message ?? "运行输入格式不正确" };
@@ -582,7 +583,7 @@ export async function startRunCore(args: {
           versionId: version.id,
           manifest,
           input: runInput,
-          sourceType: args.sourceType ?? "manual",
+          sourceType,
           sourceKey: args.sourceKey ?? null,
           lease,
         })
@@ -596,7 +597,7 @@ export async function startRunCore(args: {
             status: "queued",
             input: runInput,
             stepStates: withRunStartLease({}, lease),
-            sourceType: args.sourceType ?? "manual",
+            sourceType,
             sourceKey: args.sourceKey ?? null,
           })
           .onConflictDoNothing()
@@ -607,6 +608,8 @@ export async function startRunCore(args: {
       const [existing] = await db
         .select({
           id: runs.id,
+          agentId: runs.agentId,
+          sourceType: runs.sourceType,
           status: runs.status,
           workflowRunId: runs.workflowRunId,
           stepStates: runs.stepStates,
@@ -617,6 +620,9 @@ export async function startRunCore(args: {
         .where(and(eq(runs.workspaceId, agent.workspaceId), eq(runs.sourceKey, args.sourceKey)))
         .limit(1);
       if (!existing) return { ok: false, error: "运行启动冲突，请稍后重试" };
+      if (existing.agentId !== agentId || existing.sourceType !== sourceType) {
+        return { ok: false, error: "这项请求标识已经用于另一项运行，请重新发起" };
+      }
       if (existing.status === "failed" && !existing.workflowRunId) {
         return { ok: false, error: existing.error ?? "运行启动失败，请稍后重试" };
       }
