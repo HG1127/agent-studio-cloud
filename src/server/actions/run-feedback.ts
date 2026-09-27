@@ -1,6 +1,6 @@
 "use server";
 
-import { and, count, eq, isNull } from "drizzle-orm";
+import { and, count, eq, isNotNull, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { MAX_EVALUATION_CASES, EvaluationCaseCreateInput } from "@/contracts/evaluation";
@@ -69,7 +69,19 @@ export async function saveRunFeedbackAction(input: unknown): Promise<RunFeedback
     });
     if (outcome.kind === "missing") return { ok: false, error: "找不到这次运行，请刷新页面后重试" };
     if (outcome.kind === "not-completed") return { ok: false, error: "运行完成后才能评价结果" };
-    const feedback = RunFeedbackView.parse({ ...outcome.row, updatedAt: outcome.row.updatedAt.toISOString() });
+    const [activeCase] = outcome.row.evaluationCaseId
+      ? await db.select({ id: evaluationCases.id }).from(evaluationCases).where(and(
+          eq(evaluationCases.id, outcome.row.evaluationCaseId),
+          eq(evaluationCases.agentId, outcome.row.agentId),
+          eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID),
+          isNull(evaluationCases.archivedAt),
+        )).limit(1)
+      : [];
+    const feedback = RunFeedbackView.parse({
+      ...outcome.row,
+      evaluationCaseId: activeCase?.id ?? null,
+      updatedAt: outcome.row.updatedAt.toISOString(),
+    });
     revalidatePath(`/runs/${parsed.data.runId}`);
     return { ok: true, feedback };
   } catch (error) {
@@ -94,13 +106,25 @@ export async function createRegressionCaseFromRunFeedbackAction(runId: string): 
         .where(and(eq(runFeedback.runId, run.id), eq(runFeedback.workspaceId, DEMO_WORKSPACE_ID)))
         .limit(1);
       if (!feedback || feedback.rating !== "needs_improvement") return { kind: "feedback-required" as const };
-      if (feedback.evaluationCaseId) return { kind: "created" as const, id: feedback.evaluationCaseId, created: false };
-      const [agent] = await tx.select({ id: agents.id, name: agents.name })
+      const [agent] = await tx.select({ id: agents.id, name: agents.name, archivedAt: agents.archivedAt })
         .from(agents)
-        .where(and(eq(agents.id, run.agentId), eq(agents.workspaceId, DEMO_WORKSPACE_ID), isNull(agents.archivedAt)))
+        .where(and(eq(agents.id, run.agentId), eq(agents.workspaceId, DEMO_WORKSPACE_ID)))
         .for("update")
         .limit(1);
       if (!agent) return { kind: "agent-missing" as const };
+      const [linkedCase] = feedback.evaluationCaseId
+        ? await tx.select({ id: evaluationCases.id, name: evaluationCases.name, archivedAt: evaluationCases.archivedAt })
+            .from(evaluationCases)
+            .where(and(
+              eq(evaluationCases.id, feedback.evaluationCaseId),
+              eq(evaluationCases.agentId, agent.id),
+              eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID),
+            )).limit(1)
+        : [];
+      if (linkedCase && !linkedCase.archivedAt) {
+        return { kind: "created" as const, id: linkedCase.id, agentId: agent.id, created: false };
+      }
+      if (agent.archivedAt) return { kind: "agent-missing" as const };
       const [runningEvaluation] = await tx.select({ id: evaluationRuns.id }).from(evaluationRuns).where(and(
         eq(evaluationRuns.agentId, agent.id),
         eq(evaluationRuns.workspaceId, DEMO_WORKSPACE_ID),
@@ -113,6 +137,28 @@ export async function createRegressionCaseFromRunFeedbackAction(runId: string): 
         isNull(evaluationCases.archivedAt),
       ));
       if ((active?.count ?? 0) >= MAX_EVALUATION_CASES) return { kind: "limit" as const };
+      if (linkedCase) {
+        const [restored] = await tx.update(evaluationCases)
+          .set({ archivedAt: null, updatedAt: new Date() })
+          .where(and(
+            eq(evaluationCases.id, linkedCase.id),
+            eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID),
+            eq(evaluationCases.agentId, agent.id),
+            isNotNull(evaluationCases.archivedAt),
+          ))
+          .returning({ id: evaluationCases.id });
+        if (!restored) return { kind: "changed" as const };
+        await tx.insert(auditEvents).values(auditEventValues({
+          workspaceId: DEMO_WORKSPACE_ID,
+          createdBy: DEMO_USER_ID,
+          action: "evaluation_case.restored",
+          targetType: "evaluation",
+          targetId: restored.id,
+          summary: `恢复助手「${agent.name}」的验收样例「${linkedCase.name}」`,
+          data: { sourceRunId: run.id },
+        }));
+        return { kind: "created" as const, id: restored.id, agentId: agent.id, created: true };
+      }
       const name = `改进回归：${agent.name}`.slice(0, 80);
       const validCase = EvaluationCaseCreateInput.safeParse({
         agentId: agent.id,
@@ -139,9 +185,9 @@ export async function createRegressionCaseFromRunFeedbackAction(runId: string): 
         targetType: "run",
         targetId: run.id,
         summary: `把运行反馈加入助手「${agent.name}」的验收样例`,
-        data: { evaluationCaseId: created.id },
+        data: { evaluationCaseId: created.id, replacedEvaluationCaseId: feedback.evaluationCaseId },
       }));
-      return { kind: "created" as const, id: created.id, created: true };
+      return { kind: "created" as const, id: created.id, agentId: agent.id, created: true };
     });
     if (outcome.kind === "missing") return { ok: false, error: "找不到这次运行，请刷新页面后重试" };
     if (outcome.kind === "not-completed") return { ok: false, error: "运行完成后才能加入验收样例" };
@@ -151,8 +197,11 @@ export async function createRegressionCaseFromRunFeedbackAction(runId: string): 
       return { ok: false, error: "自动验收运行期间不能新增回归样例，请等待验收完成" };
     }
     if (outcome.kind === "limit") return { ok: false, error: `启用中的验收样例已达到 ${MAX_EVALUATION_CASES} 条上限` };
+    if (outcome.kind === "changed") return { ok: false, error: "验收样例状态已经变化，请刷新页面后重试" };
     if (outcome.kind === "input-invalid") return { ok: false, error: "这次运行的历史输入不符合当前验收格式，无法自动加入" };
     revalidatePath(`/runs/${runId}`);
+    revalidatePath(`/agents/${outcome.agentId}`);
+    revalidatePath("/memory");
     return { ok: true, evaluationCaseId: outcome.id, created: outcome.created };
   } catch (error) {
     console.error("从运行反馈创建验收样例失败", safeErrorForLog(error));
