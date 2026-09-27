@@ -16,4 +16,9 @@ describe("自动验收条件", () => {
     expect(evaluateExpectations({ answer: "仍然错误" }, expectations, { feedbackRegression: true }).passed).toBe(false);
     expect(evaluateExpectations({ answer: "正确答案" }, expectations, { feedbackRegression: true }).passed).toBe(true);
   });
+
+  it("JSON 数字负零满足数值零的等于条件", () => {
+    expect(evaluateExpectations({ amount: -0 }, [{ path: "amount", operator: "equals", value: 0 }]))
+      .toEqual({ passed: true, errors: [] });
+  });
 });
