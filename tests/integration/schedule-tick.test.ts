@@ -22,6 +22,8 @@ const DRAFT_AGENT_ID = "00000000-0000-4000-8000-0000000000ef";
 const RETIRED_VERSION_ID = "00000000-0000-4000-8000-0000000000f0";
 const RETIRED_SCHEDULE_ID = "00000000-0000-4000-8000-0000000000f1";
 const PAUSED_DURING_START_ID = "00000000-0000-4000-8000-0000000000f2";
+const OTHER_WORKSPACE_SCHEDULE_ID = "00000000-0000-4000-8000-0000000000f3";
+const OTHER_WORKSPACE_ID = "00000000-0000-4000-8000-0000000000f4";
 
 const manifest = AgentManifest.parse({
   schemaVersion: "4.0",
@@ -57,7 +59,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await db.delete(runs).where(eq(runs.agentId, AGENT_ID));
-  await db.delete(schedules).where(inArray(schedules.id, [SCHEDULE_DUE, SCHEDULE_ONCE, SCHEDULE_PAUSED, SCHEDULE_FAILING, RETIRED_SCHEDULE_ID, PAUSED_DURING_START_ID]));
+  await db.delete(schedules).where(inArray(schedules.id, [SCHEDULE_DUE, SCHEDULE_ONCE, SCHEDULE_PAUSED, SCHEDULE_FAILING, RETIRED_SCHEDULE_ID, PAUSED_DURING_START_ID, OTHER_WORKSPACE_SCHEDULE_ID]));
   await db.delete(agentVersions).where(inArray(agentVersions.agentId, [AGENT_ID, DRAFT_AGENT_ID]));
   await db.delete(agents).where(inArray(agents.id, [AGENT_ID, DRAFT_AGENT_ID]));
 });
@@ -140,6 +142,30 @@ describe("调度 tick 接口", () => {
     const response = await tick(authedRequest());
     const body = await response.json();
     expect(body.claimed).toBe(0);
+  }, 240_000);
+
+  it("只领取演示工作区任务，不推进其他工作区的到期任务", async () => {
+    const dueAt = new Date(Date.now() - 60_000);
+    await insertSchedule({
+      id: OTHER_WORKSPACE_SCHEDULE_ID,
+      workspaceId: OTHER_WORKSPACE_ID,
+      agentId: "00000000-0000-4000-8000-0000000000f5",
+      nextRunAt: dueAt,
+    });
+    const startsBefore = startMock.mock.calls.length;
+
+    const response = await tick(authedRequest());
+
+    expect(await response.json()).toEqual({ ok: true, claimed: 0, started: 0, failed: 0 });
+    const [schedule] = await db.select().from(schedules).where(eq(schedules.id, OTHER_WORKSPACE_SCHEDULE_ID)).limit(1);
+    expect(schedule).toMatchObject({
+      workspaceId: OTHER_WORKSPACE_ID,
+      status: "active",
+      nextRunAt: dueAt,
+      leaseUntil: null,
+      consecutiveFailures: 0,
+    });
+    expect(startMock).toHaveBeenCalledTimes(startsBefore);
   }, 240_000);
 
   it("连续失败 3 次后置 error 停跑", async () => {

@@ -4,6 +4,7 @@
 import { and, asc, eq, inArray, isNull, lt, lte, or } from "drizzle-orm";
 import { ScheduleSpec } from "@/contracts/schedule";
 import { schedules } from "@/db/schema";
+import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { nextOccurrenceAfterDue } from "@/server/domain/schedule-spec";
 import { startRunCore } from "@/server/services/start-run-core";
@@ -24,6 +25,7 @@ async function claimDueSchedules() {
       .select({ id: schedules.id })
       .from(schedules)
       .where(and(
+        eq(schedules.workspaceId, DEMO_WORKSPACE_ID),
         eq(schedules.status, "active"),
         isNull(schedules.archivedAt),
         lte(schedules.nextRunAt, now),
@@ -37,7 +39,10 @@ async function claimDueSchedules() {
     return tx
       .update(schedules)
       .set({ leaseUntil: new Date(now.getTime() + 60_000), updatedAt: now })
-      .where(inArray(schedules.id, due.map((schedule) => schedule.id)))
+      .where(and(
+        eq(schedules.workspaceId, DEMO_WORKSPACE_ID),
+        inArray(schedules.id, due.map((schedule) => schedule.id)),
+      ))
       .returning();
   });
 }
