@@ -103,6 +103,51 @@ describe("定时触发入口", () => {
     expect(mocks.recoverStaleQueuedRuns).toHaveBeenCalledOnce();
   });
 
+  it("过期排队运行接管异常时返回可重试错误，不伪报调度成功", async () => {
+    mocks.recoverStaleQueuedRuns.mockRejectedValueOnce(new Error("database unavailable"));
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("60");
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "过期运行接管暂时失败，请稍后重试",
+      claimed: 0,
+      started: 0,
+      failed: 0,
+    });
+  });
+
+  it("已启动的定时运行不因后续接管失败而从回执中消失", async () => {
+    mocks.due = [{ id: SCHEDULE_ID }];
+    mocks.claimed = [{
+      id: SCHEDULE_ID,
+      workspaceId: "00000000-0000-4000-8000-000000000001",
+      agentId: AGENT_ID,
+      versionId: VERSION_ID,
+      spec: { kind: "interval", minutes: 5 },
+      input: {},
+      nextRunAt: new Date("2026-09-26T00:00:00.000Z"),
+      leaseUntil: new Date("2026-09-26T00:01:00.000Z"),
+      consecutiveFailures: 0,
+      status: "active",
+    }];
+    mocks.recoverStaleQueuedRuns.mockRejectedValueOnce(new Error("database unavailable"));
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "过期运行接管暂时失败，请稍后重试",
+      claimed: 1,
+      started: 1,
+      failed: 0,
+    });
+    expect(mocks.startRunCore).toHaveBeenCalledOnce();
+  });
+
   it("始终使用定时任务创建时冻结的版本", async () => {
     const dueAt = new Date("2026-09-26T00:00:00.000Z");
     mocks.due = [{ id: SCHEDULE_ID }];

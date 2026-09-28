@@ -123,7 +123,14 @@ async function handle(req: Request) {
         .where(stillClaimed);
     }
   }
-  await recoverStaleQueuedRuns();
+  try {
+    await recoverStaleQueuedRuns();
+  } catch {
+    return Response.json(
+      { ok: false, error: "过期运行接管暂时失败，请稍后重试", claimed: claimed.length, started, failed },
+      { status: 503, headers: { "retry-after": "60" } },
+    );
+  }
   return Response.json({ ok: true, claimed: claimed.length, started, failed });
 }
 

@@ -26,5 +26,6 @@ export async function recoverStaleQueuedRuns(now = new Date()): Promise<void> {
     }
   } catch (error) {
     console.error("接管过期排队运行失败", safeErrorForLog(error));
+    throw error;
   }
 }
