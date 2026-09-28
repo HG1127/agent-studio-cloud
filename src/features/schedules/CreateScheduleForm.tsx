@@ -87,7 +87,6 @@ export function CreateScheduleForm({ agents }: { agents: ScheduleAgentOption[] }
               setError(result.error);
               return;
             }
-            requestRef.current = null;
             router.refresh();
           } catch {
             setError("创建状态待确认，请检查网络后用同一设置重试");

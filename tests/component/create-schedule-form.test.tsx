@@ -50,4 +50,18 @@ describe("定时任务创建请求恢复", () => {
     expect(mocks.create.mock.calls[0][0].requestId).toBe(REQUEST_ID);
     expect(mocks.create.mock.calls[1][0].requestId).toBe(nextId);
   });
+
+  it("成功后刷新完成前重复点击相同设置仍沿用请求标识", async () => {
+    mocks.create.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    render(<CreateScheduleForm agents={[{ id: AGENT_ID, name: "测试助手" }]} />);
+
+    await user.click(screen.getByRole("button", { name: "创建定时任务" }));
+    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledOnce());
+    await user.click(screen.getByRole("button", { name: "创建定时任务" }));
+
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(2));
+    expect(mocks.create.mock.calls[0][0].requestId).toBe(REQUEST_ID);
+    expect(mocks.create.mock.calls[1][0].requestId).toBe(REQUEST_ID);
+  });
 });
