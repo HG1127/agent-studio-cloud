@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AgentInputContract } from "./manifest";
 import { WorkflowDraft } from "./workflow";
 import { VersionExportFile } from "./version";
 
@@ -69,8 +70,8 @@ export const AgentTargetOption = z.object({
   agentName: z.string(),
   versionId: z.string().uuid(),
   version: z.number().int().positive(),
-  inputContract: z.record(z.string(), z.unknown()),
-  outputContract: z.record(z.string(), z.unknown()),
+  inputContract: AgentInputContract,
+  outputContract: WorkflowDraft.shape.outputContract.unwrap(),
 });
 export type AgentTargetOption = z.infer<typeof AgentTargetOption>;
 

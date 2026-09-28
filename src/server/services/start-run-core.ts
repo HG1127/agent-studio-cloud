@@ -529,6 +529,7 @@ export async function startRunCore(args: {
   versionId?: string;
 }): Promise<StartRunResult> {
   const { agentId } = args;
+  const sourceType = args.sourceType ?? "manual";
   const parsedRunInput = RunInputPayload.safeParse(args.input);
   if (!parsedRunInput.success) {
     return { ok: false, error: parsedRunInput.error.issues[0]?.message ?? "运行输入格式不正确" };
@@ -554,6 +555,12 @@ export async function startRunCore(args: {
     if (!version) {
       return { ok: false, error: "这个助手还没有发布版本，请先发布后再运行" };
     }
+    const usableVersion = args.sourceType === "evaluation"
+      ? version.status === "candidate" || version.status === "production"
+      : version.status === "production" || version.status === "retired";
+    if (!usableVersion) {
+      return { ok: false, error: "这个版本不能用于本次运行，请重新选择已发布版本" };
+    }
     const manifestParsed = AgentManifest.safeParse(version.manifest);
     if (!manifestParsed.success) {
       return { ok: false, error: "这个助手的版本信息不完整，请重新发布后再运行" };
@@ -576,7 +583,7 @@ export async function startRunCore(args: {
           versionId: version.id,
           manifest,
           input: runInput,
-          sourceType: args.sourceType ?? "manual",
+          sourceType,
           sourceKey: args.sourceKey ?? null,
           lease,
         })
@@ -590,7 +597,7 @@ export async function startRunCore(args: {
             status: "queued",
             input: runInput,
             stepStates: withRunStartLease({}, lease),
-            sourceType: args.sourceType ?? "manual",
+            sourceType,
             sourceKey: args.sourceKey ?? null,
           })
           .onConflictDoNothing()
@@ -601,6 +608,8 @@ export async function startRunCore(args: {
       const [existing] = await db
         .select({
           id: runs.id,
+          agentId: runs.agentId,
+          sourceType: runs.sourceType,
           status: runs.status,
           workflowRunId: runs.workflowRunId,
           stepStates: runs.stepStates,
@@ -611,6 +620,9 @@ export async function startRunCore(args: {
         .where(and(eq(runs.workspaceId, agent.workspaceId), eq(runs.sourceKey, args.sourceKey)))
         .limit(1);
       if (!existing) return { ok: false, error: "运行启动冲突，请稍后重试" };
+      if (existing.agentId !== agentId || existing.sourceType !== sourceType) {
+        return { ok: false, error: "这项请求标识已经用于另一项运行，请重新发起" };
+      }
       if (existing.status === "failed" && !existing.workflowRunId) {
         return { ok: false, error: existing.error ?? "运行启动失败，请稍后重试" };
       }

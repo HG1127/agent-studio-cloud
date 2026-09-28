@@ -4,7 +4,7 @@ import intentGolden from "../fixtures/domain/intent-golden-1.json";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-import { agentVersions, agents, evaluationRuns, workflowDefinitions } from "@/db/schema";
+import { agentVersions, agents, evaluationRuns, knowledgeSources, workflowDefinitions } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { publishVersionAction } from "@/server/actions/publish-version";
@@ -13,6 +13,7 @@ import { buildAgentDraft, buildManifest } from "@/server/domain/pipeline";
 const AGENT_ID = "00000000-0000-4000-8000-0000000000c1";
 const VERSION_ID = "00000000-0000-4000-8000-0000000000c2";
 const DEFINITION_ID = "00000000-0000-4000-8000-0000000000c3";
+const KNOWLEDGE_ID = "00000000-0000-4000-8000-0000000000c4";
 
 beforeEach(() => {
   vi.stubEnv("MODEL_MOCK", "1");
@@ -24,6 +25,7 @@ afterEach(async () => {
   await db.delete(agentVersions).where(eq(agentVersions.agentId, AGENT_ID));
   await db.delete(workflowDefinitions).where(eq(workflowDefinitions.agentId, AGENT_ID));
   await db.delete(agents).where(eq(agents.id, AGENT_ID));
+  await db.delete(knowledgeSources).where(eq(knowledgeSources.id, KNOWLEDGE_ID));
 });
 
 async function insertFixture() {
@@ -39,7 +41,17 @@ async function insertFixture() {
     modelId: "mock",
     mock: true,
     connectionId: null,
-    knowledgeSnapshot: [],
+    knowledgeSnapshot: [KNOWLEDGE_ID],
+  });
+  await db.insert(knowledgeSources).values({
+    id: KNOWLEDGE_ID,
+    workspaceId: DEMO_WORKSPACE_ID,
+    createdBy: DEMO_USER_ID,
+    name: "客服资料",
+    mime: "text/plain",
+    sizeBytes: 10,
+    sha256: "c".repeat(64),
+    status: "indexed",
   });
   await db.insert(agents).values({
     id: AGENT_ID,

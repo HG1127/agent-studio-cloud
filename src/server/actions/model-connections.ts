@@ -5,7 +5,12 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { ModelConnectionSaveInput } from "@/contracts/connections";
+import {
+  ModelConnectionSaveInput,
+  type ModelConnectionDeleteResult,
+  type ModelConnectionSaveResult,
+  type ModelConnectionTestResult,
+} from "@/contracts/connections";
 import { modelConnections } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
@@ -14,7 +19,7 @@ import { apiKeyHint, decryptApiKey, encryptApiKey, resolveEncryptionKey } from "
 
 class EndpointKeyRequiredError extends Error {}
 
-export async function saveModelConnectionAction(input: unknown): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+export async function saveModelConnectionAction(input: unknown): Promise<ModelConnectionSaveResult> {
   if (!realModelsEnabled()) return { ok: false, error: "真实模型功能尚未开放" };
   const parsed = ModelConnectionSaveInput.safeParse(input);
   if (!parsed.success) return { ok: false, error: "请检查连接名称、服务地址、密钥与模型列表的填写" };
@@ -60,7 +65,7 @@ export async function saveModelConnectionAction(input: unknown): Promise<{ ok: t
   }
 }
 
-export async function deleteModelConnectionAction(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function deleteModelConnectionAction(id: string): Promise<ModelConnectionDeleteResult> {
   if (!realModelsEnabled()) return { ok: false, error: "真实模型功能尚未开放" };
   if (!z.string().uuid().safeParse(id).success) return { ok: false, error: "连接标识不正确，请刷新页面后重试" };
   try {
@@ -76,7 +81,7 @@ export async function deleteModelConnectionAction(id: string): Promise<{ ok: tru
   }
 }
 
-export async function testModelConnectionAction(id: string): Promise<{ ok: true; reply: string } | { ok: false; error: string }> {
+export async function testModelConnectionAction(id: string): Promise<ModelConnectionTestResult> {
   if (!realModelsEnabled()) return { ok: false, error: "真实模型功能尚未开放" };
   if (!z.string().uuid().safeParse(id).success) return { ok: false, error: "连接标识不正确，请刷新页面后重试" };
   try {

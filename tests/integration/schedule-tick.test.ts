@@ -1,10 +1,16 @@
 import { eq, inArray } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+const { startMock } = vi.hoisted(() => ({ startMock: vi.fn() }));
+vi.mock("workflow/api", () => ({ start: startMock }));
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 import { AgentManifest } from "@/contracts/manifest";
 import { agentVersions, agents, runs, schedules } from "@/db/schema";
 import { db } from "@/lib/db";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { POST as tick } from "@/app/api/schedules/tick/route";
+import { listScheduleableAgents } from "@/server/queries/schedules";
+import { updateScheduleStatusAction } from "@/server/actions/update-schedule-status";
 
 const AGENT_ID = "00000000-0000-4000-8000-0000000000e9";
 const VERSION_ID = "00000000-0000-4000-8000-0000000000ea";
@@ -12,6 +18,10 @@ const SCHEDULE_DUE = "00000000-0000-4000-8000-0000000000eb";
 const SCHEDULE_ONCE = "00000000-0000-4000-8000-0000000000ec";
 const SCHEDULE_PAUSED = "00000000-0000-4000-8000-0000000000ed";
 const SCHEDULE_FAILING = "00000000-0000-4000-8000-0000000000ee";
+const DRAFT_AGENT_ID = "00000000-0000-4000-8000-0000000000ef";
+const RETIRED_VERSION_ID = "00000000-0000-4000-8000-0000000000f0";
+const RETIRED_SCHEDULE_ID = "00000000-0000-4000-8000-0000000000f1";
+const PAUSED_DURING_START_ID = "00000000-0000-4000-8000-0000000000f2";
 
 const manifest = AgentManifest.parse({
   schemaVersion: "4.0",
@@ -37,15 +47,19 @@ const authedRequest = () =>
 
 beforeAll(async () => {
   process.env.CRON_SECRET = "test-cron-secret";
+  let workflowCount = 0;
+  startMock.mockImplementation(async () => ({ runId: `schedule-workflow-${++workflowCount}`, cancel: vi.fn() }));
   await db.insert(agents).values({ id: AGENT_ID, workspaceId: DEMO_WORKSPACE_ID, name: "定时测试助手", intentText: "定时触发的测试助手", createdBy: DEMO_USER_ID });
+  await db.insert(agents).values({ id: DRAFT_AGENT_ID, workspaceId: DEMO_WORKSPACE_ID, name: "未发布测试助手", intentText: "尚未发布的测试助手", createdBy: DEMO_USER_ID });
   await db.insert(agentVersions).values({ id: VERSION_ID, agentId: AGENT_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, version: 1, status: "production", manifest });
+  await db.insert(agentVersions).values({ id: RETIRED_VERSION_ID, agentId: DRAFT_AGENT_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, version: 1, status: "retired", manifest });
 });
 
 afterAll(async () => {
   await db.delete(runs).where(eq(runs.agentId, AGENT_ID));
-  await db.delete(schedules).where(inArray(schedules.id, [SCHEDULE_DUE, SCHEDULE_ONCE, SCHEDULE_PAUSED, SCHEDULE_FAILING]));
-  await db.delete(agentVersions).where(eq(agentVersions.agentId, AGENT_ID));
-  await db.delete(agents).where(eq(agents.id, AGENT_ID));
+  await db.delete(schedules).where(inArray(schedules.id, [SCHEDULE_DUE, SCHEDULE_ONCE, SCHEDULE_PAUSED, SCHEDULE_FAILING, RETIRED_SCHEDULE_ID, PAUSED_DURING_START_ID]));
+  await db.delete(agentVersions).where(inArray(agentVersions.agentId, [AGENT_ID, DRAFT_AGENT_ID]));
+  await db.delete(agents).where(inArray(agents.id, [AGENT_ID, DRAFT_AGENT_ID]));
 });
 
 async function insertSchedule(overrides?: Partial<typeof schedules.$inferInsert>) {
@@ -58,6 +72,29 @@ async function insertSchedule(overrides?: Partial<typeof schedules.$inferInsert>
 }
 
 describe("调度 tick 接口", () => {
+  it("可定时助手只包含已有生产版本的助手", async () => {
+    const options = await listScheduleableAgents();
+
+    expect(options.some((option) => option.id === AGENT_ID)).toBe(true);
+    expect(options.some((option) => option.id === DRAFT_AGENT_ID)).toBe(false);
+  });
+
+  it("暂停任务可继续使用创建时冻结的历史生产版本", async () => {
+    await insertSchedule({
+      id: RETIRED_SCHEDULE_ID,
+      agentId: DRAFT_AGENT_ID,
+      versionId: RETIRED_VERSION_ID,
+      status: "paused",
+      nextRunAt: new Date(Date.now() - 60_000),
+    });
+
+    await expect(updateScheduleStatusAction(RETIRED_SCHEDULE_ID, "active")).resolves.toEqual({ ok: true });
+    const [schedule] = await db.select().from(schedules).where(eq(schedules.id, RETIRED_SCHEDULE_ID)).limit(1);
+    expect(schedule?.status).toBe("active");
+    expect(schedule?.versionId).toBe(RETIRED_VERSION_ID);
+    expect(schedule?.nextRunAt.getTime()).toBeGreaterThan(Date.now());
+  });
+
   it("无密钥或未配密钥返回 401", async () => {
     const response = await tick(new Request("http://localhost/api/schedules/tick", { method: "POST" }));
     expect(response.status).toBe(401);
@@ -79,6 +116,7 @@ describe("调度 tick 接口", () => {
     const dueRuns = await runsFor(SCHEDULE_DUE);
     expect(dueRuns).toHaveLength(1);
     expect(dueRuns[0].sourceType).toBe("schedule");
+    expect(dueRuns[0].versionId).toBe(VERSION_ID);
     // 第二次 tick：next_run_at 已推进到 5 分钟后，无可领取项，不会重复开 run
     const second = await tick(authedRequest());
     const secondBody = await second.json();
@@ -118,5 +156,19 @@ describe("调度 tick 接口", () => {
     expect(schedule?.status).toBe("error");
     expect(schedule?.consecutiveFailures).toBe(3);
     expect(schedule?.lastError).toBeTruthy();
+  }, 240_000);
+
+  it("启动失败期间被暂停的任务不会被失败回写重新启用", async () => {
+    await insertSchedule({ id: PAUSED_DURING_START_ID });
+    startMock.mockImplementationOnce(async () => {
+      expect(await updateScheduleStatusAction(PAUSED_DURING_START_ID, "paused")).toEqual({ ok: true });
+      throw new Error("模拟工作流启动失败");
+    });
+
+    const response = await tick(authedRequest());
+    expect((await response.json()).failed).toBe(1);
+    const [schedule] = await db.select().from(schedules).where(eq(schedules.id, PAUSED_DURING_START_ID)).limit(1);
+    expect(schedule?.status).toBe("paused");
+    expect(schedule?.leaseUntil).toBeNull();
   }, 240_000);
 });

@@ -73,6 +73,7 @@ describe("步骤表转流程", () => {
     expect(workflow.nodes.step_1).toMatchObject({ type: "knowledge", next: "step_2", knowledge: { query: "客户咨询回复规范" } });
     expect(workflow.nodes.step_2).toMatchObject({ type: "ai", next: "step_3" });
     expect(workflow.nodes.step_4).toMatchObject({ type: "human", next: "step_5", approval: { role: "业务负责人" } });
+    expect(Object.hasOwn(workflow.nodes.step_4, "description")).toBe(false);
     expect(workflow.nodes.step_5).toMatchObject({ type: "tool", next: "done", tool: { protocol: "unbound", action: "send" } });
     expect(workflow.nodes.step_5.description).toContain("邮件系统");
     expect(workflow.nodes.done).toMatchObject({ type: "end", next: null });

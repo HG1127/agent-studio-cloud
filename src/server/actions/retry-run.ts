@@ -16,7 +16,7 @@ export async function retryRunAction(runId: string, requestId?: string): Promise
   }
   try {
     const [source] = await db
-      .select({ agentId: runs.agentId, versionId: runs.versionId, input: runs.input })
+      .select({ agentId: runs.agentId, versionId: runs.versionId, input: runs.input, sourceType: runs.sourceType })
       .from(runs)
       .where(and(
         eq(runs.id, runId),
@@ -25,6 +25,9 @@ export async function retryRunAction(runId: string, requestId?: string): Promise
       ))
       .limit(1);
     if (!source) return { ok: false, error: "只有已结束的运行才能再次运行" };
+    if (source.sourceType === "evaluation") {
+      return { ok: false, error: "自动验收的运行不能单独再次运行，请在验收页面重新发起" };
+    }
     const result = await startRunCore({
       agentId: source.agentId,
       versionId: source.versionId,

@@ -76,7 +76,8 @@ export function stepListToWorkflowDraft({ steps, name, intentText }: {
     const id = `step_${index + 1}`;
     const following = index + 1 < steps.length ? `step_${index + 2}` : "done";
     const node: z.input<typeof WorkflowNode> = {
-      id, title: step.title, type: NODE_TYPES[step.kind], next: following, description: step.description,
+      id, title: step.title, type: NODE_TYPES[step.kind], next: following,
+      ...(step.description === undefined ? {} : { description: step.description }),
     };
     if (step.kind === "condition") {
       node.description = step.condition.question;

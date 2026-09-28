@@ -24,7 +24,7 @@ export async function knowledgeIngestWorkflow(args: KnowledgeIngestArgs): Promis
     } catch (failErr) {
       console.error(`知识来源 ${args.sourceId} 写失败状态时出错：`, safeErrorForLog(failErr));
     }
-    if (err instanceof FatalError || err instanceof RetryableError) throw err;
+    if (FatalError.is(err) || RetryableError.is(err)) throw err;
     console.error(`知识来源 ${args.sourceId} 解析发生未知异常：`, safeErrorForLog(err));
     throw new FatalError(reason);
   }

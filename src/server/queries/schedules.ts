@@ -1,23 +1,24 @@
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { schedules, agents, agentVersions } from "@/db/schema";
 import { AgentManifest } from "@/contracts/manifest";
-import { ScheduleAgentOption, ScheduleSpec, type ScheduleAgentOption as ScheduleAgentOptionType, type ScheduleView } from "@/contracts/schedule";
+import { ScheduleAgentOption, ScheduleSpec, ScheduleView, type ScheduleAgentOption as ScheduleAgentOptionType, type ScheduleView as ScheduleViewType } from "@/contracts/schedule";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
+import { parseQueryRows } from "@/server/queries/parse-query-rows";
 
-export async function listSchedules(): Promise<ScheduleView[]> {
+export async function listSchedules(): Promise<ScheduleViewType[]> {
   const rows = await db
     .select({ schedule: schedules, agentName: agents.name })
     .from(schedules)
-    .innerJoin(agents, eq(schedules.agentId, agents.id))
+    .innerJoin(agents, and(eq(schedules.agentId, agents.id), eq(schedules.workspaceId, agents.workspaceId)))
     .where(and(eq(schedules.workspaceId, DEMO_WORKSPACE_ID), isNull(schedules.archivedAt)))
     .orderBy(desc(schedules.createdAt));
-  return rows.flatMap(({ schedule, agentName }) => {
+  const candidates = rows.flatMap(({ schedule, agentName }) => {
     const spec = ScheduleSpec.safeParse(schedule.spec);
     if (!spec.success) return [];
     return [{
       id: schedule.id, agentId: schedule.agentId, agentName,
-      status: schedule.status as ScheduleView["status"],
+      status: schedule.status,
       spec: spec.data,
       nextRunAt: schedule.nextRunAt?.toISOString() ?? null,
       lastError: schedule.lastError,
@@ -25,13 +26,14 @@ export async function listSchedules(): Promise<ScheduleView[]> {
       createdAt: schedule.createdAt.toISOString(),
     }];
   });
+  return parseQueryRows("定时任务列表", ScheduleView, candidates);
 }
 
 export async function listScheduleableAgents(): Promise<ScheduleAgentOptionType[]> {
   const rows = await db
     .select({ id: agents.id, name: agents.name, version: agentVersions.version, manifest: agentVersions.manifest })
     .from(agentVersions)
-    .innerJoin(agents, eq(agents.id, agentVersions.agentId))
+    .innerJoin(agents, and(eq(agents.id, agentVersions.agentId), eq(agents.workspaceId, agentVersions.workspaceId)))
     .where(and(
       eq(agentVersions.workspaceId, DEMO_WORKSPACE_ID),
       eq(agentVersions.status, "production"),

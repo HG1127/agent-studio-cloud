@@ -71,3 +71,12 @@ export function nextOccurrence(spec: ScheduleSpec, from: Date): Date | null {
   }
   return null;
 }
+
+export function nextOccurrenceAfterDue(spec: ScheduleSpec, dueAt: Date, now: Date): Date | null {
+  if (spec.kind === "once") return null;
+  if (spec.kind !== "interval") return nextOccurrence(spec, now);
+  const periodMs = spec.minutes * 60 * 1000;
+  const elapsedMs = Math.max(0, now.getTime() - dueAt.getTime());
+  const skippedSlots = Math.floor(elapsedMs / periodMs) + 1;
+  return new Date(dueAt.getTime() + skippedSlots * periodMs);
+}

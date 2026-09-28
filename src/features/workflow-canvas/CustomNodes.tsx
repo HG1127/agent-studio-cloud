@@ -110,6 +110,9 @@ export function WorkflowNodeView(props: NodeProps) {
       {supportsErrorRoute(node) ? (
         <Handle id="error" type="source" position={Position.Right} style={{ ...HANDLE_STYLE, top: "78%" }} title="未完成时" />
       ) : null}
+      {node.type === "wait" && node.wait?.mode === "event" ? (
+        <Handle id="timeout" type="source" position={Position.Right} style={{ ...HANDLE_STYLE, top: "78%" }} title="超时后" />
+      ) : null}
       {isCondition
         ? node.condition?.branches.map((branch, index) => (
             <Handle

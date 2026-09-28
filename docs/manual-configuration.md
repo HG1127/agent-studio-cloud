@@ -4,7 +4,7 @@
 
 ## 当前待处理
 
-- **数据库迁移状态**：2026-09-26 已在当前共享 Neon 数据库应用 `0009` 至 `0016` 迁移，`drizzle.__drizzle_migrations` 共 17 条；`audit_events` 与 `run_feedback` 已创建，`/memory` 和 `/activity` 均返回正常页面。本地 `.env.local` 的 `DATABASE_URL` 已改为同一 Neon 数据库的直连地址；当前系统环境还继承了另一数据库的 `DATABASE_URL`，运行迁移命令前必须清除或显式覆盖该环境变量。其他环境仍须在部署前按各自迁移记录执行 `pnpm db:migrate`；生产环境使用带迁移前数据分支的 GitHub Actions 工作流。
+- **数据库迁移状态**：2026-09-26 已在当前共享 Neon 数据库应用 `0009` 至 `0016` 迁移，`drizzle.__drizzle_migrations` 共 17 条；`audit_events` 与 `run_feedback` 已创建，`/memory` 和 `/activity` 均返回正常页面。最新主分支还包含 `0017` 与 `0018`，共享库和生产库是否已应用这两项须分别核对迁移日志。本地 `.env.local` 的 `DATABASE_URL` 已改为同一 Neon 数据库的直连地址；当前系统环境还继承了另一数据库的 `DATABASE_URL`，运行迁移命令前必须清除或显式覆盖该环境变量。其他环境仍须在部署前按各自迁移记录执行 `pnpm db:migrate`；生产环境使用带迁移前数据分支的 GitHub Actions 工作流。
 - **完整工作流套件的稳定数据库连接**：2026-09-25 的定向真实数据库用例可以通过，但完整套件在清理协作测试数据时出现 Neon `CONNECT_TIMEOUT`。合并前应在临时 Neon 分支重新执行 `pnpm test:workflow`，以本地完整验收或按需 CI 的隔离数据库结果为准。
 - **本地浏览器端到端验收**：2026-09-25 执行 `pnpm test:e2e` 时，Next.js 与 Workflow 均已正常启动，但 `/api/health` 因当前 Neon 连接不可用返回 `503`（`db=false`、`workflow=true`），Playwright 因此未进入用例执行。2026-09-26 提高本地 Node 堆上限后再次独立启动并请求健康接口，仍在 5 秒数据库探针超时后得到相同的 `503`，确认不是开发服务内存问题。请在本地验收或按需 CI 的临时 Neon 分支上重跑 `pnpm test:e2e`。
 - **按需 GitHub 集成测试与生产迁移**：在仓库 Actions 中添加密钥 `NEON_API_KEY` 和变量 `NEON_PROJECT_ID`。CI 仅在免费额度可用时手动触发，创建并清理临时数据库分支；本地验收需在本机提供同名环境变量。生产迁移工作流只允许从 `main` 手动触发，并要求输入 `MIGRATE_PRODUCTION`，执行前会保留一个 Neon 数据分支。
@@ -15,4 +15,4 @@
 - **真实业务工具**：代码已支持服务端 HTTP 工具注册、画布绑定、幂等调用、超时/重试和回执契约校验。逐个准备外部系统专用账号与最小权限凭据，按 `.env.example` 配置 `TOOL_REGISTRY_JSON`；请求与回执格式见 `docs/tool-http-contract.md`。未配置或已移除的工具会在启动前明确阻止，不静默模拟。
 - **私有原文件存储**：配置 `BLOB_READ_WRITE_TOKEN` 后启用知识原文件长期保存，解析失败时可直接从原文件一键重新解析；未配置时仅保留解析后的知识片段，失败后需重新上传同一文件。
 - **超过 4MB 的知识原文件**：Vercel Function 请求体上限为 4.5MB，当前上传入口为 multipart 并预留开销，故限制为 4MB；如业务必须上传更大文件，需要配置私有 Blob 并启用客户端直传方案。
-- **定时触发入口**：生产环境设置随机 `CRON_SECRET`，并在 Vercel 中确认 Cron 调用携带相同密钥。
+- **定时触发入口**：生产环境设置随机 `CRON_SECRET`，并在 Vercel 中确认 Cron 调用携带相同密钥。`vercel.json` 里的每日触发仅能兜底；需要按分钟执行固定间隔或多时段计划时，还须配置更频繁的外部定时调用。

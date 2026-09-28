@@ -33,6 +33,24 @@ export const ModelConnectionView = z.object({
 });
 export type ModelConnectionView = z.infer<typeof ModelConnectionView>;
 
+export const ModelConnectionSaveResult = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), id: z.string().uuid() }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+export type ModelConnectionSaveResult = z.infer<typeof ModelConnectionSaveResult>;
+
+export const ModelConnectionDeleteResult = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true) }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+export type ModelConnectionDeleteResult = z.infer<typeof ModelConnectionDeleteResult>;
+
+export const ModelConnectionTestResult = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), reply: z.string() }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+export type ModelConnectionTestResult = z.infer<typeof ModelConnectionTestResult>;
+
 export const PublishModelSelection = z.object({
   connectionId: z.string().uuid(),
   modelId: z.string().trim().min(1),

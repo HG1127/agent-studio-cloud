@@ -18,6 +18,8 @@ const EVALUATION_ID = "00000000-0000-4000-8000-0000000007a3";
 const CASE_ID = "00000000-0000-4000-8000-0000000007a4";
 const CROSS_VERSION_ID = "00000000-0000-4000-8000-0000000007a5";
 const OTHER_WS = "00000000-0000-4000-8000-0000000007af";
+const OTHER_AGENT_ID = "00000000-0000-4000-8000-0000000007b0";
+const OTHER_VERSION_ID = "00000000-0000-4000-8000-0000000007b1";
 const manifest = AgentManifest.parse({
   schemaVersion: "4.0",
   workflowFingerprint: "7".repeat(64),
@@ -37,12 +39,12 @@ const manifest = AgentManifest.parse({
 });
 
 async function cleanup() {
-  await db.delete(runs).where(eq(runs.agentId, AGENT_ID));
+  await db.delete(runs).where(inArray(runs.agentId, [AGENT_ID, OTHER_AGENT_ID]));
   await db.delete(evaluationCaseResults).where(eq(evaluationCaseResults.evaluationRunId, EVALUATION_ID));
   await db.delete(evaluationRuns).where(eq(evaluationRuns.id, EVALUATION_ID));
   await db.delete(evaluationCases).where(eq(evaluationCases.id, CASE_ID));
-  await db.delete(agentVersions).where(inArray(agentVersions.id, [VERSION_ID, CROSS_VERSION_ID]));
-  await db.delete(agents).where(eq(agents.id, AGENT_ID));
+  await db.delete(agentVersions).where(inArray(agentVersions.id, [VERSION_ID, CROSS_VERSION_ID, OTHER_VERSION_ID]));
+  await db.delete(agents).where(inArray(agents.id, [AGENT_ID, OTHER_AGENT_ID]));
 }
 
 beforeEach(async () => {
@@ -101,6 +103,44 @@ describe("运行启动句柄恢复", () => {
     const [stored] = await db.select().from(runs).where(eq(runs.id, first.ok ? first.runId : ""));
     expect(stored.workflowRunId).toBe("wrun_test_handle");
     expect(readRunStartLease(stored.stepStates)?.token).toBe(startMock.mock.calls[0]?.[1]?.[3]?.startToken);
+  });
+
+  it("同一来源键不能跨助手复用已有运行", async () => {
+    await db.insert(agents).values({
+      id: OTHER_AGENT_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID,
+      name: "另一个测试助手", intentText: "验证请求标识不能跨助手复用", status: "published",
+    });
+    await db.insert(agentVersions).values({
+      id: OTHER_VERSION_ID, agentId: OTHER_AGENT_ID, workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID, version: 1, status: "production",
+      manifest: AgentManifest.parse({
+        ...manifest,
+        workflowSnapshot: {
+          ...manifest.workflowSnapshot,
+          rootAgent: { ...manifest.workflowSnapshot.rootAgent, id: OTHER_AGENT_ID },
+        },
+      }),
+    });
+    const sourceKey = "manual:00000000-0000-4000-8000-0000000007b2";
+    const first = await startRunCore({ agentId: AGENT_ID, input: {}, sourceKey });
+    const second = await startRunCore({ agentId: OTHER_AGENT_ID, input: {}, sourceKey });
+
+    expect(first.ok).toBe(true);
+    expect(second).toEqual({ ok: false, error: "这项请求标识已经用于另一项运行，请重新发起" });
+    expect(startMock).toHaveBeenCalledOnce();
+    const stored = await db.select().from(runs).where(eq(runs.sourceKey, sourceKey));
+    expect(stored).toHaveLength(1);
+    expect(stored[0].agentId).toBe(AGENT_ID);
+  });
+
+  it("同一来源键不能跨运行来源复用已有运行", async () => {
+    const sourceKey = "manual:00000000-0000-4000-8000-0000000007b3";
+    const first = await startRunCore({ agentId: AGENT_ID, input: {}, sourceKey });
+    const second = await startRunCore({ agentId: AGENT_ID, input: {}, sourceType: "evaluation", sourceKey });
+
+    expect(first.ok).toBe(true);
+    expect(second).toEqual({ ok: false, error: "这项请求标识已经用于另一项运行，请重新发起" });
+    expect(startMock).toHaveBeenCalledOnce();
   });
 
   it("相同来源键遇到过期排队记录时接管原运行而不新建记录", async () => {
@@ -239,6 +279,21 @@ describe("运行启动句柄恢复", () => {
       expect.any(String),
       expect.objectContaining({ workflowFingerprint: "7".repeat(64) }),
     ]));
+  });
+
+  it("候选版本只能用于验收，历史生产版本仍可手动重跑", async () => {
+    await db.update(agentVersions).set({ status: "candidate" }).where(eq(agentVersions.id, VERSION_ID));
+
+    const manualCandidate = await startRunCore({ agentId: AGENT_ID, versionId: VERSION_ID, input: {}, sourceType: "manual" });
+    expect(manualCandidate).toEqual({ ok: false, error: "这个版本不能用于本次运行，请重新选择已发布版本" });
+    expect(startMock).not.toHaveBeenCalled();
+
+    const evaluationCandidate = await startRunCore({ agentId: AGENT_ID, versionId: VERSION_ID, input: {}, sourceType: "evaluation" });
+    expect(evaluationCandidate.ok).toBe(true);
+
+    await db.update(agentVersions).set({ status: "retired" }).where(eq(agentVersions.id, VERSION_ID));
+    const manualRetired = await startRunCore({ agentId: AGENT_ID, versionId: VERSION_ID, input: {}, sourceType: "manual" });
+    expect(manualRetired.ok).toBe(true);
   });
 
   it("验收运行启动失败时直接落定样例与验收汇总", async () => {

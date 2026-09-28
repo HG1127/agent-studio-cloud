@@ -5,6 +5,7 @@ import { useState } from "react";
 import { CheckCircle2, Clock3, FileText, ShieldCheck, XCircle } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import type { ApprovalReview, ApprovalView } from "@/contracts/run";
+import { presentBusinessOutput } from "@/features/runs/present-business-output";
 import { decideApprovalAction } from "@/server/actions/decide-approval";
 
 // 审批面板：runs 详情页（Task 13）挂载。界面只显示业务信息，不出现内部标识。
@@ -112,11 +113,12 @@ function ReviewContent({ review, title = "待确认草稿" }: { review: Approval
   if (!review) {
     return <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-white/70 p-3 text-sm leading-6 text-amber-900"><FileText aria-hidden="true" className="mt-1 size-4 shrink-0" /><p>这一步没有生成可展示的正文，请核对运行输入和上游步骤结果。</p></div>;
   }
+  const presented = presentBusinessOutput(review.content);
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4">
       <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-950"><FileText aria-hidden="true" className="size-4 text-indigo-600" />{title}</h3>
       <p className="text-xs text-slate-500">来自「{review.sourceTitle}」</p>
-      <p className="max-h-80 overflow-auto whitespace-pre-wrap break-words text-sm leading-6 text-slate-800">{review.content}</p>
+      <p className="max-h-80 overflow-auto whitespace-pre-wrap break-words text-sm leading-6 text-slate-800">{presented.text}</p>
     </div>
   );
 }
@@ -138,6 +140,7 @@ function ApprovalForm({
 }) {
   const [note, setNote] = useState("");
   const [rejectOpen, setRejectOpen] = useState(false);
+  const reviewable = review ? presentBusinessOutput(review.content).reviewable : true;
 
   return (
     <section aria-labelledby="approval-title" className="overflow-hidden rounded-2xl border border-amber-200 bg-white shadow-sm">
@@ -155,6 +158,7 @@ function ApprovalForm({
           <span>需要角色：<strong className="font-semibold text-slate-900">{role}</strong></span>
         </div>
       <ReviewContent review={review} />
+        {review && reviewable ? <p className="text-xs text-amber-900">确认前请核对草稿中的事实和适用条件。</p> : null}
         <div className="grid gap-2 sm:grid-cols-2">
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs leading-5 text-emerald-800"><strong className="block text-sm text-emerald-950">批准后</strong>从当前暂停位置继续执行后续步骤。</div>
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600"><strong className="block text-sm text-slate-900">拒绝后</strong>本次运行安全结束，不执行后续交付。</div>
@@ -178,7 +182,7 @@ function ApprovalForm({
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <button
           type="button"
-          disabled={submitting !== null}
+          disabled={submitting !== null || !reviewable}
           onClick={() => onDecide("approved", note)}
           className="inline-flex h-10 items-center justify-center rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:bg-indigo-300"
         >

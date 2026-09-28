@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { ApprovalPanel } from "@/features/runs/ApprovalPanel";
+import { presentBusinessOutput } from "@/features/runs/present-business-output";
 import { RunStatusBadge } from "@/features/runs/RunList";
 import { TraceTimeline } from "@/features/runs/TraceTimeline";
 import { WaitEventPanel } from "@/features/runs/WaitEventPanel";
@@ -193,7 +194,7 @@ export async function RunDetail({ runId, backHref = "/runs" }: { runId: string; 
       return { key, label: label === "步骤结果" ? `步骤结果 ${index + 1}` : label, output };
     });
   const copyText = contractedOutputs.length > 0
-    ? contractedOutputs.map((field) => `${field.label}\n${displayValue(field.output)}`).join("\n\n")
+    ? contractedOutputs.map((field) => `${field.label}\n${typeof field.output === "string" ? presentBusinessOutput(field.output).text : displayValue(field.output)}`).join("\n\n")
     : undefined;
   const completedSteps = steps.filter((step) => step.status === "succeeded").length;
   const guidance = RUN_GUIDANCE[run.status];
@@ -359,7 +360,7 @@ export async function RunDetail({ runId, backHref = "/runs" }: { runId: string; 
                   <p className="text-sm font-medium text-gray-700">
                     {label}
                   </p>
-                  <StructuredRunValue value={output} />
+                  <StructuredRunValue value={typeof output === "string" ? presentBusinessOutput(output).text : output} />
                 </li>
               ))}
             </ul>

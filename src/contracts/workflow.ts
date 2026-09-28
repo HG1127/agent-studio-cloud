@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { JsonStorageValue } from "./json";
 
 const RESERVED_FIELD_NAMES: ReadonlySet<string> = new Set(["__proto__", "prototype", "constructor"]);
 const RESERVED_WORKFLOW_NODE_IDS: ReadonlySet<string> = new Set([
@@ -9,6 +10,15 @@ const safeFieldPath = (value: string) => value.split(".").every((segment) => seg
 const safeTopLevelNodeId = (value: string) => value.length <= 200
   && /^[A-Za-z0-9_-]+$/.test(value)
   && !RESERVED_WORKFLOW_NODE_IDS.has(value);
+const omitUndefined = <T extends object>(value: T): T => Object.fromEntries(
+  Object.entries(value).filter(([, item]) => item !== undefined),
+) as T;
+const InlineStepData = z.record(z.string(), z.unknown()).transform((step) => {
+  if (step.contract !== undefined) return step;
+  const storedStep = { ...step };
+  delete storedStep.contract;
+  return storedStep;
+});
 
 export const MAX_WORKFLOW_NODES = 200;
 export const MAX_WORKFLOW_BYTES = 1024 * 1024;
@@ -42,15 +52,21 @@ export const ToolSpec = z.object({
 });
 export const ConditionBranch = z.object({
   label: z.string(), value: z.unknown().optional(), next: z.string().nullable(),
-  rules: z.array(z.object({ source: z.string(), operator: z.string(), value: z.unknown().optional() })).optional(),
+  rules: z.array(z.object({ source: z.string(), operator: z.string(), value: z.unknown().optional() })
+    .transform(({ value, ...rule }) => ({ ...rule, ...(value === undefined ? {} : { value }) }))).optional(),
   mode: z.enum(["all", "any"]).optional(),
-});
+}).transform(({ value, rules, mode, ...branch }) => ({
+  ...branch,
+  ...(value === undefined ? {} : { value }),
+  ...(rules === undefined ? {} : { rules }),
+  ...(mode === undefined ? {} : { mode }),
+}));
 export const ParallelBranch = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
   inputs: z.array(z.string()).default([]),
   outputs: z.array(z.string()).default([]),
-  steps: z.array(z.record(z.string(), z.unknown())).min(1).max(MAX_PARALLEL_STEPS),
+  steps: z.array(InlineStepData).min(1).max(MAX_PARALLEL_STEPS),
 });
 export const HandoffField = z.object({
   name: z.string().min(1).max(200).refine(safeFieldPath, "交接字段名不能使用保留名称"),
@@ -126,12 +142,12 @@ export const WorkflowNode = z.object({
     onTimeoutNext: z.string().nullable().default(null),
   }).optional(),
   memory: z.object({ mode: z.enum(["read", "write"]), query: z.string().optional(), limit: z.number().int().min(1).max(20).optional(), contentFrom: z.string().optional() }).optional(),
-  subflow: z.object({ name: z.string(), steps: z.array(z.record(z.string(), z.unknown())).max(MAX_SUBFLOW_STEPS).default([]), inputs: z.array(z.string()).default([]), outputs: z.array(z.string()).default([]), failurePolicy: z.enum(["checkpoint", "continue"]).default("checkpoint") }).optional(),
+  subflow: z.object({ name: z.string(), steps: z.array(InlineStepData).max(MAX_SUBFLOW_STEPS).default([]), inputs: z.array(z.string()).default([]), outputs: z.array(z.string()).default([]), failurePolicy: z.enum(["checkpoint", "continue"]).default("checkpoint") }).optional(),
   agentCall: z.object({ targetAgentId: z.string(), versionId: z.string(), targetAgentName: z.string().optional(), workflowId: z.string().optional(), memoryAccess: z.object({ mode: z.enum(["self", "team", "none"]) }).optional(), inputContract: z.record(z.string(), z.unknown()).optional(), outputContract: z.record(z.string(), z.unknown()).optional() }).optional(),
   toAgent: z.object({ id: z.string(), name: z.string().optional(), versionId: z.string().optional() }).optional(),
   contract: HandoffContract.optional(),
   businessSpec: z.record(z.string(), z.unknown()).nullable().default(null),
-});
+}).transform(omitUndefined);
 export const WorkflowDraft = z.object({
   id: z.string(), versionId: z.string().nullable().default(null),
   startNodeId: z.string().default("start"),
@@ -166,6 +182,10 @@ export const WorkflowDraft = z.object({
     }
   }
   try {
+    if (!JsonStorageValue.safeParse(draft).success) {
+      ctx.addIssue({ code: "custom", message: "流程草稿必须是可保存的 JSON 数据" });
+      return;
+    }
     const bytes = new TextEncoder().encode(JSON.stringify(draft)).byteLength;
     if (bytes > MAX_WORKFLOW_BYTES) ctx.addIssue({ code: "custom", message: "流程草稿不能超过 1MB" });
   } catch {

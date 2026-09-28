@@ -7,7 +7,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { FatalError, RetryableError } from "workflow";
 import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
-import { modelConnections } from "@/db/schema";
+import { modelConnections, runs } from "@/db/schema";
 import { db } from "@/lib/db";
 import { isTransientModelError, realModelsEnabled } from "@/lib/model";
 import { resolveEncryptionKey } from "@/server/domain/crypto";
@@ -23,6 +23,14 @@ export interface RunModelStepInput {
   outputs: Record<string, unknown>;
   input: Record<string, unknown>;
   qualityFeedback?: string | null;
+}
+
+class UnusableModelOutputError extends Error {}
+
+function cleanModelOutput(raw: string): string {
+  const output = raw.replace(/<think\b[^>]*>[\s\S]*?<\/think\s*>/gi, "").trim();
+  if (!output || /<\/?think\b/i.test(output)) throw new UnusableModelOutputError();
+  return output;
 }
 
 export async function runModelStep(args: RunModelStepInput): Promise<{ output: string }> {
@@ -70,9 +78,10 @@ export async function runModelStep(args: RunModelStepInput): Promise<{ output: s
               modelIds: modelConnections.modelIds,
             })
             .from(modelConnections)
+            .innerJoin(runs, and(eq(runs.id, args.runId), eq(runs.workspaceId, modelConnections.workspaceId)))
             .where(and(eq(modelConnections.id, manifestModel.connectionId), isNull(modelConnections.archivedAt)))
             .limit(1)
-            .catch(() => { throw new Error("读取模型连接失败，请稍后重试"); })
+            .catch(() => { throw new RetryableError("读取模型连接失败，请稍后重试", { retryAfter: "2s" }); })
         )[0] ?? null
       : null;
     target = resolveModelTarget({
@@ -87,7 +96,7 @@ export async function runModelStep(args: RunModelStepInput): Promise<{ output: s
     });
   } catch (error) {
     const reason = error instanceof Error ? error.message : "模型配置无效";
-    // 配置类失败不可重试：重试同样会失败，直接判死并落失败状态
+    // 配置错误不可重试；读取连接的暂时失败保留 SDK 的重试语义。
     console.error("[model-step] 模型配置无效：", reason);
     await persistStep({
       runId: args.runId,
@@ -97,6 +106,7 @@ export async function runModelStep(args: RunModelStepInput): Promise<{ output: s
       status: "failed",
       error: reason,
     });
+    if (FatalError.is(error) || RetryableError.is(error)) throw error;
     throw new FatalError(reason);
   }
   try {
@@ -111,7 +121,7 @@ export async function runModelStep(args: RunModelStepInput): Promise<{ output: s
       prompt: prompt.user,
       abortSignal: AbortSignal.timeout(60_000),
     });
-    const output = text.trim();
+    const output = cleanModelOutput(text);
     await persistStep({
       runId: args.runId,
       nodeId: node.id,
@@ -122,7 +132,7 @@ export async function runModelStep(args: RunModelStepInput): Promise<{ output: s
     });
     return { output };
   } catch (error) {
-    if (error instanceof FatalError) throw error;
+    if (FatalError.is(error) || RetryableError.is(error)) throw error;
     const retryable = isTransientModelError(error);
     const reason = retryable
       ? "模型服务暂时不可用，稍后自动重试"
