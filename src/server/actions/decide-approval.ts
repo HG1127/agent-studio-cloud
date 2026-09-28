@@ -62,25 +62,44 @@ export async function decideApprovalAction(
     const approved = parsedInput.data.decision === "approved";
     const note = parsedInput.data.note?.trim() ? redactCredentialText(parsedInput.data.note.trim()) : null;
     const now = new Date();
-    const claimed = await db.transaction(async (tx) => {
-      const [lockedRun] = await tx
-        .select({ status: runs.status })
-        .from(runs)
-        .where(and(eq(runs.id, runId), eq(runs.workspaceId, DEMO_WORKSPACE_ID)))
-        .for("update")
-        .limit(1);
-      if (lockedRun?.status !== "waiting_approval") return null;
-      return tx
-        .update(approvals)
-        .set({ status: approved ? "approved" : "rejected", note, decidedAt: now, updatedAt: now })
-        .where(and(
-          eq(approvals.id, approvalId),
-          eq(approvals.runId, runId),
-          eq(approvals.workspaceId, DEMO_WORKSPACE_ID),
-          eq(approvals.status, "pending"),
-        ))
-        .returning({ id: approvals.id });
-    });
+    let decidedNote = note;
+    let claimed: { id: string }[] | null;
+    try {
+      claimed = await db.transaction(async (tx) => {
+        const [lockedRun] = await tx
+          .select({ status: runs.status })
+          .from(runs)
+          .where(and(eq(runs.id, runId), eq(runs.workspaceId, DEMO_WORKSPACE_ID)))
+          .for("update")
+          .limit(1);
+        if (lockedRun?.status !== "waiting_approval") return null;
+        return tx
+          .update(approvals)
+          .set({ status: approved ? "approved" : "rejected", note, decidedAt: now, updatedAt: now })
+          .where(and(
+            eq(approvals.id, approvalId),
+            eq(approvals.runId, runId),
+            eq(approvals.workspaceId, DEMO_WORKSPACE_ID),
+            eq(approvals.status, "pending"),
+          ))
+          .returning({ id: approvals.id });
+      });
+    } catch (transactionError) {
+      let saved: { status: string; note: string | null } | undefined;
+      try {
+        [saved] = await db
+          .select({ status: approvals.status, note: approvals.note })
+          .from(approvals)
+          .where(and(eq(approvals.id, approvalId), eq(approvals.runId, runId), eq(approvals.workspaceId, DEMO_WORKSPACE_ID)))
+          .limit(1);
+      } catch (recoveryError) {
+        console.error("核对确认提交结果失败", safeErrorForLog(recoveryError));
+        throw transactionError;
+      }
+      if (saved?.status !== parsedInput.data.decision) throw transactionError;
+      claimed = [{ id: approvalId }];
+      decidedNote = saved.note ? redactCredentialText(saved.note) : null;
+    }
     if (claimed === null) {
       return { ok: false, error: "这次运行已不再等待确认，请刷新页面查看最新状态" };
     }
@@ -90,7 +109,7 @@ export async function decideApprovalAction(
     try {
       await resumeHook(`approval:${row.id}`, {
         decision: parsedInput.data.decision,
-        note: note ?? undefined,
+        note: decidedNote ?? undefined,
       });
     } catch (error) {
       // resumeHook 可能已被执行引擎接收，只是响应在网络中丢失；回滚会让数据库与运行状态互相矛盾。

@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   updates: 0,
   returningRows: [] as unknown[][],
   transactions: 0,
+  transactionError: null as Error | null,
+  savedAfterCommit: null as Record<string, unknown> | null,
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -29,7 +31,13 @@ vi.mock("@/lib/db", () => ({
       ...client,
       transaction: async (run: (tx: typeof client) => unknown) => {
         mocks.transactions += 1;
-        return run(client);
+        if (mocks.transactionError && !mocks.savedAfterCommit) throw mocks.transactionError;
+        const result = await run(client);
+        if (mocks.transactionError) {
+          mocks.rows.push([mocks.savedAfterCommit]);
+          throw mocks.transactionError;
+        }
+        return result;
       },
     };
   })(),
@@ -50,6 +58,8 @@ beforeEach(() => {
   mocks.updates = 0;
   mocks.returningRows = [];
   mocks.transactions = 0;
+  mocks.transactionError = null;
+  mocks.savedAfterCommit = null;
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -239,5 +249,41 @@ describe("已记录确认的运行恢复", () => {
     });
     expect(mocks.updates).toBe(1);
     expect(mocks.revalidatePath).toHaveBeenCalledWith(`/runs/${RUN_ID}`);
+  });
+
+  it("确认事务已提交但回执丢失时对账并继续运行", async () => {
+    mocks.rows = [
+      [{ id: APPROVAL_ID, status: "pending", note: null }],
+      [{ agentId: AGENT_ID, status: "waiting_approval" }],
+      [{ status: "waiting_approval" }],
+    ];
+    mocks.returningRows = [[{ id: APPROVAL_ID }]];
+    mocks.transactionError = new Error("commit response lost");
+    mocks.savedAfterCommit = { status: "approved", note: "已保存的决定" };
+
+    await expect(decideApprovalAction(RUN_ID, APPROVAL_ID, { decision: "approved", note: "页面备注" }))
+      .resolves.toEqual({ ok: true });
+    expect(mocks.resumeHook).toHaveBeenCalledWith(`approval:${APPROVAL_ID}`, {
+      decision: "approved",
+      note: "已保存的决定",
+    });
+    expect(mocks.revalidatePath).toHaveBeenCalledWith(`/runs/${RUN_ID}`);
+  });
+
+  it("确认事务失败且决定未保存时不继续运行", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.rows = [
+      [{ id: APPROVAL_ID, status: "pending", note: null }],
+      [{ agentId: AGENT_ID, status: "waiting_approval" }],
+    ];
+    mocks.transactionError = new Error("database unavailable");
+
+    try {
+      await expect(decideApprovalAction(RUN_ID, APPROVAL_ID, { decision: "approved" }))
+        .resolves.toEqual({ ok: false, error: "提交确认失败，请稍后重试" });
+      expect(mocks.resumeHook).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
   });
 });
