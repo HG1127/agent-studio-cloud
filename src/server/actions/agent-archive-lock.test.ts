@@ -153,6 +153,46 @@ describe("助手停用依赖保护", () => {
     expect(mocks.inserts).toHaveLength(0);
   });
 
+  it("旧冻结版本仍绑定启用中的定时任务时拒绝停用其协作助手", async () => {
+    const rootVersionId = "00000000-0000-4000-8000-000000000086";
+    mocks.rows = [
+      [{ id: AGENT_ID, name: "资料整理助手", archivedAt: null }],
+      [],
+      [{
+        versionId: rootVersionId,
+        agentId: "00000000-0000-4000-8000-000000000087",
+        agentName: "定时运行的旧助手",
+        status: "retired",
+        agentArchivedAt: null,
+        manifest: {
+          schemaVersion: "4.0",
+          workflowSnapshot: {
+            id: "workflow", startNodeId: "start",
+            rootAgent: { id: "00000000-0000-4000-8000-000000000087", name: "定时运行的旧助手", role: "处理" },
+            nodes: {
+              start: { id: "start", title: "开始", type: "trigger", next: "call" },
+              call: { id: "call", title: "协作", type: "agent_call", next: "done", agentCall: { targetAgentId: AGENT_ID, versionId: "00000000-0000-4000-8000-000000000088" } },
+              done: { id: "done", title: "完成", type: "end", next: null },
+            },
+            memoryPolicy: { taskContext: true, longTerm: false },
+          },
+          workflowFingerprint: "fingerprint", inputContract: { fields: [] }, outputContract: { fields: [] },
+          resourceSelection: { model: { modelId: "mock", mock: true, connectionId: null } },
+          designAudit: { status: "passed", issueCount: 0, criticalCount: 0 }, knowledgeSnapshot: [],
+        },
+      }],
+      [],
+      [{ versionId: rootVersionId }],
+    ];
+
+    await expect(setAgentArchivedAction({ agentId: AGENT_ID, archived: true })).resolves.toEqual({
+      ok: false,
+      error: "助手「定时运行的旧助手」仍有启用中的定时任务需要这个协作助手，请先暂停相关定时任务",
+    });
+    expect(mocks.updates).toHaveLength(0);
+    expect(mocks.inserts).toHaveLength(0);
+  });
+
   it("自动验收运行期间拒绝停用", async () => {
     mocks.rows = [
       [{ id: AGENT_ID, name: "资料整理助手", archivedAt: null }],

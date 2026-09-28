@@ -86,6 +86,22 @@ export async function setAgentArchivedAction(input: unknown): Promise<AgentArchi
           parsed.data.agentId,
         );
         if (liveDependent) return { kind: "run-in-use" as const, inUseBy: liveDependent.agentName };
+        // 定时任务会继续运行创建时冻结的退役版本，不能只检查当前版本与进行中的运行。
+        const activeSchedules = await tx
+          .select({ versionId: schedules.versionId })
+          .from(schedules)
+          .where(and(
+            eq(schedules.workspaceId, DEMO_WORKSPACE_ID),
+            ne(schedules.agentId, parsed.data.agentId),
+            eq(schedules.status, "active"),
+            isNull(schedules.archivedAt),
+          ));
+        const scheduledDependent = liveRunDependingOnAgent(
+          dependencyVersions,
+          new Set(activeSchedules.map((schedule) => schedule.versionId)),
+          parsed.data.agentId,
+        );
+        if (scheduledDependent) return { kind: "schedule-in-use" as const, inUseBy: scheduledDependent.agentName };
       }
 
       const rows = await tx
@@ -126,6 +142,9 @@ export async function setAgentArchivedAction(input: unknown): Promise<AgentArchi
     }
     if (typeof updated === "object" && updated.kind === "run-in-use") {
       return { ok: false, error: `助手「${updated.inUseBy}」仍有运行中的任务需要这个协作助手，请等待运行结束后再停用` };
+    }
+    if (typeof updated === "object" && updated.kind === "schedule-in-use") {
+      return { ok: false, error: `助手「${updated.inUseBy}」仍有启用中的定时任务需要这个协作助手，请先暂停相关定时任务` };
     }
     if (typeof updated === "object") {
       return { ok: false, error: `助手「${updated.inUseBy}」的当前版本或待验收版本仍在使用它，请先调整并重新发布` };

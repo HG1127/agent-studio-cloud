@@ -12,6 +12,7 @@ import { POST as tick } from "@/app/api/schedules/tick/route";
 import { listScheduleableAgents, listSchedules } from "@/server/queries/schedules";
 import { MAX_SCHEDULE_INTERVAL_MINUTES } from "@/contracts/schedule";
 import { createScheduleAction } from "@/server/actions/create-schedule";
+import { setAgentArchivedAction } from "@/server/actions/set-agent-archived";
 import { updateScheduleStatusAction } from "@/server/actions/update-schedule-status";
 
 const AGENT_ID = "00000000-0000-4000-8000-0000000000e9";
@@ -173,6 +174,61 @@ describe("调度 tick 接口", () => {
     expect(schedule?.status).toBe("active");
     expect(schedule?.versionId).toBe(RETIRED_VERSION_ID);
     expect(schedule?.nextRunAt.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it("旧版定时协作仍启用时保护协作助手，停用后不允许恢复任务", async () => {
+    const helperId = "00000000-0000-4000-8000-0000000000ca";
+    const helperVersionId = "00000000-0000-4000-8000-0000000000cb";
+    const rootId = "00000000-0000-4000-8000-0000000000cc";
+    const rootVersionId = "00000000-0000-4000-8000-0000000000cd";
+    const scheduleId = "00000000-0000-4000-8000-0000000000ce";
+    const helperManifest = AgentManifest.parse({
+      ...manifest,
+      workflowSnapshot: {
+        ...manifest.workflowSnapshot,
+        rootAgent: { id: helperId, name: "历史协作助手", role: "处理" },
+      },
+    });
+    const rootManifest = AgentManifest.parse({
+      ...manifest,
+      workflowSnapshot: {
+        ...manifest.workflowSnapshot,
+        rootAgent: { id: rootId, name: "旧版定时助手", role: "处理" },
+        nodes: {
+          start: { id: "start", title: "开始", type: "trigger", next: "call" },
+          call: { id: "call", title: "协作", type: "agent_call", next: "done", agentCall: { targetAgentId: helperId, versionId: helperVersionId } },
+          done: { id: "done", title: "完成", type: "end", next: null },
+        },
+      },
+    });
+    await db.insert(agents).values([
+      { id: helperId, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, name: "历史协作助手", intentText: "协作处理定时任务" },
+      { id: rootId, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, name: "旧版定时助手", intentText: "按计划调用协作助手" },
+    ]);
+    try {
+      await db.insert(agentVersions).values([
+        { id: helperVersionId, agentId: helperId, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, version: 1, status: "retired", manifest: helperManifest },
+        { id: rootVersionId, agentId: rootId, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, version: 1, status: "retired", manifest: rootManifest },
+      ]);
+      await insertSchedule({ id: scheduleId, agentId: rootId, versionId: rootVersionId, status: "active" });
+
+      expect(await setAgentArchivedAction({ agentId: helperId, archived: true })).toEqual({
+        ok: false,
+        error: "助手「旧版定时助手」仍有启用中的定时任务需要这个协作助手，请先暂停相关定时任务",
+      });
+      expect(await updateScheduleStatusAction(scheduleId, "paused")).toEqual({ ok: true });
+      await db.update(agents).set({ archivedAt: new Date() }).where(eq(agents.id, helperId));
+      expect(await updateScheduleStatusAction(scheduleId, "active")).toEqual({
+        ok: false,
+        error: "协作链包含已停用、缺失或格式不完整的冻结版本，请检查协作助手后再启用定时任务",
+      });
+      const [paused] = await db.select().from(schedules).where(eq(schedules.id, scheduleId));
+      expect(paused?.status).toBe("paused");
+    } finally {
+      await db.delete(schedules).where(eq(schedules.id, scheduleId));
+      await db.delete(agentVersions).where(inArray(agentVersions.id, [helperVersionId, rootVersionId]));
+      await db.delete(agents).where(inArray(agents.id, [helperId, rootId]));
+    }
   });
 
   it("无密钥或未配密钥返回 401", async () => {
