@@ -13,7 +13,7 @@ export function RunLauncher({ agentId, inputFields }: { agentId: string; inputFi
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const runningRef = useRef(false);
-  const requestIdRef = useRef<string | null>(null);
+  const requestRef = useRef<{ fingerprint: string; id: string } | null>(null);
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const usesFieldForm = Boolean(inputFields?.length);
 
@@ -70,12 +70,15 @@ export function RunLauncher({ agentId, inputFields }: { agentId: string; inputFi
       return;
     }
     runningRef.current = true;
-    const requestId = requestIdRef.current ?? crypto.randomUUID();
-    requestIdRef.current = requestId;
+    const fingerprint = JSON.stringify(input);
+    const request = requestRef.current?.fingerprint === fingerprint
+      ? requestRef.current
+      : { fingerprint, id: crypto.randomUUID() };
+    requestRef.current = request;
     setPending(true);
     try {
-      const result = await startRunAction({ agentId, input, requestId });
-      requestIdRef.current = null;
+      const result = await startRunAction({ agentId, input, requestId: request.id });
+      if (result.ok || !result.retryable) requestRef.current = null;
       if (result.ok) router.push(`/runs/${result.runId}`);
       else setError(result.error);
     } catch {
