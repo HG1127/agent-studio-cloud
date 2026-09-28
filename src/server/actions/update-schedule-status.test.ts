@@ -60,6 +60,7 @@ const SCHEDULE_ID = "00000000-0000-4000-8000-000000000302";
 const VERSION_ID = "00000000-0000-4000-8000-000000000303";
 const HELPER_ID = "00000000-0000-4000-8000-000000000304";
 const HELPER_VERSION_ID = "00000000-0000-4000-8000-000000000305";
+const SOURCE_ID = "00000000-0000-4000-8000-000000000306";
 const schedule = {
   id: SCHEDULE_ID,
   agentId: AGENT_ID,
@@ -113,6 +114,18 @@ const helperVersion = {
   agentArchivedAt: null,
   manifest: helperManifest,
 };
+const knowledgeManifest = AgentManifest.parse({
+  ...manifest,
+  knowledgeSnapshot: [SOURCE_ID],
+  workflowSnapshot: {
+    ...manifest.workflowSnapshot,
+    nodes: {
+      start: { id: "start", title: "收到任务", type: "trigger", next: "read" },
+      read: { id: "read", title: "读取资料", type: "knowledge", next: "done", knowledge: { space: "业务资料", sourceIds: [SOURCE_ID] } },
+      done: { id: "done", title: "流程结束", type: "end", next: null },
+    },
+  },
+});
 
 beforeEach(() => {
   mocks.rows = [];
@@ -213,6 +226,53 @@ describe("定时任务状态并发保护", () => {
       error: "协作链包含已停用、缺失或格式不完整的冻结版本，请检查协作助手后再启用定时任务",
     });
     expect(mocks.locks).toHaveLength(0);
+    expect(mocks.updates).toHaveLength(0);
+  });
+
+  it("恢复任务时锁定冻结的知识资料直到启用提交", async () => {
+    mocks.rows = [
+      [{ agentId: AGENT_ID, versionId: VERSION_ID, archivedAt: null }],
+      [{ manifest: knowledgeManifest }],
+      [{ id: AGENT_ID, archivedAt: null }],
+      [{ id: SOURCE_ID }],
+      [schedule],
+    ];
+
+    expect(await updateScheduleStatusAction(SCHEDULE_ID, "active")).toEqual({ ok: true });
+    expect(mocks.locks).toEqual(["share", "share", "update"]);
+    expect(mocks.updates).toEqual([expect.objectContaining({ status: "active" })]);
+  });
+
+  it("冻结资料已归档时不能恢复任务", async () => {
+    mocks.rows = [
+      [{ agentId: AGENT_ID, versionId: VERSION_ID, archivedAt: null }],
+      [{ manifest: knowledgeManifest }],
+      [{ id: AGENT_ID, archivedAt: null }],
+      [],
+    ];
+
+    expect(await updateScheduleStatusAction(SCHEDULE_ID, "active")).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("需要知识资料"),
+    });
+    expect(mocks.locks).toEqual(["share", "share"]);
+    expect(mocks.updates).toHaveLength(0);
+  });
+
+  it("协作助手的冻结资料已归档时不能恢复任务", async () => {
+    mocks.rows = [
+      [{ agentId: AGENT_ID, versionId: VERSION_ID, archivedAt: null }],
+      [{ manifest: collaborativeManifest }],
+      [{ ...helperVersion, manifest: { ...helperManifest, knowledgeSnapshot: [SOURCE_ID] } }],
+      [{ id: AGENT_ID, archivedAt: null }, { id: HELPER_ID, archivedAt: null }],
+      [],
+    ];
+
+    expect(await updateScheduleStatusAction(SCHEDULE_ID, "active")).toEqual({
+      ok: false,
+      error: "绑定版本或协作助手使用的知识资料已归档或尚未完成解析，请先恢复资料后再启用定时任务",
+    });
+    expect(mocks.locks).toEqual(["share", "share"]);
     expect(mocks.updates).toHaveLength(0);
   });
 

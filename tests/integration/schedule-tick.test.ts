@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -5,13 +6,14 @@ const { startMock, revalidatePathMock } = vi.hoisted(() => ({ startMock: vi.fn()
 vi.mock("workflow/api", () => ({ start: startMock }));
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 import { AgentManifest } from "@/contracts/manifest";
-import { agentVersions, agents, runs, schedules } from "@/db/schema";
+import { agentVersions, agents, knowledgeSources, runs, schedules } from "@/db/schema";
 import { db } from "@/lib/db";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { POST as tick } from "@/app/api/schedules/tick/route";
 import { listScheduleableAgents, listSchedules } from "@/server/queries/schedules";
 import { MAX_SCHEDULE_INTERVAL_MINUTES } from "@/contracts/schedule";
 import { createScheduleAction } from "@/server/actions/create-schedule";
+import { setKnowledgeSourceArchivedAction } from "@/server/actions/archive-knowledge-source";
 import { setAgentArchivedAction } from "@/server/actions/set-agent-archived";
 import { updateScheduleStatusAction } from "@/server/actions/update-schedule-status";
 
@@ -228,6 +230,57 @@ describe("调度 tick 接口", () => {
       await db.delete(schedules).where(eq(schedules.id, scheduleId));
       await db.delete(agentVersions).where(inArray(agentVersions.id, [helperVersionId, rootVersionId]));
       await db.delete(agents).where(inArray(agents.id, [helperId, rootId]));
+    }
+  });
+
+  it("旧版定时任务仍启用时保护冻结资料，归档后不允许恢复任务", async () => {
+    const rootId = "00000000-0000-4000-8000-0000000000d3";
+    const rootVersionId = "00000000-0000-4000-8000-0000000000d4";
+    const sourceId = "00000000-0000-4000-8000-0000000000d5";
+    const scheduleId = "00000000-0000-4000-8000-0000000000d6";
+    const rootManifest = AgentManifest.parse({
+      ...manifest,
+      knowledgeSnapshot: [sourceId],
+      workflowSnapshot: {
+        ...manifest.workflowSnapshot,
+        rootAgent: { id: rootId, name: "旧版资料助手", role: "处理" },
+        nodes: {
+          start: { id: "start", title: "开始", type: "trigger", next: "read" },
+          read: { id: "read", title: "读取资料", type: "knowledge", next: "done", knowledge: { space: "业务资料", sourceIds: [sourceId] } },
+          done: { id: "done", title: "完成", type: "end", next: null },
+        },
+      },
+    });
+    await db.insert(agents).values({ id: rootId, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, name: "旧版资料助手", intentText: "定时读取冻结资料" });
+    try {
+      await db.insert(agentVersions).values({
+        id: rootVersionId, agentId: rootId, workspaceId: DEMO_WORKSPACE_ID,
+        createdBy: DEMO_USER_ID, version: 1, status: "retired", manifest: rootManifest,
+      });
+      await db.insert(knowledgeSources).values({
+        id: sourceId, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID,
+        name: "旧版定时资料.txt", mime: "text/plain", sizeBytes: 10,
+        sha256: createHash("sha256").update(sourceId).digest("hex"), status: "indexed", chunkCount: 1, charCount: 10,
+      });
+      await insertSchedule({ id: scheduleId, agentId: rootId, versionId: rootVersionId, status: "active" });
+
+      expect(await setKnowledgeSourceArchivedAction({ sourceId, archived: true })).toEqual({
+        ok: false,
+        error: "助手「旧版资料助手」仍有启用中的定时任务需要这份资料，请先暂停相关定时任务",
+      });
+      expect(await updateScheduleStatusAction(scheduleId, "paused")).toEqual({ ok: true });
+      await db.update(knowledgeSources).set({ archivedAt: new Date(), status: "archived" }).where(eq(knowledgeSources.id, sourceId));
+      expect(await updateScheduleStatusAction(scheduleId, "active")).toMatchObject({
+        ok: false,
+        error: expect.stringContaining("需要知识资料"),
+      });
+      const [paused] = await db.select().from(schedules).where(eq(schedules.id, scheduleId));
+      expect(paused?.status).toBe("paused");
+    } finally {
+      await db.delete(schedules).where(eq(schedules.id, scheduleId));
+      await db.delete(knowledgeSources).where(eq(knowledgeSources.id, sourceId));
+      await db.delete(agentVersions).where(eq(agentVersions.id, rootVersionId));
+      await db.delete(agents).where(eq(agents.id, rootId));
     }
   });
 

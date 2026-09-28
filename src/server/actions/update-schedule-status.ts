@@ -5,7 +5,8 @@ import { AgentManifest } from "@/contracts/manifest";
 import { ScheduleCreateSpec, type ScheduleActionResult } from "@/contracts/schedule";
 import { workflowCollaborationKeys } from "@/server/domain/import-agent";
 import { inspectCollaborationVersionGraph } from "@/server/domain/runtime/collaboration-dependencies";
-import { agents, agentVersions, schedules } from "@/db/schema";
+import { knowledgeStepTitles, validateKnowledgeSnapshot } from "@/server/domain/runtime/knowledge-snapshot";
+import { agents, agentVersions, knowledgeSources, schedules } from "@/db/schema";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { nextOccurrence } from "@/server/domain/schedule-spec";
@@ -78,6 +79,34 @@ export async function updateScheduleStatusAction(id: string, next: string): Prom
         }
         if (lockedAgents.length !== requiredAgentIds.length || lockedAgents.some((row) => row.archivedAt)) {
           return { ok: false, error: "协作助手已停用，请恢复协作助手后再启用定时任务" };
+        }
+        // 资料归档先锁来源行；这里在助手锁后持有同一来源共享锁直到任务恢复提交。
+        const requiredSourceIds = [...new Set([
+          ...manifest.data.knowledgeSnapshot,
+          ...graph.knowledgeSourceIds,
+        ])].sort();
+        const availableSources = requiredSourceIds.length > 0
+          ? await tx
+              .select({ id: knowledgeSources.id })
+              .from(knowledgeSources)
+              .where(and(
+                inArray(knowledgeSources.id, requiredSourceIds),
+                eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID),
+                eq(knowledgeSources.status, "indexed"),
+                isNull(knowledgeSources.archivedAt),
+              ))
+              .orderBy(knowledgeSources.id)
+              .for("share")
+          : [];
+        const availableSourceIds = new Set(availableSources.map((source) => source.id));
+        const knowledgeError = validateKnowledgeSnapshot({
+          knowledgeTitles: knowledgeStepTitles(manifest.data.workflowSnapshot.nodes),
+          snapshotSourceIds: manifest.data.knowledgeSnapshot,
+          availableSourceIds,
+        });
+        if (knowledgeError) return { ok: false, error: knowledgeError };
+        if (requiredSourceIds.some((sourceId) => !availableSourceIds.has(sourceId))) {
+          return { ok: false, error: "绑定版本或协作助手使用的知识资料已归档或尚未完成解析，请先恢复资料后再启用定时任务" };
         }
       } else {
         // 暂停与停用助手保持同一锁顺序，不能在读取任务后反向锁助手。
