@@ -24,11 +24,18 @@ describe("数据库就绪检查", () => {
       "public.wait_event_submissions_token_unique",
       "public.wait_event_submissions_run_created_idx",
       "public.evaluation_runs_workspace_request_unique",
+      "public.schedules_workspace_request_idx",
       "public.knowledge_chunks_content_trgm_idx",
       "public.agent_memories_content_trgm_idx",
     ]));
     expect(REQUIRED_DATABASE_COLUMNS).toContainEqual({
       tableName: "evaluation_runs",
+      columnName: "request_id",
+      requireNotNull: false,
+      allowDefault: false,
+    });
+    expect(REQUIRED_DATABASE_COLUMNS).toContainEqual({
+      tableName: "schedules",
       columnName: "request_id",
       requireNotNull: false,
       allowDefault: false,

@@ -10,14 +10,34 @@ import { nextOccurrence } from "@/server/domain/schedule-spec";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { validationMessage } from "@/server/domain/validation-message";
 import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
+import { jsonValuesEqual } from "@/server/domain/json-value";
+
+async function existingRequestResult(requestId: string, agentId: string, spec: unknown, input: unknown): Promise<ScheduleActionResult | null> {
+  const [existing] = await db
+    .select({ agentId: schedules.agentId, spec: schedules.spec, input: schedules.input })
+    .from(schedules)
+    .where(and(eq(schedules.workspaceId, DEMO_WORKSPACE_ID), eq(schedules.requestId, requestId)))
+    .limit(1);
+  if (!existing) return null;
+  return existing.agentId === agentId && jsonValuesEqual(existing.spec, spec) && jsonValuesEqual(existing.input, input)
+    ? { ok: true }
+    : { ok: false, error: "这项请求标识已经用于另一条定时任务，请重新发起" };
+}
 
 export async function createScheduleAction(raw: unknown): Promise<ScheduleActionResult> {
   const parsed = ScheduleCreateInput.safeParse(raw);
   if (!parsed.success) {
     return { ok: false, error: validationMessage(parsed.error, "定时设置不完整，请检查频率与时间后重试") };
   }
-  const { agentId, spec, input } = parsed.data;
+  const { agentId, requestId, spec, input } = parsed.data;
   try {
+    if (requestId) {
+      const existing = await existingRequestResult(requestId, agentId, spec, input);
+      if (existing) {
+        if (existing.ok) revalidatePathsAfterCommit(["/schedules"], "schedule-create-reuse");
+        return existing;
+      }
+    }
     const [agent] = await db
       .select()
       .from(agents)
@@ -41,14 +61,34 @@ export async function createScheduleAction(raw: unknown): Promise<ScheduleAction
     if (inputError) return { ok: false, error: inputError };
     const next = nextOccurrence(spec, new Date());
     if (!next) return { ok: false, error: "一次性任务的执行时间必须在未来" };
-    await db.insert(schedules).values({
+    const inserted = await db.insert(schedules).values({
       workspaceId: agent.workspaceId, agentId, versionId: version.id,
-      status: "active", spec, input, nextRunAt: next, createdBy: DEMO_USER_ID,
-    });
+      requestId: requestId ?? null, status: "active", spec, input, nextRunAt: next, createdBy: DEMO_USER_ID,
+    }).onConflictDoNothing({ target: [schedules.workspaceId, schedules.requestId] }).returning({ id: schedules.id });
+    if (inserted.length === 0) {
+      const existing = requestId ? await existingRequestResult(requestId, agentId, spec, input) : null;
+      if (existing) {
+        if (existing.ok) revalidatePathsAfterCommit(["/schedules"], "schedule-create-reuse");
+        return existing;
+      }
+      return { ok: false, error: "定时任务创建冲突，请稍后重试" };
+    }
     revalidatePathsAfterCommit(["/schedules"], "schedule-create");
     return { ok: true };
   } catch (error) {
     console.error("创建定时任务失败", safeErrorForLog(error));
+    if (requestId) {
+      try {
+        const existing = await existingRequestResult(requestId, agentId, spec, input);
+        if (existing) {
+          if (existing.ok) revalidatePathsAfterCommit(["/schedules"], "schedule-create-reuse");
+          return existing;
+        }
+      } catch (lookupError) {
+        console.error("核对定时任务创建状态失败", safeErrorForLog(lookupError));
+      }
+      return { ok: false, error: "定时任务创建状态待确认，请用同一次请求重试", retryable: true };
+    }
     return { ok: false, error: "创建定时任务失败，请稍后重试" };
   }
 }

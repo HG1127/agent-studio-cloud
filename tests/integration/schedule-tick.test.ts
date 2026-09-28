@@ -137,6 +137,28 @@ describe("调度 tick 接口", () => {
     }
   });
 
+  it("同一创建请求重复或并发提交只保留一条定时任务", async () => {
+    const requestId = "00000000-0000-4000-8000-0000000000d1";
+    const input = { agentId: AGENT_ID, requestId, spec: { kind: "interval" as const, minutes: 5 }, input: { marker: requestId } };
+
+    expect(await createScheduleAction(input)).toEqual({ ok: true });
+    expect(await createScheduleAction(input)).toEqual({ ok: true });
+    const first = await db.select().from(schedules).where(eq(schedules.requestId, requestId));
+    expect(first).toHaveLength(1);
+    createdScheduleIds.push(first[0].id);
+    expect(await createScheduleAction({ ...input, input: { marker: "不同输入" } })).toEqual({
+      ok: false, error: "这项请求标识已经用于另一条定时任务，请重新发起",
+    });
+
+    const concurrentId = "00000000-0000-4000-8000-0000000000d2";
+    const concurrent = { ...input, requestId: concurrentId };
+    expect(await Promise.all([createScheduleAction(concurrent), createScheduleAction(concurrent)]))
+      .toEqual([{ ok: true }, { ok: true }]);
+    const second = await db.select().from(schedules).where(eq(schedules.requestId, concurrentId));
+    expect(second).toHaveLength(1);
+    createdScheduleIds.push(second[0].id);
+  });
+
   it("暂停任务可继续使用创建时冻结的历史生产版本", async () => {
     await insertSchedule({
       id: RETIRED_SCHEDULE_ID,

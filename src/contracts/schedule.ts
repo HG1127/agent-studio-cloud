@@ -25,6 +25,7 @@ export type ScheduleCreateSpec = z.infer<typeof ScheduleCreateSpec>;
 
 export const ScheduleCreateInput = z.object({
   agentId: z.string().uuid(),
+  requestId: z.string().uuid().optional(),
   spec: ScheduleCreateSpec,
   input: RunInputPayload.default({}),
 });
@@ -38,7 +39,7 @@ export type ScheduleAgentOption = z.infer<typeof ScheduleAgentOption>;
 
 export const ScheduleActionResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true) }),
-  z.object({ ok: z.literal(false), error: z.string() }),
+  z.object({ ok: z.literal(false), error: z.string(), retryable: z.literal(true).optional() }),
 ]);
 export type ScheduleActionResult = z.infer<typeof ScheduleActionResult>;
 

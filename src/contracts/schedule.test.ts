@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_SCHEDULE_INTERVAL_MINUTES, ScheduleActionResult, ScheduleAgentOption, ScheduleCreateSpec, ScheduleSpec, ScheduleView } from "@/contracts/schedule";
+import { MAX_SCHEDULE_INTERVAL_MINUTES, ScheduleActionResult, ScheduleAgentOption, ScheduleCreateInput, ScheduleCreateSpec, ScheduleSpec, ScheduleView } from "@/contracts/schedule";
 
 const ID = "00000000-0000-4000-8000-000000000301";
 
@@ -37,6 +37,14 @@ describe("定时任务前后端共享契约", () => {
   it("统一创建与状态更新动作的返回结构", () => {
     expect(ScheduleActionResult.safeParse({ ok: true }).success).toBe(true);
     expect(ScheduleActionResult.safeParse({ ok: false, error: "稍后重试" }).success).toBe(true);
+    expect(ScheduleActionResult.safeParse({ ok: false, error: "状态待确认", retryable: true }).success).toBe(true);
+    expect(ScheduleActionResult.safeParse({ ok: false, error: "状态待确认", retryable: false }).success).toBe(false);
     expect(ScheduleActionResult.safeParse({ ok: false }).success).toBe(false);
+  });
+
+  it("创建请求标识只接受 UUID", () => {
+    const input = { agentId: ID, spec: { kind: "interval", minutes: 5 }, input: {} };
+    expect(ScheduleCreateInput.safeParse({ ...input, requestId: ID }).success).toBe(true);
+    expect(ScheduleCreateInput.safeParse({ ...input, requestId: "bad" }).success).toBe(false);
   });
 });

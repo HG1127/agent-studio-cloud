@@ -162,6 +162,13 @@
       "when": 1790524952656,
       "tag": "0022_same_mysterio",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1790555496347,
+      "tag": "0023_bumpy_bishop",
+      "breakpoints": true
     }
   ]
 }
