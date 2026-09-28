@@ -51,6 +51,20 @@ async function removeUnusedOriginal(pathname: string | null, retainedPathname: s
   }
 }
 
+async function removeUnreferencedOriginal(pathname: string | null, sha256: string, token: string): Promise<void> {
+  if (!pathname) return;
+  try {
+    const [source] = await db
+      .select({ blobPathname: knowledgeSources.blobPathname })
+      .from(knowledgeSources)
+      .where(and(eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID), eq(knowledgeSources.sha256, sha256)))
+      .limit(1);
+    await removeUnusedOriginal(pathname, source?.blobPathname ?? null, token);
+  } catch (error) {
+    console.error("[knowledge-upload] 无法核对原文件是否已被采用，保留文件待后续清理", safeErrorForLog(error));
+  }
+}
+
 function storageUnavailable() {
   console.error("[knowledge-upload] 私有文件存储写入失败");
   return Response.json({ ok: false, error: "私有文件存储暂不可用，请检查配置后重试" }, { status: 503 });
@@ -66,62 +80,79 @@ async function reconcileDuplicateSource(
   filename: string,
   suppliedMime: string,
 ) {
-  return db.transaction(async (tx) => {
-    // 重新锁定并读取，避免两个失败重传请求都基于锁外的旧状态启动解析任务。
-    const [current] = await tx
-      .select()
-      .from(knowledgeSources)
-      .where(and(eq(knowledgeSources.id, sourceId), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)))
-      .for("update")
-      .limit(1);
-    if (!current) return null;
-    const staleParsing = isKnowledgeParsingStalled(current);
-    const retrying = current.status === "failed" || staleParsing
-      || (current.status === "archived" && current.chunkCount === 0);
-    const status = retrying
-      ? "parsing"
-      : current.status === "archived"
-        ? (current.chunkCount > 0 ? "indexed" : "parsing")
-        : current.status;
-    const error = retrying ? null : current.error;
-    const ingestToken = retrying ? `pending:${randomUUID()}` : null;
-    const name = retrying ? filename : current.name;
-    const mime = retrying
-      ? suppliedMime || (filename === current.name ? current.mime : `application/${filename.split(".").pop()?.toLowerCase() ?? "octet-stream"}`)
-      : current.mime;
-    const blobPathname = current.blobPathname ?? suppliedBlobPathname;
-    const shouldUpdate = Boolean(current.archivedAt) || retrying || blobPathname !== current.blobPathname;
-    const updatedAt = shouldUpdate ? new Date() : current.updatedAt;
-    if (shouldUpdate) {
-      await tx
-        .update(knowledgeSources)
-        .set({ name, mime, archivedAt: null, status, error, blobPathname, parseEngine: ingestToken ?? current.parseEngine, updatedAt })
-        .where(and(eq(knowledgeSources.id, current.id), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)));
-      if (current.archivedAt) {
-        await tx.insert(auditEvents).values(auditEventValues({
-          workspaceId: DEMO_WORKSPACE_ID,
-          createdBy: DEMO_USER_ID,
-          action: "knowledge.restored",
-          targetType: "knowledge",
-          targetId: current.id,
-          summary: `通过重新上传恢复知识资料「${name}」`,
-          data: {},
-        }));
+  const pendingToken = `pending:${randomUUID()}`;
+  try {
+    return await db.transaction(async (tx) => {
+      // 重新锁定并读取，避免两个失败重传请求都基于锁外的旧状态启动解析任务。
+      const [current] = await tx
+        .select()
+        .from(knowledgeSources)
+        .where(and(eq(knowledgeSources.id, sourceId), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)))
+        .for("update")
+        .limit(1);
+      if (!current) return null;
+      const staleParsing = isKnowledgeParsingStalled(current);
+      const retrying = current.status === "failed" || staleParsing
+        || (current.status === "archived" && current.chunkCount === 0);
+      const status = retrying
+        ? "parsing"
+        : current.status === "archived"
+          ? (current.chunkCount > 0 ? "indexed" : "parsing")
+          : current.status;
+      const error = retrying ? null : current.error;
+      const ingestToken = retrying ? pendingToken : null;
+      const name = retrying ? filename : current.name;
+      const mime = retrying
+        ? suppliedMime || (filename === current.name ? current.mime : `application/${filename.split(".").pop()?.toLowerCase() ?? "octet-stream"}`)
+        : current.mime;
+      const blobPathname = current.blobPathname ?? suppliedBlobPathname;
+      const shouldUpdate = Boolean(current.archivedAt) || retrying || blobPathname !== current.blobPathname;
+      const updatedAt = shouldUpdate ? new Date() : current.updatedAt;
+      if (shouldUpdate) {
+        await tx
+          .update(knowledgeSources)
+          .set({ name, mime, archivedAt: null, status, error, blobPathname, parseEngine: ingestToken ?? current.parseEngine, updatedAt })
+          .where(and(eq(knowledgeSources.id, current.id), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)));
+        if (current.archivedAt) {
+          await tx.insert(auditEvents).values(auditEventValues({
+            workspaceId: DEMO_WORKSPACE_ID,
+            createdBy: DEMO_USER_ID,
+            action: "knowledge.restored",
+            targetType: "knowledge",
+            targetId: current.id,
+            summary: `通过重新上传恢复知识资料「${name}」`,
+            data: {},
+          }));
+        }
+        if (retrying) {
+          await tx.insert(auditEvents).values(auditEventValues({
+            workspaceId: DEMO_WORKSPACE_ID,
+            createdBy: DEMO_USER_ID,
+            action: "knowledge.reingested",
+            targetType: "knowledge",
+            targetId: current.id,
+            summary: `重新解析知识资料「${name}」`,
+            data: { previousStatus: current.status },
+          }));
+        }
       }
-      if (retrying) {
-        await tx.insert(auditEvents).values(auditEventValues({
-          workspaceId: DEMO_WORKSPACE_ID,
-          createdBy: DEMO_USER_ID,
-          action: "knowledge.reingested",
-          targetType: "knowledge",
-          targetId: current.id,
-          summary: `重新解析知识资料「${name}」`,
-          data: { previousStatus: current.status },
-        }));
+      return { row: { ...current, name, mime, archivedAt: null, status, error, blobPathname, parseEngine: ingestToken ?? current.parseEngine, updatedAt }, retrying, ingestToken };
+    });
+  } catch (error) {
+    try {
+      const [current] = await db
+        .select()
+        .from(knowledgeSources)
+        .where(and(eq(knowledgeSources.id, sourceId), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)))
+        .limit(1);
+      if (current?.parseEngine === pendingToken) {
+        return { row: current, retrying: true, ingestToken: pendingToken };
       }
+    } catch (recoveryError) {
+      console.error("[knowledge-upload] 无法核对重新解析结果", safeErrorForLog(recoveryError));
     }
-    return { row: { ...current, name, mime, archivedAt: null, status, error, blobPathname, parseEngine: ingestToken ?? current.parseEngine, updatedAt }, retrying, ingestToken };
-  });
+    throw error;
+  }
 }
 
 async function handleUpload(req: Request) {
@@ -186,7 +217,7 @@ async function handleUpload(req: Request) {
     try {
       reconciled = await reconcileDuplicateSource(duplicate.id, blobPathname, file.name, file.type);
     } catch (error) {
-      await removeUnusedOriginal(uploadedBlobPathname, null, blobToken);
+      await removeUnreferencedOriginal(uploadedBlobPathname, sha256, blobToken);
       throw error;
     }
     if (!reconciled) {
@@ -257,8 +288,22 @@ async function handleUpload(req: Request) {
       return created;
     });
   } catch (error) {
-    await removeUnusedOriginal(blobPathname, null, blobToken);
-    throw error;
+    let recovered: typeof knowledgeSources.$inferSelect | undefined;
+    try {
+      [recovered] = await db
+        .select()
+        .from(knowledgeSources)
+        .where(and(eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID), eq(knowledgeSources.sha256, sha256)))
+        .limit(1);
+    } catch (recoveryError) {
+      console.error("[knowledge-upload] 无法核对资料创建结果，保留原文件待后续重试", safeErrorForLog(recoveryError));
+      throw error;
+    }
+    if (!recovered) {
+      await removeUnusedOriginal(blobPathname, null, blobToken);
+      throw error;
+    }
+    row = recovered.parseEngine === ingestToken && recovered.blobPathname === blobPathname ? recovered : null;
   }
   if (!row) {
     const [concurrent] = await db
@@ -274,7 +319,7 @@ async function handleUpload(req: Request) {
     try {
       reconciled = await reconcileDuplicateSource(concurrent.id, blobPathname, file.name, file.type);
     } catch (error) {
-      await removeUnusedOriginal(blobPathname, null, blobToken);
+      await removeUnreferencedOriginal(blobPathname, sha256, blobToken);
       throw error;
     }
     if (!reconciled) {

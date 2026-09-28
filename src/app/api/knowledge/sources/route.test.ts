@@ -12,6 +12,11 @@ const dbState = vi.hoisted(() => ({
   updateValues: [] as Array<Record<string, unknown>>,
   updateRows: [] as unknown[],
   selectError: null as Error | null,
+  selectCalls: 0,
+  failRecoveryLookup: false,
+  commitResponseLost: false,
+  reconcileResponseLost: false,
+  insertedValue: null as Record<string, unknown> | null,
 }));
 
 vi.mock("@vercel/blob", () => ({ del, put }));
@@ -22,6 +27,8 @@ vi.mock("@/lib/db", () => ({
       from: () => ({
         where: () => ({
           limit: async () => {
+            dbState.selectCalls += 1;
+            if (dbState.failRecoveryLookup && dbState.selectCalls > 1) throw new Error("recovery lookup unavailable");
             if (dbState.selectError) throw dbState.selectError;
             return dbState.selectQueue.shift() ?? dbState.rows;
           },
@@ -38,8 +45,11 @@ vi.mock("@/lib/db", () => ({
           dbState.auditRows.push(value);
           return Promise.resolve();
         }
+        dbState.insertedValue = value;
         return {
-          onConflictDoNothing: () => ({ returning: async () => dbState.insertRows }),
+          onConflictDoNothing: () => ({ returning: async () => dbState.commitResponseLost
+            ? [{ ...value, id: "00000000-0000-4000-8000-0000000000f5", chunkCount: 0, charCount: 0, error: null, archivedAt: null, createdAt: new Date() }]
+            : dbState.insertRows }),
         };
       },
     }),
@@ -49,7 +59,18 @@ vi.mock("@/lib/db", () => ({
       return { returning: async () => dbState.updateRows };
     } }) }),
     };
-    return { ...client, transaction: async (run: (tx: typeof client) => unknown) => run(client) };
+    return { ...client, transaction: async (run: (tx: typeof client) => unknown) => {
+      const result = await run(client);
+      if (dbState.commitResponseLost) {
+        dbState.rows = [{ ...dbState.insertedValue, id: "00000000-0000-4000-8000-0000000000f5", chunkCount: 0, charCount: 0, error: null, archivedAt: null, createdAt: new Date() }];
+        throw new Error("commit response lost");
+      }
+      if (dbState.reconcileResponseLost) {
+        dbState.rows = [{ ...(dbState.rows[0] as Record<string, unknown>), ...dbState.updateValues.at(-1) }];
+        throw new Error("reconcile commit response lost");
+      }
+      return result;
+    } };
   })(),
 }));
 vi.mock("workflow/api", () => ({ start: startMock }));
@@ -69,6 +90,11 @@ afterEach(() => {
   dbState.updateValues = [];
   dbState.updateRows = [];
   dbState.selectError = null;
+  dbState.selectCalls = 0;
+  dbState.failRecoveryLookup = false;
+  dbState.commitResponseLost = false;
+  dbState.reconcileResponseLost = false;
+  dbState.insertedValue = null;
 });
 
 describe("知识原文件上传", () => {
@@ -217,6 +243,53 @@ describe("知识原文件上传", () => {
       access: "private", addRandomSuffix: true, token: "test-token",
     });
     expect(dbState.update).toHaveBeenCalledOnce();
+  });
+
+  it("重新解析事务提交回执丢失时对账并保留采用的原文件", async () => {
+    process.env.BLOB_READ_WRITE_TOKEN = "test-token";
+    dbState.rows = [{
+      id: "00000000-0000-4000-8000-0000000000f3", name: "售后手册.txt", mime: "text/plain",
+      sizeBytes: 12, status: "failed", chunkCount: 0, charCount: 0, error: "上次解析失败",
+      createdAt: new Date("2026-09-24T00:00:00Z"), updatedAt: new Date("2026-09-24T00:00:00Z"),
+      blobPathname: null, archivedAt: null,
+    }];
+    put.mockResolvedValue({ pathname: "knowledge/reingested-original.txt" });
+    dbState.reconcileResponseLost = true;
+    const form = new FormData();
+    form.set("file", new File(["退货说明"], "售后手册.txt", { type: "text/plain" }));
+
+    const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, deduped: true, blobStored: true, source: { status: "parsing" } });
+    expect(del).not.toHaveBeenCalled();
+    expect(startMock).toHaveBeenCalledOnce();
+    expect(startMock.mock.calls[0]?.[1]?.[0]).toMatchObject({ ingestToken: dbState.updateValues[0].parseEngine });
+  });
+
+  it("仅补存原文件的事务回执丢失时不删除已被资料采用的文件", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    process.env.BLOB_READ_WRITE_TOKEN = "test-token";
+    dbState.rows = [{
+      id: "00000000-0000-4000-8000-0000000000f3", name: "售后手册.txt", mime: "text/plain",
+      sizeBytes: 12, status: "indexed", chunkCount: 1, charCount: 4, error: null,
+      createdAt: new Date("2026-09-24T00:00:00Z"), updatedAt: new Date("2026-09-24T00:00:00Z"),
+      blobPathname: null, archivedAt: null,
+    }];
+    put.mockResolvedValue({ pathname: "knowledge/adopted-original.txt" });
+    dbState.reconcileResponseLost = true;
+    const form = new FormData();
+    form.set("file", new File(["退货说明"], "售后手册.txt", { type: "text/plain" }));
+
+    try {
+      const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+      expect(response.status).toBe(503);
+      expect(del).not.toHaveBeenCalled();
+      expect(startMock).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it("重复上传已归档资料时直接恢复原记录", async () => {
@@ -516,5 +589,42 @@ describe("知识原文件上传", () => {
     });
     expect(dbState.update).not.toHaveBeenCalled();
     expect(startMock.mock.calls[0]?.[1]?.[0]).toMatchObject({ ingestToken: expect.stringMatching(/^pending:/) });
+  });
+
+  it("创建事务已提交但回执丢失时保留被资料引用的原文件并启动解析", async () => {
+    process.env.BLOB_READ_WRITE_TOKEN = "test-token";
+    put.mockResolvedValue({ pathname: "knowledge/committed-original.txt" });
+    dbState.commitResponseLost = true;
+    const form = new FormData();
+    form.set("file", new File(["退款规则内容"], "退款规则.md", { type: "text/markdown" }));
+
+    const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, deduped: false, blobStored: true, source: { hasOriginal: true } });
+    expect(del).not.toHaveBeenCalled();
+    expect(startMock).toHaveBeenCalledOnce();
+    expect(startMock.mock.calls[0]?.[1]?.[0]).toMatchObject({ ingestToken: dbState.insertedValue?.parseEngine });
+  });
+
+  it("创建回执和对账都失败时不猜测原文件未被引用", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    process.env.BLOB_READ_WRITE_TOKEN = "test-token";
+    put.mockResolvedValue({ pathname: "knowledge/uncertain-original.txt" });
+    dbState.commitResponseLost = true;
+    dbState.failRecoveryLookup = true;
+    const form = new FormData();
+    form.set("file", new File(["退款规则内容"], "退款规则.md", { type: "text/markdown" }));
+
+    try {
+      const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ ok: false, error: "资料上传暂时失败，请稍后重试" });
+      expect(del).not.toHaveBeenCalled();
+      expect(startMock).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
   });
 });
