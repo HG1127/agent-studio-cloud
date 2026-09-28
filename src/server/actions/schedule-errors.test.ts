@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ select: vi.fn() }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
-vi.mock("@/lib/db", () => ({ db: { select: mocks.select } }));
+vi.mock("@/lib/db", () => ({ db: {
+  select: mocks.select,
+  transaction: async (run: (tx: { select: typeof mocks.select }) => unknown) => run({ select: mocks.select }),
+} }));
 
 import { createScheduleAction } from "@/server/actions/create-schedule";
 import { updateScheduleStatusAction } from "@/server/actions/update-schedule-status";
