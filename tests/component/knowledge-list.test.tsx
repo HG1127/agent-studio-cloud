@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { KnowledgeList, UploadSourceForm } from "@/features/knowledge/KnowledgeList";
@@ -12,6 +12,7 @@ vi.mock("@/server/actions/retry-knowledge-source", () => ({ retryKnowledgeSource
 afterEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("知识库列表", () => {
@@ -32,6 +33,40 @@ describe("知识库列表", () => {
     expect(screen.getByText("归档")).toBeInTheDocument();
   });
 
+  it("按文件名查找为空时不误称资料库为空", () => {
+    render(<KnowledgeList initial={[]} serverManaged hasFilter />);
+    expect(screen.getByText(/没有找到匹配的资料/)).toBeInTheDocument();
+    expect(screen.queryByText(/还没有上传过文档/)).not.toBeInTheDocument();
+  });
+
+  it("归档后页码失效时保留筛选并引导返回上一页", () => {
+    render(<KnowledgeList initial={[]} serverManaged hasFilter emptyPageHref="/knowledge?source=%E5%90%88%E5%90%8C&page=2" />);
+    expect(screen.getByText("当前页没有匹配的资料。")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "返回上一页" })).toHaveAttribute("href", "/knowledge?source=%E5%90%88%E5%90%8C&page=2");
+    expect(screen.queryByText(/还没有上传过文档/)).not.toBeInTheDocument();
+  });
+
+  it("解析中的资料说明需手动核对状态，不把解析中称为可检索", () => {
+    render(<KnowledgeList initial={[{
+      id: "00000000-0000-4000-8000-0000000000f3", name: "合同库.pdf", mime: "application/pdf",
+      sizeBytes: 100, status: "parsing", chunkCount: 0, charCount: 0, error: null,
+      createdAt: "2026-09-23T00:00:00.000Z",
+    }]} />);
+    expect(screen.getByText(/可点页面顶部“重新读取状态”查看结果/)).toBeInTheDocument();
+    expect(screen.getByText(/解析就绪后才能用于助手检索/)).toBeInTheDocument();
+  });
+
+  it("解析中不会持续轮询整页", () => {
+    vi.useFakeTimers();
+    render(<KnowledgeList initial={[{
+      id: "00000000-0000-4000-8000-0000000000f3", name: "合同库.pdf", mime: "application/pdf",
+      sizeBytes: 100, status: "parsing", chunkCount: 0, charCount: 0, error: null,
+      createdAt: "2026-09-23T00:00:00.000Z",
+    }]} />);
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
   it("可以归档和恢复资料", async () => {
     const source = {
       id: "00000000-0000-4000-8000-0000000000f3", name: "售后手册.txt", mime: "text/plain",
@@ -40,10 +75,15 @@ describe("知识库列表", () => {
     };
     const { rerender } = render(<KnowledgeList initial={[source]} />);
     await userEvent.click(screen.getByRole("button", { name: "归档" }));
+    expect(screen.getByText(/归档后不再参与助手检索/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "确认归档" }));
     expect(setKnowledgeSourceArchivedAction).toHaveBeenCalledWith({ sourceId: source.id, archived: true });
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 
     rerender(<KnowledgeList initial={[{ ...source, status: "archived" }]} archived />);
     await userEvent.click(screen.getByRole("button", { name: "恢复" }));
+    await userEvent.click(screen.getByRole("button", { name: "确认恢复" }));
     expect(setKnowledgeSourceArchivedAction).toHaveBeenLastCalledWith({ sourceId: source.id, archived: false });
   });
 
@@ -55,6 +95,7 @@ describe("知识库列表", () => {
       createdAt: "2026-09-23T00:00:00.000Z",
     }]} />);
     await userEvent.click(screen.getByRole("button", { name: "归档" }));
+    await userEvent.click(screen.getByRole("button", { name: "确认归档" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("归档资料失败，请检查网络后重试");
     expect(screen.getByRole("button", { name: "归档" })).toBeEnabled();
   });
@@ -129,12 +170,33 @@ describe("知识库列表", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("原文件尚未保存");
   });
 
-  it("上传请求失败后允许重试", async () => {
+  it("相同文件不重复创建，并按真实解析状态说明是否可检索", async () => {
+    const source = {
+      id: "00000000-0000-4000-8000-0000000000f3", name: "售后手册.txt", mime: "text/plain",
+      sizeBytes: 10, chunkCount: 3, charCount: 1200, error: null, hasOriginal: true,
+      createdAt: "2026-09-23T00:00:00.000Z",
+    };
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce({ json: async () => ({ ok: true, deduped: true, blobStored: true, source: { ...source, status: "indexed" } }) })
+      .mockResolvedValueOnce({ json: async () => ({ ok: true, deduped: true, blobStored: true, source: { ...source, status: "parsing" } }) }));
+    const user = userEvent.setup();
+    const { container } = render(<UploadSourceForm />);
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+    await user.upload(fileInput, new window.File(["退货说明"], "售后手册.txt", { type: "text/plain" }));
+    await user.click(screen.getByRole("button", { name: "上传文档" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("这份文件已有记录，未重复创建。当前已就绪，可在资料库中检索。"));
+    await user.upload(fileInput, new window.File(["退货说明"], "售后手册.txt", { type: "text/plain" }));
+    await user.click(screen.getByRole("button", { name: "上传文档" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("这份文件已有记录，未重复创建。当前正在解析，完成后才能用于资料检索。"));
+  });
+
+  it("上传请求响应丢失时提示先核对资料列表", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
     const { container } = render(<UploadSourceForm />);
     await userEvent.upload(container.querySelector('input[type="file"]')!, new window.File(["退货说明"], "售后手册.txt", { type: "text/plain" }));
     await userEvent.click(screen.getByRole("button", { name: "上传文档" }));
-    expect(await screen.findByText("上传失败，请检查网络后重试")).toBeInTheDocument();
+    expect(await screen.findByText(/暂时无法确认是否上传成功/)).toBeInTheDocument();
+    expect(refresh).toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "上传文档" })).toBeEnabled();
   });
 

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DesignAuditPanel } from "@/features/agents/DesignAuditPanel";
 import { DRAFT_STATE_EVENT } from "@/lib/draft-state";
+import { WORKFLOW_NODE_FOCUS_EVENT, type WorkflowNodeFocusDetail } from "@/lib/workflow-node-focus";
 
 const { actionMock, refreshMock } = vi.hoisted(() => ({ actionMock: vi.fn(), refreshMock: vi.fn() }));
 vi.mock("@/server/actions/apply-audit-fixes", () => ({ applyAuditFixesAction: actionMock }));
@@ -10,7 +11,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: refreshMock }) 
 
 const issue = {
   id: "issue-1", severity: "critical" as const, title: "Agent 调用缺少备用路径",
-  detail: "Workflow 无法在 Agent 不可用时继续", fixable: true,
+  detail: "Workflow 无法在 Agent 不可用时继续", nodeId: null, fixable: true,
 };
 
 describe("设计检查面板", () => {
@@ -26,6 +27,14 @@ describe("设计检查面板", () => {
     await waitFor(() => expect(actionMock).toHaveBeenCalled());
     expect(await screen.findByRole("status")).toHaveTextContent("已完成 1 项安全修复");
     expect(refreshMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("面向员工的审计说明不暴露业务规格内部字段名", () => {
+    render(<DesignAuditPanel agentId="00000000-0000-4000-8000-000000000081" score={76} issues={[
+      { ...issue, title: "业务节点没有业务规格", detail: "没有 businessSpec，也没有声明 scope 或 registryTool。" },
+    ]} />);
+    expect(screen.getByText("没有 业务规格，也没有声明 权限范围 或 已注册业务工具。")).toBeVisible();
+    expect(screen.queryByText(/businessSpec|registryTool|scope/)).not.toBeInTheDocument();
   });
 
   it("响应丢失后重试已完成的修复时提示复用当前状态", async () => {
@@ -62,6 +71,23 @@ describe("设计检查面板", () => {
     await user.click(screen.getByRole("button", { name: "查看其他 2 项问题" }));
     expect(screen.getByText("问题 10")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "收起其他问题" })).toBeInTheDocument();
+  });
+
+  it("只为有真实节点关联的问题提供流程定位", async () => {
+    const events: WorkflowNodeFocusDetail[] = [];
+    const receive = (event: Event) => events.push((event as CustomEvent<WorkflowNodeFocusDetail>).detail);
+    window.addEventListener(WORKFLOW_NODE_FOCUS_EVENT, receive);
+    try {
+      render(<DesignAuditPanel agentId="00000000-0000-4000-8000-000000000081" score={76} issues={[
+        { ...issue, nodeId: "step_1" },
+        { ...issue, id: "issue-global", title: "全局问题", nodeId: null },
+      ]} />);
+      await userEvent.click(screen.getByRole("button", { name: "在流程中查看" }));
+      expect(events).toEqual([{ agentId: "00000000-0000-4000-8000-000000000081", nodeId: "step_1" }]);
+      expect(screen.getAllByRole("button", { name: "在流程中查看" })).toHaveLength(1);
+    } finally {
+      window.removeEventListener(WORKFLOW_NODE_FOCUS_EVENT, receive);
+    }
   });
 
   it("有未保存修改时阻止基于旧草稿自动修复", () => {

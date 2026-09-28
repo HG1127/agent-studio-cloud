@@ -1,4 +1,4 @@
-export const MAX_AGENT_INTENT_LENGTH = 2_000;
+import { MAX_AGENT_INTENT_LENGTH } from "@/contracts/agent";
 
 export interface AgentBlueprintFields {
   objective: string;

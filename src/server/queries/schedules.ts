@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { schedules, agents } from "@/db/schema";
-import { ScheduleSpec, type ScheduleView } from "@/contracts/schedule";
+import { schedules, agents, agentVersions } from "@/db/schema";
+import { AgentManifest } from "@/contracts/manifest";
+import { ScheduleAgentOption, ScheduleSpec, type ScheduleAgentOption as ScheduleAgentOptionType, type ScheduleView } from "@/contracts/schedule";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 
@@ -26,11 +27,31 @@ export async function listSchedules(): Promise<ScheduleView[]> {
   });
 }
 
-export async function listScheduleableAgents(): Promise<{ id: string; name: string }[]> {
+export async function listScheduleableAgents(): Promise<ScheduleAgentOptionType[]> {
   const rows = await db
-    .select({ id: agents.id, name: agents.name })
-    .from(agents)
-    .where(and(eq(agents.workspaceId, DEMO_WORKSPACE_ID), isNull(agents.archivedAt)))
-    .orderBy(desc(agents.createdAt));
-  return rows;
+    .select({ id: agents.id, name: agents.name, version: agentVersions.version, manifest: agentVersions.manifest })
+    .from(agentVersions)
+    .innerJoin(agents, eq(agents.id, agentVersions.agentId))
+    .where(and(
+      eq(agentVersions.workspaceId, DEMO_WORKSPACE_ID),
+      eq(agentVersions.status, "production"),
+      eq(agents.workspaceId, DEMO_WORKSPACE_ID),
+      isNull(agents.archivedAt),
+    ))
+    .orderBy(desc(agentVersions.version));
+  const seen = new Set<string>();
+  return rows.flatMap((row) => {
+    if (seen.has(row.id)) return [];
+    const manifest = AgentManifest.safeParse(row.manifest);
+    if (!manifest.success) return [];
+    const option = ScheduleAgentOption.safeParse({
+      id: row.id,
+      name: row.name,
+      version: row.version,
+      inputContract: manifest.data.inputContract,
+    });
+    if (!option.success) return [];
+    seen.add(row.id);
+    return [option.data];
+  });
 }

@@ -19,7 +19,7 @@ export async function saveModelConnectionAction(input: unknown): Promise<{ ok: t
   const parsed = ModelConnectionSaveInput.safeParse(input);
   if (!parsed.success) return { ok: false, error: "请检查连接名称、服务地址、密钥与模型列表的填写" };
   const key = resolveEncryptionKey(process.env.MODEL_ENCRYPTION_KEY);
-  if (!key) return { ok: false, error: "服务端尚未配置密钥加密，暂时无法保存连接" };
+  if (!key) return { ok: false, error: "当前服务缺少有效的模型加密主钥，请恢复原主钥并重启服务" };
   const { name, baseUrl, apiKey, modelIds, isDefaultCompile } = parsed.data;
   const connectionId = "id" in parsed.data ? parsed.data.id : null;
   try {
@@ -85,12 +85,12 @@ export async function testModelConnectionAction(id: string): Promise<{ ok: true;
       .limit(1);
     if (!connection) return { ok: false, error: "连接不存在或已删除，请刷新页面后重试" };
     const key = resolveEncryptionKey(process.env.MODEL_ENCRYPTION_KEY);
-    if (!key) return { ok: false, error: "服务端尚未配置密钥解密，暂时无法测试连接" };
+    if (!key) return { ok: false, error: "当前服务缺少有效的模型加密主钥，请恢复原主钥并重启服务" };
     let apiKey: string;
     try {
       apiKey = decryptApiKey(connection.apiKeyCiphertext, key);
     } catch {
-      return { ok: false, error: "密钥解密失败，请编辑连接并重新填写密钥" };
+      return { ok: false, error: "无法解开已保存的密钥，请先确认服务使用的是原加密主钥" };
     }
     const provider = createOpenAICompatible({ name: "custom-model", baseURL: connection.baseUrl, apiKey });
     const { text } = await generateText({

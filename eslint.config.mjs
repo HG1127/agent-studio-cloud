@@ -17,6 +17,8 @@ const eslintConfig = defineConfig([
     "src/app/.well-known/workflow/**",
     // Playwright 使用独立 Next 产物目录，跑过 E2E 后仍应能直接执行全量 lint。
     ".next-playwright/**",
+    ".next-playwright-*/**",
+    ".next-production-*/**",
   ]),
 ]);
 

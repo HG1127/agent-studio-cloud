@@ -10,7 +10,7 @@ import { FlowCanvas } from "@/features/workflow-canvas/FlowCanvas";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { auditWorkflow, type DesignAuditResult } from "@/server/domain/audit";
 import { getAgentDetail, listAgentTargets } from "@/server/queries/agents";
-import { listVersions } from "@/server/queries/versions";
+import { getVersionExportSource, listVersions } from "@/server/queries/versions";
 import { listModelConnections } from "@/server/queries/model-connections";
 import { hasRunningEvaluation, listEvaluationCases, listEvaluationRuns } from "@/server/queries/evaluations";
 import { listKnowledgeSourcesForPicker } from "@/server/queries/knowledge";
@@ -21,6 +21,7 @@ import { listToolRegistryOptions } from "@/server/tools/tool-registry";
 import { pageFromSearchParam } from "@/lib/search-params";
 import { withSafeQueryError } from "@/server/security/query-error";
 import { z } from "zod";
+import { Download, ArrowLeft, CheckCircle2, FlaskConical, Layers3, Play, Rocket, ShieldCheck, Workflow } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -57,8 +58,9 @@ export default async function AgentDetailPage({
   const selectedCollaborationVersionIds = detail.draft
     ? workflowCollaborationKeys(detail.draft).map((key) => key.slice(key.lastIndexOf(":") + 1))
     : [];
-  const [versions, connections, agentTargets, evaluationCases, archivedEvaluationCases, evaluationRunRows, evaluationRunning, knowledgeSources] = await withSafeQueryError(() => Promise.all([
+  const [versions, latestVersions, connections, agentTargets, evaluationCases, archivedEvaluationCases, evaluationRunRows, evaluationRunning, knowledgeSources] = await withSafeQueryError(() => Promise.all([
     listVersions(agentId, DEMO_WORKSPACE_ID, { limit: versionPageSize + 1, offset: (versionPage - 1) * versionPageSize }),
+    versionPage === 1 ? Promise.resolve([]) : listVersions(agentId, DEMO_WORKSPACE_ID, { limit: 1 }),
     listModelConnections(),
     listAgentTargets(DEMO_WORKSPACE_ID, agentId, selectedCollaborationVersionIds),
     listEvaluationCases(agentId, DEMO_WORKSPACE_ID),
@@ -76,40 +78,71 @@ export default async function AgentDetailPage({
   ]), "agent-detail-related");
   const defaultModelLabel = process.env.MODEL_MOCK === "1" ? "演示模式" : process.env.MODEL_ID?.trim() ? "服务端默认模型" : "尚未配置默认模型";
   const currentVersion = detail.currentVersion;
+  const latestVersion = versionPage === 1 ? versions[0] : latestVersions[0];
+  const hasEvaluableVersion = latestVersion?.status === "candidate" || Boolean(currentVersion);
+  const evaluationVersionId = latestVersion?.status === "candidate" ? latestVersion.id : currentVersion?.id;
+  const evaluationVersionSource = evaluationVersionId
+    ? await withSafeQueryError(() => getVersionExportSource(agentId, evaluationVersionId, DEMO_WORKSPACE_ID), "evaluation-version")
+    : null;
+  const evaluationManifest = evaluationVersionSource ? AgentManifest.safeParse(evaluationVersionSource.manifest) : null;
+  const currentVersionNumber = currentVersion
+    ? versions.find((version) => version.id === currentVersion.id)?.version ?? null
+    : null;
   const toolOptions = listToolRegistryOptions();
   const currentManifest = currentVersion ? AgentManifest.safeParse(currentVersion.manifest) : null;
   const inputFields = currentManifest?.success ? currentManifest.data.inputContract.fields : undefined;
+  const outputFields = currentManifest?.success ? currentManifest.data.outputContract?.fields : undefined;
+  const navigation = [
+    { href: "#workflow", label: "流程设计", icon: Workflow },
+    { href: "#audit", label: "设计检查", icon: ShieldCheck },
+    { href: "#versions", label: "版本发布", icon: Rocket },
+    { href: "#evaluation", label: "自动验收", icon: FlaskConical },
+    { href: "#run", label: "试运行", icon: Play },
+  ];
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-6 p-8">
-      <Link href="/agents" className="w-fit text-sm text-gray-500 hover:text-gray-700">
-        ← 返回助手列表
+    <main className="page-shell max-w-[1480px]">
+      <Link href="/agents" className="inline-flex w-fit items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-800">
+        <ArrowLeft className="size-4" />返回助手列表
       </Link>
-      <header className="flex flex-col gap-2">
+      <header className="content-card flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-2xl font-bold">{detail.agent.name}</h1>
-          <a href={`/api/agents/${agentId}/export`} download className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:border-gray-500">导出定义</a>
+          <div><p className="eyebrow mb-2">助手工作台</p><h1 className="text-2xl font-bold tracking-tight text-slate-950">{detail.agent.name}</h1></div>
+          <a href={`/api/agents/${agentId}/export`} download className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"><Download className="size-4" />导出定义</a>
         </div>
         {detail.agent.description ? (
           <p className="text-sm text-gray-500">{detail.agent.description}</p>
         ) : null}
         <AgentMetadataEditor
+          key={agentId}
           agentId={agentId}
           initialName={detail.agent.name}
           initialDescription={detail.agent.description}
           initialUpdatedAt={detail.agent.updatedAt.toISOString()}
         />
-        <p className="text-sm text-gray-500">{auditStatusLine(audit)}</p>
+        <p className="w-fit rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">{auditStatusLine(audit)}</p>
       </header>
-      {detail.draft ? (
-        <FlowCanvas agentId={agentId} draft={detail.draft} draftUpdatedAt={detail.draftUpdatedAt} agentTargets={agentTargets} toolOptions={toolOptions}
-          knowledgeSources={knowledgeSources} />
-      ) : (
-        <section className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">
-          这个助手还没有流程草稿
-        </section>
-      )}
-      {audit ? <DesignAuditPanel agentId={agentId} score={audit.score} issues={AuditIssueView.array().parse(audit.issues)} /> : null}
+      <section aria-label="助手状态摘要" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="content-card flex items-center gap-3 p-4"><span className="grid size-10 place-items-center rounded-xl bg-indigo-50 text-indigo-600"><Layers3 className="size-5" /></span><div><p className="text-xs text-slate-500">流程步骤</p><p className="mt-1 text-xl font-bold text-slate-950">{detail.draft ? Object.keys(detail.draft.nodes).length : 0}</p></div></div>
+        <div className="content-card flex items-center gap-3 p-4"><span className="grid size-10 place-items-center rounded-xl bg-blue-50 text-blue-600"><Rocket className="size-5" /></span><div><p className="text-xs text-slate-500">当前版本</p><p className="mt-1 text-xl font-bold text-slate-950">{currentVersionNumber === null ? currentVersion ? "已发布" : "未发布" : `V${currentVersionNumber}`}</p></div></div>
+        <div className="content-card flex items-center gap-3 p-4"><span className="grid size-10 place-items-center rounded-xl bg-emerald-50 text-emerald-600"><CheckCircle2 className="size-5" /></span><div><p className="text-xs text-slate-500">启用样例</p><p className="mt-1 text-xl font-bold text-slate-950">{evaluationCases.length}</p></div></div>
+        <div className="content-card flex items-center gap-3 p-4"><span className="grid size-10 place-items-center rounded-xl bg-amber-50 text-amber-600"><ShieldCheck className="size-5" /></span><div><p className="text-xs text-slate-500">设计得分</p><p className="mt-1 text-xl font-bold text-slate-950">{audit?.score ?? "—"}</p></div></div>
+      </section>
+      <nav aria-label="助手工作台分区" className="sticky top-14 z-30 -mx-1 flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white/95 p-1.5 shadow-sm backdrop-blur">
+        {navigation.map((item) => <a key={item.href} href={item.href} className="inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-indigo-50 hover:text-indigo-700"><item.icon className="size-4" />{item.label}</a>)}
+      </nav>
+      <section id="workflow" className="scroll-mt-32">
+        {detail.draft ? (
+          <FlowCanvas key={agentId} agentId={agentId} draft={detail.draft} draftUpdatedAt={detail.draftUpdatedAt} agentTargets={agentTargets} toolOptions={toolOptions}
+            knowledgeSources={knowledgeSources} />
+        ) : (
+          <div className="content-card border-dashed text-center text-sm text-gray-500">
+            这个助手还没有流程草稿
+          </div>
+        )}
+      </section>
+      {audit ? <DesignAuditPanel key={agentId} agentId={agentId} score={audit.score} issues={AuditIssueView.array().parse(audit.issues)} /> : null}
       <VersionPanel
+        key={agentId}
         agentId={agentId}
         versions={versions.slice(0, versionPageSize)}
         connections={connections}
@@ -121,18 +154,30 @@ export default async function AgentDetailPage({
         evaluationRunsPage={evaluationRunsPage}
       />
       <EvaluationPanel
+        key={agentId}
         agentId={agentId}
         cases={evaluationCases}
         archivedCases={archivedEvaluationCases.slice(0, archivedCasesPageSize)}
         runs={evaluationRunRows.slice(0, evaluationRunsPageSize)}
         evaluationRunning={evaluationRunning}
+        hasEvaluableVersion={hasEvaluableVersion}
         runsPage={evaluationRunsPage}
         hasMoreRuns={evaluationRunRows.length > evaluationRunsPageSize}
         archivedPage={archivedCasesPage}
         hasMoreArchived={archivedEvaluationCases.length > archivedCasesPageSize}
         versionsPage={versionPage}
+        inputFields={evaluationManifest?.success ? evaluationManifest.data.inputContract.fields : undefined}
+        inputVersion={evaluationVersionSource?.version ?? null}
+        evaluationVersionId={evaluationVersionId ?? null}
       />
-      <RunLauncher agentId={agentId} inputFields={inputFields} />
+      <RunLauncher
+        key={agentId}
+        agentId={agentId}
+        inputFields={inputFields}
+        outputFields={outputFields}
+        hasProductionVersion={Boolean(currentVersion)}
+        productionVersion={currentVersionNumber}
+      />
     </main>
   );
 }

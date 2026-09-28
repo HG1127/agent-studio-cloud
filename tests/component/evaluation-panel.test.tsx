@@ -32,6 +32,11 @@ const CASES = [{
   createdAt: "2026-09-24T00:00:00.000Z",
   updatedAt: "2026-09-24T00:05:00.000Z",
 }];
+const INPUT_FIELDS = [
+  { name: "brief", label: "客户需求", required: true, type: "string" as const },
+  { name: "amount", label: "金额", required: false, type: "number" as const },
+  { name: "approved", label: "已确认", required: false, type: "boolean" as const },
+];
 
 describe("EvaluationPanel", () => {
   afterEach(() => {
@@ -42,11 +47,57 @@ describe("EvaluationPanel", () => {
     archiveMock.mockReset();
     startMock.mockReset();
     refreshMock.mockReset();
+    window.sessionStorage.clear();
   });
 
   it("明确提示验收输入不会保留凭据", () => {
     render(<EvaluationPanel agentId={AGENT_ID} cases={[]} runs={[]} />);
     expect(screen.getByText(/密钥、令牌和密码会自动隐藏/)).toBeVisible();
+    expect(screen.getByLabelText("运行输入")).toHaveValue("{}");
+  });
+
+  it("没有可验收版本时允许准备样例，但不发起必然失败的生成与运行", () => {
+    render(<EvaluationPanel agentId={AGENT_ID} cases={CASES} runs={[]} hasEvaluableVersion={false} />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("还没有可验收版本");
+    expect(screen.getByRole("link", { name: "版本发布" })).toHaveAttribute("href", "#versions");
+    expect(screen.getByRole("button", { name: "运行全部样例" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("样例名称"), { target: { value: "新业务样例" } });
+    expect(screen.getByRole("button", { name: "添加样例" })).toBeEnabled();
+    expect(startMock).not.toHaveBeenCalled();
+  });
+
+  it("没有可验收版本或样例时不提供流程样例生成动作", () => {
+    render(<EvaluationPanel agentId={AGENT_ID} cases={[]} runs={[]} hasEvaluableVersion={false} />);
+
+    expect(screen.getByRole("button", { name: "从流程生成样例" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "运行全部样例" })).toBeDisabled();
+  });
+
+  it("从验收总览进入后沿用待核对请求，不新建另一轮", async () => {
+    const versionId = "00000000-0000-4000-8000-000000000038";
+    window.sessionStorage.setItem(`agent-studio:acceptance-run:${AGENT_ID}`, JSON.stringify({ requestId: REQUEST_ID, versionId }));
+    startMock.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    render(<EvaluationPanel agentId={AGENT_ID} cases={CASES} runs={[]} evaluationVersionId={versionId} />);
+    const retry = await screen.findByRole("button", { name: "核对上次验收" });
+    expect(screen.getByText("上次验收结果待核对")).toBeInTheDocument();
+    await user.click(retry);
+    await waitFor(() => expect(startMock).toHaveBeenCalledWith(AGENT_ID, REQUEST_ID));
+    expect(window.sessionStorage.getItem(`agent-studio:acceptance-run:${AGENT_ID}`)).toBeNull();
+  });
+
+  it("跨页核对期间版本已变化时阻止旧请求发起新验收", async () => {
+    window.sessionStorage.setItem(`agent-studio:acceptance-run:${AGENT_ID}`, JSON.stringify({ requestId: REQUEST_ID, versionId: "00000000-0000-4000-8000-000000000038" }));
+    const user = userEvent.setup();
+    render(<EvaluationPanel agentId={AGENT_ID} cases={CASES} runs={[]} evaluationVersionId="00000000-0000-4000-8000-000000000039" />);
+    expect(await screen.findByText("上次验收结果待核对，可验收版本已变化")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "核对上次验收" })).toBeDisabled();
+    expect(startMock).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "已核对，继续操作" }));
+    await user.click(within(screen.getByRole("dialog", { name: "已经核对上次验收？" })).getByRole("button", { name: "继续操作" }));
+    expect(screen.getByRole("button", { name: "运行全部样例" })).toBeEnabled();
+    expect(window.sessionStorage.getItem(`agent-studio:acceptance-run:${AGENT_ID}`)).toBeNull();
   });
 
   it("保存 JSON 输入和结果包含断言", async () => {
@@ -64,6 +115,77 @@ describe("EvaluationPanel", () => {
       expectations: [{ path: "", operator: "contains", value: "续约" }],
     }));
     expect(refreshMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("按当前待验收版本的业务字段填写并提交正确类型", async () => {
+    createMock.mockResolvedValue({ ok: true });
+    render(<EvaluationPanel agentId={AGENT_ID} cases={[]} runs={[]} inputFields={INPUT_FIELDS} inputVersion={4} />);
+    expect(screen.getByText("运行输入 · 版本 V4 的字段")).toBeVisible();
+    expect(screen.queryByLabelText("运行输入")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("样例名称"), { target: { value: "续约金额核对" } });
+    fireEvent.change(screen.getByLabelText("客户需求"), { target: { value: "准备续约方案" } });
+    fireEvent.change(screen.getByLabelText("金额"), { target: { value: "60" } });
+    fireEvent.change(screen.getByLabelText("已确认"), { target: { value: "false" } });
+    await userEvent.click(screen.getByRole("button", { name: "添加样例" }));
+    await waitFor(() => expect(createMock).toHaveBeenCalledWith({
+      agentId: AGENT_ID, name: "续约金额核对", input: { brief: "准备续约方案", amount: 60, approved: false }, expectations: [],
+    }));
+  });
+
+  it("新版字段不兼容旧样例时保留原始对象与额外字段", async () => {
+    updateMock.mockResolvedValue({ ok: true });
+    const legacy = { ...CASES[0], input: { brief: "旧需求", oldField: "保留的信息" } };
+    render(<EvaluationPanel agentId={AGENT_ID} cases={[legacy]} runs={[]} inputFields={INPUT_FIELDS} inputVersion={4} />);
+    await userEvent.click(screen.getByRole("button", { name: "编辑" }));
+    expect(screen.getByText(/已保留全部原始内容供编辑/)).toBeVisible();
+    expect(screen.getByLabelText("运行输入")).toHaveValue('{"brief":"旧需求","oldField":"保留的信息"}');
+    await userEvent.click(screen.getByRole("button", { name: "保存修改" }));
+    await waitFor(() => expect(updateMock).toHaveBeenCalledWith(expect.objectContaining({ input: legacy.input })));
+  });
+
+  it("样例列表按业务字段阅读输入，旧字段不在普通阅读区暴露内部名称", async () => {
+    const current = { ...CASES[0], input: { brief: "续约回复", approved: false } };
+    const legacy = { ...CASES[0], id: "00000000-0000-4000-8000-000000000039", name: "旧版样例", input: { oldField: "历史内容" } };
+    render(<EvaluationPanel agentId={AGENT_ID} cases={[current, legacy]} runs={[]} inputFields={INPUT_FIELDS} inputVersion={4} />);
+    expect(screen.getByText("客户需求：续约回复 · 已确认：否")).toBeVisible();
+    expect(screen.getByText("业务信息 1：历史内容")).toBeVisible();
+    const currentItem = screen.getByRole("listitem", { name: /客户续约/ });
+    await userEvent.click(within(currentItem).getByText("查看样例内容"));
+    expect(within(currentItem).getByText("客户需求")).toBeVisible();
+    expect(within(currentItem).getByText("续约回复")).toBeVisible();
+    const legacyItem = screen.getByRole("listitem", { name: /旧版样例/ });
+    await userEvent.click(within(legacyItem).getByText("查看样例内容"));
+    expect(within(legacyItem).getByText(/下方按顺序展示已保存的内容/)).toBeVisible();
+    expect(within(legacyItem).queryByText("oldField")).not.toBeInTheDocument();
+  });
+
+  it("填写中验收版本发生变化时保留已输入内容并提示核对", async () => {
+    const { rerender } = render(<EvaluationPanel agentId={AGENT_ID} cases={[]} runs={[]} inputFields={INPUT_FIELDS} inputVersion={4} />);
+    fireEvent.change(screen.getByLabelText("样例名称"), { target: { value: "变更中的样例" } });
+    fireEvent.change(screen.getByLabelText("客户需求"), { target: { value: "已填写的需求" } });
+    rerender(<EvaluationPanel agentId={AGENT_ID} cases={[]} runs={[]} inputFields={[{ name: "newBrief", label: "新需求", required: true, type: "string" }]} inputVersion={5} />);
+    expect(await screen.findByText(/验收版本的输入字段已变化/)).toBeVisible();
+    expect(screen.getByLabelText("运行输入")).toHaveValue('{\n  "brief": "已填写的需求"\n}');
+    expect(screen.getByLabelText("样例名称")).toHaveValue("变更中的样例");
+  });
+
+  it("创建样例响应丢失后锁定原内容，并以同一快照核对", async () => {
+    createMock.mockRejectedValueOnce(new Error("response lost")).mockResolvedValueOnce({ ok: true });
+    const user = userEvent.setup();
+    render(<EvaluationPanel agentId={AGENT_ID} cases={[]} runs={[]} />);
+    await user.type(screen.getByLabelText("样例名称"), "续约核对");
+    fireEvent.change(screen.getByLabelText("运行输入"), { target: { value: '{"brief":"真实测试输入"}' } });
+    await user.click(screen.getByRole("button", { name: "添加样例" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("暂时无法确认样例是否保存成功");
+    expect(screen.getByLabelText("样例名称")).toHaveAttribute("readonly");
+    expect(screen.getByLabelText("运行输入")).toHaveAttribute("readonly");
+    expect(screen.getByRole("button", { name: "从流程生成样例" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "核对上次保存" }));
+
+    await waitFor(() => expect(createMock).toHaveBeenCalledTimes(2));
+    expect(createMock.mock.calls[1][0]).toEqual(createMock.mock.calls[0][0]);
+    expect(screen.getByLabelText("运行输入")).toHaveValue("{}");
   });
 
   it("拒绝不是对象的 JSON 输入", async () => {
@@ -122,6 +244,24 @@ describe("EvaluationPanel", () => {
     await waitFor(() => expect(startMock).toHaveBeenCalledWith(AGENT_ID, REQUEST_ID));
   });
 
+  it("在运行前展示样例资产与最近结果摘要", () => {
+    render(<EvaluationPanel agentId={AGENT_ID} cases={CASES} runs={[{
+      id: "00000000-0000-4000-8000-000000000033",
+      version: 3,
+      status: "completed",
+      totalCount: 1,
+      passedCount: 0,
+      failedCount: 1,
+      startedAt: "2026-09-24T00:00:00.000Z",
+      finishedAt: "2026-09-24T00:01:00.000Z",
+      results: [],
+    }]} />);
+
+    expect(screen.getByText("1 条已启用")).toBeInTheDocument();
+    expect(screen.getByText("1 项结果检查")).toBeInTheDocument();
+    expect(screen.getByText("1 项需处理")).toBeInTheDocument();
+  });
+
   it("已有一轮验收运行时锁定样例但允许检查并继续", async () => {
     startMock.mockResolvedValue({ ok: true });
     const user = userEvent.setup();
@@ -152,11 +292,13 @@ describe("EvaluationPanel", () => {
     vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(REQUEST_ID);
     startMock.mockRejectedValueOnce(new Error("response lost")).mockResolvedValueOnce({ ok: true });
     const user = userEvent.setup();
-    render(<EvaluationPanel agentId={AGENT_ID} cases={CASES} runs={[]} />);
+    const { rerender } = render(<EvaluationPanel agentId={AGENT_ID} cases={CASES} runs={[]} hasEvaluableVersion />);
 
     await user.click(screen.getByRole("button", { name: "运行全部样例" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("启动自动验收失败");
-    await user.click(screen.getByRole("button", { name: "运行全部样例" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("暂时无法确认验收是否已启动");
+    rerender(<EvaluationPanel agentId={AGENT_ID} cases={CASES} runs={[]} hasEvaluableVersion={false} />);
+    expect(screen.getByRole("button", { name: "核对上次验收" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "核对上次验收" }));
 
     await waitFor(() => expect(startMock).toHaveBeenCalledTimes(2));
     expect(startMock).toHaveBeenNthCalledWith(1, AGENT_ID, REQUEST_ID);
@@ -213,12 +355,25 @@ describe("EvaluationPanel", () => {
     await waitFor(() => expect(createMock).toHaveBeenCalledWith({
       agentId: AGENT_ID,
       name: "结构化结果",
-      input: { input: "请处理这条验收任务" },
+      input: {},
       expectations: [
         { path: "deliverables.plan", operator: "equals", value: 42 },
         { path: "receipt", operator: "contains", value: "已发送" },
       ],
     }));
+  });
+
+  it("字段检查在窄面板中展示字段含义并可直接删除", async () => {
+    const user = userEvent.setup();
+    render(<EvaluationPanel agentId={AGENT_ID} cases={[]} runs={[]} />);
+    await user.click(screen.getByText("字段检查（0）"));
+    await user.click(screen.getByRole("button", { name: "添加字段检查" }));
+    expect(screen.getByLabelText("字段检查 1 路径").closest("label")).toHaveTextContent("检查字段");
+    expect(screen.getByLabelText("字段检查 1 方式").closest("label")).toHaveTextContent("检查方式");
+    expect(screen.getByLabelText("字段检查 1 预期值").closest("label")).toHaveTextContent("预期值");
+    await user.click(screen.getByRole("button", { name: "删除检查" }));
+    expect(screen.getByText("字段检查（0）")).toBeInTheDocument();
+    expect(screen.queryByLabelText("字段检查 1 路径")).not.toBeInTheDocument();
   });
 
   it("包含检查未填写预期文字时阻止保存", async () => {
@@ -270,6 +425,13 @@ describe("EvaluationPanel", () => {
     const user = userEvent.setup();
     const { rerender } = render(<EvaluationPanel agentId={AGENT_ID} cases={CASES} runs={[]} />);
     await user.click(screen.getByRole("button", { name: "归档" }));
+    const confirmation = screen.getByRole("dialog", { name: "归档「客户续约」？" });
+    expect(within(confirmation).getByText(/不再参与后续自动验收/)).toBeVisible();
+    expect(archiveMock).not.toHaveBeenCalled();
+    await user.click(within(confirmation).getByRole("button", { name: "关闭确认弹窗" }));
+    expect(archiveMock).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "归档" }));
+    await user.click(within(screen.getByRole("dialog", { name: "归档「客户续约」？" })).getByRole("button", { name: "归档样例" }));
     await waitFor(() => expect(archiveMock).toHaveBeenCalledWith({ agentId: AGENT_ID, caseId: CASES[0].id, archived: true }));
 
     rerender(<EvaluationPanel agentId={AGENT_ID} cases={[]} archivedCases={CASES} runs={[]} />);

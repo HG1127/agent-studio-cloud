@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AgentInputContract } from "./manifest";
 import { RunInputPayload } from "./run";
 
 const TimeSlot = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "时间格式应为 HH:MM");
@@ -19,6 +20,14 @@ export const ScheduleCreateInput = z.object({
   input: RunInputPayload.default({}),
 });
 export type ScheduleCreateInput = z.infer<typeof ScheduleCreateInput>;
+
+export const ScheduleAgentOption = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  version: z.number().int().positive(),
+  inputContract: AgentInputContract,
+});
+export type ScheduleAgentOption = z.infer<typeof ScheduleAgentOption>;
 
 export const ScheduleView = z.object({
   id: z.string().uuid(),

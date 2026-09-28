@@ -27,26 +27,26 @@ export function WorkflowInputEditor({ variables, onChange }: {
       <p className="mt-2 text-xs text-gray-500">定义员工运行助手时需要填写的内容。未设置时使用一个“业务输入”文本框。</p>
       {variables.length > 0 ? <div className="mt-3 space-y-3">
         {variables.map((variable, index) => (
-          <div key={index} className="grid gap-2 rounded-md border border-gray-100 p-3 md:grid-cols-[1fr_1fr_120px_auto_auto]">
-            <label className="flex flex-col gap-1 text-xs text-gray-600">字段名
+          <div key={index} className="grid min-w-0 gap-3 rounded-md border border-gray-100 p-3 sm:grid-cols-2">
+            <label className="flex min-w-0 flex-col gap-1 text-xs text-gray-600">字段名
               <input aria-label={`字段 ${index + 1} 名称`} value={variable.name}
                 maxLength={200}
                 onChange={(event) => {
                   const cleaned = event.target.value.replace(/[^A-Za-z0-9_]/g, "");
                   update(index, { name: /^\d/.test(cleaned) ? `_${cleaned}` : cleaned });
                 }}
-                className="rounded-md border border-gray-300 px-2 py-1.5 text-sm" />
+                className="w-full min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-sm" />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-gray-600">显示名称
+            <label className="flex min-w-0 flex-col gap-1 text-xs text-gray-600">显示名称
               <input aria-label={`字段 ${index + 1} 显示名称`} value={variable.label ?? ""}
                 maxLength={200}
                 onChange={(event) => update(index, { label: event.target.value })}
-                className="rounded-md border border-gray-300 px-2 py-1.5 text-sm" />
+                className="w-full min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-sm" />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-gray-600">内容类型
+            <label className="flex min-w-0 flex-col gap-1 text-xs text-gray-600">内容类型
               <select aria-label={`字段 ${index + 1} 类型`} value={variable.type}
                 onChange={(event) => update(index, { type: event.target.value })}
-                className="rounded-md border border-gray-300 px-2 py-1.5 text-sm">
+                className="w-full min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-sm">
                 {FIELD_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
             </label>
@@ -54,7 +54,7 @@ export function WorkflowInputEditor({ variables, onChange }: {
               <input type="checkbox" checked={variable.required} onChange={(event) => update(index, { required: event.target.checked })} />必填
             </label>
             <button type="button" onClick={() => onChange(variables.filter((_, position) => position !== index))}
-              className="self-end py-1.5 text-xs text-red-600 hover:underline">删除</button>
+              className="inline-flex min-h-9 items-center justify-self-start rounded-lg px-2 text-xs font-semibold text-red-600 hover:bg-red-50 sm:col-span-2 sm:justify-self-end">删除</button>
           </div>
         ))}
       </div> : null}

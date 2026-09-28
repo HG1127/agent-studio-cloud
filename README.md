@@ -93,16 +93,8 @@ pnpm db:migrate      # 应用迁移
 
 尚需人工账号、密钥或生产环境操作的事项统一记录在 [`docs/manual-configuration.md`](./docs/manual-configuration.md)。未配置的真实工具会在运行前明确阻止，不会静默伪装成成功。
 
-## 质量门槛
+`MODEL_ENCRYPTION_KEY` 是服务端共用的加密主钥，须为 64 位十六进制值，不能填写模型服务的接口密钥。每个本地工作树都有自己的 `.env.local`；连接同一个数据库时，各工作树和部署环境必须使用加密现有连接时的同一把主钥。修改后重启开发服务。若原主钥丢失，旧连接无法用新主钥解密，需逐条重新录入接口密钥。不要提交或分享主钥。
 
-Pull Request 必须通过：
+## 上线前验收
 
-```bash
-pnpm exec tsc --noEmit
-pnpm lint
-pnpm test
-pnpm build
-pnpm audit --prod --audit-level high
-```
-
-带 Neon 临时分支的 CI 还会执行数据库迁移、事务与并发集成测试、Workflow 集成测试和 Playwright E2E。项目分层、迁移与 UI 文案约束见 [`AGENTS.md`](./AGENTS.md)。
+每次合并或上线先核对 GitHub Actions 免费额度；额度可用时手动运行 CI，状态不明或额度不足时在已配置 Neon 测试分支权限的本机运行 `pnpm acceptance`。两种方式均需完成类型检查、lint、Vitest、构建、隔离数据库迁移与集成测试，以及 Playwright 端到端测试。预览部署也须可访问。详见 [验收说明](./docs/release-acceptance.md) 和 [项目规则](./AGENTS.md)。

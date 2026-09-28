@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { MAX_WAIT_DURATION_MS, WorkflowNode } from "@/contracts/workflow";
@@ -90,6 +90,79 @@ const COLLABORATION_TARGET = {
 };
 
 describe("NodeInspector", () => {
+  it("仅在单一路径可换序时开放步骤顺序按钮", async () => {
+    const onMoveUp = vi.fn();
+    const onMoveDown = vi.fn();
+    const user = userEvent.setup();
+    render(<NodeInspector node={AI_NODE} onNodeChange={vi.fn()} onNodeDelete={vi.fn()}
+      canMoveUp={false} canMoveDown onMoveUp={onMoveUp} onMoveDown={onMoveDown} />);
+    expect(screen.getByRole("button", { name: "上移步骤" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "下移步骤" }));
+    expect(onMoveDown).toHaveBeenCalledOnce();
+    expect(onMoveUp).not.toHaveBeenCalled();
+  });
+  it("按草稿真实业务规格展示需求证据、完成标准与缺失来源", () => {
+    const node = WorkflowNode.parse({
+      ...AI_NODE,
+      businessSpec: {
+        objective: "核对客户续约条件",
+        evidence: ["用户要求先核对续约资格"],
+        inputs: [{ path: "input.customer", label: "客户资料" }],
+        rules: ["合同到期前处理"],
+        outputs: ["续约资格结论"],
+        doneWhen: ["输出资格结论与核对依据"],
+        grounding: { status: "grounded", score: 0.82 },
+        executability: {
+          status: "blocked",
+          sources: [{ kind: "runtime-input", label: "客户资料", verified: true }],
+          missingSources: [{ kind: "data_source", question: "续约记录从哪里读取？", detail: "未绑定资料源" }],
+        },
+      },
+    });
+    render(<NodeInspector node={node} onNodeChange={vi.fn()} onNodeDelete={vi.fn()} />);
+
+    const card = within(screen.getByRole("region", { name: "业务依据与完成标准" }));
+    expect(card.getByText("草稿已关联需求")).toBeVisible();
+    expect(card.getByText("设计时来源检查受阻")).toBeVisible();
+    expect(card.getByText("用户要求先核对续约资格")).toBeVisible();
+    expect(card.getByText("客户资料")).toBeVisible();
+    expect(card.getByText("输出资格结论与核对依据")).toBeVisible();
+    expect(card.getByText("续约记录从哪里读取？")).toBeVisible();
+    expect(card.queryByText("未绑定资料源")).not.toBeInTheDocument();
+  });
+
+  it("缺少业务规格时提示补证据，不把节点标题当作需求依据", () => {
+    render(<NodeInspector node={AI_NODE} onNodeChange={vi.fn()} onNodeDelete={vi.fn()} />);
+    const card = within(screen.getByRole("region", { name: "业务依据与完成标准" }));
+    expect(card.getByRole("status")).toHaveTextContent("还没有业务规格");
+    expect(card.queryByText("生成回复方案")).not.toBeInTheDocument();
+  });
+
+  it("设计时来源检查通过也不把未记录的额外来源冒充为实际可用", () => {
+    const node = WorkflowNode.parse({
+      ...AI_NODE,
+      businessSpec: {
+        objective: "生成回复方案",
+        evidence: ["用户要求生成回复方案"],
+        doneWhen: ["生成可供人工确认的回复文本"],
+        grounding: { status: "execution-grounded" },
+        executability: { status: "executable", sources: [] },
+      },
+    });
+    render(<NodeInspector node={node} onNodeChange={vi.fn()} onNodeDelete={vi.fn()} />);
+    const card = within(screen.getByRole("region", { name: "业务依据与完成标准" }));
+    expect(card.getByText("草稿有执行契约依据")).toBeVisible();
+    expect(card.getByText("设计时来源检查通过")).toBeVisible();
+    expect(card.getByText("未记录额外来源")).toBeVisible();
+    expect(card.queryByText("实际来源已验证")).not.toBeInTheDocument();
+  });
+
+  it("平台控制节点不展示业务依据卡片", () => {
+    const node = WorkflowNode.parse({ ...AI_NODE, ui: { visibility: "control" } });
+    render(<NodeInspector node={node} onNodeChange={vi.fn()} onNodeDelete={vi.fn()} />);
+    expect(screen.queryByRole("region", { name: "业务依据与完成标准" })).not.toBeInTheDocument();
+  });
+
   it("修改节点名称时回调携带新值", () => {
     const onNodeChange = vi.fn();
     render(<NodeInspector node={AI_NODE} onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
@@ -172,6 +245,29 @@ describe("NodeInspector", () => {
     await user.click(screen.getAllByRole("button", { name: "添加条件" }).at(-1)!);
     expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
       condition: expect.objectContaining({ branches: [expect.objectContaining({ rules: [expect.anything(), { source: "input.", operator: "eq", value: "" }] })] }),
+    }));
+  });
+
+  it("复合条件展示字段含义并允许删除非唯一条件", async () => {
+    const node = WorkflowNode.parse({
+      ...CONDITION_NODE,
+      condition: { ...CONDITION_NODE.condition!, branches: [{
+        label: "重点订单", next: null, mode: "all",
+        rules: [
+          { source: "input.amount", operator: "gte", value: 1000 },
+          { source: "input.status", operator: "eq", value: "待审核" },
+        ],
+      }] },
+    });
+    const onNodeChange = vi.fn();
+    const user = userEvent.setup();
+    render(<NodeInspector node={node} onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
+    expect(screen.getByLabelText("情况 1 条件 2 数据").closest("label")).toHaveTextContent("判断数据");
+    expect(screen.getByLabelText("情况 1 条件 2 判断方式").closest("label")).toHaveTextContent("判断方式");
+    expect(screen.getByLabelText("情况 1 条件 2 比较值").closest("label")).toHaveTextContent("比较值");
+    await user.click(screen.getByRole("button", { name: "删除情况 1 条件 2" }));
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      condition: expect.objectContaining({ branches: [expect.objectContaining({ rules: [{ source: "input.amount", operator: "gte", value: 1000 }] })] }),
     }));
   });
 
@@ -364,6 +460,26 @@ describe("NodeInspector", () => {
     expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({ subflow: expect.objectContaining({ steps: expect.arrayContaining([expect.objectContaining({ title: "处理下一步" })]) }) }));
   });
 
+  it("步骤组展示内部字段含义并允许删除新增步骤", async () => {
+    const node = WorkflowNode.parse({
+      ...SUBFLOW_NODE,
+      subflow: { ...SUBFLOW_NODE.subflow!, steps: [
+        { id: "step_1", title: "检查材料", type: "ai" },
+        { id: "step_2", title: "核对资料", type: "ai" },
+      ] },
+    });
+    const onNodeChange = vi.fn();
+    const user = userEvent.setup();
+    render(<NodeInspector node={node} onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
+    expect(screen.getByLabelText("步骤组步骤 2 类型").closest("label")).toHaveTextContent("处理类型");
+    expect(screen.getByLabelText("步骤组步骤 2 名称").closest("label")).toHaveTextContent("步骤名称");
+    expect(screen.getByLabelText("步骤组步骤 2 说明").closest("label")).toHaveTextContent("步骤说明");
+    await user.click(screen.getByRole("button", { name: "删除步骤组步骤 2" }));
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      subflow: expect.objectContaining({ steps: [expect.objectContaining({ id: "step_1" })] }),
+    }));
+  });
+
   it("顺序步骤组可以创建资料和经验步骤", async () => {
     const onNodeChange = vi.fn();
     const user = userEvent.setup();
@@ -496,11 +612,60 @@ describe("NodeInspector", () => {
     render(<NodeInspector node={unavailable} toolOptions={[option]}
       onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
 
-    expect(screen.getByText("导入文件中的业务工具在当前环境不可用，请重新选择。")).toBeVisible();
+    expect(screen.getByText("原业务工具在当前服务端不可用，请重新选择。保存前不会自动替换原绑定。")).toBeVisible();
     expect(screen.getByLabelText("业务工具")).toHaveValue("");
     await user.selectOptions(screen.getByLabelText("业务工具"), option.id);
     expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
       tool: expect.objectContaining({ registryToolId: option.id, unresolved: false }),
+    }));
+  });
+
+  it("服务端清单已移除的旧绑定显示明确状态，选择新工具前不改草稿", async () => {
+    const onNodeChange = vi.fn();
+    const user = userEvent.setup();
+    const stale = WorkflowNode.parse({ ...TOOL_NODE, tool: { ...TOOL_NODE.tool!, connector: "原客户系统", registryToolId: "gone.tool", protocol: "http-json", unresolved: false } });
+    render(<NodeInspector node={stale} toolOptions={[{
+      id: "crm.update", name: "客户系统", description: "", action: "update_customer", scope: "customer.write", risk: "medium",
+      inputSchema: { type: "object" }, outputSchema: { type: "object" },
+    }]} onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
+    expect(screen.getByRole("combobox", { name: "业务工具" })).toHaveValue("gone.tool");
+    expect(screen.getByRole("option", { name: "原工具当前不可用（请重新选择）" })).toBeVisible();
+    expect(screen.getByText("原业务工具在当前服务端不可用，请重新选择。保存前不会自动替换原绑定。")).toBeVisible();
+    expect(onNodeChange).not.toHaveBeenCalled();
+    await user.selectOptions(screen.getByRole("combobox", { name: "业务工具" }), "crm.update");
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({ tool: expect.objectContaining({ registryToolId: "crm.update", unresolved: false }) }));
+  });
+
+  it("新业务工具保持未绑定，只有明确选择演示工具才启用演示配置", async () => {
+    const onNodeChange = vi.fn();
+    const user = userEvent.setup();
+    const unbound = WorkflowNode.parse({
+      ...TOOL_NODE,
+      tool: { ...TOOL_NODE.tool!, connector: "unbound", action: "", scope: "", registryToolId: null, protocol: "unbound", unresolved: true },
+    });
+    render(<NodeInspector node={unbound} onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
+    expect(screen.getByLabelText("业务工具")).toHaveValue("");
+    expect(screen.getByText(/尚未绑定可用的业务工具/)).toBeVisible();
+    await user.selectOptions(screen.getByLabelText("业务工具"), "demo");
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      tool: expect.objectContaining({ registryToolId: "demo", protocol: "demo", unresolved: false }),
+    }));
+  });
+
+  it("既有演示工具在节点详情持续说明不会执行真实业务操作", () => {
+    render(<NodeInspector node={TOOL_NODE} onNodeChange={vi.fn()} onNodeDelete={vi.fn()} />);
+    expect(screen.getByText("当前是演示工具，不会连接业务系统或执行真实业务操作。")).toBeVisible();
+  });
+
+  it("内嵌步骤切换为业务工具时也先保持未绑定", async () => {
+    const onNodeChange = vi.fn();
+    const user = userEvent.setup();
+    render(<NodeInspector node={PARALLEL_NODE} onNodeChange={onNodeChange} onNodeDelete={vi.fn()} />);
+    await user.selectOptions(screen.getByLabelText("并行工作 1 步骤 1 类型"), "tool");
+    expect(onNodeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      parallel: expect.objectContaining({ branches: [expect.objectContaining({
+        steps: [expect.objectContaining({ tool: expect.objectContaining({ registryToolId: null, protocol: "unbound", unresolved: true }) })],
+      }), expect.anything()] }),
     }));
   });
 
@@ -603,11 +768,21 @@ describe("NodeInspector", () => {
       <NodeInspector node={AI_NODE} onNodeChange={vi.fn()} onNodeDelete={onDeleteAi} />,
     );
     await user.click(screen.getByRole("button", { name: "删除节点" }));
+    expect(screen.getByRole("dialog")).toBeVisible();
+    await user.click(screen.getAllByRole("button", { name: "删除节点" }).at(-1)!);
     expect(onDeleteAi).toHaveBeenCalledWith("step_1");
 
     const onStart = vi.fn();
     const startNode = WorkflowNode.parse({ id: "start", title: "收到业务任务", type: "trigger" });
     rerender(<NodeInspector node={startNode} onNodeChange={vi.fn()} onNodeDelete={onStart} />);
     expect(screen.queryByRole("button", { name: "删除节点" })).not.toBeInTheDocument();
+  });
+
+  it("可以关闭节点详情而不改动流程", async () => {
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    render(<NodeInspector node={AI_NODE} onNodeChange={vi.fn()} onNodeDelete={vi.fn()} onClose={onClose} />);
+    await user.click(screen.getByRole("button", { name: "关闭节点详情" }));
+    expect(onClose).toHaveBeenCalledOnce();
   });
 });

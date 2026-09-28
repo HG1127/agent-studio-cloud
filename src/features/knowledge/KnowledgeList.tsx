@@ -1,9 +1,11 @@
 "use client";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { KnowledgeUploadResult, MAX_KNOWLEDGE_FILENAME_LENGTH, type KnowledgeSourceView } from "@/contracts/knowledge";
 import { setKnowledgeSourceArchivedAction } from "@/server/actions/archive-knowledge-source";
 import { retryKnowledgeSourceAction } from "@/server/actions/retry-knowledge-source";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 const STATUS_LABELS: Record<KnowledgeSourceView["status"], string> = {
   parsing: "解析中",
@@ -20,8 +22,11 @@ export function UploadSourceForm() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [selectedFileName, setSelectedFileName] = useState("尚未选择文件");
   return (
-    <section className="rounded-lg border bg-white p-4">
+    <section className="content-card">
+      <h2 className="section-title">上传业务资料</h2>
+      <p className="mt-1 text-sm text-slate-500">上传后会开始解析；只有显示“已就绪”的资料才会参与助手检索。</p>
       <form
         onSubmit={async (event) => {
           event.preventDefault();
@@ -60,20 +65,44 @@ export function UploadSourceForm() {
               setError(result.error);
               return;
             }
-            if (!result.blobStored) {
-              setNotice("资料已接收，但原文件尚未保存。需要长期留存原文件时，请先配置私有文件存储。");
-            }
+            const recordNotice = result.deduped ? "这份文件已有记录，未重复创建。" : "资料已接收。";
+            const statusNotice = result.source.status === "indexed"
+              ? "当前已就绪，可在资料库中检索。"
+              : result.source.status === "parsing"
+                ? "当前正在解析，完成后才能用于资料检索。"
+                : result.source.status === "failed"
+                  ? "解析失败，请在资料列表查看原因。"
+                  : "请在资料列表核对当前状态。";
+            const originalNotice = result.blobStored
+              ? ""
+              : "原文件尚未保存；以后无法直接重新解析，需要重新上传同一文件。";
+            setNotice(`${recordNotice}${statusNotice}${originalNotice}`);
             form.reset();
+            setSelectedFileName("尚未选择文件");
             router.refresh();
           } catch {
-            setError("上传失败，请检查网络后重试");
+            setError("暂时无法确认是否上传成功。请先核对资料列表，再决定是否重新上传。");
+            router.refresh();
           } finally {
             setUploading(false);
           }
         }}
-        className="flex flex-wrap items-center gap-3"
+        className="mt-4 flex flex-wrap items-center gap-3"
       >
-        <input type="file" name="file" className="text-sm" accept=".pdf,.docx,.txt,.md,.html,.json,.csv,.xml" />
+        <label className="inline-flex cursor-pointer items-center gap-3 text-sm">
+          <span className="rounded-lg border border-slate-300 bg-white px-3 py-2 font-medium text-slate-700 transition-colors hover:border-indigo-300 hover:text-indigo-700">
+            选择文件
+          </span>
+          <span className="max-w-72 truncate text-slate-500">{selectedFileName}</span>
+          <input
+            aria-label="选择业务资料"
+            type="file"
+            name="file"
+            className="sr-only"
+            accept=".pdf,.docx,.txt,.md,.html,.json,.csv,.xml"
+            onChange={(event) => setSelectedFileName(event.currentTarget.files?.[0]?.name ?? "尚未选择文件")}
+          />
+        </label>
         <button type="submit" disabled={uploading} className="rounded bg-gray-900 px-3 py-1.5 text-sm text-white disabled:opacity-50">
           {uploading ? "上传中…" : "上传文档"}
         </button>
@@ -85,13 +114,14 @@ export function UploadSourceForm() {
   );
 }
 
-export function KnowledgeList({ initial, archived = false, serverManaged = false }: { initial: KnowledgeSourceView[]; archived?: boolean; serverManaged?: boolean }) {
+export function KnowledgeList({ initial, archived = false, serverManaged = false, hasFilter = false, emptyPageHref }: { initial: KnowledgeSourceView[]; archived?: boolean; serverManaged?: boolean; hasFilter?: boolean; emptyPageHref?: string }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [activeSourceId, setActiveSourceId] = useState<string | null>(null);
+  const [confirmSource, setConfirmSource] = useState<KnowledgeSourceView | null>(null);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
-  const hasParsing = initial.some((source) => source.status === "parsing" && !source.parsingStalled);
   const filtered = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase("zh-CN");
     if (!normalized) return initial;
@@ -100,14 +130,14 @@ export function KnowledgeList({ initial, archived = false, serverManaged = false
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
   const visible = serverManaged ? initial : filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-  useEffect(() => {
-    if (!hasParsing) return;
-    const timer = setInterval(() => startTransition(() => router.refresh()), 2000);
-    return () => clearInterval(timer);
-  }, [hasParsing, router]);
-
   if (initial.length === 0) {
-    return <p className="text-sm text-gray-600">{archived ? "没有已归档的资料" : "还没有上传过文档，上传第一份业务资料后，助手的「读取资料」步骤就能真正查到内容。"}</p>;
+    const message = emptyPageHref
+      ? hasFilter ? "当前页没有匹配的资料。" : "当前页没有资料。"
+      : hasFilter ? "没有找到匹配的资料，请修改文件名后再查找。"
+        : archived ? "没有已归档的资料" : "还没有上传过文档；解析就绪的资料可供助手在运行时检索。";
+    return <div className="space-y-2 text-sm text-gray-600"><p>{message}</p>
+      {emptyPageHref ? <Link href={emptyPageHref} className="inline-block font-semibold text-indigo-700 hover:underline">返回上一页</Link> : null}
+    </div>;
   }
   return (
     <>
@@ -130,26 +160,25 @@ export function KnowledgeList({ initial, archived = false, serverManaged = false
       {visible.length === 0 ? <p className="py-4 text-sm text-gray-600">没有找到匹配的资料</p> : null}
       <ul className="space-y-2">
         {visible.map((source) => (
-          <li key={source.id} className="flex items-center justify-between rounded-lg border bg-white p-3">
-            <div>
-              <p className="text-sm font-medium text-gray-900">{source.name}</p>
-              <p className="mt-0.5 text-xs text-gray-500">
-                {source.parsingStalled ? "解析已中断" : STATUS_LABELS[source.status]} · {(source.sizeBytes / 1024).toFixed(1)} KB · {source.chunkCount} 段 · 上传于 {source.createdAt.slice(0, 10)}
-              {source.status === "failed" && source.error
-                ? ` · ${source.error} · ${source.hasOriginal ? "可直接重新解析" : "重新上传同一文件即可重试"}`
-                : source.parsingStalled
-                  ? ` · ${source.hasOriginal ? "可直接重新解析" : "重新上传同一文件即可重试"}`
-                : ""}
-              </p>
+          <li key={source.id} className="flex min-w-0 flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="min-w-0 break-all text-sm font-semibold text-slate-900">{source.name}</p>
+                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${source.parsingStalled || source.status === "failed" ? "bg-red-50 text-red-700" : source.status === "indexed" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{source.parsingStalled ? "解析已中断" : STATUS_LABELS[source.status]}</span>
+              </div>
+              <p className="mt-1 text-xs text-slate-500">{(source.sizeBytes / 1024).toFixed(1)} KB · {source.chunkCount} 段 · 上传于 {source.createdAt.slice(0, 10)}</p>
+              {source.status === "parsing" && !source.parsingStalled ? <p className="mt-1 text-xs text-slate-600">解析在后台继续；可点页面顶部“重新读取状态”查看结果。解析就绪后才能用于助手检索。</p> : null}
+              {(source.status === "failed" || source.parsingStalled) ? <p className="mt-1 break-words text-xs text-red-700">{source.error ? `${source.error} · ` : ""}{source.hasOriginal ? "可直接重新解析" : "重新上传同一文件即可重试"}</p> : null}
             </div>
-            <span className="flex shrink-0 items-center gap-3">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs sm:justify-end">
               {!archived && (source.status === "failed" || source.parsingStalled) && source.hasOriginal ? (
                 <button
                   type="button"
                   disabled={pending}
-                  className="text-xs text-blue-700 hover:underline disabled:opacity-50"
+                  className="font-medium text-indigo-700 hover:underline disabled:opacity-50"
                   onClick={() => {
                     setError(null);
+                    setActiveSourceId(source.id);
                     startTransition(async () => {
                       try {
                         const result = await retryKnowledgeSourceAction(source.id);
@@ -157,35 +186,26 @@ export function KnowledgeList({ initial, archived = false, serverManaged = false
                         else router.refresh();
                       } catch {
                         setError("重新解析失败，请检查网络后重试");
+                      } finally {
+                        setActiveSourceId(null);
                       }
                     });
                   }}
                 >
-                  重新解析
+                  {activeSourceId === source.id && pending ? "正在重新解析…" : "重新解析"}
                 </button>
               ) : null}
-              {source.hasOriginal ? <a href={`/api/knowledge/sources/${source.id}/file`} download className="text-xs text-blue-700 hover:underline">下载原文件</a>
-                : <span className="text-xs text-gray-400">未保留原文件</span>}
+              {source.hasOriginal ? <a href={`/api/knowledge/sources/${source.id}/file`} download className="font-medium text-indigo-700 hover:underline">下载原文件</a>
+                : <span className="text-slate-400">未保留原文件</span>}
               <button
                 type="button"
                 disabled={pending}
-                className="text-xs text-gray-500 hover:text-gray-900 disabled:opacity-50"
-                onClick={() => {
-                  setError(null);
-                  startTransition(async () => {
-                    try {
-                      const result = await setKnowledgeSourceArchivedAction({ sourceId: source.id, archived: !archived });
-                      if (!result.ok) setError(result.error);
-                      else router.refresh();
-                    } catch {
-                      setError(archived ? "恢复资料失败，请检查网络后重试" : "归档资料失败，请检查网络后重试");
-                    }
-                  });
-                }}
+                className="font-medium text-slate-600 hover:text-slate-900 disabled:opacity-50"
+                onClick={() => { setError(null); setConfirmSource(source); }}
               >
-                {archived ? "恢复" : "归档"}
+                {activeSourceId === source.id && pending ? "正在处理…" : archived ? "恢复" : "归档"}
               </button>
-            </span>
+            </div>
           </li>
         ))}
       </ul>
@@ -195,6 +215,35 @@ export function KnowledgeList({ initial, archived = false, serverManaged = false
         <button type="button" disabled={currentPage === pageCount} onClick={() => setPage(currentPage + 1)} className="rounded border px-3 py-1.5 disabled:opacity-40">下一页</button>
       </nav> : null}
       {error ? <p role="alert" className="mt-2 text-sm text-red-600">{error}</p> : null}
+      <ConfirmDialog
+        open={confirmSource !== null}
+        onOpenChange={(open) => { if (!open) setConfirmSource(null); }}
+        title={archived ? "恢复这份资料？" : "归档这份资料？"}
+        description={archived
+          ? `“${confirmSource?.name ?? "这份资料"}”恢复后，解析就绪的内容可再次用于助手检索。`
+          : `“${confirmSource?.name ?? "这份资料"}”归档后不再参与助手检索，之后可以从已归档资料中恢复。`}
+        confirmLabel={archived ? "确认恢复" : "确认归档"}
+        tone="warning"
+        pending={pending}
+        onConfirm={() => {
+          const source = confirmSource;
+          if (!source) return;
+          setError(null);
+          setActiveSourceId(source.id);
+          startTransition(async () => {
+            try {
+              const result = await setKnowledgeSourceArchivedAction({ sourceId: source.id, archived: !archived });
+              if (!result.ok) setError(result.error);
+              else router.refresh();
+            } catch {
+              setError(archived ? "恢复资料失败，请检查网络后重试" : "归档资料失败，请检查网络后重试");
+            } finally {
+              setConfirmSource(null);
+              setActiveSourceId(null);
+            }
+          });
+        }}
+      />
     </>
   );
 }

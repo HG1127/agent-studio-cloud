@@ -5,6 +5,7 @@ export const AuditIssueView = z.object({
   severity: z.enum(["critical", "warning", "info"]),
   title: z.string(),
   detail: z.string(),
+  nodeId: z.string().nullable(),
   fixable: z.boolean(),
 });
 export type AuditIssueView = z.infer<typeof AuditIssueView>;

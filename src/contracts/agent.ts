@@ -2,9 +2,11 @@ import { z } from "zod";
 import { WorkflowDraft } from "./workflow";
 import { VersionExportFile } from "./version";
 
+export const MAX_AGENT_INTENT_LENGTH = 2_000;
+
 export const AgentCreateInput = z.object({
   name: z.string().trim().min(1).max(60),
-  intentText: z.string().trim().min(10).max(2000),
+  intentText: z.string().trim().min(10).max(MAX_AGENT_INTENT_LENGTH),
 });
 export type AgentCreateInput = z.infer<typeof AgentCreateInput>;
 

@@ -126,7 +126,7 @@ server/workflows → server/steps → server/domain + lib/
 - Vitest：`server/domain/` 纯逻辑必测；contracts schema 测试。
 - @workflow/vitest：审批暂停/恢复、重试路径的集成测试。
 - Playwright：关键用户路径 E2E（创建 Agent → 编排 → 运行 → 查看结果）。
-- GitHub Actions：PR 上跑 `tsc --noEmit` + lint + vitest + build；Vercel 为每个 PR 出预览环境；合并主分支部署生产。
+- 每次合并或上线前优先核对 GitHub Actions 免费额度；可免费运行时手动触发完整 CI，否则在本地临时 Neon 分支运行等价验收。Vercel 为每个 PR 出预览环境；合并主分支部署生产。
 - 环境变量（Neon 连接串、Blob 令牌、模型 API Key）全部走 Vercel 环境变量（加密），不入库不入码。
 
 ## 8. 迭代里程碑（垂直切片，每段可用）

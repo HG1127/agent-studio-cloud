@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { ArrowDown, ArrowUp, X } from "lucide-react";
 import type { AgentTargetOption } from "@/contracts/agent";
 import type { KnowledgeSourceView } from "@/contracts/knowledge";
 import type { ToolRegistryOption } from "@/contracts/tool-registry";
+import { toolBindingStatus } from "./tool-binding-status";
 import {
   MAX_CONDITION_BRANCHES,
   MAX_PARALLEL_BRANCHES,
@@ -15,6 +17,11 @@ import {
 import { validateJsonSchemaDefinition } from "@/server/domain/json-schema";
 import { NODE_TYPE_LABELS } from "./CustomNodes";
 import { isHiddenControlNode } from "@/lib/workflow-node-visibility";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { BusinessEvidenceCard } from "./BusinessEvidenceCard";
+import { NodeRoutesEditor } from "./NodeRoutesEditor";
+import { ADDABLE_NODE_TYPES } from "./create-workflow-node";
+import type { ChangeableNodeType } from "./change-workflow-node-type";
 
 interface NodeInspectorProps {
   node: WorkflowNode;
@@ -24,6 +31,18 @@ interface NodeInspectorProps {
   knowledgeSources?: KnowledgeSourceView[];
   onNodeChange: (node: WorkflowNode) => void;
   onNodeDelete: (nodeId: string) => void;
+  onRequestTypeChange?: (type: ChangeableNodeType) => void;
+  showControlNodes?: boolean;
+  onRouteChange?: (handle: string, targetId: string | null) => void;
+  onDisconnectIncoming?: (sourceId: string, handle: string, targetId: string) => void;
+  onRevealControlNodes?: () => void;
+  onFocusNode?: (nodeId: string) => void;
+  deletionContinuationTitle?: string | null;
+  canMoveUp?: boolean;
+  canMoveDown?: boolean;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
+  onClose?: () => void;
 }
 
 const DEFAULT_HANDOFF_PROHIBITED = ["密钥和访问令牌", "与本次任务无关的个人隐私", "未确认的内部草稿"];
@@ -77,7 +96,7 @@ const CONDITION_OPERATORS = [
 function changeInlineStepType(steps: Array<Record<string, unknown>>, index: number, type: InlineStepType) {
   return steps.map((step, stepIndex) => {
     if (stepIndex !== index) return step;
-    if (type === "tool") return { ...step, type, tool: step.tool ?? { connector: "demo", action: "demo", scope: "demo", risk: "low", maxRetries: 1, registryToolId: "demo", protocol: "demo", inputSchema: { type: "object" }, outputSchema: { type: "object" } } };
+    if (type === "tool") return { ...step, type, tool: step.tool ?? { connector: "unbound", action: "", scope: "", risk: "high", maxRetries: 3, registryToolId: null, protocol: "unbound", unresolved: true, inputSchema: { type: "object" }, outputSchema: { type: "object" } } };
     if (type === "knowledge") return { ...step, type, knowledge: step.knowledge ?? { space: "业务资料库", query: "" } };
     if (type === "memory") return { ...step, type, memory: step.memory ?? { mode: "read", limit: 5 } };
     if (type === "agent_call") return { ...step, type, agentCall: step.agentCall ?? { targetAgentId: "", versionId: "" } };
@@ -94,8 +113,8 @@ function boundedNumber(value: string, fallback: number, min: number, max: number
 function inlineToolSpec(toolId: string, currentAction: string, options: ToolRegistryOption[]) {
   const selected = options.find((item) => item.id === toolId);
   if (!selected) return {
-    connector: "demo", action: currentAction || "demo", scope: "demo", risk: "low" as const,
-    maxRetries: 1, registryToolId: "demo", protocol: "demo", unresolved: false,
+    connector: toolId === "demo" ? "demo" : "unbound", action: toolId === "demo" ? currentAction || "demo" : "", scope: toolId === "demo" ? "demo" : "", risk: toolId === "demo" ? "low" as const : "high" as const,
+    maxRetries: toolId === "demo" ? 1 : 3, registryToolId: toolId === "demo" ? "demo" : null, protocol: toolId === "demo" ? "demo" : "unbound", unresolved: toolId !== "demo",
     inputSchema: { type: "object" }, outputSchema: { type: "object" },
   };
   return {
@@ -153,33 +172,34 @@ function InlineStepEditor({ label, steps, index, toolOptions, agentTargets, know
   const knowledge = step.knowledge && typeof step.knowledge === "object" ? step.knowledge as Record<string, unknown> : null;
   const maxAttempts = Number(retry?.maxAttempts ?? tool?.maxRetries ?? 1);
   const backoffMs = Number(retry?.backoffMs ?? 5_000);
-  return <div className="grid gap-1 rounded-md bg-gray-50 p-2 md:grid-cols-[110px_1fr_2fr_auto]">
-    <select aria-label={`${label} 类型`} value={type}
+  return <div className="grid min-w-0 gap-2 rounded-md bg-gray-50 p-2">
+    <label className="flex min-w-0 flex-col gap-1 text-xs text-gray-600">处理类型<select aria-label={`${label} 类型`} value={type}
       onChange={(event) => onChange(changeInlineStepType(steps, index, event.target.value as InlineStepType))}
-      className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs">
+      className="w-full min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs">
       <option value="ai">智能处理</option><option value="system">自动记录</option><option value="tool">业务工具</option>
       <option value="knowledge">读取资料</option><option value="memory">参考经验</option>
       <option value="agent_call">呼叫其他助手</option><option value="handoff">交给其他助手</option>
-    </select>
-    <input aria-label={`${label} 名称`} value={String(step.title ?? "")}
+    </select></label>
+    <label className="flex min-w-0 flex-col gap-1 text-xs text-gray-600">步骤名称<input aria-label={`${label} 名称`} value={String(step.title ?? "")}
       onChange={(event) => onChange(changeInlineStep(steps, index, "title", event.target.value))}
-      className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
-    <input aria-label={`${label} 说明`} value={String(step.description ?? "")}
+      className="w-full min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" /></label>
+    <label className="flex min-w-0 flex-col gap-1 text-xs text-gray-600">步骤说明<input aria-label={`${label} 说明`} value={String(step.description ?? "")}
       onChange={(event) => onChange(changeInlineStep(steps, index, "description", event.target.value))}
-      className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
-    {removable ? <button type="button" aria-label={`删除${label}`} onClick={onDelete} className="text-xs text-red-600">删除</button> : <span />}
-    {type === "tool" ? <div className="grid gap-2 md:col-span-4 md:grid-cols-3">
-      <select aria-label={`${label} 业务工具`} value={tool?.unresolved === true ? "" : String(tool?.registryToolId ?? "demo")}
+      className="w-full min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" /></label>
+    {removable ? <button type="button" aria-label={`删除${label}`} onClick={onDelete} className="min-h-9 justify-self-end rounded-lg px-2 text-xs font-semibold text-red-600 hover:bg-red-50">删除</button> : null}
+    {type === "tool" ? <div className="grid min-w-0 gap-2">
+      <select aria-label={`${label} 业务工具`} value={tool?.unresolved === true ? "" : String(tool?.registryToolId ?? "")}
         onChange={(event) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
           ...item,
-          tool: inlineToolSpec(event.target.value, String(tool?.action ?? "demo"), toolOptions),
+          tool: inlineToolSpec(event.target.value, String(tool?.action ?? ""), toolOptions),
         } : item))}
-        className="rounded-md border border-gray-300 px-2 py-1.5 text-xs">
-        <option value="" disabled>请选择业务工具</option>
+        className="w-full min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs">
+        <option value="">未绑定业务工具</option>
         <option value="demo">演示工具（不连接业务系统）</option>
         {toolOptions.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
       </select>
-      {tool?.unresolved === true ? <p className="text-xs text-amber-700 md:col-span-3">导入文件中的业务工具在当前环境不可用，请重新选择。</p> : null}
+      {tool?.unresolved === true ? <p className="text-xs text-amber-700">{tool.connector === "unbound" ? "尚未绑定可用的业务工具，请选择服务端工具；也可明确选择不连接业务系统的演示工具。" : "导入文件中的业务工具在当前环境不可用，请重新选择。"}</p> : null}
+      {tool?.protocol === "demo" && tool?.unresolved !== true ? <p className="text-xs text-amber-700">当前是演示工具，不会连接业务系统或执行真实业务操作。</p> : null}
       <label className="flex items-center gap-2 text-xs text-gray-600">最多尝试
         <input aria-label={`${label} 最多尝试次数`} type="number" min={1} max={8} value={maxAttempts}
           onChange={(event) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
@@ -197,13 +217,13 @@ function InlineStepEditor({ label, steps, index, toolOptions, agentTargets, know
           className="min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />秒
       </label>
     </div> : null}
-    {type === "knowledge" ? <div className="space-y-2 md:col-span-4">
+    {type === "knowledge" ? <div className="min-w-0 space-y-2">
       <input aria-label={`${label} 检索内容`} value={String(knowledge?.query ?? "")} placeholder="留空则使用本次运行输入"
         onChange={(event) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
           ...item,
           knowledge: { ...(knowledge ?? { space: "业务资料库" }), query: event.target.value },
         } : item))}
-        className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
+        className="w-full min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
       <KnowledgeSourcePicker label={`${label} 资料范围`} sourceIds={Array.isArray(knowledge?.sourceIds) ? knowledge.sourceIds.filter((id): id is string => typeof id === "string") : []}
         selectionRequired={knowledge?.selectionRequired === true}
         sources={knowledgeSources}
@@ -218,7 +238,7 @@ function InlineStepEditor({ label, steps, index, toolOptions, agentTargets, know
         ...item,
         agentCall: agentCallSelection(agentTargets.find((target) => target.versionId === event.target.value)),
       } : item))}
-      className="rounded-md border border-gray-300 px-2 py-1.5 text-xs md:col-span-4">
+      className="w-full min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs">
       <option value="">请选择已发布助手</option>
       {agentTargets.map((target) => <option key={target.versionId} value={target.versionId}>{target.agentName}（版本 {target.version}）</option>)}
     </select> : null}
@@ -231,7 +251,7 @@ function InlineStepEditor({ label, steps, index, toolOptions, agentTargets, know
           memoryAccess: { mode: event.target.value as "none" | "self" | "team" },
         },
       } : item))}
-      className="rounded-md border border-gray-300 px-2 py-1.5 text-xs md:col-span-4">
+      className="w-full min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs">
       <option value="none">不传递长期经验</option>
       <option value="self">仅使用目标助手自身经验</option>
       <option value="team">共享当前助手已读取的经验</option>
@@ -242,7 +262,7 @@ function InlineStepEditor({ label, steps, index, toolOptions, agentTargets, know
         ...item,
         ...handoffSelection(agentTargets.find((target) => target.versionId === event.target.value)),
       } : item))}
-      className="rounded-md border border-gray-300 px-2 py-1.5 text-xs md:col-span-4">
+      className="w-full min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs">
       <option value="">请选择已发布助手</option>
       {agentTargets.map((target) => <option key={target.versionId} value={target.versionId}>{target.agentName}（版本 {target.version}）</option>)}
     </select> : null}
@@ -323,9 +343,13 @@ function WaitPayloadSchemaEditor({ node, onNodeChange }: {
 }
 
 // 通用标题/说明与各节点专属配置集中在同一检查面板；condition 的说明以「判断说明」呈现。
-export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agentTargets = [], toolOptions = [], knowledgeSources = [], onNodeChange, onNodeDelete }: NodeInspectorProps) {
+export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agentTargets = [], toolOptions = [], knowledgeSources = [], onNodeChange, onNodeDelete, onRequestTypeChange, showControlNodes = false, onRouteChange, onDisconnectIncoming, onRevealControlNodes, onFocusNode, deletionContinuationTitle, canMoveUp = false, canMoveDown = false, onMoveUp, onMoveDown, onClose }: NodeInspectorProps) {
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const isHuman = node.type === "human";
   const isCondition = node.type === "condition";
+  const toolStatus = node.type === "tool" ? toolBindingStatus(node, toolOptions) : null;
+  const unavailableToolId = toolStatus === "unavailable" && node.tool?.registryToolId
+    && !toolOptions.some((option) => option.id === node.tool?.registryToolId) ? node.tool.registryToolId : null;
   const knowledge = node.knowledge;
   const deletable = node.type !== "trigger" && node.type !== "end";
   const memorySources = Object.values(workflowNodes).filter((candidate) =>
@@ -335,11 +359,40 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
     && !isHiddenControlNode(candidate),
   );
   return (
-    <aside aria-label="节点详情" className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4">
-      <div className="flex items-center gap-2">
-        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">{NODE_TYPE_LABELS[node.type]}</span>
-        <h2 className="text-sm font-semibold text-gray-900">节点详情</h2>
+    <aside aria-label="节点详情" className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-xl shadow-slate-950/5 xl:shadow-sm">
+      <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
+        <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">{NODE_TYPE_LABELS[node.type]}</span>
+        <h2 className="text-sm font-bold text-slate-950">节点详情</h2>
+        {onClose ? <button type="button" aria-label="关闭节点详情" onClick={onClose}
+          className="ml-auto grid size-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+          <X className="size-4" />
+        </button> : null}
       </div>
+      {onRequestTypeChange ? <div className="grid gap-1">
+        <label htmlFor="node-processing-type" className="text-sm font-medium">处理类型</label>
+        <select id="node-processing-type" value={node.type} disabled={!deletable || isHiddenControlNode(node)}
+          onChange={(event) => onRequestTypeChange(event.target.value as ChangeableNodeType)}
+          className="h-10 min-w-0 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 disabled:bg-slate-100 disabled:text-slate-500">
+          {!ADDABLE_NODE_TYPES.some((type) => type === node.type) ? <option value={node.type}>{NODE_TYPE_LABELS[node.type]}</option> : null}
+          {ADDABLE_NODE_TYPES.map((type) => <option key={type} value={type}>{NODE_TYPE_LABELS[type]}</option>)}
+        </select>
+        {!deletable || isHiddenControlNode(node) ? <p className="text-xs text-slate-500">启动、完成和控制检查步骤不能更改类型。</p>
+          : <p className="text-xs text-slate-500">更改类型会重建这一步的专属设置；确认前会说明受影响的路径和交付字段。</p>}
+      </div> : null}
+      {onMoveUp && onMoveDown ? <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <p className="text-xs font-semibold text-slate-700">调整执行顺序</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button type="button" disabled={!canMoveUp} onClick={onMoveUp} title="与前一个普通步骤交换顺序"
+            className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:border-slate-400 disabled:cursor-not-allowed disabled:text-slate-400">
+            <ArrowUp className="size-4" />上移步骤
+          </button>
+          <button type="button" disabled={!canMoveDown} onClick={onMoveDown} title="与后一个普通步骤交换顺序"
+            className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:border-slate-400 disabled:cursor-not-allowed disabled:text-slate-400">
+            <ArrowDown className="size-4" />下移步骤
+          </button>
+        </div>
+        {!canMoveUp && !canMoveDown ? <p className="mt-2 text-xs leading-5 text-slate-500">只有同一条单一路径上的相邻普通步骤可以换序。分支或控制检查请调整流程线。</p> : null}
+      </div> : null}
       <div className="flex flex-col gap-1">
         <label htmlFor="node-title" className="text-sm font-medium">
           节点名称
@@ -365,12 +418,17 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
           className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
         />
       </div>
+      {onRouteChange && onDisconnectIncoming && onRevealControlNodes && onFocusNode ? <NodeRoutesEditor node={node} nodes={workflowNodes} showControlNodes={showControlNodes}
+        onRouteChange={onRouteChange} onDisconnectIncoming={onDisconnectIncoming} onRevealControlNodes={onRevealControlNodes} onFocusNode={onFocusNode} /> : null}
+      {node.type !== "trigger" && node.type !== "end" && !isHiddenControlNode(node) ? <BusinessEvidenceCard node={node} /> : null}
+      {node.type === "rule" && node.rule?.kind === "business_rule" ? <p className="text-xs leading-5 text-slate-600">此类业务规则由模型根据步骤说明判断；需要固定条件时，请使用“分情况处理”。</p> : null}
+      {node.type === "system" ? <p className="text-xs leading-5 text-slate-600">这一步只在本次运行中生成文字记录，不会更新外部业务系统。</p> : null}
       {node.type === "tool" ? (
         <div className="flex flex-col gap-2">
           <label htmlFor="node-tool-target" className="text-sm font-medium">业务工具</label>
           <select
             id="node-tool-target"
-            value={node.tool?.unresolved === true ? "" : node.tool?.registryToolId ?? ""}
+            value={unavailableToolId ?? (node.tool?.unresolved === true ? "" : node.tool?.registryToolId ?? "")}
             onChange={(event) => {
               const selected = toolOptions.find((item) => item.id === event.target.value);
               onNodeChange({
@@ -388,19 +446,22 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
                   inputSchema: selected.inputSchema,
                   outputSchema: selected.outputSchema,
                 } : {
-                  connector: "demo", action: node.tool?.action || "demo", scope: "demo", risk: "low",
-                  maxRetries: 1, registryToolId: "demo", protocol: "demo", unresolved: false,
+                  connector: event.target.value === "demo" ? "demo" : "unbound", action: event.target.value === "demo" ? node.tool?.action || "demo" : "", scope: event.target.value === "demo" ? "demo" : "", risk: event.target.value === "demo" ? "low" : "high",
+                  maxRetries: event.target.value === "demo" ? 1 : 3, registryToolId: event.target.value === "demo" ? "demo" : null, protocol: event.target.value === "demo" ? "demo" : "unbound", unresolved: event.target.value !== "demo",
                   inputSchema: { type: "object" }, outputSchema: { type: "object" },
                 },
               });
             }}
             className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
           >
-            <option value="" disabled>请选择业务工具</option>
+            <option value="">未绑定业务工具</option>
+            {unavailableToolId ? <option value={unavailableToolId}>原工具当前不可用（请重新选择）</option> : null}
             <option value="demo">演示工具（不连接业务系统）</option>
             {toolOptions.map((tool) => <option key={tool.id} value={tool.id}>{tool.name}</option>)}
           </select>
-          {node.tool?.unresolved === true ? <p className="text-xs text-amber-700">导入文件中的业务工具在当前环境不可用，请重新选择。</p> : null}
+          {toolStatus === "unbound" ? <p className="text-xs text-amber-700">尚未绑定可用的业务工具，请选择服务端工具；也可明确选择不连接业务系统的演示工具。</p> : null}
+          {toolStatus === "unavailable" ? <p className="text-xs text-amber-700">原业务工具在当前服务端不可用，请重新选择。保存前不会自动替换原绑定。</p> : null}
+          {toolStatus === "demo" ? <p className="text-xs text-amber-700">当前是演示工具，不会连接业务系统或执行真实业务操作。</p> : null}
           {toolOptions.length === 0 ? <p className="text-xs text-gray-500">服务端还没有配置可用的业务工具</p> : null}
           {toolOptions.find((tool) => tool.id === node.tool?.registryToolId)?.description ? (
             <p className="text-xs text-gray-500">{toolOptions.find((tool) => tool.id === node.tool?.registryToolId)?.description}</p>
@@ -501,22 +562,22 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
                       <option value="all">全部满足</option><option value="any">任一满足</option>
                     </select>
                   </label>
-                  {rules.map((rule, ruleIndex) => <div key={ruleIndex} className="grid gap-1 md:grid-cols-[1.5fr_1fr_1fr_auto]">
-                    <input aria-label={`情况 ${index + 1} 条件 ${ruleIndex + 1} 数据`} value={rule.source} placeholder="input.status"
+                  {rules.map((rule, ruleIndex) => <div key={ruleIndex} className="grid min-w-0 gap-2 rounded-lg border border-slate-100 bg-slate-50/70 p-2">
+                    <label className="flex min-w-0 flex-col gap-1 text-xs text-gray-600">判断数据<input aria-label={`情况 ${index + 1} 条件 ${ruleIndex + 1} 数据`} value={rule.source} placeholder="input.status"
                       onChange={(event) => updateBranch({ ...branch, rules: rules.map((item, itemIndex) => itemIndex === ruleIndex ? { ...item, source: event.target.value } : item) })}
-                      className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
-                    <select aria-label={`情况 ${index + 1} 条件 ${ruleIndex + 1} 判断方式`} value={rule.operator}
+                      className="w-full min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" /></label>
+                    <label className="flex min-w-0 flex-col gap-1 text-xs text-gray-600">判断方式<select aria-label={`情况 ${index + 1} 条件 ${ruleIndex + 1} 判断方式`} value={rule.operator}
                       onChange={(event) => updateBranch({ ...branch, rules: rules.map((item, itemIndex) => itemIndex === ruleIndex ? { ...item, operator: event.target.value } : item) })}
-                      className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs">
+                      className="w-full min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs">
                       {CONDITION_OPERATORS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                    </select>
-                    <input aria-label={`情况 ${index + 1} 条件 ${ruleIndex + 1} 比较值`} value={rule.value === null ? "null" : String(rule.value ?? "")} placeholder="比较值"
+                    </select></label>
+                    <label className="flex min-w-0 flex-col gap-1 text-xs text-gray-600">比较值<input aria-label={`情况 ${index + 1} 条件 ${ruleIndex + 1} 比较值`} value={rule.value === null ? "null" : String(rule.value ?? "")} placeholder="比较值"
                       onChange={(event) => updateBranch({ ...branch, rules: rules.map((item, itemIndex) => itemIndex === ruleIndex ? { ...item, value: parseConditionValue(event.target.value) } : item) })}
-                      className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
+                      className="w-full min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" /></label>
                     <button type="button" aria-label={`删除情况 ${index + 1} 条件 ${ruleIndex + 1}`}
                       disabled={rules.length === 1}
                       onClick={() => updateBranch({ ...branch, rules: rules.filter((_, itemIndex) => itemIndex !== ruleIndex) })}
-                      className="text-xs text-red-600 disabled:text-gray-300">删除</button>
+                      className="min-h-9 justify-self-end rounded-lg px-2 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:text-gray-300">删除</button>
                   </div>)}
                   <div className="flex gap-3">
                     <button type="button" disabled={rules.length >= MAX_CONDITION_BRANCHES}
@@ -831,12 +892,25 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
       {deletable ? (
         <button
           type="button"
-          onClick={() => onNodeDelete(node.id)}
+          onClick={() => setDeleteOpen(true)}
           className="w-fit rounded-md border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:border-red-400"
         >
           删除节点
         </button>
       ) : null}
+      <ConfirmDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title="删除这个节点？"
+        description={deletionContinuationTitle
+          ? `将删除“${node.title}”，前一步会直接接到“${deletionContinuationTitle}”。相关配置和引用也会移除；可撤销，保存草稿后生效。`
+          : `将删除“${node.title}”，所连路径会断开，可能需要重新连线。相关控制检查和引用也可能移除；可撤销，保存草稿后生效。`}
+        confirmLabel="删除节点"
+        onConfirm={() => {
+          setDeleteOpen(false);
+          onNodeDelete(node.id);
+        }}
+      />
     </aside>
   );
 }

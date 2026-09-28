@@ -38,9 +38,17 @@ beforeEach(() => {
 });
 
 describe("运行详情步骤数据", () => {
+  it("从筛选列表进入时返回原范围，直接打开时仍返回全部记录", async () => {
+    mocks.steps.mockResolvedValue([]);
+    const { rerender } = render(await RunDetail({ runId: "00000000-0000-4000-8000-000000000001", backHref: "/runs?status=failed&page=2" }));
+    expect(screen.getByRole("link", { name: "返回筛选结果" })).toHaveAttribute("href", "/runs?status=failed&page=2");
+    rerender(await RunDetail({ runId: "00000000-0000-4000-8000-000000000001" }));
+    expect(screen.getByRole("link", { name: "返回运行记录" })).toHaveAttribute("href", "/runs");
+  });
+
   it("提供完整运行报告下载入口", async () => {
     mocks.steps.mockResolvedValue([]);
-    render(await RunDetail({ runId: "00000000-0000-4000-8000-000000000001" }));
+    const { container } = render(await RunDetail({ runId: "00000000-0000-4000-8000-000000000001" }));
     expect(screen.getByRole("link", { name: "下载运行报告" })).toHaveAttribute(
       "href",
       "/api/runs/00000000-0000-4000-8000-000000000001/export",
@@ -50,6 +58,12 @@ describe("运行详情步骤数据", () => {
       "/runs/00000000-0000-4000-8000-000000000003",
     );
     expect(screen.getByText("运行版本：版本 4")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "结果与执行证据已保存" })).toBeVisible();
+    const result = container.querySelector("#result");
+    const input = container.querySelector("#input");
+    expect(result).not.toBeNull();
+    expect(input).not.toBeNull();
+    expect(result!.compareDocumentPosition(input!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("可展开步骤的持久化输出和模型用量，不依赖最终结果包含用量", async () => {
@@ -112,6 +126,8 @@ describe("运行详情步骤数据", () => {
     expect(container.textContent).not.toContain("upstream-secret-value");
     expect(container.textContent).not.toContain("person@example.com");
     expect(container.textContent).not.toContain("top-level-secret-value");
+    expect(screen.getByRole("heading", { name: "先核对失败原因，再决定是否重试" })).toBeVisible();
+    expect(screen.getByText("失败原因")).toBeVisible();
     expect(screen.getAllByRole("alert").some((element) => element.textContent === "[已隐藏敏感信息]")).toBe(true);
     await userEvent.click(screen.getByRole("button", { name: "复制最终结果" }));
     expect(writeText).toHaveBeenCalledOnce();
@@ -138,6 +154,56 @@ describe("运行详情步骤数据", () => {
     expect(screen.getByText("回复邮件")).toBeVisible();
     expect(screen.getByText("已生成回复邮件")).toBeVisible();
     expect(screen.queryByText("步骤结果")).not.toBeInTheDocument();
+  });
+
+  it("将结构化交付结果展开成可读条目，不把内部字段名作为界面标签", async () => {
+    mocks.steps.mockResolvedValue([]);
+    mocks.runView.mockResolvedValue(RunView.parse({
+      id: "00000000-0000-4000-8000-000000000001",
+      agentId: "00000000-0000-4000-8000-000000000002",
+      agentName: "售后助手",
+      status: "completed",
+      input: {},
+      result: { delivery: { summary: "已整理三条建议", details: [{ title: "先联系客户", detail: "说明处理时间" }, { title: "跟进工单", detail: "明天回访" }] } },
+      outputContract: { fields: [{ path: "delivery", label: "处理建议", required: true, sourceNodeId: "deliver" }] },
+      error: null,
+      startedAt: null,
+      finishedAt: null,
+    }));
+
+    const { container } = render(await RunDetail({ runId: "00000000-0000-4000-8000-000000000001" }));
+    const result = container.querySelector("#result")!;
+    expect(screen.getByText("处理建议")).toBeVisible();
+    expect(screen.getByText("已整理三条建议")).toBeVisible();
+    expect(screen.getByText("先联系客户")).toBeVisible();
+    expect(screen.getByText("明天回访")).toBeVisible();
+    expect(result.querySelectorAll("ol > li")).toHaveLength(2);
+    expect(result.querySelector("dl")?.textContent).toContain("摘要");
+    expect(result.querySelector("dl")?.textContent).toContain("明细");
+  });
+
+  it("没有字段契约时仍展示真实输入与结果，并保留开发者原始数据", async () => {
+    mocks.steps.mockResolvedValue([]);
+    mocks.runView.mockResolvedValue(RunView.parse({
+      id: "00000000-0000-4000-8000-000000000001",
+      agentId: "00000000-0000-4000-8000-000000000002",
+      agentName: "业务助手",
+      status: "completed",
+      input: { taskCode: "发货核对" },
+      result: { machineStep: ["已核对订单", "已核对库存"] },
+      error: null,
+      startedAt: null,
+      finishedAt: null,
+    }));
+
+    const { container } = render(await RunDetail({ runId: "00000000-0000-4000-8000-000000000001" }));
+    expect(container.querySelector("#input")?.textContent).toContain("内容 1");
+    expect(screen.getByText("发货核对")).toBeVisible();
+    expect(container.querySelector("#result")?.textContent).toContain("步骤结果 1");
+    expect(screen.getByText("已核对订单")).toBeVisible();
+    expect(screen.getByText("已核对库存")).toBeVisible();
+    expect(screen.getByText("查看输入数据（开发者数据）")).toBeVisible();
+    expect(screen.getByText("查看结果数据（开发者数据）")).toBeVisible();
   });
 
   it("人工拒绝后展示受控终态而不是缺失的交付字段", async () => {

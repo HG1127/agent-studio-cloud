@@ -9,6 +9,8 @@ const nextConfig: NextConfig = {
   // PDF 解析改用 unpdf（serverless 版 pdfjs，无 DOMMatrix 依赖），可直接打包
   serverExternalPackages: ["mammoth"],
   experimental: {
+    // 限制构建并发，避免低配构建机使用默认 worker 数耗尽提交内存；保留两个 worker 供 Next 静态页管线协作。
+    cpus: 2,
     // 助手导入的有效流程最多 1MB；为导出包装与 Server Action 编码预留空间，同时不越过平台请求上限。
     serverActions: { bodySizeLimit: "3mb" },
   },
