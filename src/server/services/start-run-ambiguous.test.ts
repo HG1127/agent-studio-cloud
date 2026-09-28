@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   completeEvaluationForRun: vi.fn(),
   updateRows: [] as unknown[],
   updateFilters: [] as SQL[],
+  selectError: null as Error | null,
 }));
 
 vi.mock("workflow/api", () => ({ start: mocks.start }));
@@ -19,11 +20,14 @@ vi.mock("@/lib/db", () => ({
       mocks.updateFilters.push(filter);
       return { returning: async () => mocks.updateRows };
     } }) }),
-    select: () => ({ from: () => ({ where: () => ({ limit: async () => [] }) }) }),
+    select: () => {
+      if (mocks.selectError) throw mocks.selectError;
+      return { from: () => ({ where: () => ({ limit: async () => [] }) }) };
+    },
   },
 }));
 
-import { launchClaimedRun } from "@/server/services/start-run-core";
+import { launchClaimedRun, resumeQueuedRunStartCore } from "@/server/services/start-run-core";
 
 const RUN_ID = "00000000-0000-4000-8000-0000000000b1";
 const args = () => ({
@@ -38,6 +42,7 @@ beforeEach(() => {
   mocks.completeEvaluationForRun.mockReset();
   mocks.updateRows = [];
   mocks.updateFilters = [];
+  mocks.selectError = null;
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
 
@@ -49,5 +54,16 @@ describe("启动响应丢失时的运行状态", () => {
     expect(mocks.updateFilters).toEqual([]);
     expect(vi.mocked(console.error)).toHaveBeenCalledOnce();
     expect(mocks.completeEvaluationForRun).not.toHaveBeenCalled();
+  });
+
+  it("尚未接管运行时数据库故障返回可重试结果", async () => {
+    mocks.selectError = new Error("数据库暂时不可用");
+
+    await expect(resumeQueuedRunStartCore(RUN_ID)).resolves.toEqual({
+      ok: false,
+      error: "继续启动失败，请稍后重试",
+      retryable: true,
+    });
+    expect(vi.mocked(console.error)).toHaveBeenCalledOnce();
   });
 });

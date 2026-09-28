@@ -21,9 +21,12 @@ export async function recoverStaleQueuedRuns(now = new Date()): Promise<void> {
       ))
       .orderBy(asc(runs.updatedAt), asc(runs.id))
       .limit(MAX_STALE_RUNS_PER_TICK);
+    let retryableFailure = false;
     for (const run of stale) {
-      await resumeQueuedRunStartCore(run.id);
+      const result = await resumeQueuedRunStartCore(run.id);
+      if (!result.ok && result.retryable) retryableFailure = true;
     }
+    if (retryableFailure) throw new Error("部分过期运行接管暂时失败");
   } catch (error) {
     console.error("接管过期排队运行失败", safeErrorForLog(error));
     throw error;

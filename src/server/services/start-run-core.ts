@@ -335,7 +335,7 @@ export async function resumeQueuedRunStartCore(runId: string): Promise<StartRunR
     console.error("继续启动结果待确认", safeErrorForLog(error));
     return claimedRun
       ? { ok: true, runId: claimedRun.id }
-      : { ok: false, error: "继续启动失败，请稍后重试" };
+      : { ok: false, error: "继续启动失败，请稍后重试", retryable: true };
   }
 }
 
