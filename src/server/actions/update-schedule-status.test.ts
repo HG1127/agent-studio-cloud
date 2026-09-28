@@ -143,7 +143,7 @@ describe("定时任务创建并发保护", () => {
       ok: false,
       error: "找不到这个助手，请刷新页面后重试",
     });
-    expect(mocks.locks).toEqual(["share"]);
+    expect(mocks.locks).toEqual([]);
     expect(mocks.inserts).toHaveLength(0);
   });
 
@@ -151,6 +151,7 @@ describe("定时任务创建并发保护", () => {
     mocks.rows = [
       [{ id: AGENT_ID, workspaceId: schedule.workspaceId }],
       [{ id: VERSION_ID, manifest }],
+      [{ id: AGENT_ID, archivedAt: null }],
     ];
 
     expect(await createScheduleAction({ agentId: AGENT_ID, spec: { kind: "interval", minutes: 5 }, input: {} })).toEqual({ ok: true });
@@ -161,6 +162,37 @@ describe("定时任务创建并发保护", () => {
       status: "active",
       nextRunAt: expect.any(Date),
     })]);
+  });
+
+  it("创建任务时协作助手已停用则拒绝插入", async () => {
+    mocks.rows = [
+      [{ id: AGENT_ID, workspaceId: schedule.workspaceId }],
+      [{ id: VERSION_ID, manifest: collaborativeManifest }],
+      [{ ...helperVersion, agentArchivedAt: new Date() }],
+    ];
+
+    expect(await createScheduleAction({ agentId: AGENT_ID, spec: { kind: "interval", minutes: 5 }, input: {} })).toEqual({
+      ok: false,
+      error: "协作链包含已停用、缺失或格式不完整的冻结版本，请检查协作助手后再设置定时",
+    });
+    expect(mocks.inserts).toHaveLength(0);
+  });
+
+  it("创建任务时协作助手资料已归档则拒绝插入", async () => {
+    mocks.rows = [
+      [{ id: AGENT_ID, workspaceId: schedule.workspaceId }],
+      [{ id: VERSION_ID, manifest: collaborativeManifest }],
+      [{ ...helperVersion, manifest: knowledgeManifest }],
+      [{ id: AGENT_ID, archivedAt: null }, { id: HELPER_ID, archivedAt: null }],
+      [],
+    ];
+
+    expect(await createScheduleAction({ agentId: AGENT_ID, spec: { kind: "interval", minutes: 5 }, input: {} })).toEqual({
+      ok: false,
+      error: "当前版本或协作助手使用的知识资料已归档或尚未完成解析，请先恢复资料后再设置定时",
+    });
+    expect(mocks.locks).toEqual(["share", "share"]);
+    expect(mocks.inserts).toHaveLength(0);
   });
 });
 
