@@ -24,12 +24,10 @@ export async function updateAgentAction(input: unknown): Promise<AgentUpdateResu
         .for("update")
         .limit(1);
       if (!agent) return { kind: "agent-missing" as const };
-      if (agent.updatedAt.getTime() !== new Date(parsed.data.expectedUpdatedAt).getTime()) {
-        if (agent.name === parsed.data.name && agent.description === (parsed.data.description || null)) {
-          return { kind: "updated" as const, agentId: agent.id, updatedAt: agent.updatedAt.toISOString() };
-        }
-        return { kind: "stale" as const };
+      if (agent.name === parsed.data.name && agent.description === (parsed.data.description || null)) {
+        return { kind: "updated" as const, agentId: agent.id, updatedAt: agent.updatedAt.toISOString() };
       }
+      if (agent.updatedAt.getTime() !== new Date(parsed.data.expectedUpdatedAt).getTime()) return { kind: "stale" as const };
       const [definition] = await tx
         .select({ id: workflowDefinitions.id, draft: workflowDefinitions.draft })
         .from(workflowDefinitions)

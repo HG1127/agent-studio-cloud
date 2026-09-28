@@ -66,13 +66,11 @@ export async function saveWorkflowAction(
         .limit(1);
       if (!definition) return "definition-missing" as const;
       const storedDraft = bindWorkflowRootAgent(parsed.data, { id: agentId, name: agent.name });
-      if (definition.updatedAt.getTime() !== expectedRevision.getTime()) {
-        const currentDraft = WorkflowDraft.safeParse(definition.draft);
-        if (currentDraft.success && stableStringify(currentDraft.data) === stableStringify(storedDraft)) {
-          return { kind: "saved" as const, updatedAt: definition.updatedAt.toISOString() };
-        }
-        return "stale" as const;
+      const currentDraft = WorkflowDraft.safeParse(definition.draft);
+      if (currentDraft.success && stableStringify(currentDraft.data) === stableStringify(storedDraft)) {
+        return { kind: "saved" as const, updatedAt: definition.updatedAt.toISOString() };
       }
+      if (definition.updatedAt.getTime() !== expectedRevision.getTime()) return "stale" as const;
       const now = new Date();
       await tx
         .update(workflowDefinitions)

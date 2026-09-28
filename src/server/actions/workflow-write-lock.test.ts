@@ -141,6 +141,19 @@ describe("助手与流程并发写入", () => {
     expect(mocks.revalidatePath).toHaveBeenCalledWith(`/agents/${AGENT_ID}`);
   });
 
+  it("保存未变化草稿时不增加审计或版本时间", async () => {
+    mocks.selectRows = [[{ name: "当前名称" }], [{
+      id: DEFINITION_ID,
+      draft: { ...draft, rootAgent: { ...draft.rootAgent, id: AGENT_ID, name: "当前名称" } },
+      updatedAt: DEFINITION_UPDATED_AT,
+    }]];
+
+    expect(await saveWorkflowAction(AGENT_ID, draft, DEFINITION_UPDATED_AT.toISOString()))
+      .toEqual({ ok: true, updatedAt: DEFINITION_UPDATED_AT.toISOString() });
+    expect(mocks.updates).toHaveLength(0);
+    expect(mocks.inserts).toHaveLength(0);
+  });
+
   it("已归档或不存在的助手不能被旧页面写回流程", async () => {
     mocks.selectRows = [[]];
 
@@ -257,6 +270,24 @@ describe("助手与流程并发写入", () => {
     expect(mocks.updates).toHaveLength(0);
     expect(mocks.inserts).toHaveLength(0);
     expect(mocks.revalidatePath).toHaveBeenCalledWith(`/agents/${AGENT_ID}`);
+  });
+
+  it("保存未变化助手信息时不增加审计或版本时间", async () => {
+    mocks.selectRows = [[{
+      id: AGENT_ID,
+      name: "已保存名称",
+      description: "已保存说明",
+      updatedAt: AGENT_UPDATED_AT,
+    }]];
+
+    expect(await updateAgentAction({
+      agentId: AGENT_ID,
+      name: "已保存名称",
+      description: "已保存说明",
+      expectedUpdatedAt: AGENT_UPDATED_AT.toISOString(),
+    })).toEqual({ ok: true, updatedAt: AGENT_UPDATED_AT.toISOString() });
+    expect(mocks.updates).toHaveLength(0);
+    expect(mocks.inserts).toHaveLength(0);
   });
 
   it("自动修复也锁定助手后再写入最新草稿", async () => {
