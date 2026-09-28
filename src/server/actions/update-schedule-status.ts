@@ -40,7 +40,12 @@ export async function updateScheduleStatusAction(id: string, next: string): Prom
       if (!schedule || (schedule.archivedAt && parsed.data !== "archived")) {
         return { ok: false, error: "找不到这条定时任务，请刷新页面后重试" };
       }
-      if (schedule.status === parsed.data) return { ok: true };
+      if (schedule.status === parsed.data) {
+        if (parsed.data === "active" && (!agent || agent.archivedAt)) {
+          return { ok: false, error: "绑定的助手已停用，请恢复助手后再启用定时任务" };
+        }
+        return { ok: true };
+      }
       let resumedAt: Date | undefined;
       if (parsed.data === "active") {
         if (!agent || agent.archivedAt) {

@@ -149,6 +149,20 @@ describe("定时任务状态并发保护", () => {
     expect(mocks.updates).toHaveLength(0);
   });
 
+  it("助手已停用时重复提交启用状态也不能返回成功", async () => {
+    mocks.rows = [
+      [{ agentId: AGENT_ID }],
+      [{ archivedAt: new Date() }],
+      [{ ...schedule, status: "active" }],
+    ];
+
+    expect(await updateScheduleStatusAction(SCHEDULE_ID, "active")).toEqual({
+      ok: false,
+      error: "绑定的助手已停用，请恢复助手后再启用定时任务",
+    });
+    expect(mocks.updates).toHaveLength(0);
+  });
+
   it("助手锁先于任务锁，暂停操作也遵守相同顺序", async () => {
     mocks.rows = [
       [{ agentId: AGENT_ID }],

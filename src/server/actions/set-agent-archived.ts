@@ -27,7 +27,21 @@ export async function setAgentArchivedAction(input: unknown): Promise<AgentArchi
         .for("update")
         .limit(1);
       if (!agent) return false;
-      if (parsed.data.archived === (agent.archivedAt !== null)) return true;
+      if (parsed.data.archived === (agent.archivedAt !== null)) {
+        if (parsed.data.archived) {
+          // 重复停用请求也修复旧数据中残留的启用任务，不重复写审计事件。
+          await tx
+            .update(schedules)
+            .set({ status: "paused", leaseUntil: null, updatedAt: now })
+            .where(and(
+              eq(schedules.agentId, parsed.data.agentId),
+              eq(schedules.workspaceId, DEMO_WORKSPACE_ID),
+              isNull(schedules.archivedAt),
+              ne(schedules.status, "paused"),
+            ));
+        }
+        return true;
+      }
 
       if (parsed.data.archived) {
         const [runningEvaluation] = await tx

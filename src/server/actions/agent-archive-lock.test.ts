@@ -30,12 +30,12 @@ const tx = {
   select: () => ({ from: () => selectTail }),
   update: () => ({
     set: (value: Record<string, unknown>) => ({
-      where: () => ({
-        returning: async () => {
-          mocks.updates.push(value);
-          return [{ id: "00000000-0000-4000-8000-000000000081" }];
-        },
-      }),
+      where: () => {
+        mocks.updates.push(value);
+        return {
+          returning: async () => [{ id: "00000000-0000-4000-8000-000000000081" }],
+        };
+      },
     }),
   }),
   insert: () => ({ values: async (value: Record<string, unknown>) => { mocks.inserts.push(value); } }),
@@ -105,6 +105,7 @@ describe("助手停用依赖保护", () => {
     await expect(setAgentArchivedAction({ agentId: AGENT_ID, archived: true })).resolves.toEqual({ ok: true });
     expect(mocks.lock).toHaveBeenCalledOnce();
     expect(mocks.updates[0]).toMatchObject({ archivedAt: expect.any(Date) });
+    expect(mocks.updates[1]).toMatchObject({ status: "paused", leaseUntil: null });
     expect(mocks.inserts).toContainEqual(expect.objectContaining({
       action: "agent.archived",
       targetType: "agent",
@@ -177,11 +178,11 @@ describe("助手停用依赖保护", () => {
     expect(mocks.updates).toHaveLength(0);
   });
 
-  it("重复停用已停用助手时直接返回成功且不重复审计", async () => {
+  it("重复停用已停用助手时修复残留任务且不重复审计", async () => {
     mocks.rows = [[{ id: AGENT_ID, name: "资料整理助手", archivedAt: new Date() }]];
 
     await expect(setAgentArchivedAction({ agentId: AGENT_ID, archived: true })).resolves.toEqual({ ok: true });
-    expect(mocks.updates).toHaveLength(0);
+    expect(mocks.updates).toEqual([expect.objectContaining({ status: "paused", leaseUntil: null })]);
     expect(mocks.inserts).toHaveLength(0);
   });
 });
