@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkflowNode } from "@/contracts/workflow";
 
 const mocks = vi.hoisted(() => ({
@@ -28,13 +28,31 @@ const registration = {
   method: "POST", headers: {}, action: "update_customer", scope: "customer.write", risk: "medium",
   inputSchema: { type: "object" }, outputSchema: node.tool!.outputSchema,
 };
+const originalHarnessPolicy = process.env.HARNESS_POLICY_JSON;
 
 describe("真实工具步骤", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.HARNESS_POLICY_JSON;
     mocks.attempt = 1;
     mocks.stepId = "step-1";
     mocks.getToolRegistration.mockReturnValue(registration);
+  });
+  afterEach(() => {
+    if (originalHarnessPolicy === undefined) delete process.env.HARNESS_POLICY_JSON;
+    else process.env.HARNESS_POLICY_JSON = originalHarnessPolicy;
+  });
+
+  it("Harness 拒绝时不调用外部业务工具", async () => {
+    process.env.HARNESS_POLICY_JSON = JSON.stringify({ version: 1, rules: [
+      { id: "block-customer-write", effect: "deny", when: { scope: "customer.write" } },
+    ] });
+    await expect(runToolStep({ runId: "run-1", node, input: {}, outputs: {} }))
+      .rejects.toMatchObject({ name: "FatalError" });
+    expect(mocks.invokeHttpTool).not.toHaveBeenCalled();
+    expect(mocks.appendTrace).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "harness.policy", data: expect.objectContaining({ decision: "deny", ruleId: "block-customer-write" }),
+    }));
   });
 
   it("执行注册工具并持久化经过契约校验的业务回执", async () => {

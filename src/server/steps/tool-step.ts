@@ -4,6 +4,7 @@ import { FatalError, getStepMetadata, RetryableError } from "workflow";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { validateJsonObjectSchema } from "@/server/domain/json-schema";
 import { canRetryStep, MAX_STEP_ATTEMPTS, resolveToolRetryPolicy } from "@/server/domain/runtime/retry-policy";
+import { enforceHarnessPolicy } from "@/server/steps/harness-policy-step";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 import { invokeHttpTool } from "@/server/tools/invoke-http-tool";
@@ -64,6 +65,7 @@ export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Re
   if (!tool || tool.unresolved === true) {
     return reject(`步骤「${node.title}」的工具未绑定，无法执行`);
   }
+  await enforceHarnessPolicy({ runId: args.runId, node });
   const demo = tool.registryToolId === "demo" || tool.protocol === "demo";
   let receipt: Record<string, unknown>;
   if (demo) {

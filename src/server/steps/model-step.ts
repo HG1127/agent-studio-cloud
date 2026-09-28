@@ -12,7 +12,9 @@ import { db } from "@/lib/db";
 import { isTransientModelError, realModelsEnabled } from "@/lib/model";
 import { resolveEncryptionKey } from "@/server/domain/crypto";
 import { resolveModelTarget } from "@/server/domain/model-target";
+import { assessHarnessContext, parseHarnessPromptLimit } from "@/server/domain/harness/context-budget";
 import { buildStepPrompt } from "@/server/domain/runtime/step-prompt";
+import { enforceHarnessPolicy } from "@/server/steps/harness-policy-step";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 
@@ -50,7 +52,33 @@ export async function runModelStep(args: RunModelStepInput): Promise<{ output: s
     nodeType: node.type,
     status: "running",
   });
-  const prompt = buildStepPrompt({ node, upstreamOutputs: args.outputs, input: args.input, qualityFeedback: args.qualityFeedback });
+  await enforceHarnessPolicy({ runId: args.runId, node });
+  const maxChars = parseHarnessPromptLimit(process.env.HARNESS_MAX_PROMPT_CHARS);
+  const promptInput = { node, upstreamOutputs: args.outputs, input: args.input, qualityFeedback: args.qualityFeedback };
+  const context = maxChars === null
+    ? { allowed: false, usedChars: 0, maxChars: 0, reason: "模型上下文预算配置无效" }
+    : assessHarnessContext(promptInput, maxChars);
+  await appendTrace({
+    runId: args.runId,
+    nodeId: node.id,
+    kind: "harness.context",
+    level: context.allowed ? "info" : "warn",
+    title: context.allowed ? `「${node.title}」上下文检查通过` : `「${node.title}」上下文超出预算`,
+    detail: context.reason,
+    data: { allowed: context.allowed, usedChars: context.usedChars, maxChars: context.maxChars },
+  });
+  if (!context.allowed) {
+    await persistStep({
+      runId: args.runId,
+      nodeId: node.id,
+      nodeTitle: node.title,
+      nodeType: node.type,
+      status: "failed",
+      error: context.reason,
+    });
+    throw new FatalError(context.reason ?? "模型上下文检查失败");
+  }
+  const prompt = buildStepPrompt(promptInput);
   const manifestModel = args.manifest.resourceSelection.model;
   if (manifestModel.mock) {
     const goal = node.description || node.title;
