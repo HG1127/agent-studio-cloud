@@ -10,6 +10,8 @@ import { startRunCore } from "@/server/services/start-run-core";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
+class RunStartPendingError extends Error {}
+
 export async function retryRunAction(runId: string, requestId?: string): Promise<StartRunResult> {
   if (!z.string().uuid().safeParse(runId).success || (requestId && !z.string().uuid().safeParse(requestId).success)) {
     return { ok: false, error: "运行信息不正确，请刷新页面后重试" };
@@ -35,11 +37,13 @@ export async function retryRunAction(runId: string, requestId?: string): Promise
       sourceType: "manual",
       sourceKey: requestId ? `manual-retry:${runId}:${requestId}` : null,
     });
+    if (!result.ok && result.retryable) throw new RunStartPendingError("运行启动状态待确认，请用同一次请求重试");
     if (result.ok) {
       revalidatePathsAfterCommit(["/runs", `/runs/${runId}`], "run-retry");
     }
     return result;
   } catch (error) {
+    if (error instanceof RunStartPendingError) throw error;
     console.error("再次运行失败", safeErrorForLog(error));
     return { ok: false, error: "再次运行失败，请稍后重试" };
   }

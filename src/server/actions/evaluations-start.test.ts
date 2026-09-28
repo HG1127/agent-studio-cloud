@@ -162,6 +162,20 @@ describe("批量启动自动验收", () => {
     expect(mocks.reconcile).toHaveBeenCalledWith(mocks.existingRun.id);
   });
 
+  it("运行提交状态待确认且暂未查到记录时不把验收样例判为失败", async () => {
+    const testCase = { id: "00000000-0000-4000-8000-0000000000c1", input: {} };
+    mocks.prepare.mockResolvedValue({
+      ok: true, evaluationId: EVALUATION_ID, versionId: VERSION_ID, cases: [testCase], resumed: false,
+    });
+    mocks.startRun.mockResolvedValue({ ok: false, error: "运行启动状态待确认", retryable: true });
+
+    await expect(startEvaluationAction(AGENT_ID, REQUEST_ID)).resolves.toEqual({
+      ok: false, error: "部分验收结果尚未对账，请点击“检查并继续”重试",
+    });
+    expect(mocks.markFailure).not.toHaveBeenCalled();
+    expect(mocks.updates).toBe(0);
+  });
+
   it("没有待补启样例时仍重新汇总已落定结果", async () => {
     mocks.prepare.mockResolvedValue({
       ok: true,

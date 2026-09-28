@@ -89,6 +89,13 @@ async function handle(req: Request) {
       sourceType: "schedule",
       sourceKey: `${schedule.id}:${occurrenceKey}`,
     });
+    if (!result.ok && result.retryable) {
+      await db
+        .update(schedules)
+        .set({ lastError: result.error, leaseUntil: null, updatedAt: new Date() })
+        .where(stillClaimed);
+      continue;
+    }
     const next = nextOccurrenceAfterDue(parsedSpec.data, schedule.nextRunAt, new Date());
     if (result.ok) {
       started += 1;

@@ -29,6 +29,7 @@ const OTHER_WORKSPACE_ID = "00000000-0000-4000-8000-0000000000f4";
 const RECOVERABLE_SCHEDULE_ID = "00000000-0000-4000-8000-0000000000f6";
 const IDEMPOTENT_STATUS_ID = "00000000-0000-4000-8000-0000000000f7";
 const LEGACY_INTERVAL_ID = "00000000-0000-4000-8000-0000000000f8";
+const INDETERMINATE_SCHEDULE_ID = "00000000-0000-4000-8000-0000000000f9";
 const createdScheduleIds: string[] = [];
 
 const manifest = AgentManifest.parse({
@@ -67,7 +68,7 @@ afterEach(() => revalidatePathMock.mockReset());
 
 afterAll(async () => {
   await db.delete(runs).where(eq(runs.agentId, AGENT_ID));
-  await db.delete(schedules).where(inArray(schedules.id, [SCHEDULE_DUE, SCHEDULE_ONCE, SCHEDULE_PAUSED, SCHEDULE_FAILING, RETIRED_SCHEDULE_ID, PAUSED_DURING_START_ID, OTHER_WORKSPACE_SCHEDULE_ID, RECOVERABLE_SCHEDULE_ID, IDEMPOTENT_STATUS_ID, LEGACY_INTERVAL_ID, ...createdScheduleIds]));
+  await db.delete(schedules).where(inArray(schedules.id, [SCHEDULE_DUE, SCHEDULE_ONCE, SCHEDULE_PAUSED, SCHEDULE_FAILING, RETIRED_SCHEDULE_ID, PAUSED_DURING_START_ID, OTHER_WORKSPACE_SCHEDULE_ID, RECOVERABLE_SCHEDULE_ID, IDEMPOTENT_STATUS_ID, LEGACY_INTERVAL_ID, INDETERMINATE_SCHEDULE_ID, ...createdScheduleIds]));
   await db.delete(agentVersions).where(inArray(agentVersions.agentId, [AGENT_ID, DRAFT_AGENT_ID]));
   await db.delete(agents).where(inArray(agents.id, [AGENT_ID, DRAFT_AGENT_ID]));
 });
@@ -211,6 +212,30 @@ describe("调度 tick 接口", () => {
     const [recoveredSchedule] = await db.select().from(schedules).where(eq(schedules.id, RECOVERABLE_SCHEDULE_ID)).limit(1);
     expect(recoveredSchedule?.nextRunAt.getTime()).toBeGreaterThan(Date.now());
     expect(recoveredSchedule?.lastRunId).toBe(matchingRuns[0].id);
+  }, 240_000);
+
+  it("运行写入状态不确定时保留原定时时间槽，下一轮沿用来源键重试", async () => {
+    const dueAt = new Date(Date.now() - 60_000);
+    await insertSchedule({ id: INDETERMINATE_SCHEDULE_ID, nextRunAt: dueAt });
+    const transaction = db.transaction.bind(db);
+    let calls = 0;
+    const transactionSpy = vi.spyOn(db, "transaction").mockImplementation((callback) => {
+      calls += 1;
+      return calls === 2 ? Promise.reject(new Error("模拟运行写入状态不确定")) : transaction(callback);
+    });
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const first = await tick(authedRequest());
+
+    expect(await first.json()).toMatchObject({ claimed: 1, started: 0, failed: 0 });
+    const [pending] = await db.select().from(schedules).where(eq(schedules.id, INDETERMINATE_SCHEDULE_ID));
+    expect(pending).toMatchObject({ status: "active", nextRunAt: dueAt, leaseUntil: null, consecutiveFailures: 0 });
+    transactionSpy.mockRestore();
+    const retry = await tick(authedRequest());
+    expect(await retry.json()).toMatchObject({ claimed: 1, started: 1, failed: 0 });
+    const rows = await db.select().from(runs).where(eq(runs.sourceKey, `${INDETERMINATE_SCHEDULE_ID}:${dueAt.toISOString()}`));
+    expect(rows).toHaveLength(1);
+    log.mockRestore();
   }, 240_000);
 
   it("一次性任务到期：先开跑这一次再归档", async () => {

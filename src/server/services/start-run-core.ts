@@ -663,6 +663,15 @@ export async function startRunCore(args: {
     return launchClaimedRun({ runId: created.runId, manifest, input: runInput, lease });
   } catch (error) {
     console.error("运行启动失败：", safeErrorForLog(error));
+    if (args.sourceKey) {
+      try {
+        const existing = await reuseExistingRun({ agentId, input: runInput, sourceType, sourceKey: args.sourceKey });
+        if (existing) return existing;
+      } catch (lookupError) {
+        console.error("核对运行启动状态失败：", safeErrorForLog(lookupError));
+      }
+      return { ok: false, error: "运行启动状态待确认，请稍后用同一次请求重试", retryable: true };
+    }
     return { ok: false, error: "运行启动失败，请稍后重试" };
   }
 }

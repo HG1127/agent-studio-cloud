@@ -25,6 +25,14 @@ beforeEach(() => {
 });
 
 describe("手动启动运行", () => {
+  it("启动状态待确认时抛出可重试错误，让客户端保留原请求标识", async () => {
+    mocks.startRunCore.mockResolvedValueOnce({ ok: false, error: "运行启动状态待确认", retryable: true });
+
+    await expect(startRunAction({ agentId: AGENT_ID, input: {}, requestId: RUN_ID }))
+      .rejects.toThrow("运行启动状态待确认");
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
   it("运行已启动后缓存刷新失败仍返回运行标识", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
     mocks.revalidatePath.mockImplementationOnce(() => { throw new Error("缓存暂时不可用"); });

@@ -50,6 +50,13 @@ describe("再次运行幂等键", () => {
     });
   });
 
+  it("再次运行状态待确认时抛出错误以保留原请求标识", async () => {
+    mocks.startRun.mockResolvedValueOnce({ ok: false, error: "运行启动状态待确认", retryable: true });
+
+    await expect(retryRunAction(RUN_ID, REQUEST_ID)).rejects.toThrow("运行启动状态待确认");
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
   it("新运行已启动后缓存刷新失败不误报再次运行失败", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
     mocks.revalidatePath.mockImplementationOnce(() => { throw new Error("缓存暂时不可用"); });

@@ -339,7 +339,7 @@ export async function startEvaluationAction(agentId: string, requestId?: string)
           if (existing) {
             runId = existing.id;
             if (existing.status === "queued") needsRetry = true;
-          } else if (started && !started.ok) {
+          } else if (started && !started.ok && !started.retryable) {
             await markEvaluationStartFailure(prepared.evaluationId, testCase.id, started.error, DEMO_WORKSPACE_ID);
             return;
           } else {

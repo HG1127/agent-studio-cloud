@@ -61,6 +61,11 @@ describe("StartRunResult", () => {
     const parsed = StartRunResult.parse({ ok: false, error: "这个助手还没有发布版本，请先发布后再运行" });
     expect(parsed.ok).toBe(false);
   });
+  it("启动状态待确认时标记必须沿用原请求重试", () => {
+    expect(StartRunResult.parse({ ok: false, error: "启动状态待确认", retryable: true }))
+      .toEqual({ ok: false, error: "启动状态待确认", retryable: true });
+    expect(StartRunResult.safeParse({ ok: false, error: "启动状态待确认", retryable: false }).success).toBe(false);
+  });
   it("拒绝缺少 error 的失败分支", () => {
     expect(StartRunResult.safeParse({ ok: false }).success).toBe(false);
   });

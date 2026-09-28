@@ -212,6 +212,48 @@ describe("运行启动句柄恢复", () => {
     expect(startMock).toHaveBeenCalledOnce();
   });
 
+  it("运行事务已提交但提交回执丢失时按原请求标识找回运行", async () => {
+    const sourceKey = "manual:00000000-0000-4000-8000-0000000007d3";
+    const transaction = db.transaction.bind(db);
+    vi.spyOn(db, "transaction").mockImplementationOnce(async (callback) => {
+      await transaction(callback);
+      throw new Error("模拟事务提交回执丢失");
+    });
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const result = await startRunCore({ agentId: AGENT_ID, input: {}, sourceKey });
+
+    expect(result).toMatchObject({ ok: true, runId: expect.any(String) });
+    const stored = await db.select().from(runs).where(eq(runs.sourceKey, sourceKey));
+    expect(stored).toHaveLength(1);
+    expect(result.ok && result.runId).toBe(stored[0].id);
+    expect(await startRunCore({ agentId: AGENT_ID, input: {}, sourceKey })).toEqual(result);
+    expect(startMock).not.toHaveBeenCalled();
+    log.mockRestore();
+  });
+
+  it("提交与对账回执均暂时不可用时要求沿用原请求标识重试", async () => {
+    const sourceKey = "manual:00000000-0000-4000-8000-0000000007d4";
+    const transaction = db.transaction.bind(db);
+    vi.spyOn(db, "transaction").mockImplementationOnce(async (callback) => {
+      await transaction(callback);
+      vi.spyOn(db, "select").mockImplementationOnce(() => { throw new Error("模拟对账查询暂时失败"); });
+      throw new Error("模拟事务提交回执丢失");
+    });
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const first = await startRunCore({ agentId: AGENT_ID, input: {}, sourceKey });
+
+    expect(first).toEqual({ ok: false, error: "运行启动状态待确认，请稍后用同一次请求重试", retryable: true });
+    const retried = await startRunCore({ agentId: AGENT_ID, input: {}, sourceKey });
+    expect(retried).toMatchObject({ ok: true, runId: expect.any(String) });
+    const stored = await db.select().from(runs).where(eq(runs.sourceKey, sourceKey));
+    expect(stored).toHaveLength(1);
+    expect(retried.ok && retried.runId).toBe(stored[0].id);
+    expect(startMock).not.toHaveBeenCalled();
+    log.mockRestore();
+  });
+
   it("普通运行在读取助手后才发生停用时不创建运行", async () => {
     const transaction = db.transaction.bind(db);
     vi.spyOn(db, "transaction").mockImplementationOnce((callback) => transaction(async (tx) => {

@@ -141,10 +141,10 @@ export const PendingWaitView = z.object({
 });
 export type PendingWaitView = z.infer<typeof PendingWaitView>;
 
-// 启动动作返回的判别联合唯一来源：失败时不创建 run，只返回中文错误
+// 启动动作返回的判别联合唯一来源：状态待确认时沿用原请求标识重试
 export const StartRunResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true), runId: z.string().uuid() }),
-  z.object({ ok: z.literal(false), error: z.string() }),
+  z.object({ ok: z.literal(false), error: z.string(), retryable: z.literal(true).optional() }),
 ]);
 export type StartRunResult = z.infer<typeof StartRunResult>;
 
