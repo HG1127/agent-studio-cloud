@@ -63,7 +63,7 @@ try {
   Invoke-Checked "生成 Next.js 路由类型" "pnpm" @("exec", "next", "typegen")
   Invoke-Checked "检查 TypeScript" "pnpm" @("exec", "tsc", "--noEmit")
   Invoke-Checked "检查代码规范" "pnpm" @("lint")
-  Invoke-Checked "运行单元与组件测试" "pnpm" @("test")
+  Invoke-Checked "运行单元与组件测试" "pnpm" @("test", "--maxWorkers=1")
   Invoke-Checked "验证生产构建" "pnpm" @("build")
 
   Write-Host "→ 创建隔离的 Neon 测试分支：$branchName"
