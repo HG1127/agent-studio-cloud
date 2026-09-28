@@ -105,8 +105,45 @@ export async function retryKnowledgeSourceAction(sourceId: string): Promise<Know
         return current;
       });
     } catch (error) {
-      await cancelBlobStream(blob.stream);
-      throw error;
+      let current: {
+        id: string;
+        name: string;
+        mime: string;
+        status: string;
+        blobPathname: string | null;
+        updatedAt: Date;
+        parseEngine: string | null;
+        archivedAt: Date | null;
+      } | undefined;
+      try {
+        [current] = await db
+          .select({
+            id: knowledgeSources.id,
+            name: knowledgeSources.name,
+            mime: knowledgeSources.mime,
+            status: knowledgeSources.status,
+            blobPathname: knowledgeSources.blobPathname,
+            updatedAt: knowledgeSources.updatedAt,
+            parseEngine: knowledgeSources.parseEngine,
+            archivedAt: knowledgeSources.archivedAt,
+          })
+          .from(knowledgeSources)
+          .where(and(eq(knowledgeSources.id, sourceId), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)))
+          .limit(1);
+      } catch (recoveryError) {
+        await cancelBlobStream(blob.stream);
+        console.error("核对知识重新解析结果失败", safeErrorForLog(recoveryError));
+        throw error;
+      }
+      if (current?.status === "parsing"
+        && !current.archivedAt
+        && current.parseEngine === ingestToken
+        && current.blobPathname === source.blobPathname) {
+        claimed = current;
+      } else {
+        await cancelBlobStream(blob.stream);
+        throw error;
+      }
     }
     if (!claimed) {
       await cancelBlobStream(blob.stream);

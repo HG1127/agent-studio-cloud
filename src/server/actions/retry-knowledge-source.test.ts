@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   start: vi.fn(),
   revalidatePath: vi.fn(),
   transactionError: null as Error | null,
+  commitResponseLost: false,
+  recoveryBase: null as Record<string, unknown> | null,
 }));
 
 vi.mock("@/lib/db", () => {
@@ -31,7 +33,12 @@ vi.mock("@/lib/db", () => {
   };
   return { db: { ...client, transaction: async (run: (tx: typeof client) => unknown) => {
     if (mocks.transactionError) throw mocks.transactionError;
-    return run(client);
+    const result = await run(client);
+    if (mocks.commitResponseLost) {
+      mocks.rows.push([{ ...mocks.recoveryBase, ...mocks.updates.at(-1) }]);
+      throw new Error("commit response lost");
+    }
+    return result;
   } } };
 });
 
@@ -62,6 +69,8 @@ beforeEach(() => {
   mocks.start.mockReset().mockResolvedValue(undefined);
   mocks.revalidatePath.mockReset();
   mocks.transactionError = null;
+  mocks.commitResponseLost = false;
+  mocks.recoveryBase = null;
 });
 
 afterEach(() => {
@@ -178,6 +187,25 @@ describe("重新解析知识资料", () => {
 
     expect(cancel).toHaveBeenCalledOnce();
     expect(mocks.start).not.toHaveBeenCalled();
+  });
+
+  it("领取事务已提交但回执丢失时对账并继续使用原文件流启动解析", async () => {
+    const stream = new ReadableStream({ start(controller) { controller.close(); } });
+    const cancel = vi.spyOn(stream, "cancel");
+    mocks.get.mockResolvedValue({ stream });
+    mocks.rows = [[source], [source]];
+    mocks.recoveryBase = { ...source, archivedAt: null };
+    mocks.commitResponseLost = true;
+
+    await expect(retryKnowledgeSourceAction(SOURCE_ID)).resolves.toEqual({ ok: true });
+
+    expect(cancel).not.toHaveBeenCalled();
+    expect(mocks.start).toHaveBeenCalledOnce();
+    expect(mocks.start.mock.calls[0]?.[1]?.[0]).toMatchObject({
+      sourceId: SOURCE_ID,
+      content: stream,
+      ingestToken: mocks.updates[0].parseEngine,
+    });
   });
 
   it("工作流启动回执丢失时保留解析令牌和原文件流", async () => {
