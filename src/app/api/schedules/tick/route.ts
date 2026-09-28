@@ -55,6 +55,7 @@ async function handle(req: Request) {
   const claimed = await claimDueSchedules();
   let started = 0;
   let failed = 0;
+  let retryableStarts = 0;
   for (const schedule of claimed) {
     const claimedLease = schedule.leaseUntil;
     if (!claimedLease) continue;
@@ -90,6 +91,7 @@ async function handle(req: Request) {
       sourceKey: `${schedule.id}:${occurrenceKey}`,
     });
     if (!result.ok && result.retryable) {
+      retryableStarts += 1;
       await db
         .update(schedules)
         .set({ lastError: result.error, leaseUntil: null, updatedAt: new Date() })
@@ -128,6 +130,12 @@ async function handle(req: Request) {
   } catch {
     return Response.json(
       { ok: false, error: "过期运行接管暂时失败，请稍后重试", claimed: claimed.length, started, failed },
+      { status: 503, headers: { "retry-after": "60" } },
+    );
+  }
+  if (retryableStarts > 0) {
+    return Response.json(
+      { ok: false, error: "部分定时运行启动暂时失败，请稍后重试", claimed: claimed.length, started, failed },
       { status: 503, headers: { "retry-after": "60" } },
     );
   }

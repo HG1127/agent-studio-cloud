@@ -148,6 +148,37 @@ describe("定时触发入口", () => {
     expect(mocks.startRunCore).toHaveBeenCalledOnce();
   });
 
+  it("可重试的定时运行启动故障返回 503 并释放租约", async () => {
+    mocks.due = [{ id: SCHEDULE_ID }];
+    mocks.claimed = [{
+      id: SCHEDULE_ID,
+      workspaceId: "00000000-0000-4000-8000-000000000001",
+      agentId: AGENT_ID,
+      versionId: VERSION_ID,
+      spec: { kind: "interval", minutes: 5 },
+      input: {},
+      nextRunAt: new Date("2026-09-26T00:00:00.000Z"),
+      leaseUntil: new Date("2026-09-26T00:01:00.000Z"),
+      consecutiveFailures: 0,
+      status: "active",
+    }];
+    mocks.startRunCore.mockResolvedValueOnce({ ok: false, error: "启动状态待确认", retryable: true });
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("60");
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "部分定时运行启动暂时失败，请稍后重试",
+      claimed: 1,
+      started: 0,
+      failed: 0,
+    });
+    expect(mocks.updateSet).toHaveBeenLastCalledWith(expect.objectContaining({ leaseUntil: null }));
+    expect(mocks.recoverStaleQueuedRuns).toHaveBeenCalledOnce();
+  });
+
   it("始终使用定时任务创建时冻结的版本", async () => {
     const dueAt = new Date("2026-09-26T00:00:00.000Z");
     mocks.due = [{ id: SCHEDULE_ID }];
