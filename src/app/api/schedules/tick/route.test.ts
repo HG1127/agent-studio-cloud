@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   limit: vi.fn(),
   updateSet: vi.fn(),
   rejectAdvance: false,
+  transactionError: null as Error | null,
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -45,6 +46,7 @@ vi.mock("@/lib/db", () => ({
       ...client,
       transaction: async (run: (tx: typeof client) => unknown) => {
         mocks.transaction();
+        if (mocks.transactionError) throw mocks.transactionError;
         return run(client);
       },
     };
@@ -78,6 +80,7 @@ beforeEach(() => {
   mocks.limit.mockReset();
   mocks.updateSet.mockReset();
   mocks.rejectAdvance = false;
+  mocks.transactionError = null;
 });
 
 afterEach(() => {
@@ -101,6 +104,29 @@ describe("定时触发入口", () => {
 
     expect(await response.json()).toEqual({ ok: true, claimed: 0, started: 0, failed: 0 });
     expect(mocks.recoverStaleQueuedRuns).toHaveBeenCalledOnce();
+  });
+
+  it("领取失败时返回脱敏的可重试错误", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.transactionError = new Error("authorization: Bearer private-claim-token");
+
+    try {
+      const response = await POST(request());
+
+      expect(response.status).toBe(503);
+      expect(response.headers.get("retry-after")).toBe("60");
+      expect(await response.json()).toEqual({
+        ok: false,
+        error: "定时任务检查暂时失败，请稍后重试",
+        claimed: 0,
+        started: 0,
+        failed: 0,
+      });
+      expect(JSON.stringify(log.mock.calls)).not.toContain("private-claim-token");
+      expect(mocks.recoverStaleQueuedRuns).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it("过期排队运行接管异常时返回可重试错误，不伪报调度成功", async () => {
@@ -177,6 +203,46 @@ describe("定时触发入口", () => {
     });
     expect(mocks.updateSet).toHaveBeenLastCalledWith(expect.objectContaining({ leaseUntil: null }));
     expect(mocks.recoverStaleQueuedRuns).toHaveBeenCalledOnce();
+  });
+
+  it("单条定时任务异常不阻止同批其他任务，且不泄露错误细节", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const anotherId = "00000000-0000-4000-8000-000000000105";
+    mocks.due = [{ id: SCHEDULE_ID }, { id: anotherId }];
+    mocks.claimed = [SCHEDULE_ID, anotherId].map((id) => ({
+      id,
+      workspaceId: "00000000-0000-4000-8000-000000000001",
+      agentId: AGENT_ID,
+      versionId: VERSION_ID,
+      spec: { kind: "interval", minutes: 5 },
+      input: {},
+      nextRunAt: new Date("2026-09-26T00:00:00.000Z"),
+      leaseUntil: new Date("2026-09-26T00:01:00.000Z"),
+      consecutiveFailures: 0,
+      status: "active",
+    }));
+    mocks.startRunCore
+      .mockRejectedValueOnce(new Error("authorization: Bearer private-start-token"))
+      .mockResolvedValueOnce({ ok: true, runId: "00000000-0000-4000-8000-000000000104" });
+
+    try {
+      const response = await POST(request());
+
+      expect(response.status).toBe(503);
+      expect(response.headers.get("retry-after")).toBe("60");
+      expect(await response.json()).toEqual({
+        ok: false,
+        error: "部分定时运行启动暂时失败，请稍后重试",
+        claimed: 2,
+        started: 1,
+        failed: 0,
+      });
+      expect(mocks.startRunCore).toHaveBeenCalledTimes(2);
+      expect(mocks.recoverStaleQueuedRuns).toHaveBeenCalledOnce();
+      expect(JSON.stringify(log.mock.calls)).not.toContain("private-start-token");
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it("始终使用定时任务创建时冻结的版本", async () => {
