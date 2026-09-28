@@ -38,34 +38,39 @@ export async function createScheduleAction(raw: unknown): Promise<ScheduleAction
         return existing;
       }
     }
-    const [agent] = await db
-      .select()
-      .from(agents)
-      .where(and(eq(agents.id, agentId), isNull(agents.archivedAt), eq(agents.workspaceId, DEMO_WORKSPACE_ID)))
-      .limit(1);
-    if (!agent) return { ok: false, error: "找不到这个助手，请刷新页面后重试" };
-    const [version] = await db
-      .select({ id: agentVersions.id, manifest: agentVersions.manifest })
-      .from(agentVersions)
-      .where(and(
-        eq(agentVersions.agentId, agentId),
-        eq(agentVersions.workspaceId, agent.workspaceId),
-        eq(agentVersions.status, "production"),
-      ))
-      .orderBy(desc(agentVersions.version))
-      .limit(1);
-    if (!version) return { ok: false, error: "这个助手还没有发布版本，请先发布后再设置定时" };
-    const manifest = AgentManifest.safeParse(version.manifest);
-    if (!manifest.success) return { ok: false, error: "当前发布版本信息不完整，请重新发布后再设置定时" };
-    const inputError = validateRunInput(input, manifest.data.inputContract.fields);
-    if (inputError) return { ok: false, error: inputError };
-    const next = nextOccurrence(spec, new Date());
-    if (!next) return { ok: false, error: "一次性任务的执行时间必须在未来" };
-    const inserted = await db.insert(schedules).values({
-      workspaceId: agent.workspaceId, agentId, versionId: version.id,
-      requestId: requestId ?? null, status: "active", spec, input, nextRunAt: next, createdBy: DEMO_USER_ID,
-    }).onConflictDoNothing({ target: [schedules.workspaceId, schedules.requestId] }).returning({ id: schedules.id });
-    if (inserted.length === 0) {
+    const result = await db.transaction(async (tx): Promise<ScheduleActionResult | null> => {
+      // 停用助手持有同一行的 update 锁并暂停已有任务；创建必须先锁助手再写任务。
+      const [agent] = await tx
+        .select()
+        .from(agents)
+        .where(and(eq(agents.id, agentId), isNull(agents.archivedAt), eq(agents.workspaceId, DEMO_WORKSPACE_ID)))
+        .for("share")
+        .limit(1);
+      if (!agent) return { ok: false, error: "找不到这个助手，请刷新页面后重试" };
+      const [version] = await tx
+        .select({ id: agentVersions.id, manifest: agentVersions.manifest })
+        .from(agentVersions)
+        .where(and(
+          eq(agentVersions.agentId, agentId),
+          eq(agentVersions.workspaceId, agent.workspaceId),
+          eq(agentVersions.status, "production"),
+        ))
+        .orderBy(desc(agentVersions.version))
+        .limit(1);
+      if (!version) return { ok: false, error: "这个助手还没有发布版本，请先发布后再设置定时" };
+      const manifest = AgentManifest.safeParse(version.manifest);
+      if (!manifest.success) return { ok: false, error: "当前发布版本信息不完整，请重新发布后再设置定时" };
+      const inputError = validateRunInput(input, manifest.data.inputContract.fields);
+      if (inputError) return { ok: false, error: inputError };
+      const next = nextOccurrence(spec, new Date());
+      if (!next) return { ok: false, error: "一次性任务的执行时间必须在未来" };
+      const inserted = await tx.insert(schedules).values({
+        workspaceId: agent.workspaceId, agentId, versionId: version.id,
+        requestId: requestId ?? null, status: "active", spec, input, nextRunAt: next, createdBy: DEMO_USER_ID,
+      }).onConflictDoNothing({ target: [schedules.workspaceId, schedules.requestId] }).returning({ id: schedules.id });
+      return inserted.length > 0 ? { ok: true } : null;
+    });
+    if (!result) {
       const existing = requestId ? await existingRequestResult(requestId, agentId, spec, input) : null;
       if (existing) {
         if (existing.ok) revalidatePathsAfterCommit(["/schedules"], "schedule-create-reuse");
@@ -73,8 +78,8 @@ export async function createScheduleAction(raw: unknown): Promise<ScheduleAction
       }
       return { ok: false, error: "定时任务创建冲突，请稍后重试" };
     }
-    revalidatePathsAfterCommit(["/schedules"], "schedule-create");
-    return { ok: true };
+    if (result.ok) revalidatePathsAfterCommit(["/schedules"], "schedule-create");
+    return result;
   } catch (error) {
     console.error("创建定时任务失败", safeErrorForLog(error));
     if (requestId) {

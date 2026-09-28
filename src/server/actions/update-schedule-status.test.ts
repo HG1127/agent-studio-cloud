@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   rows: [] as unknown[][],
   locks: [] as string[],
   updates: [] as Record<string, unknown>[],
+  inserts: [] as Record<string, unknown>[],
   revalidatePath: vi.fn(),
 }));
 
@@ -13,6 +14,7 @@ const tx = {
     from: () => ({
       where: () => ({
         limit: async () => mocks.rows.shift() ?? [],
+        orderBy: () => ({ limit: async () => mocks.rows.shift() ?? [] }),
         for: (mode: string) => ({ limit: async () => {
           mocks.locks.push(mode);
           return mocks.rows.shift() ?? [];
@@ -28,12 +30,21 @@ const tx = {
       } }),
     }),
   }),
+  insert: () => ({
+    values: (values: Record<string, unknown>) => ({
+      onConflictDoNothing: () => ({ returning: async () => {
+        mocks.inserts.push(values);
+        return [{ id: SCHEDULE_ID }];
+      } }),
+    }),
+  }),
 };
 
 vi.mock("@/lib/db", () => ({ db: { transaction: async (run: (client: typeof tx) => unknown) => run(tx) } }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 
 import { updateScheduleStatusAction } from "@/server/actions/update-schedule-status";
+import { createScheduleAction } from "@/server/actions/create-schedule";
 
 const AGENT_ID = "00000000-0000-4000-8000-000000000301";
 const SCHEDULE_ID = "00000000-0000-4000-8000-000000000302";
@@ -70,7 +81,37 @@ beforeEach(() => {
   mocks.rows = [];
   mocks.locks = [];
   mocks.updates = [];
+  mocks.inserts = [];
   mocks.revalidatePath.mockReset();
+});
+
+describe("定时任务创建并发保护", () => {
+  it("助手在创建前被停用时不插入启用任务", async () => {
+    mocks.rows = [[]];
+
+    expect(await createScheduleAction({ agentId: AGENT_ID, spec: { kind: "interval", minutes: 5 }, input: {} })).toEqual({
+      ok: false,
+      error: "找不到这个助手，请刷新页面后重试",
+    });
+    expect(mocks.locks).toEqual(["share"]);
+    expect(mocks.inserts).toHaveLength(0);
+  });
+
+  it("持有助手共享锁直到任务插入完成", async () => {
+    mocks.rows = [
+      [{ id: AGENT_ID, workspaceId: schedule.workspaceId }],
+      [{ id: VERSION_ID, manifest }],
+    ];
+
+    expect(await createScheduleAction({ agentId: AGENT_ID, spec: { kind: "interval", minutes: 5 }, input: {} })).toEqual({ ok: true });
+    expect(mocks.locks).toEqual(["share"]);
+    expect(mocks.inserts).toEqual([expect.objectContaining({
+      agentId: AGENT_ID,
+      versionId: VERSION_ID,
+      status: "active",
+      nextRunAt: expect.any(Date),
+    })]);
+  });
 });
 
 describe("定时任务状态并发保护", () => {
