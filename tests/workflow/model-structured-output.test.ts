@@ -92,6 +92,43 @@ async function prepare(replies: string[], mock = false) {
 
 describe("持久工作流的结构化业务结果", () => {
   it.each([
+    { label: "肯定值不是金额", amount: true, threshold: 1, writes: false },
+    { label: "否定值不能冒充零金额", amount: false, threshold: 0, writes: false },
+    { label: "空数组不能冒充零金额", amount: [], threshold: 0, writes: false },
+    { label: "单元素数组不是金额", amount: [100], threshold: 100, writes: false },
+    { label: "对象不是金额", amount: { amount: 100 }, threshold: 100, writes: false },
+    { label: "数字文字仍可比较", amount: "100", threshold: 100, writes: true },
+    { label: "真实零金额不丢失", amount: 0, threshold: 0, writes: true },
+  ])("数值分流 $label 时，只为真实匹配调用业务写入工具", async ({ amount, threshold, writes }) => {
+    const base = await prepare([]);
+    const manifest = AgentManifest.parse({
+      ...base, workflowFingerprint: "numeric-condition-test",
+      workflowSnapshot: { ...base.workflowSnapshot, nodes: {
+        start: { ...base.workflowSnapshot.nodes.start, next: "choose" },
+        choose: { ...base.workflowSnapshot.nodes.choose, condition: {
+          source: "input.amount", operator: "gte",
+          branches: [{ label: "金额符合条件", value: threshold, next: "record" }], defaultNext: "low_amount",
+        } },
+        record: base.workflowSnapshot.nodes.record,
+        low_amount: base.workflowSnapshot.nodes.low_amount,
+        done: base.workflowSnapshot.nodes.done,
+      } },
+    });
+    const input = { amount };
+    await db.update(runs).set({ input }).where(eq(runs.id, runId!));
+    const handle = await start(agentRunWorkflow, [runId!, manifest, input]);
+    await expect(handle.returnValue).resolves.toEqual({ status: "completed" });
+    expect(service!.modelRequests).toHaveLength(0);
+    expect(service!.toolRequests).toHaveLength(Number(writes));
+    const [completed] = await db.select().from(runs).where(eq(runs.id, runId!));
+    expect(completed).toMatchObject({ status: "completed", result: { choose: { matched: writes ? "金额符合条件" : "默认分支", next: writes ? "record" : "low_amount" } } });
+    const steps = await db.select().from(runSteps).where(eq(runSteps.runId, runId!));
+    expect(steps.some((step) => step.nodeId === "record")).toBe(writes);
+    expect(steps.some((step) => step.nodeId === "low_amount")).toBe(!writes);
+    if (writes) expect(service!.toolRequests[0]).toMatchObject({ input });
+  }, 240_000);
+
+  it.each([
     { label: "零金额和否定值符合业务预期", amount: 0, approved: false, passed: true },
     { label: "格式正确但业务值不符", amount: 10, approved: true, passed: false },
   ])("实际模型返回订单数组，$label 时正确执行验收上线门禁", async ({ amount, approved, passed }) => {
