@@ -72,6 +72,7 @@ pnpm db:migrate      # 应用迁移
 ```
 
 普通测试不依赖真实数据库。`test:integration`、`test:workflow` 和 `test:e2e` 会写入测试数据，必须指向隔离数据库；CI 会创建临时 Neon 分支、应用全部迁移，并在结束时清理。
+`test:integration` 执行数据库事务与并发用例，`test:workflow` 执行实际 SDK 编排、暂停恢复和重试用例，两套清单不重复；CI 仍完整执行两套测试及 E2E，不以重复运行数据库用例代替真实引擎验收。
 Playwright 默认自行启动本项目服务并使用 3210 端口；端口被其他工作区占用时可设置 `PLAYWRIGHT_PORT`。只有确认现有服务就是本分支、且连接同一隔离数据库时，才设置 `PLAYWRIGHT_REUSE_SERVER=1` 复用服务。若复用生产构建验证模型连接，测试服务还需用测试专用加密主钥和本机假模型启用 `REAL_MODELS_ENABLED=1`。
 
 ## 模型结构化结果（后端契约）
