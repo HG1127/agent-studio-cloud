@@ -57,7 +57,9 @@ export function buildStepPrompt({
   if (qualityFeedback) {
     parts.push(`【上一版质量检查未通过，必须修正后完整重写】\n${truncateMiddle(qualityFeedback, 16_000)}`);
   }
-  const outputRequirement = "【输出要求】\n直接返回本步骤的业务结果，不要输出多余解释或前后缀。";
+  const outputRequirement = node.modelOutput
+    ? `【输出要求】\n只返回一个合法 JSON 对象，不要输出解释、代码块或前后缀。必须满足以下完整字段契约：\n${JSON.stringify(node.modelOutput.schema)}`
+    : "【输出要求】\n直接返回本步骤的业务结果，不要输出多余解释或前后缀。";
   const bodyBudget = MAX_STEP_USER_PROMPT_CHARS - outputRequirement.length - 2;
   const body = truncateMiddle(parts.join("\n\n"), bodyBudget);
   return { system, user: `${body}\n\n${outputRequirement}` };

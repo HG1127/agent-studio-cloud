@@ -1,12 +1,13 @@
 "use step";
 // 模型步骤：先写轨迹再干活；模型目标按发布时冻结的 manifest 裁定（mock / 已保存连接 / 环境变量）。
 // 瞬时错误抛 RetryableError（SDK 自动重试），配置/永久错误抛 FatalError，不静默回落 mock。
-import { generateText } from "ai";
+import { generateText, jsonSchema, NoObjectGeneratedError, NoOutputGeneratedError, Output } from "ai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { and, eq, isNull } from "drizzle-orm";
 import { FatalError, RetryableError } from "workflow";
 import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
+import type { ModelStepResult } from "@/contracts/model-output";
 import { modelConnections, runs } from "@/db/schema";
 import { db } from "@/lib/db";
 import { isTransientModelError, realModelsEnabled } from "@/lib/model";
@@ -15,6 +16,7 @@ import { resolveModelTarget } from "@/server/domain/model-target";
 import { buildStepPrompt } from "@/server/domain/runtime/step-prompt";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
+import { validateModelJsonOutput, validateModelOutputConfiguration } from "@/server/domain/runtime/model-output";
 
 export interface RunModelStepInput {
   runId: string;
@@ -26,6 +28,11 @@ export interface RunModelStepInput {
 }
 
 class UnusableModelOutputError extends Error {}
+class StructuredModelOutputError extends Error {}
+
+function tokenCount(value: number | undefined): number {
+  return Number.isSafeInteger(value) && value! >= 0 ? value! : 0;
+}
 
 function cleanModelOutput(raw: string): string {
   const output = raw.replace(/<think\b[^>]*>[\s\S]*?<\/think\s*>/gi, "").trim();
@@ -33,7 +40,7 @@ function cleanModelOutput(raw: string): string {
   return output;
 }
 
-export async function runModelStep(args: RunModelStepInput): Promise<{ output: string }> {
+export async function runModelStep(args: RunModelStepInput): Promise<ModelStepResult> {
   "use step";
   const { node } = args;
   await appendTrace({
@@ -50,9 +57,28 @@ export async function runModelStep(args: RunModelStepInput): Promise<{ output: s
     nodeType: node.type,
     status: "running",
   });
+  const configurationIssue = validateModelOutputConfiguration(node);
+  if (configurationIssue) {
+    await persistStep({ runId: args.runId, nodeId: node.id, nodeTitle: node.title, nodeType: node.type, status: "failed", error: configurationIssue });
+    throw new FatalError(configurationIssue);
+  }
+  const outputConfig = node.modelOutput;
   const prompt = buildStepPrompt({ node, upstreamOutputs: args.outputs, input: args.input, qualityFeedback: args.qualityFeedback });
   const manifestModel = args.manifest.resourceSelection.model;
   if (manifestModel.mock) {
+    if (outputConfig) {
+      if (outputConfig.mockOutput === undefined) {
+        const reason = "结构化模拟运行需要先配置符合字段契约的模拟结果";
+        await persistStep({ runId: args.runId, nodeId: node.id, nodeTitle: node.title, nodeType: node.type, status: "failed", error: reason });
+        throw new FatalError(reason);
+      }
+      await appendTrace({ runId: args.runId, nodeId: node.id, kind: "model.mock", title: `「${node.title}」使用已配置的模拟结果` });
+      await persistStep({
+        runId: args.runId, nodeId: node.id, nodeTitle: node.title, nodeType: node.type, status: "succeeded",
+        output: { output: outputConfig.mockOutput, mock: true, repairCount: 0 },
+      });
+      return { output: outputConfig.mockOutput };
+    }
     const goal = node.description || node.title;
     const output = `[模拟输出] ${node.title} 已按「${goal}」完成，输出要点：1）已读取任务输入与上游步骤成果；2）形成可供下一步直接使用的结构化内容。`;
     await persistStep({
@@ -109,32 +135,78 @@ export async function runModelStep(args: RunModelStepInput): Promise<{ output: s
     if (FatalError.is(error) || RetryableError.is(error)) throw error;
     throw new FatalError(reason);
   }
+  const usageTotals = { inputTokens: 0, outputTokens: 0 };
+  let repairCount = 0;
   try {
     const provider = createOpenAICompatible({
       name: "custom-model",
       baseURL: target.kind === "mock" ? "" : target.baseUrl,
       apiKey: target.kind === "mock" ? "" : target.apiKey,
+      ...(outputConfig ? { supportsStructuredOutputs: outputConfig.providerMode === "json-schema" } : {}),
     });
-    const { text, usage } = await generateText({
-      model: provider(target.kind === "mock" ? "" : target.modelId),
-      system: prompt.system,
-      prompt: prompt.user,
-      abortSignal: AbortSignal.timeout(60_000),
-    });
-    const output = cleanModelOutput(text);
-    await persistStep({
-      runId: args.runId,
-      nodeId: node.id,
-      nodeTitle: node.title,
-      nodeType: node.type,
-      status: "succeeded",
-      output: { output, usage: { inputTokens: usage?.inputTokens ?? 0, outputTokens: usage?.outputTokens ?? 0 } },
-    });
-    return { output };
+    const maxRepairs = outputConfig?.maxRepairAttempts ?? 0;
+    for (let attempt = 0; attempt <= maxRepairs; attempt += 1) {
+      const currentPrompt = attempt === 0 ? prompt : buildStepPrompt({
+        node, upstreamOutputs: args.outputs, input: args.input,
+        qualityFeedback: [args.qualityFeedback, "上次结果格式或字段不符合要求，请重新核对完整字段契约并输出合法 JSON 对象。"].filter(Boolean).join("\n"),
+      });
+      try {
+        const generated = await generateText({
+          model: provider(target.kind === "mock" ? "" : target.modelId),
+          system: currentPrompt.system,
+          prompt: currentPrompt.user,
+          abortSignal: AbortSignal.timeout(60_000),
+          ...(outputConfig ? {
+            maxRetries: 0,
+            output: outputConfig.providerMode === "json-schema" ? Output.object({
+              schema: jsonSchema(outputConfig.schema, { validate: (value) => {
+                const validated = validateModelJsonOutput(value, outputConfig.schema);
+                if (validated.ok) return { success: true, value: validated.value };
+                return { success: false, error: new Error(validated.error) };
+              } }),
+            }) : Output.json(),
+          } : {}),
+        });
+        usageTotals.inputTokens += tokenCount(generated.usage?.inputTokens);
+        usageTotals.outputTokens += tokenCount(generated.usage?.outputTokens);
+        let output: ModelStepResult["output"];
+        if (outputConfig) {
+          const validated = validateModelJsonOutput(generated.output, outputConfig.schema);
+          if (!validated.ok) {
+            throw new StructuredModelOutputError(validated.error);
+          }
+          output = validated.value;
+        } else {
+          output = cleanModelOutput(generated.text);
+        }
+        await persistStep({
+          runId: args.runId, nodeId: node.id, nodeTitle: node.title, nodeType: node.type, status: "succeeded",
+          output: { output, usage: usageTotals, ...(outputConfig ? { mock: false, repairCount } : {}) },
+        });
+        return { output };
+      } catch (error) {
+        if (FatalError.is(error) || RetryableError.is(error)) throw error;
+        if (!outputConfig || !(error instanceof StructuredModelOutputError || NoObjectGeneratedError.isInstance(error) || NoOutputGeneratedError.isInstance(error))) throw error;
+        if (NoObjectGeneratedError.isInstance(error)) {
+          usageTotals.inputTokens += tokenCount(error.usage?.inputTokens);
+          usageTotals.outputTokens += tokenCount(error.usage?.outputTokens);
+        }
+        if (attempt >= maxRepairs) throw new StructuredModelOutputError("模型结果未满足字段契约，已停止后续执行");
+        repairCount += 1;
+        await appendTrace({
+          runId: args.runId, nodeId: node.id, kind: "model.output_repair", level: "warn",
+          title: `「${node.title}」正在修正结果格式`,
+          // 未声明的字段名也可能含秘密，轨迹不保存来自错误结果的字段路径。
+          detail: "模型结果格式或字段未满足契约，本次修正不会引用或保存错误正文",
+          data: { repairAttempt: repairCount, maxRepairAttempts: maxRepairs },
+        });
+      }
+    }
+    throw new StructuredModelOutputError("模型结果未满足字段契约，已停止后续执行");
   } catch (error) {
     if (FatalError.is(error) || RetryableError.is(error)) throw error;
     const retryable = isTransientModelError(error);
-    const reason = retryable
+    const reason = error instanceof StructuredModelOutputError ? error.message : retryable
       ? "模型服务暂时不可用，稍后自动重试"
       : "模型调用失败，请检查连接地址、密钥和模型名称";
     await persistStep({
@@ -144,6 +216,7 @@ export async function runModelStep(args: RunModelStepInput): Promise<{ output: s
       nodeType: node.type,
       status: "failed",
       error: reason,
+      ...(outputConfig ? { output: { usage: usageTotals, mock: false, repairCount } } : {}),
     });
     if (retryable) {
       throw new RetryableError(reason, { retryAfter: "5s" });

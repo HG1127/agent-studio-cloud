@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { JsonStorageValue } from "./json";
+import { ModelOutputConfig } from "./model-output";
 
 const RESERVED_FIELD_NAMES: ReadonlySet<string> = new Set(["__proto__", "prototype", "constructor"]);
 const RESERVED_WORKFLOW_NODE_IDS: ReadonlySet<string> = new Set([
@@ -114,6 +115,7 @@ export const WorkflowNode = z.object({
   retry: z.object({ maxAttempts: z.number().int().min(1).max(8), backoffMs: z.number().int().min(50).max(60000) }).optional(),
   // 类型专属（宽松可选，具体节点类型由运行时 switch 消费）
   modelClass: z.string().optional(),
+  modelOutput: ModelOutputConfig.optional(),
   purpose: z.string().optional(),
   approval: z.object({ role: z.string(), reason: z.string() }).optional(),
   tool: ToolSpec.optional(),
@@ -148,6 +150,10 @@ export const WorkflowNode = z.object({
   toAgent: z.object({ id: z.string(), name: z.string().optional(), versionId: z.string().optional() }).optional(),
   contract: HandoffContract.optional(),
   businessSpec: z.record(z.string(), z.unknown()).nullable().default(null),
+}).superRefine((node, context) => {
+  if (node.modelOutput && node.type !== "ai" && !(node.type === "rule" && node.rule?.kind === "business_rule" && !node.quality)) {
+    context.addIssue({ code: "custom", path: ["modelOutput"], message: "只有智能处理和业务判断步骤可以配置模型结果字段" });
+  }
 }).transform(omitUndefined);
 export const WorkflowDraft = z.object({
   id: z.string(), versionId: z.string().nullable().default(null),

@@ -19,6 +19,16 @@ const node = {
 } as unknown as WorkflowNode;
 
 describe("buildStepPrompt", () => {
+  it("结构化输出保留完整字段契约，同时限制总提示词容量", () => {
+    const schema = { type: "object", required: ["amount"], properties: { amount: { type: "number" } }, description: "中".repeat(8_000) };
+    const { user } = buildStepPrompt({
+      node: { ...node, modelOutput: { format: "json", schema, providerMode: "json", maxRepairAttempts: 1 } },
+      upstreamOutputs: { text: "a".repeat(100_000) }, input: { text: "a".repeat(100_000) }, qualityFeedback: "改".repeat(30_000),
+    });
+    expect(user.length).toBeLessThanOrEqual(MAX_STEP_USER_PROMPT_CHARS);
+    expect(user).toContain(JSON.stringify(schema));
+    expect(user).toContain("只返回一个合法 JSON 对象");
+  });
   it("返回 system 与 user 两段提示词", () => {
     const result = buildStepPrompt({ node, upstreamOutputs: {}, input: {} });
     expect(Object.keys(result).sort()).toEqual(["system", "user"]);

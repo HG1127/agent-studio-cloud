@@ -7,6 +7,7 @@
 - 助手创建、中文意图编译、业务落地检查和流程设计审计
 - React Flow 流程画布、未保存保护、版本发布、历史版本对比与安全恢复
 - 模型步骤、演示或服务端 HTTP 业务工具、知识检索、人工确认、条件、循环、等待外部消息
+- 模型按字段契约输出业务对象、有限格式修正与显式模拟样例（后端配置）
 - 并行分支（全部成功、任一成功、保留失败继续）和顺序子流程
 - 长期经验读取与写入，写入前自动移除常见敏感字段
 - 调用其他助手、交接给其他助手、冻结目标版本和独立子运行
@@ -68,6 +69,34 @@ pnpm db:migrate      # 应用迁移
 
 普通测试不依赖真实数据库。`test:integration`、`test:workflow` 和 `test:e2e` 会写入测试数据，必须指向隔离数据库；CI 会创建临时 Neon 分支、应用全部迁移，并在结束时清理。
 Playwright 默认自行启动本项目服务并使用 3210 端口；端口被其他工作区占用时可设置 `PLAYWRIGHT_PORT`。只有确认现有服务就是本分支、且连接同一隔离数据库时，才设置 `PLAYWRIGHT_REUSE_SERVER=1` 复用服务。若复用生产构建验证模型连接，测试服务还需用测试专用加密主钥和本机假模型启用 `REAL_MODELS_ENABLED=1`。
+
+## 模型结构化结果（后端契约）
+
+智能处理和业务判断步骤可以配置 `modelOutput`，让模型结果按字段契约校验后以对象传给条件、工具和最终交付，而不是仅返回文本。未配置的旧步骤行为不变。目前通过助手定义导入或后端流程保存配置，画布尚无专门的结果字段编辑入口。
+
+```json
+{
+  "modelOutput": {
+    "format": "json",
+    "providerMode": "json",
+    "maxRepairAttempts": 1,
+    "schema": {
+      "type": "object",
+      "required": ["amount", "approved"],
+      "additionalProperties": false,
+      "properties": {
+        "amount": { "type": "number", "title": "金额", "minimum": 0 },
+        "approved": { "type": "boolean", "title": "已确认" }
+      }
+    },
+    "mockOutput": { "amount": 100, "approved": false }
+  }
+}
+```
+
+`json` 模式要求服务支持 JSON 对象响应，由应用严格校验字段；`json-schema` 模式还把契约交给支持原生结构化输出的服务。不支持的模式会明确失败，不偷偷切回模拟或其他协议。实现使用 [Vercel AI SDK 结构化输出](https://ai-sdk.dev/docs/ai-sdk-core/generating-structured-data)。
+
+字段契约沿用工具和等待消息的受支持子集，根类型必须是对象，契约最大 32KB。结构化结果为单步回执预留 4KB，实际结果最大 1020KB；修正次数可设为 0 至 2，默认一次。错误结果不会传给下游，也不会原样存入失败轨迹；修正耗尽后结束失败。成功或失败回执累计供应商回传用量并记录修正次数。模拟模式必须显式提供符合契约、最大 256KB 的 `mockOutput`，并明确记录模拟状态；真实运行忽略该样例。
 
 ## 使用路径
 
