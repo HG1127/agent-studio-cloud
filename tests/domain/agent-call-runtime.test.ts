@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { AgentManifest } from "@/contracts/manifest";
 import { WorkflowNode } from "@/contracts/workflow";
-import { buildAgentCallInput, validateAgentCallNode, validateAgentCallOutput } from "@/server/domain/runtime/agent-call-runtime";
+import { buildAgentCallInput as buildAgentCallInputResult, validateAgentCallNode, validateAgentCallOutput } from "@/server/domain/runtime/agent-call-runtime";
 import { compileModelWorkflowPlan } from "@/server/domain/compile";
+
+function buildAgentCallInput(args: Parameters<typeof buildAgentCallInputResult>[0]) {
+  const result = buildAgentCallInputResult(args);
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error(result.error);
+  return result.input;
+}
 
 const targetManifest = AgentManifest.parse({
   schemaVersion: "4.0",
@@ -19,6 +26,48 @@ const targetManifest = AgentManifest.parse({
 });
 
 describe("助手调用运行逻辑", () => {
+  it("显式映射保留业务对象类型，不再按目标名称猜测或补充全文上下文", () => {
+    const typed = AgentManifest.parse({ ...targetManifest, inputContract: { fields: [
+      { name: "amount", type: "number" }, { name: "approved", type: "boolean" }, { name: "customer", type: "object" },
+    ] } });
+    const node = WorkflowNode.parse({ id: "call", title: "处理金额", type: "agent_call", agentCall: { targetAgentId: "target", versionId: "version" }, inputMapping: { fields: [
+      { target: ["amount"], source: { kind: "output", nodeId: "extract", path: ["amount"] } },
+      { target: ["approved"], source: { kind: "literal", value: false } },
+      { target: ["customer"], source: { kind: "input", path: ["customer"] } },
+    ] } });
+    expect(buildAgentCallInput({ node, targetManifest: typed, input: { customer: { id: "c1" }, other: "not-selected" }, outputs: { extract: { amount: 0 }, other: "not-selected" } }))
+      .toEqual({ amount: 0, approved: false, customer: { id: "c1" } });
+  });
+  it("映射缺失明确失败，不用文字上下文伪装成业务字段", () => {
+    const node = WorkflowNode.parse({ id: "call", title: "处理金额", type: "agent_call", agentCall: { targetAgentId: "target", versionId: "version" }, inputMapping: { fields: [
+      { target: ["brief"], source: { kind: "input", path: ["missing"] } },
+    ] } });
+    expect(buildAgentCallInputResult({ node, targetManifest, input: { note: "not-selected" }, outputs: {} })).toMatchObject({ ok: false, error: expect.stringContaining("缺少映射字段") });
+  });
+  it("映射前和映射后均脱敏，重命名、固定值和兜底不能复制密钥", () => {
+    const node = WorkflowNode.parse({ id: "call", title: "处理金额", type: "agent_call", agentCall: { targetAgentId: "target", versionId: "version" }, inputMapping: { fields: [
+      { target: ["brief"], source: { kind: "input", path: ["apiKey"] } },
+      { target: ["token"], source: { kind: "literal", value: "literal-private-value" } },
+      { target: ["note"], source: { kind: "input", path: ["missing"] }, fallback: "Bearer abcdefghijklmnop" },
+    ] } });
+    const input = buildAgentCallInput({ node, targetManifest, input: { apiKey: "source-private-value" }, outputs: {} });
+    expect(input).toEqual({ brief: "[已隐藏敏感信息]", token: "[已隐藏敏感信息]", note: "[已隐藏敏感信息]" });
+  });
+  it("私有模式不能通过嵌套成果读取长期经验，团队模式可显式映射", () => {
+    const base = { id: "call", title: "引用经验", type: "agent_call", agentCall: { targetAgentId: "target", versionId: "version", memoryAccess: { mode: "none" } }, inputMapping: { fields: [
+      { target: ["brief"], source: { kind: "output", nodeId: "group", path: ["steps", "0", "output", "memories", "0", "content"] } },
+    ] } };
+    const outputs = { group: { steps: [{ output: { mode: "read", memories: [{ content: "private-memory" }] } }] } };
+    const node = WorkflowNode.parse(base);
+    expect(buildAgentCallInputResult({ node, targetManifest, input: {}, outputs }).ok).toBe(false);
+    const team = WorkflowNode.parse({ ...base, agentCall: { ...base.agentCall, memoryAccess: { mode: "team" } } });
+    expect(buildAgentCallInput({ node: team, targetManifest, input: {}, outputs })).toEqual({ brief: "private-memory" });
+  });
+  it("旧上下文路径也移除嵌套经验，不仅保护新映射", () => {
+    const node = WorkflowNode.parse({ id: "call", title: "旧协作", type: "agent_call", agentCall: { targetAgentId: "target", versionId: "version" } });
+    const outputs = { group: { steps: [{ output: { mode: "write", saved: true, content: "private-memory" } }] } };
+    expect(JSON.stringify(buildAgentCallInput({ node, targetManifest, input: {}, outputs }))).not.toContain("private-memory");
+  });
   it("按目标输入契约映射已有字段，并为缺失字段补充业务上下文", () => {
     const node = WorkflowNode.parse({ id: "call", title: "请研究助手分析", type: "agent_call", description: "分析客户情况", agentCall: { targetAgentId: "target", versionId: "version" } });
     const input = buildAgentCallInput({ node, targetManifest, input: { customer: "甲公司" }, outputs: { summary: "最近续约下降" } });

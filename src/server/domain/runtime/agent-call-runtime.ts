@@ -1,6 +1,7 @@
 import { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
-import { buildBoundedCollaborationContext, isCollaborationMemoryOutput } from "@/server/domain/runtime/collaboration-input";
+import { buildBoundedCollaborationContext, collaborationDataWithMemoryPolicy } from "@/server/domain/runtime/collaboration-input";
+import { resolveNodeInput } from "./input-mapping";
 import { safeDataPathSegments } from "@/server/domain/runtime/data-path";
 import { hasMeaningfulResult } from "@/server/domain/runtime/result-content";
 import { redactSensitiveData } from "@/server/domain/security/redact-sensitive";
@@ -14,13 +15,19 @@ export function buildAgentCallInput(args: {
   targetManifest: AgentManifest;
   input: Record<string, unknown>;
   outputs: Record<string, unknown>;
-}): Record<string, unknown> {
+}): { ok: true; input: Record<string, unknown> } | { ok: false; error: string } {
   const fields = args.targetManifest.inputContract.fields;
   const input = redactSensitiveData(args.input) as Record<string, unknown>;
-  const accessibleOutputs = args.node.agentCall?.memoryAccess?.mode === "team"
-    ? args.outputs
-    : Object.fromEntries(Object.entries(args.outputs).filter(([, value]) => !isCollaborationMemoryOutput(value)));
+  const team = args.node.agentCall?.memoryAccess?.mode === "team";
+  const accessibleOutputs = collaborationDataWithMemoryPolicy(args.outputs, team);
   const outputs = redactSensitiveData(accessibleOutputs) as Record<string, unknown>;
+  if (args.node.inputMapping) {
+    if (args.node.inputMapping.includeUpstreamOutputs) return { ok: false, error: "助手协作请逐项映射需要的上游字段，不能额外携带全部成果" };
+    const mapped = resolveNodeInput({ node: args.node, input, outputs });
+    if (!mapped.ok) return mapped;
+    const mappedInput = collaborationDataWithMemoryPolicy(mapped.input, team);
+    return { ok: true, input: redactSensitiveData(mappedInput) as Record<string, unknown> };
+  }
   const fallbackCopies = fields.filter((field) => {
     const value = ownValue(input, field.name) ?? ownValue(outputs, field.name);
     return (value === undefined || value === null) && field.type === "string";
@@ -30,12 +37,12 @@ export function buildAgentCallInput(args: {
     previousResults: Object.values(outputs),
     request: args.node.description || args.node.title,
   }, fallbackCopies || 1);
-  if (fields.length === 0) return { context };
-  return Object.fromEntries(fields.flatMap((field) => {
+  if (fields.length === 0) return { ok: true, input: { context } };
+  return { ok: true, input: Object.fromEntries(fields.flatMap((field) => {
     const value = ownValue(input, field.name) ?? ownValue(outputs, field.name);
     if (value !== undefined && value !== null) return [[field.name, value]];
     return field.type === "string" ? [[field.name, context]] : [];
-  }));
+  })) };
 }
 
 export function validateAgentCallNode(node: WorkflowNode, currentAgentId?: string): string | null {

@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import { MAX_PARALLEL_BRANCHES, MAX_PARALLEL_STEPS, WorkflowNode } from "@/contracts/workflow";
 import { prepareParallelBranches, resolveParallelOutcome } from "@/server/domain/runtime/parallel-runtime";
@@ -20,6 +21,18 @@ function parallelNode(overrides: Record<string, unknown> = {}) {
 }
 
 describe("并行分支运行准备", () => {
+  it("另一隔离环境的模型配置和固定对象保持完整", () => {
+    const node = parallelNode();
+    node.parallel!.branches[0].steps = runInNewContext('JSON.parse(payload)', { payload: JSON.stringify([{
+      id: "extract", title: "整理金额", type: "ai",
+      modelOutput: { format: "json", schema: { type: "object" }, mockOutput: { amount: 123.5 } },
+      inputMapping: { fields: [{ target: ["customer"], source: { kind: "literal", value: { id: "c1" } } }] },
+    }]) });
+    expect(prepareParallelBranches(node)).toMatchObject({ ok: true, branches: [
+      { steps: [{ id: "parallel.market.extract", modelOutput: { mockOutput: { amount: 123.5 } }, inputMapping: { fields: [{ source: { value: { id: "c1" } } }] } }] },
+      {},
+    ] });
+  });
   it("为分支内步骤生成互不冲突的运行标识", () => {
     const result = prepareParallelBranches(parallelNode());
     expect(result.ok).toBe(true);

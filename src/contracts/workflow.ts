@@ -153,8 +153,11 @@ export const WorkflowNode = z.object({
   contract: HandoffContract.optional(),
   businessSpec: z.record(z.string(), z.unknown()).nullable().default(null),
 }).superRefine((node, context) => {
-  if (node.inputMapping && node.type !== "tool" && node.type !== "ai" && !(node.type === "rule" && node.rule?.kind === "business_rule" && !node.quality)) {
-    context.addIssue({ code: "custom", path: ["inputMapping"], message: "只有智能处理、业务判断和工具步骤可以配置输入映射" });
+  if (node.inputMapping && !["tool", "ai", "agent_call", "handoff"].includes(node.type) && !(node.type === "rule" && node.rule?.kind === "business_rule" && !node.quality)) {
+    context.addIssue({ code: "custom", path: ["inputMapping"], message: "只有智能处理、业务判断、工具和助手协作步骤可以配置输入映射" });
+  }
+  if (node.inputMapping?.includeUpstreamOutputs && ["agent_call", "handoff"].includes(node.type)) {
+    context.addIssue({ code: "custom", path: ["inputMapping", "includeUpstreamOutputs"], message: "助手协作请逐项映射需要的上游字段，不能额外携带全部成果" });
   }
   if (node.modelOutput && node.type !== "ai" && !(node.type === "rule" && node.rule?.kind === "business_rule" && !node.quality)) {
     context.addIssue({ code: "custom", path: ["modelOutput"], message: "只有智能处理和业务判断步骤可以配置模型结果字段" });

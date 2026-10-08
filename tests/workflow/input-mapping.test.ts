@@ -22,7 +22,7 @@ afterEach(async () => {
   runId = undefined;
 });
 
-async function prepare(input: Record<string, unknown>, mode: "normal" | "loop" | "subflow" = "normal") {
+async function prepare(input: Record<string, unknown>, mode: "normal" | "loop" | "subflow" | "parallel" = "normal") {
   service = await startModelJsonServer([]);
   const inputSchema = { type: "object", required: ["action", "input", "outputs"], additionalProperties: false, properties: {
     action: { type: "string", const: "record" },
@@ -39,6 +39,7 @@ async function prepare(input: Record<string, unknown>, mode: "normal" | "loop" |
   vi.stubEnv("TOOL_REGISTRY_JSON", JSON.stringify([tool]));
   const extract = {
     id: "extract", title: "提取业务字段", type: "ai", next: "record",
+    ...(mode === "parallel" ? { inputMapping: { fields: [{ target: ["customer"], source: { kind: "literal", value: { id: "fixed" } }, fallback: { id: "missing" } }] } } : {}),
     modelOutput: { format: "json", schema: { type: "object", properties: { amount: { type: "number" }, approved: { type: "boolean" } }, required: ["amount", "approved"] }, mockOutput: { amount: 123.5, approved: true } },
   };
   const record = {
@@ -46,8 +47,8 @@ async function prepare(input: Record<string, unknown>, mode: "normal" | "loop" |
     tool: { connector: "test", action: "record", scope: "test.record", risk: "low", registryToolId: tool.id, protocol: "http-json", inputSchema, outputSchema: tool.outputSchema },
     inputMapping: { fields: [
       { target: ["customerId"], source: mode === "loop" ? { kind: "output", nodeId: "items", path: ["currentItem", "id"] } : { kind: "input", path: ["customer", "id"] } },
-      { target: ["amount"], source: { kind: "output", nodeId: mode === "subflow" ? "group.extract" : "extract", path: ["amount"] } },
-      { target: ["approved"], source: { kind: "output", nodeId: mode === "subflow" ? "group.extract" : "extract", path: ["approved"] } },
+      { target: ["amount"], source: { kind: "output", nodeId: mode === "subflow" ? "group.extract" : mode === "parallel" ? "group.main.extract" : "extract", path: ["amount"] } },
+      { target: ["approved"], source: { kind: "output", nodeId: mode === "subflow" ? "group.extract" : mode === "parallel" ? "group.main.extract" : "extract", path: ["approved"] } },
     ] },
   };
   const manifest = AgentManifest.parse({
@@ -58,9 +59,14 @@ async function prepare(input: Record<string, unknown>, mode: "normal" | "loop" |
       id: "input-mapping-test", startNodeId: "start",
       rootAgent: { id: "test", name: "字段映射助手", role: "测试" }, memoryPolicy: { taskContext: true, longTerm: false },
       nodes: {
-        start: { id: "start", title: "收到任务", type: "trigger", next: mode === "loop" ? "items" : mode === "subflow" ? "group" : "extract" },
+        start: { id: "start", title: "收到任务", type: "trigger", next: mode === "loop" ? "items" : mode === "subflow" || mode === "parallel" ? "group" : "extract" },
         ...(mode === "subflow" ? {
           group: { id: "group", title: "处理订单", type: "subflow", next: "done", subflow: { name: "处理订单", steps: [extract, record] } },
+        } : mode === "parallel" ? {
+          group: { id: "group", title: "并行核对订单", type: "parallel", next: "done", parallel: { strategy: "all", failurePolicy: "fail_fast", branches: [
+            { id: "main", label: "记录订单", steps: [extract, record] },
+            { id: "audit", label: "记录核对轨迹", steps: [{ id: "note", title: "记录核对", type: "system" }] },
+          ] } },
         } : { extract, record }),
         ...(mode === "loop" ? {
           items: { id: "items", title: "逐项处理", type: "loop", loop: { collectionPath: "input.customers", itemKey: "currentItem", maxIterations: 10, bodyNext: "extract", exitNext: "done" } },
@@ -113,5 +119,13 @@ describe("真实持久工作流字段映射", () => {
     expect(service!.toolRequests).toEqual([{ action: "record", input: { customerId: "c1", amount: 123.5, approved: true }, outputs: {} }]);
     const steps = await db.select().from(runSteps).where(eq(runSteps.runId, runId!));
     expect(steps.find((step) => step.nodeId === "group.record")).toMatchObject({ status: "succeeded", output: { ok: true } });
+  }, 240_000);
+  it("并行分支的结构化配置与对象固定值可经过隔离环境解析并映射给工具", async () => {
+    const handle = await prepare({ customer: { id: "c1" }, secretNote: "not-for-tool" }, "parallel");
+    await expect(handle.returnValue).resolves.toEqual({ status: "completed" });
+    expect(service!.toolRequests).toEqual([{ action: "record", input: { customerId: "c1", amount: 123.5, approved: true }, outputs: {} }]);
+    const steps = await db.select().from(runSteps).where(eq(runSteps.runId, runId!));
+    expect(steps.find((step) => step.nodeId === "group.main.record")).toMatchObject({ status: "succeeded", output: { ok: true } });
+    expect(steps.find((step) => step.nodeId === "group.audit.note")).toMatchObject({ status: "succeeded" });
   }, 240_000);
 });

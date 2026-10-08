@@ -53,7 +53,8 @@ export async function beginAgentCall(args: {
   const parsedManifest = target ? AgentManifest.safeParse(target.manifest) : null;
   if (!target || !parsedManifest?.success) throw new FatalError(`步骤「${args.node.title}」绑定的协作助手版本不可用`);
   const derivedInput = buildAgentCallInput({ node: args.node, targetManifest: parsedManifest.data, input: args.parentInput, outputs: args.outputs });
-  const validatedInput = validateCollaborationInput(derivedInput, parsedManifest.data.inputContract.fields);
+  if (!derivedInput.ok) throw new FatalError(derivedInput.error);
+  const validatedInput = validateCollaborationInput(derivedInput.input, parsedManifest.data.inputContract.fields);
   if (!validatedInput.ok) throw new FatalError(`步骤「${args.node.title}」生成的协作输入无效：${validatedInput.error}`);
   const input = validatedInput.data;
   await persistStep({ runId: args.runId, nodeId: args.node.id, nodeTitle: args.node.title, nodeType: args.node.type, status: "running" });

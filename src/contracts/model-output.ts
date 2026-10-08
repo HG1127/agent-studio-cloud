@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { JsonStorageRecord } from "./json";
+import { isPlainJsonObject, JsonStorageRecord } from "./json";
 
 export const MAX_MODEL_OUTPUT_SCHEMA_BYTES = 32 * 1024;
 export const MAX_MODEL_MOCK_OUTPUT_BYTES = 256 * 1024;
@@ -26,7 +26,7 @@ function boundedResultRecord(limit: number, label: string) {
       else if (Array.isArray(item)) {
         if (entries + stack.length + item.length > 50_000) issue = `${label}的内容超过限制`;
         else for (const child of item) stack.push({ value: child, depth: current.depth + 1 });
-      } else if (Object.getPrototypeOf(item) !== Object.prototype && Object.getPrototypeOf(item) !== null) {
+      } else if (!isPlainJsonObject(item)) {
         issue = `${label}只能包含普通对象和数组`;
       } else {
         const children = Object.entries(item);

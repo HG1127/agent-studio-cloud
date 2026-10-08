@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isPlainJsonObject } from "./json";
 import { AgentInputContract } from "./manifest";
 import { RunFeedbackView } from "./run-feedback";
 import { WorkflowDraft } from "./workflow";
@@ -45,7 +46,7 @@ function jsonObjectIssue(value: Record<string, unknown>, options: {
     if (typeof item !== "object") return `${options.label}只能包含可序列化的 JSON 数据`;
     if (visited.has(item)) return `${options.label}不能包含循环引用`;
     visited.add(item);
-    if (!Array.isArray(item) && Object.getPrototypeOf(item) !== Object.prototype && Object.getPrototypeOf(item) !== null) {
+    if (!Array.isArray(item) && !isPlainJsonObject(item)) {
       return `${options.label}只能包含普通对象和数组`;
     }
     if (Array.isArray(item)) {

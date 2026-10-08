@@ -1,6 +1,7 @@
 import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
-import { buildBoundedCollaborationContext, isCollaborationMemoryOutput } from "@/server/domain/runtime/collaboration-input";
+import { buildBoundedCollaborationContext, collaborationDataWithMemoryPolicy } from "@/server/domain/runtime/collaboration-input";
+import { resolveNodeInput } from "./input-mapping";
 import { isSafeDataPathSegment, safeDataPathSegments } from "@/server/domain/runtime/data-path";
 import { hasMeaningfulResult } from "@/server/domain/runtime/result-content";
 import { redactSensitiveData } from "@/server/domain/security/redact-sensitive";
@@ -64,19 +65,28 @@ export function buildHandoffInput(args: {
   targetManifest: AgentManifest;
   input: Record<string, unknown>;
   outputs: Record<string, unknown>;
-}): { input: Record<string, unknown>; redactedPaths: string[] } {
+}): { ok: true; input: Record<string, unknown>; redactedPaths: string[] } | { ok: false; error: string } {
   const memoryPolicy = args.node.contract?.memoryPolicy;
   const terms = [
     ...normalizedTerms(args.node),
     ...(memoryPolicy?.private ?? []).map((term) => term.toLowerCase().replace(/[\s_-]/g, "")).filter((term) => term.length >= 2),
   ];
-  const accessibleOutputs = memoryPolicy?.mode === "team"
-    ? args.outputs
-    : Object.fromEntries(Object.entries(args.outputs).filter(([, value]) => !isCollaborationMemoryOutput(value)));
+  const team = memoryPolicy?.mode === "team";
+  const accessibleOutputs = collaborationDataWithMemoryPolicy(args.outputs, team);
   const sanitizedInput = sanitizeHandoffValue(args.input, terms);
   const sanitizedOutputs = sanitizeHandoffValue(accessibleOutputs, terms);
   const sourceInput = sanitizedInput.value as Record<string, unknown>;
   const sourceOutputs = sanitizedOutputs.value as Record<string, unknown>;
+  if (args.node.inputMapping) {
+    if (args.node.inputMapping.includeUpstreamOutputs) return { ok: false, error: "助手交接请逐项映射需要的上游字段，不能额外携带全部成果" };
+    const mapped = resolveNodeInput({ node: args.node, input: sourceInput, outputs: sourceOutputs });
+    if (!mapped.ok) return mapped;
+    const filtered = collaborationDataWithMemoryPolicy(mapped.input, team);
+    const sanitized = sanitizeHandoffValue(filtered, terms);
+    return { ok: true, input: sanitized.value as Record<string, unknown>, redactedPaths: [
+      ...sanitizedInput.redactedPaths, ...sanitizedOutputs.redactedPaths, ...sanitized.redactedPaths,
+    ] };
+  }
   const fields = args.targetManifest.inputContract.fields;
   const fallbackCopies = fields.filter((field) => {
     const value = ownValue(sourceInput, field.name) ?? ownValue(sourceOutputs, field.name);
@@ -96,7 +106,7 @@ export function buildHandoffInput(args: {
     if (value !== undefined && value !== null) return [[field.name, value]];
     return field.type === "string" ? [[field.name, context]] : [];
   }));
-  return { input, redactedPaths: [...sanitizedInput.redactedPaths, ...sanitizedOutputs.redactedPaths] };
+  return { ok: true, input, redactedPaths: [...sanitizedInput.redactedPaths, ...sanitizedOutputs.redactedPaths] };
 }
 
 export function validateHandoffNode(node: WorkflowNode, currentAgentId?: string): string | null {
