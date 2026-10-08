@@ -6,6 +6,9 @@ import { POST } from "@/app/api/runs/route";
 import { GET as getStatus } from "@/app/api/runs/[runId]/route";
 import { GET as getResult } from "@/app/api/runs/[runId]/result/route";
 import { POST as cancelTask } from "@/app/api/runs/[runId]/cancel/route";
+import { GET as readApproval, POST as decideTaskApproval } from "@/app/api/runs/[runId]/approvals/[approvalId]/route";
+import { GET as readApprovals } from "@/app/api/runs/[runId]/approvals/route";
+import { RunApprovalGetResult, RunApprovalListResult } from "@/contracts/run-approval";
 import { AgentManifest } from "@/contracts/manifest";
 import { RunTaskResult, RunTaskStartResult, RunTaskStatusResult } from "@/contracts/run-task";
 import { ApprovalPayload } from "@/contracts/run";
@@ -13,6 +16,7 @@ import { agents, agentVersions, approvals, runs, runSteps, traceEvents } from "@
 import { db } from "@/lib/db";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { decideApprovalAction } from "@/server/actions/decide-approval";
+import { resolvePath, runEvalContext } from "@/server/domain/runtime/condition-eval";
 import { waitForPendingApprovalHook } from "./approval-helpers";
 import { startModelJsonServer } from "../helpers/model-json-server";
 
@@ -95,6 +99,9 @@ async function readResult() {
   const response = await getResult(new Request(`${ORIGIN}/api/runs/${runId}/result`), { params: Promise.resolve({ runId: runId! }) });
   return { response, body: RunTaskResult.parse(await response.json()) };
 }
+async function decideViaHttp(approvalId: string, note = "已核对实际金额") {
+  return decideTaskApproval(new Request(`${ORIGIN}/api/runs/${runId}/approvals/${approvalId}`, { method: "POST", headers: { origin: ORIGIN, "content-type": "application/json" }, body: JSON.stringify({ confirmed: true, decision: "approved", note }) }), { params: Promise.resolve({ runId: runId!, approvalId }) });
+}
 
 describe("程序化任务到真实持久工作流的交付", () => {
   it.each(["ai", "rule"] as const)("同一 %s 模型步骤返工后，人工确认审核最新成果而非旧参考", async (type) => {
@@ -104,9 +111,10 @@ describe("程序化任务到真实持久工作流的交付", () => {
     const revised = AgentManifest.parse({ ...original, workflowSnapshot: { ...original.workflowSnapshot,
       nodes: { ...original.workflowSnapshot.nodes,
         extract: { ...original.workflowSnapshot.nodes.extract, type, ...(type === "rule" ? { rule: { kind: "business_rule" } } : {}), next: "check_revision" },
-        check_revision: { id: "check_revision", title: "检查返工次数", type: "condition", condition: { source: "context.extract.amount", operator: "gte", branches: [{ label: "完成本次修订", value: 3, next: "confirm" }], defaultNext: "reference" } },
+        check_revision: { id: "check_revision", title: "检查返工次数", type: "condition", condition: { source: "context.outputs.extract.amount", operator: "gte", branches: [{ label: "完成本次修订", value: 3, next: "confirm" }], defaultNext: "reference" } },
         reference: { id: "reference", title: "生成参考方案", type: "ai", next: "extract", modelOutput: original.workflowSnapshot.nodes.extract.modelOutput },
       } } });
+    expect(resolvePath(revised.workflowSnapshot.nodes.check_revision.condition!.source!, runEvalContext({ input: {}, outputs: { extract: { amount: 3 } } }))).toBe(3);
     await db.update(agentVersions).set({ manifest: revised }).where(eq(agentVersions.id, versionId!));
     await submit(randomUUID());
     const token = await waitForPendingApprovalHook(handle!, runId!);
@@ -164,11 +172,39 @@ describe("程序化任务到真实持久工作流的交付", () => {
     expect(pending.body).toMatchObject({ ok: true, task: { status: "waiting_approval", ready: false, result: null } });
     const [waiting] = await db.select().from(runs).where(eq(runs.id, runId!));
     expect(waiting.context).toMatchObject({ outputs: { extract: { amount: 0, approved: false } } });
-    expect(await decideApprovalAction(runId!, token.slice("approval:".length), { decision: "approved", note: "已核对实际金额" })).toEqual({ ok: true });
+    const approvalId = token.slice("approval:".length);
+    const list = RunApprovalListResult.parse(await (await readApprovals(new Request(`${ORIGIN}/api/runs/${runId}/approvals`), { params: Promise.resolve({ runId: runId! }) })).json());
+    expect(list).toMatchObject({ ok: true, items: [{ id: approvalId, state: "pending" }] });
+    expect((await decideViaHttp(approvalId)).status).toBe(200);
     await expect(handle!.returnValue).resolves.toEqual({ status: "completed" });
     const completed = await readResult();
     expect(completed.response.status).toBe(200);
     expect(completed.body).toMatchObject({ ok: true, task: { status: "completed", result: { extract: { amount: 0, approved: false } } } });
+    expect(service!.modelRequests).toHaveLength(1);
+    expect((await decideViaHttp(approvalId)).status).toBe(200);
+    expect((await decideViaHttp(approvalId, "另一条备注")).status).toBe(409);
+  });
+  it("实际引擎等待第二项审批时旧请求可找回，但不能跳过新的确认", async () => {
+    await prepare(true);
+    const [version] = await db.select({ manifest: agentVersions.manifest }).from(agentVersions).where(eq(agentVersions.id, versionId!));
+    const original = AgentManifest.parse(version.manifest);
+    const manifest = AgentManifest.parse({ ...original, workflowSnapshot: { ...original.workflowSnapshot, nodes: {
+      ...original.workflowSnapshot.nodes, confirm: { ...original.workflowSnapshot.nodes.confirm, next: "confirm_second" },
+      confirm_second: { ...original.workflowSnapshot.nodes.confirm, id: "confirm_second", title: "第二次核对", next: "done" },
+    } } });
+    await db.update(agentVersions).set({ manifest }).where(eq(agentVersions.id, versionId!));
+    await submit(randomUUID());
+    const first = (await waitForPendingApprovalHook(handle!, runId!)).slice("approval:".length);
+    expect((await decideViaHttp(first)).status).toBe(200);
+    const second = (await waitForPendingApprovalHook(handle!, runId!, "confirm_second")).slice("approval:".length);
+    expect((await decideViaHttp(first)).status).toBe(200);
+    const result = RunApprovalGetResult.parse(await (await readApproval(new Request(`${ORIGIN}/api/runs/${runId}/approvals/${first}`), { params: Promise.resolve({ runId: runId!, approvalId: first }) })).json());
+    expect(result).toMatchObject({ ok: true, approval: { state: "processed", decisionConsumed: true, runStatus: "waiting_approval" } });
+    const [pendingSecond] = await db.select({ status: approvals.status }).from(approvals).where(eq(approvals.id, second));
+    expect(pendingSecond.status).toBe("pending");
+    expect((await decideViaHttp(second)).status).toBe(200);
+    await expect(handle!.returnValue).resolves.toEqual({ status: "completed" });
+    expect((await decideViaHttp(first)).status).toBe(200);
     expect(service!.modelRequests).toHaveLength(1);
   });
   it("实际模型输出不符合契约时任务失败，不把接收或读取成功伪装为业务成功", async () => {

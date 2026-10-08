@@ -253,7 +253,7 @@ export type ApprovalDecisionInput = z.infer<typeof ApprovalDecisionInput>;
 // 恢复执行引擎失败时，审批决定仍会保留，saved 提醒页面切换到可恢复状态。
 export const ApprovalDecisionResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true) }),
-  z.object({ ok: z.literal(false), error: z.string(), saved: z.literal(true).optional() }),
+  z.object({ ok: z.literal(false), error: z.string(), saved: z.literal(true).optional(), retryable: z.literal(true).optional() }),
 ]);
 export type ApprovalDecisionResult = z.infer<typeof ApprovalDecisionResult>;
 

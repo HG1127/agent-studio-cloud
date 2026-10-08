@@ -11,13 +11,14 @@ export const RunTaskStartInput = RunStartInput.extend({ agentId: RunTaskId, requ
 export type RunTaskStartInput = z.infer<typeof RunTaskStartInput>;
 export const RunTaskTerminalStatus = RunStatus.extract(["completed", "failed", "cancelled"]);
 export type RunTaskTerminalStatus = z.infer<typeof RunTaskTerminalStatus>;
-const RunTaskLocalLink = z.string().max(200).regex(/^\/(?:api\/)?runs\/[0-9a-f-]{36}(?:\/(?:result|export|events))?$/i);
-export const RunTaskLinks = z.object({ status: RunTaskLocalLink, result: RunTaskLocalLink, report: RunTaskLocalLink, events: RunTaskLocalLink, view: RunTaskLocalLink }).strict();
+const RunTaskLocalLink = z.string().max(200).regex(/^\/(?:api\/)?runs\/[0-9a-f-]{36}(?:\/(?:result|export|events|approvals))?$/i);
+export const RunTaskLinks = z.object({ status: RunTaskLocalLink, result: RunTaskLocalLink, report: RunTaskLocalLink, events: RunTaskLocalLink, view: RunTaskLocalLink, approvals: RunTaskLocalLink.optional() }).strict();
 export type RunTaskLinks = z.infer<typeof RunTaskLinks>;
 function checkLinks(runId: string, links: RunTaskLinks, context: z.RefinementCtx) {
   const expected = {
     status: `/api/runs/${runId}`, result: `/api/runs/${runId}/result`, report: `/api/runs/${runId}/export`,
     events: `/api/runs/${runId}/events`, view: `/runs/${runId}`,
+    ...(links.approvals === undefined ? {} : { approvals: `/api/runs/${runId}/approvals` }),
   };
   if (Object.entries(expected).some(([key, value]) => links[key as keyof RunTaskLinks] !== value)) {
     context.addIssue({ code: "custom", message: "任务入口与运行标识不一致" });
