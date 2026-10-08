@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { JsonStorageValue } from "./json";
 import { ModelOutputConfig } from "./model-output";
+import { InputMapping } from "./input-mapping";
 
 const RESERVED_FIELD_NAMES: ReadonlySet<string> = new Set(["__proto__", "prototype", "constructor"]);
 const RESERVED_WORKFLOW_NODE_IDS: ReadonlySet<string> = new Set([
@@ -116,6 +117,7 @@ export const WorkflowNode = z.object({
   // 类型专属（宽松可选，具体节点类型由运行时 switch 消费）
   modelClass: z.string().optional(),
   modelOutput: ModelOutputConfig.optional(),
+  inputMapping: InputMapping.optional(),
   purpose: z.string().optional(),
   approval: z.object({ role: z.string(), reason: z.string() }).optional(),
   tool: ToolSpec.optional(),
@@ -151,6 +153,9 @@ export const WorkflowNode = z.object({
   contract: HandoffContract.optional(),
   businessSpec: z.record(z.string(), z.unknown()).nullable().default(null),
 }).superRefine((node, context) => {
+  if (node.inputMapping && node.type !== "tool" && node.type !== "ai" && !(node.type === "rule" && node.rule?.kind === "business_rule" && !node.quality)) {
+    context.addIssue({ code: "custom", path: ["inputMapping"], message: "只有智能处理、业务判断和工具步骤可以配置输入映射" });
+  }
   if (node.modelOutput && node.type !== "ai" && !(node.type === "rule" && node.rule?.kind === "business_rule" && !node.quality)) {
     context.addIssue({ code: "custom", path: ["modelOutput"], message: "只有智能处理和业务判断步骤可以配置模型结果字段" });
   }

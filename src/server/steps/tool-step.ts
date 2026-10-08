@@ -9,6 +9,7 @@ import { appendTrace } from "@/server/steps/trace-step";
 import { invokeHttpTool } from "@/server/tools/invoke-http-tool";
 import { getToolRegistration } from "@/server/tools/tool-registry";
 import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding";
+import { resolveNodeInput } from "@/server/domain/runtime/input-mapping";
 
 export interface RunToolStepInput {
   runId: string;
@@ -65,6 +66,8 @@ export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Re
     return reject(`步骤「${node.title}」的工具未绑定，无法执行`);
   }
   const demo = tool.registryToolId === "demo" || tool.protocol === "demo";
+  const resolvedInput = resolveNodeInput({ node, input: args.input, outputs: args.outputs });
+  if (!resolvedInput.ok) return reject(resolvedInput.error);
   let receipt: Record<string, unknown>;
   if (demo) {
     // 演示延迟：sleep() 只能在 workflow 函数体内调用，步骤内用 Node 定时器模拟
@@ -75,7 +78,7 @@ export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Re
     if (!registration) return reject(`步骤「${node.title}」绑定的业务工具未在服务端配置`);
     const compatibilityIssue = toolRegistrationCompatibilityIssue(tool, registration);
     if (compatibilityIssue) return reject(`步骤「${node.title}」${compatibilityIssue}`);
-    const requestPayload = { action: tool.action || registration.action, input: args.input, outputs: args.outputs };
+    const requestPayload = { action: tool.action || registration.action, input: resolvedInput.input, outputs: resolvedInput.outputs };
     const inputSchemaError = validateJsonObjectSchema(requestPayload, tool.inputSchema);
     if (inputSchemaError) return reject(`工具输入不符合字段契约：${inputSchemaError}`);
     const currentInputSchemaError = validateJsonObjectSchema(requestPayload, registration.inputSchema);
@@ -85,8 +88,8 @@ export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Re
       // 同一次步骤重试时 stepId 稳定；循环再次调用同一节点时 stepId 会变化。
       idempotencyKey: `${args.runId}:${node.id}:${stepMetadata.stepId}`,
       action: requestPayload.action,
-      input: args.input,
-      outputs: args.outputs,
+      input: requestPayload.input,
+      outputs: requestPayload.outputs,
     });
     if (!invoked.ok) return reject(invoked.error, invoked.retryable);
     if (Object.hasOwn(invoked.output, "ok") && invoked.output.ok !== true) {

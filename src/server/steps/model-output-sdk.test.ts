@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { FatalError } from "workflow";
 import { AgentManifest } from "@/contracts/manifest";
 import { WorkflowNode } from "@/contracts/workflow";
+import { InputMapping } from "@/contracts/input-mapping";
 import { startModelJsonServer } from "../../../tests/helpers/model-json-server";
 
 const mocks = vi.hoisted(() => ({ persistStep: vi.fn(), appendTrace: vi.fn() }));
@@ -15,13 +16,13 @@ const schema = {
   type: "object", required: ["amount", "approved"], additionalProperties: false,
   properties: { amount: { type: "number" }, approved: { type: "boolean" } },
 };
-async function execute(replies: string[], providerMode: "json" | "json-schema" = "json", maxRepairAttempts = 1) {
+async function execute(replies: string[], providerMode: "json" | "json-schema" = "json", maxRepairAttempts = 1, inputMapping?: InputMapping) {
   service = await startModelJsonServer(replies);
   vi.stubEnv("MODEL_BASE_URL", service.baseUrl + "/v1");
   vi.stubEnv("MODEL_API_KEY", "test-sdk-only-key");
   vi.stubEnv("MODEL_ID", "test-model");
   const node = WorkflowNode.parse({
-    id: "extract", title: "提取金额", type: "ai", modelOutput: { format: "json", schema, providerMode, maxRepairAttempts },
+    id: "extract", title: "提取金额", type: "ai", modelOutput: { format: "json", schema, providerMode, maxRepairAttempts }, ...(inputMapping ? { inputMapping } : {}),
   });
   const manifest = AgentManifest.parse({
     schemaVersion: "4.0", workflowFingerprint: "test",
@@ -29,11 +30,38 @@ async function execute(replies: string[], providerMode: "json" | "json-schema" =
     resourceSelection: { model: { modelId: "test-model", mock: false } }, inputContract: { fields: [] },
     designAudit: { status: "passed", issueCount: 0, criticalCount: 0 },
   });
-  return runModelStep({ runId: "00000000-0000-4000-8000-000000000001", node, manifest, outputs: {}, input: { task: "提取订单金额" } });
+  return runModelStep({
+    runId: "00000000-0000-4000-8000-000000000001", node, manifest,
+    outputs: { upstream: { amount: 18 }, private_step: { text: "must-not-send-step" } },
+    input: { task: "提取订单金额", privateInfo: "must-not-send-input" },
+  });
 }
 afterEach(async () => { await service?.close(); service = undefined; vi.unstubAllEnvs(); vi.clearAllMocks(); });
 
 describe("实际 SDK 结构化输出协议", () => {
+  it("首次请求和格式修正均仅使用映射字段，不夹带未选中的任务或上游数据", async () => {
+    const mapping = InputMapping.parse({ fields: [
+      { target: ["request"], source: { kind: "input", path: ["task"] } },
+      { target: ["selectedAmount"], source: { kind: "output", nodeId: "upstream", path: ["amount"] } },
+    ] });
+    await expect(execute(['{"amount":"wrong","approved":true}', '{"amount":18,"approved":true}'], "json", 1, mapping))
+      .resolves.toEqual({ output: { amount: 18, approved: true } });
+    expect(service!.modelRequests).toHaveLength(2);
+    for (const request of service!.modelRequests) {
+      const content = (request.messages as Array<{ content: string }>).map((message) => message.content).join("\n");
+      expect(content).toContain('"request": "提取订单金额"');
+      expect(content).toContain('"selectedAmount": 18');
+      expect(content).not.toContain("must-not-send");
+      expect(content).not.toContain("private_step");
+      expect(content).not.toContain("privateInfo");
+    }
+  });
+  it("必填映射来源缺失时，不向模型发送任何请求", async () => {
+    const mapping = InputMapping.parse({ fields: [{ target: ["request"], source: { kind: "input", path: ["missing"] } }] });
+    await expect(execute([], "json", 1, mapping)).rejects.toBeInstanceOf(FatalError);
+    expect(service!.modelRequests).toHaveLength(0);
+    expect(mocks.persistStep).toHaveBeenLastCalledWith(expect.objectContaining({ status: "failed", error: expect.stringContaining("缺少映射字段") }));
+  });
   it.each(["json", "json-schema"] as const)("%s 模式通过真实 HTTP、SDK 解析及应用字段校验，错误字段自动修正", async (mode) => {
     await expect(execute(['{"amount":123.5,"approved":true,"sk-private-field-name":"private-field-value"}', '{"amount":123.5,"approved":true}'], mode))
       .resolves.toEqual({ output: { amount: 123.5, approved: true } });

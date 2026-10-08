@@ -15,6 +15,7 @@ import { validateRunInput } from "@/server/domain/runtime/run-input";
 import { validateWaitContracts } from "@/server/domain/runtime/wait-contract";
 import { validateWorkflowRoutes } from "@/server/domain/runtime/workflow-routes";
 import { validateWorkflowModelOutputConfigurations } from "@/server/domain/runtime/model-output";
+import { validateInputMappingReferences } from "@/server/domain/runtime/input-mapping";
 import { safeDataPathSegments } from "@/server/domain/runtime/data-path";
 import { knowledgeStepTitles, validateKnowledgeSnapshot } from "@/server/domain/runtime/knowledge-snapshot";
 import { completeEvaluationForRun } from "@/server/services/evaluation-state";
@@ -392,6 +393,8 @@ async function validateRuntimePreflight(args: {
   if (inputError) return inputError;
   const configurationError = validateWorkflowModelOutputConfigurations(args.manifest.workflowSnapshot);
   if (configurationError) return configurationError;
+  const mappingError = validateInputMappingReferences(args.manifest.workflowSnapshot);
+  if (mappingError) return mappingError;
 
   const knowledgeTitles = knowledgeStepTitles(args.manifest.workflowSnapshot.nodes);
   if (knowledgeTitles.length > 0) {

@@ -2,6 +2,7 @@ import type { WorkflowDraft } from "@/contracts/workflow";
 import { prepareParallelBranches } from "@/server/domain/runtime/parallel-runtime";
 import { prepareSubflow } from "@/server/domain/runtime/subflow-runtime";
 import { validateModelOutputConfiguration } from "@/server/domain/runtime/model-output";
+import { validateInputMappingReferences } from "@/server/domain/runtime/input-mapping";
 
 export function validateInlineWorkflows(draft: WorkflowDraft): string | null {
   for (const node of Object.values(draft.nodes)) {
@@ -24,5 +25,5 @@ export function validateInlineWorkflows(draft: WorkflowDraft): string | null {
       }
     }
   }
-  return null;
+  return validateInputMappingReferences(draft);
 }

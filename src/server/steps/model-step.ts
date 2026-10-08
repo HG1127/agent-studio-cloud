@@ -17,6 +17,7 @@ import { buildStepPrompt } from "@/server/domain/runtime/step-prompt";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 import { validateModelJsonOutput, validateModelOutputConfiguration } from "@/server/domain/runtime/model-output";
+import { resolveNodeInput } from "@/server/domain/runtime/input-mapping";
 
 export interface RunModelStepInput {
   runId: string;
@@ -62,8 +63,13 @@ export async function runModelStep(args: RunModelStepInput): Promise<ModelStepRe
     await persistStep({ runId: args.runId, nodeId: node.id, nodeTitle: node.title, nodeType: node.type, status: "failed", error: configurationIssue });
     throw new FatalError(configurationIssue);
   }
+  const resolvedInput = resolveNodeInput({ node, input: args.input, outputs: args.outputs });
+  if (!resolvedInput.ok) {
+    await persistStep({ runId: args.runId, nodeId: node.id, nodeTitle: node.title, nodeType: node.type, status: "failed", error: resolvedInput.error });
+    throw new FatalError(resolvedInput.error);
+  }
   const outputConfig = node.modelOutput;
-  const prompt = buildStepPrompt({ node, upstreamOutputs: args.outputs, input: args.input, qualityFeedback: args.qualityFeedback });
+  const prompt = buildStepPrompt({ node, upstreamOutputs: resolvedInput.outputs, input: resolvedInput.input, qualityFeedback: args.qualityFeedback });
   const manifestModel = args.manifest.resourceSelection.model;
   if (manifestModel.mock) {
     if (outputConfig) {
@@ -147,7 +153,7 @@ export async function runModelStep(args: RunModelStepInput): Promise<ModelStepRe
     const maxRepairs = outputConfig?.maxRepairAttempts ?? 0;
     for (let attempt = 0; attempt <= maxRepairs; attempt += 1) {
       const currentPrompt = attempt === 0 ? prompt : buildStepPrompt({
-        node, upstreamOutputs: args.outputs, input: args.input,
+        node, upstreamOutputs: resolvedInput.outputs, input: resolvedInput.input,
         qualityFeedback: [args.qualityFeedback, "上次结果格式或字段不符合要求，请重新核对完整字段契约并输出合法 JSON 对象。"].filter(Boolean).join("\n"),
       });
       try {

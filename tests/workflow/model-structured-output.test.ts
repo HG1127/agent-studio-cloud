@@ -99,7 +99,11 @@ describe("持久工作流的结构化业务结果", () => {
   it("结果校验耗尽修正次数后结束失败，绝不调用下游写入工具或保存错误正文", async () => {
     const manifest = await prepare(['{"amount":"sk-private-invalid-output","approved":true}']);
     const handle = await start(agentRunWorkflow, [runId!, manifest, {}]);
-    await expect(handle.returnValue).resolves.toEqual({ status: "failed" });
+    await expect(handle.returnValue).rejects.toThrow("模型结果未满足字段契约");
+    await vi.waitFor(async () => {
+      const [failed] = await db.select({ status: runs.status }).from(runs).where(eq(runs.id, runId!));
+      expect(failed?.status).toBe("failed");
+    }, { timeout: 30_000, interval: 500 });
     expect(service!.modelRequests).toHaveLength(2);
     expect(service!.toolRequests).toHaveLength(0);
     const [failed] = await db.select().from(runs).where(eq(runs.id, runId!));
