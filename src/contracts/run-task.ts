@@ -1,18 +1,18 @@
 import { z } from "zod";
 import { boundedJsonStorageValue } from "./json";
-import { MAX_RUN_INPUT_BYTES, MAX_RUN_RESULT_BYTES, RunStartInput, RunStatus, StartRunResult } from "./run";
+import { CancelRunResult, MAX_RUN_INPUT_BYTES, MAX_RUN_RESULT_BYTES, RunStartInput, RunStatus, StartRunResult } from "./run";
 import { WorkflowDraft } from "./workflow";
 
 export const MAX_RUN_TASK_REQUEST_BYTES = MAX_RUN_INPUT_BYTES + 4096;
-const taskId = z.string().uuid().transform((value) => value.toLowerCase());
-export const RunTaskReference = z.object({ runId: taskId });
+const RunTaskId = z.string().uuid().transform((value) => value.toLowerCase());
+export const RunTaskReference = z.object({ runId: RunTaskId });
 export type RunTaskReference = z.infer<typeof RunTaskReference>;
-export const RunTaskStartInput = RunStartInput.extend({ agentId: taskId, requestId: taskId, versionId: taskId.optional() }).strict();
+export const RunTaskStartInput = RunStartInput.extend({ agentId: RunTaskId, requestId: RunTaskId, versionId: RunTaskId.optional() }).strict();
 export type RunTaskStartInput = z.infer<typeof RunTaskStartInput>;
 export const RunTaskTerminalStatus = RunStatus.extract(["completed", "failed", "cancelled"]);
 export type RunTaskTerminalStatus = z.infer<typeof RunTaskTerminalStatus>;
-const localLink = z.string().max(200).regex(/^\/(?:api\/)?runs\/[0-9a-f-]{36}(?:\/(?:result|export|events))?$/i);
-export const RunTaskLinks = z.object({ status: localLink, result: localLink, report: localLink, events: localLink, view: localLink }).strict();
+const RunTaskLocalLink = z.string().max(200).regex(/^\/(?:api\/)?runs\/[0-9a-f-]{36}(?:\/(?:result|export|events))?$/i);
+export const RunTaskLinks = z.object({ status: RunTaskLocalLink, result: RunTaskLocalLink, report: RunTaskLocalLink, events: RunTaskLocalLink, view: RunTaskLocalLink }).strict();
 export type RunTaskLinks = z.infer<typeof RunTaskLinks>;
 function checkLinks(runId: string, links: RunTaskLinks, context: z.RefinementCtx) {
   const expected = {
@@ -55,3 +55,14 @@ export const RunTaskResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true), task: RunTaskResultView }), StartRunResult.options[1],
 ]);
 export type RunTaskResult = z.infer<typeof RunTaskResult>;
+
+export const MAX_RUN_TASK_CONTROL_BYTES = 4096;
+export const RunTaskCancelInput = RunTaskReference.extend({ confirmed: z.literal(true), scope: z.literal("execution-chain") }).strict();
+export type RunTaskCancelInput = z.infer<typeof RunTaskCancelInput>;
+export const RunTaskCancelBody = RunTaskCancelInput.omit({ runId: true });
+export type RunTaskCancelBody = z.infer<typeof RunTaskCancelBody>;
+export const RunTaskCancelResult = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), runId: RunTaskId, scope: z.literal("execution-chain"), links: RunTaskLinks }),
+  CancelRunResult.options[1],
+]).superRefine((result, context) => { if (result.ok) checkLinks(result.runId, result.links, context); });
+export type RunTaskCancelResult = z.infer<typeof RunTaskCancelResult>;

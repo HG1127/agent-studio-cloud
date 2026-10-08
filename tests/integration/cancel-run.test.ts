@@ -16,6 +16,8 @@ import { WorkflowDraft } from "@/contracts/workflow";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { cancelRunAction } from "@/server/actions/cancel-run";
+import { POST as cancelTask } from "@/app/api/runs/[runId]/cancel/route";
+import { RunTaskCancelResult } from "@/contracts/run-task";
 import { recordDecision, requestApproval } from "@/server/steps/approval-step";
 import { failRun, finalizeRun, initializeRun, markRunRunning, persistContext, persistStep } from "@/server/steps/run-state";
 import { createRunStartLease, RUN_START_LEASE_KEY, RUN_START_LEASE_MS, withRunStartLease } from "@/server/services/run-start-lease";
@@ -90,6 +92,52 @@ async function insertWaitingRun() {
 }
 
 describe("取消运行", () => {
+  it("实际 HTTP 明确确认后取消运行与待审批，相同请求重试保留终态", async () => {
+    await insertWaitingRun();
+    cancelMock.mockResolvedValue(undefined);
+    getRunMock.mockReturnValue({ cancel: cancelMock });
+    const request = () => new Request(`http://localhost/api/runs/${RUN_ID}/cancel`, { method: "POST", headers: { origin: "http://localhost", "content-type": "application/json" }, body: JSON.stringify({ confirmed: true, scope: "execution-chain" }) });
+    const context = { params: Promise.resolve({ runId: RUN_ID }) };
+    const first = await cancelTask(request(), context);
+    expect(first.status).toBe(200);
+    const body = RunTaskCancelResult.parse(await first.json());
+    expect(body).toMatchObject({ ok: true, runId: RUN_ID, scope: "execution-chain" });
+    const [cancelled] = await db.select().from(runs).where(eq(runs.id, RUN_ID));
+    expect(cancelled.status).toBe("cancelled");
+    const decided = await db.select().from(approvals).where(eq(approvals.runId, RUN_ID));
+    expect(decided.find((approval) => approval.nodeId === "approval_pending")).toMatchObject({ status: "rejected", note: "运行已取消，确认未继续" });
+    expect(decided.find((approval) => approval.nodeId === "approval_completed")).toMatchObject({ status: "approved", note: "已同意" });
+    const second = await cancelTask(request(), context);
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual(body);
+    const [afterRetry] = await db.select().from(runs).where(eq(runs.id, RUN_ID));
+    expect(afterRetry.finishedAt).toEqual(cancelled.finishedAt);
+  });
+
+  it("HTTP 未确认执行链范围时不改动运行、审批或执行引擎", async () => {
+    await insertWaitingRun();
+    const response = await cancelTask(new Request(`http://localhost/api/runs/${RUN_ID}/cancel`, { method: "POST", headers: { origin: "http://localhost", "content-type": "application/json" }, body: JSON.stringify({ confirmed: true, scope: "single-run" }) }), { params: Promise.resolve({ runId: RUN_ID }) });
+    expect(response.status).toBe(400);
+    const [run] = await db.select().from(runs).where(eq(runs.id, RUN_ID));
+    expect(run.status).toBe("waiting_approval");
+    expect(getRunMock).not.toHaveBeenCalled();
+    expect((await db.select().from(approvals).where(eq(approvals.runId, RUN_ID))).some((approval) => approval.status === "pending")).toBe(true);
+  });
+
+  it("暂时无法读取取消状态时标记为可重试，而非业务冲突", async () => {
+    const select = vi.spyOn(db, "select").mockImplementationOnce(() => { throw new Error("模拟数据库暂时不可用"); });
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const response = await cancelTask(new Request(`http://localhost/api/runs/${RUN_ID}/cancel`, { method: "POST", headers: { origin: "http://localhost", "content-type": "application/json" }, body: JSON.stringify({ confirmed: true, scope: "execution-chain" }) }), { params: Promise.resolve({ runId: RUN_ID }) });
+      expect(response.status).toBe(503);
+      expect(response.headers.get("retry-after")).toBe("2");
+      expect(await response.json()).toMatchObject({ ok: false, retryable: true });
+    } finally {
+      select.mockRestore();
+      log.mockRestore();
+    }
+  });
+
   it("允许取消租约已过期且没有工作流句柄的排队运行", async () => {
     const staleAt = new Date(Date.now() - RUN_START_LEASE_MS * 2);
     const lease = createRunStartLease(staleAt);

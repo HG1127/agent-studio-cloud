@@ -128,7 +128,7 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
     }
     const orphanedWorkflow = !root.workflowRunId
       && isRunStartLeaseExpired(root.stepStates, root.updatedAt);
-    if (!root.workflowRunId && !orphanedWorkflow) return { ok: false, error: "运行尚未完成启动，请稍后再试" };
+    if (!root.workflowRunId && !orphanedWorkflow) return { ok: false, error: "运行尚未完成启动，请稍后再试", retryable: true };
 
     const now = new Date();
     const outcome = await db.transaction(async (tx) => {
@@ -229,7 +229,7 @@ export async function cancelRunAction(runId: string): Promise<CancelRunResult> {
     return { ok: true };
   } catch (error) {
     console.error("取消运行失败：", safeErrorForLog(error));
-    return { ok: false, error: "取消失败，请稍后重试" };
+    return { ok: false, error: "取消失败，请稍后重试", retryable: true };
   }
 }
 

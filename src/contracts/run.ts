@@ -152,7 +152,7 @@ export type StartRunResult = z.infer<typeof StartRunResult>;
 
 export const CancelRunResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true) }),
-  z.object({ ok: z.literal(false), error: z.string() }),
+  z.object({ ok: z.literal(false), error: z.string(), retryable: z.literal(true).optional() }),
 ]);
 export type CancelRunResult = z.infer<typeof CancelRunResult>;
 

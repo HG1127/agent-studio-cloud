@@ -5,6 +5,7 @@ import { getRun } from "workflow/api";
 import { POST } from "@/app/api/runs/route";
 import { GET as getStatus } from "@/app/api/runs/[runId]/route";
 import { GET as getResult } from "@/app/api/runs/[runId]/result/route";
+import { POST as cancelTask } from "@/app/api/runs/[runId]/cancel/route";
 import { AgentManifest } from "@/contracts/manifest";
 import { RunTaskResult, RunTaskStartResult, RunTaskStatusResult } from "@/contracts/run-task";
 import { agents, agentVersions, approvals, runs, runSteps, traceEvents } from "@/db/schema";
@@ -95,6 +96,23 @@ async function readResult() {
 }
 
 describe("程序化任务到真实持久工作流的交付", () => {
+  it("等待审批时从 HTTP 取消真实执行引擎，重复取消不交付过程成果", async () => {
+    await prepare(true);
+    await submit(randomUUID());
+    await waitForPendingApprovalHook(handle!, runId!);
+    const request = () => new Request(`${ORIGIN}/api/runs/${runId}/cancel`, { method: "POST", headers: { origin: ORIGIN, "content-type": "application/json" }, body: JSON.stringify({ confirmed: true, scope: "execution-chain" }) });
+    const context = { params: Promise.resolve({ runId: runId! }) };
+    expect((await cancelTask(request(), context)).status).toBe(200);
+    await expect(handle!.returnValue).rejects.toThrow();
+    const result = await readResult();
+    expect(result.response.status).toBe(200);
+    expect(result.body).toMatchObject({ ok: true, task: { status: "cancelled", ready: true, result: null } });
+    expect((await cancelTask(request(), context)).status).toBe(200);
+    expect(service!.modelRequests).toHaveLength(1);
+    const confirmation = await db.select().from(approvals).where(eq(approvals.runId, runId!));
+    expect(confirmation.every((approval) => approval.status === "rejected")).toBe(true);
+  });
+
   it("HTTP 提交实际 SDK 执行，原请求重试不再次调用模型，结果保留零值和否定值", async () => {
     await prepare();
     const requestId = randomUUID();

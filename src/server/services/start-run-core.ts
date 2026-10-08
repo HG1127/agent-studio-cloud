@@ -307,7 +307,8 @@ export async function resumeQueuedRunStartCore(runId: string): Promise<StartRunR
         eq(runs.workspaceId, DEMO_WORKSPACE_ID),
         eq(runs.status, "queued"),
         isNull(runs.workflowRunId),
-        eq(runs.updatedAt, candidate.updatedAt),
+        // Date 会丢失 Postgres 微秒；比较完整启动状态，既保留领取互斥也避免永远领不到。
+        eq(runs.stepStates, candidate.stepStates),
       ))
       .returning({ id: runs.id });
     if (!claimed) return { ok: true, runId: candidate.id };
