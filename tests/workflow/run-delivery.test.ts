@@ -8,7 +8,8 @@ import { db } from "@/lib/db";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { deliverRunWorkflow } from "@/server/workflows/run-delivery";
 import { deliveryTargetBinding, parseDeliveryTargets } from "@/server/delivery/target-registry";
-import { dispatchPendingDeliveriesCore, materializeRunDelivery } from "@/server/services/run-delivery";
+import { materializeRunDelivery } from "@/server/services/run-delivery";
+import { dispatchPendingDeliveriesCore } from "@/server/services/dispatch-run-deliveries";
 import { startRunCore } from "@/server/services/start-run-core";
 import { startRunDeliveryServer } from "../helpers/run-delivery-server";
 

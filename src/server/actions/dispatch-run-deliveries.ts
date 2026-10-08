@@ -1,6 +1,6 @@
 "use server";
 import { RunDeliveryTickResult } from "@/contracts/run-delivery";
-import { dispatchPendingDeliveriesCore } from "@/server/services/run-delivery";
+import { dispatchPendingDeliveriesCore } from "@/server/services/dispatch-run-deliveries";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 
 export async function dispatchRunDeliveriesAction(authorization: string | null): Promise<RunDeliveryTickResult> {

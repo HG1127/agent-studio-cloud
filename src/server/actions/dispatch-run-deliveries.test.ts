@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ dispatch: vi.fn() }));
-vi.mock("@/server/services/run-delivery", () => ({ dispatchPendingDeliveriesCore: mocks.dispatch }));
+vi.mock("@/server/services/dispatch-run-deliveries", () => ({ dispatchPendingDeliveriesCore: mocks.dispatch }));
 import { dispatchRunDeliveriesAction } from "./dispatch-run-deliveries";
 beforeEach(() => { vi.stubEnv("CRON_SECRET", "delivery-secret"); mocks.dispatch.mockReset().mockResolvedValue({ materialized: 1, claimed: 1 }); vi.spyOn(console, "error").mockImplementation(() => undefined); });
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });

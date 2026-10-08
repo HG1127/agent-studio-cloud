@@ -9,7 +9,8 @@ import { RunDeliveryEnvelope, RunDeliveryResult } from "@/contracts/run-delivery
 import { agents, agentVersions, runDeliveries, runs } from "@/db/schema";
 import { db } from "@/lib/db";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
-import { attemptRunDeliveryCore, dispatchPendingDeliveriesCore, materializeRunDelivery } from "@/server/services/run-delivery";
+import { attemptRunDeliveryCore, materializeRunDelivery } from "@/server/services/run-delivery";
+import { dispatchPendingDeliveriesCore } from "@/server/services/dispatch-run-deliveries";
 import { deliveryTargetBinding, parseDeliveryTargets } from "@/server/delivery/target-registry";
 import { retryRunDeliveryAction } from "@/server/actions/retry-run-delivery";
 import { startRunCore } from "@/server/services/start-run-core";
