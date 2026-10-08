@@ -3,6 +3,7 @@ import { createHook, FatalError, sleep } from "workflow";
 import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { requestApproval, recordDecision } from "@/server/steps/approval-step";
+import { awaitApprovalDecision } from "@/server/workflows/approval-hook";
 import { MAX_COLLABORATION_DEPTH } from "@/server/domain/runtime/collaboration-chain";
 import { resolveLoopCollection, workflowExecutionLimit } from "@/server/domain/runtime/loop-runtime";
 import { prepareParallelBranches, resolveParallelOutcome, type PreparedParallelBranch } from "@/server/domain/runtime/parallel-runtime";
@@ -436,8 +437,9 @@ export async function agentRunWorkflow(
       }
       if (node.type === "human") {
         await persistContext(runId, outputs);
-        const { approvalId, token, recordedDecision: storedDecision } = await requestApproval({ runId, node, outputs, nodes: draft.nodes });
-        const decision = storedDecision ?? await createHook<{ decision: "approved" | "rejected"; note?: string }>({ token });
+        const approval = await requestApproval({ runId, node, outputs, nodes: draft.nodes });
+        const { approvalId } = approval;
+        const decision = await awaitApprovalDecision(runId, approval);
         const recordedDecision = await recordDecision({ runId, node, approvalId, decision });
         outputs[node.id] = recordedDecision;
         lastHumanDecision = decision.decision === "rejected" ? recordedDecision : null;
