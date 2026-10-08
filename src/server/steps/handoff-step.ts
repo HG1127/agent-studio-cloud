@@ -79,6 +79,7 @@ export async function beginHandoff(args: {
         status: "queued",
         input: validatedInput.data,
         sourceType: "handoff",
+        parentRunId: args.runId,
         sourceKey,
       })
       .onConflictDoNothing()

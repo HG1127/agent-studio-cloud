@@ -49,6 +49,8 @@ export const REQUIRED_DATABASE_OBJECTS = [
   "public.model_calls",
   "public.model_calls_workspace_run_created_idx",
   "public.model_calls_workspace_agent_created_idx",
+  "public.runs_workspace_parent_created_idx",
+  "public.runs_workspace_legacy_parent_idx",
   "public.runs_workspace_agent_finished_idx",
   "public.runs_workspace_source_key_unique",
   "public.knowledge_sources_workspace_archived_created_idx",
@@ -64,6 +66,8 @@ export const REQUIRED_DATABASE_OBJECTS = [
 
 export const REQUIRED_DATABASE_COLUMNS = [
   { tableName: "runs", columnName: "model_usage_tracking_version", requireNotNull: false, allowDefault: false },
+  { tableName: "runs", columnName: "parent_run_id", requireNotNull: false, allowDefault: false },
+  { tableName: "runs", columnName: "collaboration_tracking_version", requireNotNull: false, allowDefault: false },
   { tableName: "model_calls", columnName: "workspace_id", requireNotNull: true, allowDefault: false },
   { tableName: "model_calls", columnName: "created_by", requireNotNull: true, allowDefault: false },
   { tableName: "model_calls", columnName: "measurement", requireNotNull: false, allowDefault: false },

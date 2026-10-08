@@ -77,6 +77,7 @@ export async function beginAgentCall(args: {
         status: "queued",
         input,
         sourceType: "agent_call",
+        parentRunId: args.runId,
         sourceKey,
       })
       .onConflictDoNothing()

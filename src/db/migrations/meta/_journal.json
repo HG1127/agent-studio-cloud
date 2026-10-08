@@ -225,6 +225,13 @@
       "when": 1791484249466,
       "tag": "0031_runtime-model-call-ledger",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1791487326200,
+      "tag": "0032_runtime-model-usage-chain",
+      "breakpoints": true
     }
   ]
 }

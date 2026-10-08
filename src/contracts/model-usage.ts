@@ -42,15 +42,18 @@ export const RunModelUsageAggregate = z.object({
   knownInputTokens: RawCount.nullable(), knownOutputTokens: RawCount.nullable(), knownCallTotalTokens: RawCount.nullable(),
 }).strict();
 export type RunModelUsageAggregate = z.infer<typeof RunModelUsageAggregate>;
-export const RunModelUsage = z.object({
-  runId: AttentionIdentifier, tracking: z.enum(["tracked-v1", "legacy-or-partial"]), assessedAt: z.string().datetime(),
-  calls: z.object({ total: ModelTokenCount, pending: ModelTokenCount, returned: ModelTokenCount, failed: ModelTokenCount }).strict(),
-  usage: z.object({
+export const ModelCallCounts = z.object({ total: ModelTokenCount, pending: ModelTokenCount, returned: ModelTokenCount, failed: ModelTokenCount }).strict();
+export type ModelCallCounts = z.infer<typeof ModelCallCounts>;
+export const ModelUsageTotals = z.object({
     completeCalls: ModelTokenCount, incompleteCalls: ModelTokenCount, invalidUsageCalls: ModelTokenCount,
     inputCalls: ModelTokenCount, outputCalls: ModelTokenCount,
     knownInputTokens: ModelTokenCount.nullable(), knownOutputTokens: ModelTokenCount.nullable(), knownCallTotalTokens: ModelTokenCount.nullable(),
     recordedUsageComplete: z.boolean(),
-  }).strict(),
+}).strict();
+export type ModelUsageTotals = z.infer<typeof ModelUsageTotals>;
+export const RunModelUsage = z.object({
+  runId: AttentionIdentifier, tracking: z.enum(["tracked-v1", "legacy-or-partial"]), assessedAt: z.string().datetime(),
+  calls: ModelCallCounts, usage: ModelUsageTotals,
 }).strict().superRefine((value, ctx) => {
   const { calls, usage } = value;
   if (calls.total !== calls.pending + calls.returned + calls.failed || usage.completeCalls + usage.incompleteCalls !== calls.total

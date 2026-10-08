@@ -44,7 +44,7 @@ export async function initializeRun(runId: string, draft: WorkflowDraft, startTo
   const now = new Date();
   const updated = await withSafeWorkflowError(() => db
     .update(runs)
-    .set({ status: "running", startedAt: now, updatedAt: now, modelUsageTrackingVersion: "v1" })
+    .set({ status: "running", startedAt: now, updatedAt: now, modelUsageTrackingVersion: "v1", collaborationTrackingVersion: "v1" })
     .where(and(
       eq(runs.id, runId),
       eq(runs.status, "queued"),

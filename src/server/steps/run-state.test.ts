@@ -104,6 +104,17 @@ describe("运行终态步骤", () => {
     expect(mocks.reconcileTerminalEvaluationRun).not.toHaveBeenCalled();
   });
 
+  it("新任务首次初始化声明模型及协作关系覆盖", async () => {
+    mocks.returning.mockResolvedValue([{ id: "run-1" }]);
+    mocks.selectRows.mockResolvedValue([{ id: "run-1", workspaceId: "workspace-1", status: "queued", stepStates: {} }]);
+
+    await initializeRun("run-1", draft);
+
+    expect(mocks.setValues).toHaveBeenCalledWith(expect.objectContaining({
+      status: "running", modelUsageTrackingVersion: "v1", collaborationTrackingVersion: "v1",
+    }));
+  });
+
   it("启动状态已提交后重入时补齐启动轨迹", async () => {
     mocks.returning.mockResolvedValue([]);
     mocks.selectRows
