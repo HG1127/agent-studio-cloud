@@ -1,5 +1,6 @@
 import { jsonValuesEqual } from "@/server/domain/json-value";
 import { isSafeDataPathSegment } from "@/server/domain/runtime/data-path";
+import { compileSafePattern, safePatternMatches, MAX_PATTERN_LENGTH, MAX_PATTERN_INPUT_LENGTH, type SafePattern } from "@/server/domain/safe-pattern";
 
 function valueType(value: unknown): string {
   if (value === null) return "null";
@@ -29,37 +30,8 @@ const SUPPORTED_SCHEMA_KEYS = new Set([
 ]);
 const MAX_SCHEMA_FIELDS = 100;
 const MAX_SCHEMA_CHOICES = 100;
-const MAX_PATTERN_LENGTH = 200;
-const MAX_PATTERN_INPUT_LENGTH = 4096;
 const MAX_VALUE_DEPTH = 32;
 const MAX_VALUE_NODES = 50_000;
-
-function variableQuantifierCount(pattern: string): number {
-  let count = 0;
-  let inCharacterClass = false;
-  for (let index = 0; index < pattern.length; index += 1) {
-    const character = pattern[index];
-    if (character === "\\") { index += 1; continue; }
-    if (inCharacterClass) {
-      if (character === "]") inCharacterClass = false;
-      continue;
-    }
-    if (character === "[") { inCharacterClass = true; continue; }
-    if (character === "*" || character === "+" || character === "?") {
-      count += 1;
-      if (pattern[index + 1] === "?") index += 1;
-    } else if (character === "{") {
-      const quantity = /^\{(\d+)(?:,(\d*))?\}/.exec(pattern.slice(index));
-      if (!quantity) continue;
-      const normalize = (value: string) => value.replace(/^0+/, "") || "0";
-      if (quantity[2] !== undefined && (quantity[2] === "" || normalize(quantity[1]) !== normalize(quantity[2]))) count += 1;
-      index += quantity[0].length - 1;
-      if (pattern[index + 1] === "?") index += 1;
-    }
-    if (count > 1) return count;
-  }
-  return count;
-}
 
 function jsonValueSafetyIssue(value: unknown): string | null {
   const stack: Array<{ value: unknown; path: string; depth: number }> = [{ value, path: "消息", depth: 0 }];
@@ -118,7 +90,7 @@ function conflictingNumericBounds(rule: Record<string, unknown>): boolean {
     || uppers.some((bound) => bound.value === upperValue && bound.exclusive);
 }
 
-function validateSchemaRule(schema: unknown, path: string, depth: number): string | null {
+function validateSchemaRule(schema: unknown, path: string, depth: number, patterns: Map<string, SafePattern>): string | null {
   if (!schema || typeof schema !== "object" || Array.isArray(schema)) return `${path}必须是对象`;
   if (depth > 8) return `${path}字段结构层级超过 8 层`;
   const rule = schema as Record<string, unknown>;
@@ -157,10 +129,13 @@ function validateSchemaRule(schema: unknown, path: string, depth: number): strin
     if (/[()|]/.test(unescaped) || /\\[1-9]/.test(rule.pattern)) {
       return `${path}的 pattern 只能使用简单文字、字符范围和数量规则`;
     }
-    // 无分组的多处可变重复同样会组合回溯，短输入也能长期占用服务端。
-    if (variableQuantifierCount(rule.pattern) > 1) return `${path}的 pattern 最多允许一处不固定数量规则，其余请使用固定数量`;
     if (!nonnegativeIntegerRule(rule.maxLength) || rule.maxLength > MAX_PATTERN_INPUT_LENGTH) {
       return `${path}使用 pattern 时必须设置不超过 ${MAX_PATTERN_INPUT_LENGTH} 的 maxLength`;
+    }
+    if (!patterns.has(rule.pattern)) {
+      const compiled = compileSafePattern(rule.pattern);
+      if (!compiled) return `${path}的 pattern 只能使用简单文字、字符范围和数量规则`;
+      patterns.set(rule.pattern, compiled);
     }
   }
   if (rule.required !== undefined) {
@@ -181,11 +156,11 @@ function validateSchemaRule(schema: unknown, path: string, depth: number): strin
     return `${path}的 additionalProperties 必须是布尔值或字段规则`;
   }
   if (rule.items !== undefined) {
-    const error = validateSchemaRule(rule.items, `${path}.items`, depth + 1);
+    const error = validateSchemaRule(rule.items, `${path}.items`, depth + 1, patterns);
     if (error) return error;
   }
   if (rule.additionalProperties && typeof rule.additionalProperties === "object") {
-    const error = validateSchemaRule(rule.additionalProperties, `${path}.additionalProperties`, depth + 1);
+    const error = validateSchemaRule(rule.additionalProperties, `${path}.additionalProperties`, depth + 1, patterns);
     if (error) return error;
   }
   if (rule.properties !== undefined) {
@@ -194,7 +169,7 @@ function validateSchemaRule(schema: unknown, path: string, depth: number): strin
     if (entries.length > MAX_SCHEMA_FIELDS) return `${path}的 properties 不能超过 ${MAX_SCHEMA_FIELDS} 个字段`;
     for (const [key, child] of entries) {
       if (!isSafeDataPathSegment(key)) return `${path}的 properties 不能使用保留字段名“${key}”`;
-      const error = validateSchemaRule(child, `${path}.properties.${key}`, depth + 1);
+      const error = validateSchemaRule(child, `${path}.properties.${key}`, depth + 1, patterns);
       if (error) return error;
     }
   }
@@ -208,7 +183,7 @@ function validateSchemaRule(schema: unknown, path: string, depth: number): strin
   return null;
 }
 
-function validateValue(value: unknown, schema: unknown, path: string, depth: number): string | null {
+function validateValue(value: unknown, schema: unknown, path: string, depth: number, patterns: Map<string, SafePattern>): string | null {
   if (!schema || typeof schema !== "object" || Array.isArray(schema)) return null;
   if (depth > 8) return `${path}字段结构层级超过 8 层`;
   const rule = schema as Record<string, unknown>;
@@ -223,7 +198,10 @@ function validateValue(value: unknown, schema: unknown, path: string, depth: num
     const length = Array.from(value).length;
     if (typeof rule.minLength === "number" && length < rule.minLength) return `${path}长度不能少于 ${rule.minLength} 个字符`;
     if (typeof rule.maxLength === "number" && length > rule.maxLength) return `${path}长度不能超过 ${rule.maxLength} 个字符`;
-    if (typeof rule.pattern === "string" && !new RegExp(rule.pattern).test(value)) return `${path}格式不符合要求`;
+    if (typeof rule.pattern === "string") {
+      const compiled = patterns.get(rule.pattern);
+      if (!compiled || !safePatternMatches(value, compiled)) return `${path}格式不符合要求`;
+    }
   }
   if (typeof value === "number" && Number.isFinite(value)) {
     if (typeof rule.minimum === "number" && value < rule.minimum) return `${path}不能小于 ${rule.minimum}`;
@@ -236,7 +214,7 @@ function validateValue(value: unknown, schema: unknown, path: string, depth: num
     if (typeof rule.maxItems === "number" && value.length > rule.maxItems) return `${path}最多允许 ${rule.maxItems} 项`;
     if (rule.items) {
       for (let index = 0; index < value.length; index += 1) {
-        const error = validateValue(value[index], rule.items, `${path}[${index}]`, depth + 1);
+        const error = validateValue(value[index], rule.items, `${path}[${index}]`, depth + 1, patterns);
         if (error) return error;
       }
     }
@@ -258,14 +236,14 @@ function validateValue(value: unknown, schema: unknown, path: string, depth: num
     if (Object.keys(declared).length > 0) {
       for (const [key, childSchema] of Object.entries(declared)) {
         if (!Object.prototype.hasOwnProperty.call(object, key)) continue;
-        const error = validateValue(object[key], childSchema, `${path}.${key}`, depth + 1);
+        const error = validateValue(object[key], childSchema, `${path}.${key}`, depth + 1, patterns);
         if (error) return error;
       }
     }
     for (const key of keys.filter((key) => !Object.prototype.hasOwnProperty.call(declared, key))) {
       if (rule.additionalProperties === false) return `${path}.${key}不是允许的字段`;
       if (rule.additionalProperties && typeof rule.additionalProperties === "object") {
-        const error = validateValue(object[key], rule.additionalProperties, `${path}.${key}`, depth + 1);
+        const error = validateValue(object[key], rule.additionalProperties, `${path}.${key}`, depth + 1, patterns);
         if (error) return error;
       }
     }
@@ -274,13 +252,14 @@ function validateValue(value: unknown, schema: unknown, path: string, depth: num
 }
 
 export function validateJsonSchemaDefinition(schema: Record<string, unknown>): string | null {
-  return validateSchemaRule(schema, "消息契约", 0);
+  return validateSchemaRule(schema, "消息契约", 0, new Map());
 }
 
 export function validateJsonObjectSchema(payload: Record<string, unknown>, schema: Record<string, unknown>): string | null {
   const unsafe = jsonValueSafetyIssue(payload);
   if (unsafe) return unsafe;
-  const schemaError = validateJsonSchemaDefinition(schema);
+  const patterns = new Map<string, SafePattern>();
+  const schemaError = validateSchemaRule(schema, "消息契约", 0, patterns);
   if (schemaError) return schemaError;
-  return validateValue(payload, schema, "消息", 0);
+  return validateValue(payload, schema, "消息", 0, patterns);
 }

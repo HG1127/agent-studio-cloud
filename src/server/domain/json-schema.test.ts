@@ -14,11 +14,10 @@ describe("消息契约正则的回溯限制", () => {
     "^a{1,}a{1,}b$",
     "^a+?a+?b$",
     "^a??a??b$",
-    "^[A-Z]+[0-9]+$",
-  ])("多个可变长度重复规则在匹配前被拒绝：%s", (pattern) => {
+  ])("多个可变长度重复规则仍能有界校验不匹配的消息：%s", (pattern) => {
     const schema = patternedField(pattern);
-    expect(validateJsonSchemaDefinition(schema)).toContain("最多允许一处不固定数量规则");
-    expect(validateJsonObjectSchema({}, schema)).toContain("最多允许一处不固定数量规则");
+    expect(validateJsonSchemaDefinition(schema)).toBeNull();
+    expect(validateJsonObjectSchema({ code: "a".repeat(80) }, schema)).toBe("消息.code格式不符合要求");
   });
 
   it.each([
@@ -31,7 +30,10 @@ describe("消息契约正则的回溯限制", () => {
     { pattern: "^[\\]]+[?*+]{2}$", value: "]]?+" },
     { pattern: "^.*?end$", value: "prefix end" },
     { pattern: "^\\{[0-9]+\\}$", value: "{123}" },
-  ])("保留固定数量、字面符号和单处可变重复：$pattern", ({ pattern, value }) => {
+    { pattern: "^[A-Z]+[0-9]+$", value: "AB123" },
+    { pattern: "^[a-z0-9._+-]+@[a-z0-9.-]+\\.[a-z]{2,}$", value: "alice+team@company.example" },
+    { pattern: "^\\w+\\s+\\d+$", value: "order 123" },
+  ])("保留数量规则、字面符号和多处重复的业务格式：$pattern", ({ pattern, value }) => {
     const schema = patternedField(pattern);
     expect(validateJsonSchemaDefinition(schema)).toBeNull();
     expect(validateJsonObjectSchema({ code: value }, schema)).toBeNull();

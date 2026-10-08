@@ -3,11 +3,12 @@ import { describe, expect, it } from "vitest";
 import { resumeHook, start } from "workflow/api";
 import { waitForHook } from "@workflow/vitest";
 import { AgentManifest } from "@/contracts/manifest";
-import { runSteps, runs, traceEvents } from "@/db/schema";
+import { runSteps, runs, traceEvents, waitEventSubmissions } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
 import { getPendingWaitHook } from "@/server/queries/runs";
+import { POST as submitWaitMessage } from "@/app/api/runs/[runId]/events/[eventKey]/route";
 
 const AGENT_ID = "00000000-0000-4000-8000-0000000000b1";
 const VERSION_ID = "00000000-0000-4000-8000-0000000000b2";
@@ -47,6 +48,7 @@ async function insertRun() {
 }
 
 async function cleanup(runId: string) {
+  await db.delete(waitEventSubmissions).where(eq(waitEventSubmissions.runId, runId));
   await db.delete(traceEvents).where(eq(traceEvents.runId, runId));
   await db.delete(runSteps).where(eq(runSteps.runId, runId));
   await db.delete(runs).where(eq(runs.id, runId));
@@ -70,6 +72,43 @@ async function waitForCurrentWaitHook(
 }
 
 describe("等待节点暂停与恢复", () => {
+  it("真实消息入口保留多处重复的编号规则，先拒绝错误格式再接收并幂等恢复", async () => {
+    const runId = await insertRun();
+    const eventKey = "customer.profile.updated";
+    const manifest = manifestFor({
+      mode: "event", durationMs: 0, until: null, eventKey, timeoutMs: 0, onTimeoutNext: null,
+      payloadSchema: {
+        type: "object", required: ["code"],
+        properties: { code: { type: "string", pattern: "^[A-Z]+[0-9]+$", maxLength: 80 } },
+      },
+    });
+    try {
+      const handle = await start(agentRunWorkflow, [runId, manifest, {}]);
+      await waitForCurrentWaitHook(handle, runId);
+      const pending = await getPendingWaitHook(runId, DEMO_WORKSPACE_ID);
+      expect(pending?.submissionToken).toBeDefined();
+      const submit = (code: string) => submitWaitMessage(new Request("http://localhost:3000/api/runs/" + runId + "/events/" + eventKey, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-wait-event-token": pending!.submissionToken! },
+        body: JSON.stringify({ code }),
+      }), { params: Promise.resolve({ runId, eventKey }) });
+      const rejected = await submit("AB");
+      expect(rejected.status).toBe(400);
+      expect(await rejected.json()).toMatchObject({ ok: false, error: "消息.code格式不符合要求" });
+      const [waiting] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+      expect(waiting.status).toBe("waiting_event");
+      expect((await submit("AB123")).status).toBe(200);
+      await expect(handle.returnValue).resolves.toEqual({ status: "completed" });
+      const [completed] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+      expect(completed.result).toMatchObject({ wait: { resumedBy: "event", payload: { code: "AB123" } } });
+      expect((await submit("AB123")).status).toBe(200);
+      const receipts = await db.select().from(waitEventSubmissions).where(eq(waitEventSubmissions.runId, runId));
+      expect(receipts).toEqual([expect.objectContaining({ status: "accepted", payload: { code: "AB123" } })]);
+    } finally {
+      await cleanup(runId);
+    }
+  }, 240_000);
+
   it("等待外部消息时暂停，收到匹配消息后保存载荷并继续", async () => {
     const runId = await insertRun();
     const manifest = manifestFor({
