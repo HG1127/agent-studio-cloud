@@ -10,15 +10,32 @@ const summaries: Record<AttentionKind, string> = {
   "delivery-failed": "请查看投递记录，核对接收结果与有效期后再决定是否补投",
 };
 
+function cropText(value: string, maxLength: number) {
+  let end = Math.min(value.length, maxLength);
+  const last = value.charCodeAt(end - 1);
+  const next = value.charCodeAt(end);
+  if (last >= 0xd800 && last <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) end -= 1;
+  return value.slice(0, end);
+}
+
+function redactSummaryText(value: string, personal = false) {
+  // 摘要可能已在数据库截断，不能依赖凭据的结束标记。
+  return (personal ? redactSensitiveText(value) : redactCredentialText(value))
+    .replace(/-----BEGIN [^-\r\n]{0,40}PRIVATE KEY-----[\s\S]*$/g, "[已隐藏敏感信息]")
+    .replace(/\b(?:api[_-]?key|(?:access[_-]?|refresh[_-]?)?token|secret|password|passcode|authorization)\s*[:=]\s*(?!\[已隐藏敏感信息\])["']?(?:Bearer\s+)?[^\s,"'}）】》」』>]+["']?/gi, "[已隐藏敏感信息]")
+    .replace(/(?:(?:访问|刷新)?令牌|密钥|密码|凭据|授权)\s*[：:=]\s*(?!\[已隐藏敏感信息\])["']?(?:Bearer\s+)?[^\s，,。；;）】》」』>]+["']?/gi, "[已隐藏敏感信息]")
+    .replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^@\s/]*:[^@\s/]+$/gi, "$1[已隐藏敏感信息]");
+}
+
 export function presentAttentionItem(input: AttentionMetadata): AttentionItem {
   const row = AttentionMetadata.parse(input);
-  const title = redactCredentialText(row.title);
-  const agentName = row.agentName === null ? null : redactCredentialText(row.agentName);
-  const error = row.error === null ? null : redactSensitiveText(row.error);
+  const title = redactSummaryText(row.title);
+  const agentName = row.agentName === null ? null : redactSummaryText(row.agentName);
+  const error = row.error === null ? null : redactSummaryText(row.error, true);
   return AttentionItem.parse({
-    ...row, title: title.slice(0, 500), titleTruncated: row.titleTruncated || title.length > 500,
-    agentName: agentName?.slice(0, 200) ?? null, agentNameTruncated: row.agentNameTruncated || (agentName?.length ?? 0) > 200,
-    error: error?.slice(0, 2000) ?? null, errorTruncated: row.errorTruncated || (error?.length ?? 0) > 2000,
+    ...row, title: cropText(title, 500), titleTruncated: row.titleTruncated || title.length > 500,
+    agentName: agentName === null ? null : cropText(agentName, 200), agentNameTruncated: row.agentNameTruncated || (agentName?.length ?? 0) > 200,
+    error: error === null ? null : cropText(error, 2000), errorTruncated: row.errorTruncated || (error?.length ?? 0) > 2000,
     summary: summaries[row.kind], links: attentionLinks(row.kind, row.id, row.runId),
   });
 }

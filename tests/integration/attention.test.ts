@@ -155,4 +155,22 @@ describe("集中待处理真实数据库验收", () => {
     expect(AttentionListResult.parse(await response.json())).toMatchObject({ ok: true, items: [{ id: own.id, kind: "run-failed" }] });
     expect(await (await GET(new Request(`http://localhost/api/attention?runId=${foreign.id}`))).json()).toEqual({ ok: true, items: [], nextCursor: null });
   });
+  it("Postgres 字符截取后较长表情符号元数据不会触发坏数据失败或拆开字符", async () => {
+    const run = await makeRun("waiting_approval"); const id = await makeApproval(run);
+    await db.update(agents).set({ name: "A" + "😀".repeat(200) }).where(eq(agents.id, run.agentId));
+    await db.update(approvals).set({ nodeTitle: "A" + "😀".repeat(500) }).where(eq(approvals.id, id));
+    const result = await page({ runId: run.id });
+    expect(result.items[0]).toMatchObject({ title: "A" + "😀".repeat(249), agentName: "A" + "😀".repeat(99), titleTruncated: true, agentNameTruncated: true });
+  });
+  it("真实 SQL 摘要截掉私钥结束标记后，标签和错误仍不泄露凭据正文", async () => {
+    const run = await makeRun("waiting_approval"); const id = await makeApproval(run); const operation = await makeOperation(run);
+    const secret = "-----BEGIN PRIVATE KEY-----\n" + "private-fixture-key-material-".repeat(100) + "\n-----END PRIVATE KEY-----";
+    await db.update(agents).set({ name: secret }).where(eq(agents.id, run.agentId));
+    await db.update(approvals).set({ nodeTitle: secret }).where(eq(approvals.id, id));
+    await db.update(toolOperations).set({ error: secret }).where(eq(toolOperations.id, operation));
+    const result = await page({ runId: run.id });
+    expect(JSON.stringify(result)).not.toContain("private-fixture-key-material");
+    expect(result.items.find((item) => item.id === id)).toMatchObject({ titleTruncated: true, agentNameTruncated: true });
+    expect(result.items.find((item) => item.id === operation)?.errorTruncated).toBe(true);
+  });
 });

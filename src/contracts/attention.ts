@@ -18,8 +18,8 @@ export const AttentionListInput = z.object({
 export type AttentionListInput = z.infer<typeof AttentionListInput>;
 export const AttentionMetadata = z.object({
   kind: AttentionKind, id: Identifier, runId: Identifier, agentId: Identifier.nullable(),
-  agentName: z.string().max(200).nullable(), agentNameTruncated: z.boolean(), runStatus: RunStatus.nullable(),
-  title: z.string().max(500), titleTruncated: z.boolean(), error: z.string().max(2000).nullable(), errorTruncated: z.boolean(),
+  agentName: z.string().max(400).nullable(), agentNameTruncated: z.boolean(), runStatus: RunStatus.nullable(),
+  title: z.string().max(1000), titleTruncated: z.boolean(), error: z.string().max(4000).nullable(), errorTruncated: z.boolean(),
   createdAt: Timestamp,
 }).strict();
 export type AttentionMetadata = z.infer<typeof AttentionMetadata>;
@@ -31,6 +31,7 @@ export function attentionLinks(kind: AttentionKind, id: string, runId: string) {
   return { view, detail };
 }
 export const AttentionItem = AttentionMetadata.extend({
+  agentName: z.string().max(200).nullable(), title: z.string().max(500), error: z.string().max(2000).nullable(),
   summary: z.string().min(1).max(200), links: z.object({ view: z.string().max(200), detail: z.string().max(200) }).strict(),
 }).superRefine((item, context) => {
   const expected = attentionLinks(item.kind, item.id, item.runId);
