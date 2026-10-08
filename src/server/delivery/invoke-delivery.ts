@@ -1,6 +1,6 @@
 import { RunDeliveryEnvelope, RunDeliveryReceipt } from "@/contracts/run-delivery";
 import type { DeliveryTarget } from "./target-registry";
-import { readBoundedRequestText } from "@/server/security/bounded-request-body";
+import { readBoundedRequestBytes } from "@/server/security/bounded-request-body";
 
 export type DeliveryInvocation = { ok: true; receipt: RunDeliveryReceipt } | { ok: false; retryable: boolean; error: string };
 export async function invokeRunDelivery(args: { target: DeliveryTarget; envelope: RunDeliveryEnvelope; fetchImpl?: typeof fetch }): Promise<DeliveryInvocation> {
@@ -22,10 +22,14 @@ export async function invokeRunDelivery(args: { target: DeliveryTarget; envelope
     const retryable = response.status === 202 || [408, 425, 429].includes(response.status) || response.status >= 500;
     return { ok: false, retryable, error: retryable ? "接收方尚未明确确认，等待重试" : `接收方拒绝投递（${response.status}）` };
   }
-  const body = await readBoundedRequestText(response, 4096);
-  if (!body.ok) return { ok: false, retryable: body.reason === "read_failed", error: "接收回执无法安全读取" };
+  const body = await readBoundedRequestBytes(response, 4096);
+  if (!body.ok) {
+    await response.body?.cancel().catch(() => undefined);
+    return { ok: false, retryable: body.reason === "read_failed", error: "接收回执无法安全读取" };
+  }
   try {
-    const receipt = RunDeliveryReceipt.parse(JSON.parse(body.text));
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(body.bytes);
+    const receipt = RunDeliveryReceipt.parse(JSON.parse(text));
     if (receipt.deliveryId !== parsed.data.deliveryId) throw new Error("mismatch");
     return { ok: true, receipt };
   } catch { return { ok: false, retryable: false, error: "接收方未返回本次投递的有效确认回执，请人工核对" }; }

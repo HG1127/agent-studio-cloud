@@ -39,7 +39,7 @@ describe("最终成果 HTTP 投递", () => {
   it("实际字节有界并严格校验 UTF-8", async () => {
     for (const response of [new Response("x".repeat(4097)), new Response(new Uint8Array([0xff]))]) {
       const send = vi.fn<typeof fetch>().mockResolvedValue(response);
-      expect(await invokeRunDelivery({ target, envelope, fetchImpl: send })).toMatchObject({ ok: false });
+      expect(await invokeRunDelivery({ target, envelope, fetchImpl: send })).toMatchObject({ ok: false, retryable: false });
     }
   });
   it("连接响应丢失可重试，不暴露原错误", async () => {

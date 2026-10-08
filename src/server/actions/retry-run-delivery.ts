@@ -2,7 +2,7 @@
 import { createHash } from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
 import { RunTaskReference } from "@/contracts/run-task";
-import { RunDeliveryResolution, RunDeliveryRetryBody, type RunDeliveryRetryResult, RUN_DELIVERY_ATTEMPTS } from "@/contracts/run-delivery";
+import { RunDeliveryEnvelope, RunDeliveryResolution, RunDeliveryRetryBody, type RunDeliveryRetryResult, RUN_DELIVERY_ATTEMPTS } from "@/contracts/run-delivery";
 import { runDeliveries } from "@/db/schema";
 import { db } from "@/lib/db";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
@@ -10,6 +10,7 @@ import { canonicalJson } from "@/server/domain/canonical-json";
 import { redactCredentialText } from "@/server/domain/security/redact-sensitive";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { deliveryTargetBinding, getDeliveryTarget } from "@/server/delivery/target-registry";
+import { deliveryEnvelopeMatches } from "@/server/domain/runtime/run-delivery";
 
 export async function retryRunDeliveryAction(runId: string, input: RunDeliveryRetryBody): Promise<RunDeliveryRetryResult> {
   const reference = RunTaskReference.safeParse({ runId });
@@ -25,6 +26,8 @@ export async function retryRunDeliveryAction(runId: string, input: RunDeliveryRe
       if (previous) return previous.requestHash === requestHash ? { ok: true, runId: row.runId, deliveryId: row.id, recorded: true } : { ok: false, error: "同一次补投请求不能更改内容" };
       const now = new Date();
       if (row.status !== "failed" || !row.payload) return { ok: false, error: "只有已经停止且成果完整的投递才能补投" };
+      const payload = RunDeliveryEnvelope.safeParse(row.payload);
+      if (!payload.success || !deliveryEnvelopeMatches(payload.data, row.id, row.runId)) return { ok: false, error: "投递快照不完整或归属不正确，不能补投" };
       if (row.resolutions.length >= 20) return { ok: false, error: "人工补投次数已达到上限" };
       if (row.retryDeadline && row.retryDeadline <= now) return { ok: false, error: "接收方防重有效期已过，不能再次发送" };
       const target = getDeliveryTarget(row.targetId);

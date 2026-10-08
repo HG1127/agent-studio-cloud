@@ -146,6 +146,13 @@ describe("持久成果投递事务与并发", () => {
     expect(row.resolutions).toHaveLength(1);
     expect((await retryRunDeliveryAction(delivery.runId, { ...request, reason: "更改原因" })).ok).toBe(false);
   });
+  it("历史坏快照不能通过人工确认重新排队", async () => {
+    const { delivery } = await queued();
+    await db.update(runDeliveries).set({ status: "failed", payload: { schemaVersion: 1, deliveryId: delivery.id, task: { runId: randomUUID() } } as unknown as RunDeliveryEnvelope,
+      leaseOwner: null, leaseExpiresAt: null }).where(eq(runDeliveries.id, delivery.id));
+    expect((await retryRunDeliveryAction(delivery.runId, { requestId: randomUUID(), confirmed: true, reason: "已核对" })).ok).toBe(false);
+    expect(await deliveryRow(delivery.id)).toMatchObject({ status: "failed", maxAttempts: 5, resolutions: [] });
+  });
   it("查询严格隔离工作区，摘要不加载快照、密钥或引擎句柄", async () => {
     const { delivery } = await queued();
     const context = { params: Promise.resolve({ runId: delivery.runId }) };
