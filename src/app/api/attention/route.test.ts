@@ -20,7 +20,11 @@ describe("统一待处理只读接口", () => {
     expect((await GET(new Request(`${address}?${query}`))).status).toBe(200);
     expect(mocks.list).toHaveBeenCalledExactlyOnceWith(DEMO_WORKSPACE_ID, { before, beforeId: id, beforeKind: "run-failed", kind: "run-failed", agentId: id, limit: 2 });
   });
-  it.each(["workspaceId=other", "limit=51", "limit=0", "limit=1&limit=2", "kind=bad", "kind=run-failed&kind=wait-event", `beforeId=${id}`, "beforeKind=run-failed", "runId=bad", "before=bad", "payload=hidden"])("拒绝 %s，不读数据库", async (query) => {
+  it.each(["normal", "long-pending", "expected-overdue", "retry-expired", "unknown"])("%s 分类传入受保护查询", async (timingState) => {
+    expect((await GET(new Request(`${address}?timingState=${timingState}`))).status).toBe(200);
+    expect(mocks.list).toHaveBeenCalledExactlyOnceWith(DEMO_WORKSPACE_ID, { timingState, limit: 20 });
+  });
+  it.each(["workspaceId=other", "limit=51", "limit=0", "limit=1&limit=2", "kind=bad", "kind=run-failed&kind=wait-event", `beforeId=${id}`, "beforeKind=run-failed", "runId=bad", "before=bad", "payload=hidden", "timingState=timeout", "timingState=normal&timingState=unknown"])("拒绝 %s，不读数据库", async (query) => {
     const response = await GET(new Request(`${address}?${query}`));
     expect(response.status).toBe(400); expect(mocks.list).not.toHaveBeenCalled();
   });

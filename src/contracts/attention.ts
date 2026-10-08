@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { RunStatus } from "./run";
+import { AttentionTiming, AttentionTimingSource, AttentionTimingState } from "./attention-timing";
 
 export const AttentionKind = z.enum(["approval-pending", "approval-resume", "wait-event", "run-failed", "tool-operation", "delivery-failed"]);
 export type AttentionKind = z.infer<typeof AttentionKind>;
@@ -8,7 +9,7 @@ const Timestamp = z.string().datetime().max(32);
 export const AttentionCursor = z.object({ createdAt: Timestamp, id: Identifier, kind: AttentionKind }).strict();
 export type AttentionCursor = z.infer<typeof AttentionCursor>;
 export const AttentionListInput = z.object({
-  kind: AttentionKind.optional(), agentId: Identifier.optional(), runId: Identifier.optional(),
+  kind: AttentionKind.optional(), agentId: Identifier.optional(), runId: Identifier.optional(), timingState: AttentionTimingState.optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
   before: Timestamp.optional(), beforeId: Identifier.optional(), beforeKind: AttentionKind.optional(),
 }).strict().superRefine((input, context) => {
@@ -20,7 +21,7 @@ export const AttentionMetadata = z.object({
   kind: AttentionKind, id: Identifier, runId: Identifier, agentId: Identifier.nullable(),
   agentName: z.string().max(400).nullable(), agentNameTruncated: z.boolean(), runStatus: RunStatus.nullable(),
   title: z.string().max(1000), titleTruncated: z.boolean(), error: z.string().max(4000).nullable(), errorTruncated: z.boolean(),
-  createdAt: Timestamp,
+  createdAt: Timestamp, timingSource: AttentionTimingSource.optional(),
 }).strict();
 export type AttentionMetadata = z.infer<typeof AttentionMetadata>;
 export function attentionLinks(kind: AttentionKind, id: string, runId: string) {
@@ -30,9 +31,10 @@ export function attentionLinks(kind: AttentionKind, id: string, runId: string) {
     : kind === "delivery-failed" ? `/api/runs/${runId}/delivery` : `/api/runs/${runId}`;
   return { view, detail };
 }
-export const AttentionItem = AttentionMetadata.extend({
+export const AttentionItem = AttentionMetadata.omit({ timingSource: true }).extend({
   agentName: z.string().max(200).nullable(), title: z.string().max(500), error: z.string().max(2000).nullable(),
   summary: z.string().min(1).max(200), links: z.object({ view: z.string().max(200), detail: z.string().max(200) }).strict(),
+  timing: AttentionTiming.optional(),
 }).superRefine((item, context) => {
   const expected = attentionLinks(item.kind, item.id, item.runId);
   if (item.links.view !== expected.view || item.links.detail !== expected.detail) context.addIssue({ code: "custom", path: ["links"], message: "待处理入口必须属于原记录" });

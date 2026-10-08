@@ -41,4 +41,13 @@ describe("统一待处理有界查询", () => {
     expect(query.sql).not.toContain(row.createdAt);
     expect(query.sql).toContain('kind COLLATE "C") <');
   });
+  it("时间分类在分页前筛选，缺失起点不冒充任务创建时间", async () => {
+    mocks.execute.mockResolvedValue([{ ...row, timingSource: { waitMode: "unknown", sinceEpochMs: null, expectedEpochMs: null, retryEpochMs: null } }]);
+    const result = await listAttention(workspace, AttentionListInput.parse({ timingState: "unknown", limit: 1 }), new Date("2026-10-08T12:00:00Z"));
+    expect(result).toMatchObject({ ok: true, items: [{ timing: { state: "unknown", elapsedSeconds: null } }] });
+    expect(JSON.stringify(result)).not.toContain("timingSource");
+    const query = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0][0]);
+    expect(query.params).toContain("unknown");
+    expect(query.sql.indexOf("timing_state =")).toBeLessThan(query.sql.lastIndexOf("limit"));
+  });
 });

@@ -27,6 +27,17 @@ describe("待处理摘要纯展示", () => {
   it("来源任务已不在本工作区时仍保留可核对的独立业务操作，不猜测任务状态", () => {
     expect(presentAttentionItem({ ...row, kind: "tool-operation", runStatus: null })).toMatchObject({ runStatus: null, agentName: null, links: { detail: `/api/tool-operations/${id}` } });
   });
+  it.each([["timer", "定时等待", "无需提交外部消息"], ["event", "等待外部消息", "核对所需消息"], ["unknown", "等待方式待核对", "核对等待方式"]] as const)("%s 等待的标题与操作提示遵守真实方式", (waitMode, title, summary) => {
+    const now = new Date("2026-10-08T12:00:00Z");
+    const result = presentAttentionItem({ ...row, kind: "wait-event", id: runId, runStatus: "waiting_event",
+      timingSource: { waitMode, sinceEpochMs: now.getTime() - 1000, expectedEpochMs: waitMode === "timer" ? now.getTime() + 1000 : null, retryEpochMs: null } }, now);
+    expect(result.title).toBe(title); expect(result.summary).toContain(summary);
+    expect(result).not.toHaveProperty("timingSource");
+  });
+  it("旧摘要不假定外部消息，带分类的展示须显式提供检查时间", () => {
+    expect(presentAttentionItem({ ...row, kind: "wait-event", id: runId, runStatus: "waiting_event" }).title).toBe("等待方式待核对");
+    expect(() => presentAttentionItem({ ...row, timingSource: { waitMode: "none", sinceEpochMs: null, expectedEpochMs: null, retryEpochMs: null } })).toThrow("检查时间");
+  });
   it("数据库按字符截取的合法表情符号摘要仍能读取，输出遵守接口长度", () => {
     const result = presentAttentionItem({ ...row, title: "😀".repeat(500), titleTruncated: false,
       agentName: "😀".repeat(200), agentNameTruncated: false, error: "😀".repeat(2000), errorTruncated: false });

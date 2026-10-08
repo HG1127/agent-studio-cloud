@@ -9,6 +9,8 @@ import { db } from "@/lib/db";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
 import { getPendingWaitHook } from "@/server/queries/runs";
 import { POST as submitWaitMessage } from "@/app/api/runs/[runId]/events/[eventKey]/route";
+import { AttentionListInput } from "@/contracts/attention";
+import { listAttention } from "@/server/queries/attention";
 
 const AGENT_ID = "00000000-0000-4000-8000-0000000000b1";
 const VERSION_ID = "00000000-0000-4000-8000-0000000000b2";
@@ -130,6 +132,7 @@ describe("等待节点暂停与恢复", () => {
       expect(waiting?.status).toBe("waiting_event");
       expect(pending?.submissionToken).toMatch(/^[A-Za-z0-9_-]{40,}$/);
       expect(pending?.submissionToken).not.toBe(token);
+      expect(await listAttention(DEMO_WORKSPACE_ID, AttentionListInput.parse({ runId }))).toMatchObject({ ok: true, items: [{ timing: { waitMode: "event", state: "normal", expectedAt: null } }] });
 
       await resumeHook(token, { customerId: "C-100", complete: true });
       expect(await handle.returnValue).toEqual({ status: "completed" });
@@ -145,7 +148,31 @@ describe("等待节点暂停与恢复", () => {
       });
       const traces = await db.select().from(traceEvents).where(eq(traceEvents.runId, runId));
       expect(traces.map((item) => item.kind)).toEqual(expect.arrayContaining(["wait.started", "wait.resumed", "run.completed"]));
+      expect(await listAttention(DEMO_WORKSPACE_ID, AttentionListInput.parse({ runId }))).toEqual({ ok: true, items: [], nextCursor: null });
     } finally {
+      await cleanup(runId);
+    }
+  }, 240_000);
+
+  it("真实定时等待保持计划状态，不开放消息凭据或误导提交消息", async () => {
+    const runId = await insertRun();
+    const manifest = manifestFor({ mode: "delay", durationMs: 120_000, eventKey: "timer.only" });
+    let handle: Awaited<ReturnType<typeof start>> | undefined;
+    try {
+      handle = await start(agentRunWorkflow, [runId, manifest, {}]);
+      await expect.poll(async () => (await db.select({ status: runs.status }).from(runs).where(eq(runs.id, runId)).limit(1))[0]?.status,
+        { timeout: 90_000, interval: 100 }).toBe("waiting_event");
+      const result = await listAttention(DEMO_WORKSPACE_ID, AttentionListInput.parse({ runId }));
+      expect(result).toMatchObject({ ok: true, items: [{ title: "定时等待", timing: { waitMode: "timer", state: "normal" } }] });
+      if (!result.ok) throw new Error(result.error);
+      expect(result.items[0].timing?.expectedAt).not.toBeNull();
+      expect(result.items[0].summary).toContain("无需提交外部消息");
+      expect(await getPendingWaitHook(runId, DEMO_WORKSPACE_ID)).toBeNull();
+    } finally {
+      if (handle) {
+        await handle.cancel();
+        await expect(handle.returnValue).rejects.toThrow();
+      }
       await cleanup(runId);
     }
   }, 240_000);

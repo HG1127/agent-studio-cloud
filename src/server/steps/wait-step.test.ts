@@ -98,4 +98,18 @@ describe("等待步骤重入", () => {
     expect(completed[0][0].dedupeKey).toBe("wait-completed:wait-step-1");
     expect(completed[1][0].dedupeKey).toBe(completed[0][0].dedupeKey);
   });
+  it("事件等待快照仍保留原凭据，无超时则不生成截止时间", async () => {
+    await beginWait({ runId: "run-1", node, hookToken: "original-hook" });
+    expect(mocks.appendTrace).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ hookToken: "original-hook", submissionToken: "submission-token", timing: { mode: "event", expectedAtMs: null } }) }));
+  });
+  it("定时等待只记录公开时间信息，不生成消息凭据", async () => {
+    const timer = WorkflowNode.parse({ ...node, wait: { ...node.wait!, mode: "delay", durationMs: 1000 } });
+    const before = Date.now();
+    await beginWait({ runId: "run-1", node: timer });
+    const event = mocks.appendTrace.mock.calls[0][0];
+    expect(event.data.timing).toMatchObject({ mode: "delay", expectedAtMs: expect.any(Number) });
+    expect(event.data.timing.expectedAtMs).toBeGreaterThanOrEqual(before + 1000);
+    expect(Object.keys(event.data)).toEqual(["timing"]);
+    expect(mocks.createWaitEventToken).not.toHaveBeenCalled();
+  });
 });

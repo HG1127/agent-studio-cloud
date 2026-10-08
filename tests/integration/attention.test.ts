@@ -8,6 +8,7 @@ import { agents, approvals, runDeliveries, runs, toolOperations, traceEvents } f
 import { db } from "@/lib/db";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { listAttention } from "@/server/queries/attention";
+import { ATTENTION_EXPECTED_GRACE_MS, ATTENTION_LONG_PENDING_MS } from "@/contracts/attention-timing";
 
 let workspace: string;
 const ownedRuns: string[] = [];
@@ -62,6 +63,15 @@ async function page(input: Record<string, unknown> = {}, tenant = workspace) {
   const result = await listAttention(tenant, AttentionListInput.parse(input));
   if (!result.ok) throw new Error(result.error);
   return result;
+}
+async function timedPage(now: Date, input: Record<string, unknown> = {}) {
+  const result = await listAttention(workspace, AttentionListInput.parse(input), now);
+  if (!result.ok) throw new Error(result.error);
+  return result;
+}
+async function waitTrace(run: Fixture, seq: number, at: Date, timing?: Record<string, unknown>, tenant = run.workspaceId) {
+  await db.insert(traceEvents).values({ runId: run.id, workspaceId: tenant, createdBy: DEMO_USER_ID, seq, at,
+    nodeId: "wait", kind: "wait.started", title: "正在等待", data: { ...(timing ? { timing } : { eventKey: "legacy.ready" }), hookToken: "private-timing-hook" } });
 }
 
 describe("集中待处理真实数据库验收", () => {
@@ -172,5 +182,72 @@ describe("集中待处理真实数据库验收", () => {
     expect(JSON.stringify(result)).not.toContain("private-fixture-key-material");
     expect(result.items.find((item) => item.id === id)).toMatchObject({ titleTruncated: true, agentNameTruncated: true });
     expect(result.items.find((item) => item.id === operation)?.errorTruncated).toBe(true);
+  });
+  it("缺少可信等待轨迹不使用任务创建时间冒充久等起点", async () => {
+    const run = await makeRun("waiting_event");
+    const result = await timedPage(new Date("2026-10-08T12:00:00Z"), { runId: run.id });
+    expect(result.items[0]).toMatchObject({ timing: { state: "unknown", waitMode: "unknown", sinceAt: null, elapsedSeconds: null } });
+    expect(result.items[0].summary).toContain("核对等待方式");
+    expect(result.items[0].title).toBe("等待方式待核对");
+    expect((await timedPage(new Date("2026-10-08T12:00:00Z"), { timingState: "long-pending" })).items).toEqual([]);
+  });
+  it("只使用本工作区最新等待轨迹，计划中的长定时等待不误报久等或要求消息", async () => {
+    const now = new Date("2026-10-08T12:00:00Z"); const run = await makeRun("waiting_event");
+    await waitTrace(run, 1, new Date("2000-01-01T00:00:00Z"));
+    await waitTrace(run, 2, new Date(now.getTime() - ATTENTION_LONG_PENDING_MS * 10), { mode: "delay", expectedAtMs: now.getTime() + ATTENTION_LONG_PENDING_MS * 10 });
+    await waitTrace(run, 3, new Date("2000-01-01T00:00:00Z"), { mode: "event", expectedAtMs: 0 }, randomUUID());
+    const result = await timedPage(now, { runId: run.id });
+    expect(result.items[0].timing).toMatchObject({ state: "normal", waitMode: "timer", expectedAt: new Date(now.getTime() + ATTENTION_LONG_PENDING_MS * 10).toISOString() });
+    expect(result.items[0].summary).toContain("无需提交外部消息");
+    expect(result.items[0].title).toBe("定时等待");
+    expect((await timedPage(now, { timingState: "long-pending" })).items).toEqual([]);
+    expect(JSON.stringify(result)).not.toContain("private-timing-hook");
+  });
+  it("预计超期与24小时久等在精确边界分类，筛选先于排序和分页", async () => {
+    const now = new Date("2026-10-08T12:00:00Z");
+    const long = await makeRun("waiting_approval");
+    const longId = await makeApproval(long, "pending", randomUUID(), new Date(now.getTime() - ATTENTION_LONG_PENDING_MS).toISOString());
+    const recent = await makeRun("waiting_approval");
+    await makeApproval(recent, "pending", randomUUID(), new Date(now.getTime() - ATTENTION_LONG_PENDING_MS + 1).toISOString());
+    const overdue = await makeRun("waiting_event"); const notYet = await makeRun("waiting_event");
+    await waitTrace(overdue, 1, new Date(now.getTime() - 60000), { mode: "event", expectedAtMs: now.getTime() - ATTENTION_EXPECTED_GRACE_MS });
+    await waitTrace(notYet, 1, new Date(now.getTime() - 60000), { mode: "event", expectedAtMs: now.getTime() - ATTENTION_EXPECTED_GRACE_MS + 1 });
+    for (let index = 0; index < 3; index++) await makeRun("waiting_event", workspace, "2026-10-08T12:00:00Z");
+    expect((await timedPage(now, { timingState: "long-pending", limit: 1 })).items.map((item) => item.id)).toEqual([longId]);
+    const result = await timedPage(now, { timingState: "expected-overdue", limit: 1 });
+    expect(result.items.map((item) => item.id)).toEqual([overdue.id]); expect(result.nextCursor).toBeNull();
+    expect(result.items[0].timing?.state).toBe("expected-overdue");
+  });
+  it("旧事件记录使用可信轨迹时间，坏或超范围预计时间不触发SQL异常与假超期", async () => {
+    const now = new Date("2026-10-08T12:00:00Z"); const run = await makeRun("waiting_event");
+    await waitTrace(run, 1, new Date(now.getTime() - ATTENTION_LONG_PENDING_MS));
+    expect((await timedPage(now, { runId: run.id })).items[0].timing).toMatchObject({ waitMode: "event", state: "long-pending" });
+    for (const [index, expectedAtMs] of ["not-a-time", "0;drop table runs", { private: "hidden" }, 9999999999999999].entries()) {
+      await waitTrace(run, index + 2, new Date(now.getTime() - 1000), { mode: "delay", expectedAtMs });
+      expect((await timedPage(now, { runId: run.id })).items[0].timing).toMatchObject({ waitMode: "timer", state: "unknown", expectedAt: null });
+    }
+  });
+  it("防重截止不能用运行年龄代替，过期筛选包含两类独立异常且不改变源状态", async () => {
+    const now = new Date("2026-10-08T12:00:00Z"); const run = await makeRun("completed");
+    const operation = await makeOperation(run); const delivery = await makeDelivery(run);
+    await db.update(toolOperations).set({ retryDeadline: now }).where(eq(toolOperations.id, operation));
+    await db.update(runDeliveries).set({ retryDeadline: now }).where(eq(runDeliveries.id, delivery));
+    const result = await timedPage(now, { timingState: "retry-expired" });
+    expect(new Set(result.items.map((item) => item.id))).toEqual(new Set([operation, delivery]));
+    expect(result.items.every((item) => item.timing?.state === "retry-expired" && item.runStatus === "completed")).toBe(true);
+    await db.update(runDeliveries).set({ retryDeadline: new Date(now.getTime() + 1) }).where(eq(runDeliveries.id, delivery));
+    expect((await timedPage(now, { timingState: "retry-expired" })).items.map((item) => item.id)).toEqual([operation]);
+    expect((await db.select({ status: runs.status }).from(runs).where(eq(runs.id, run.id)))[0].status).toBe("completed");
+  });
+  it("审批待恢复和失败任务使用实际决定或完成时间，不把旧创建时间当异常起点", async () => {
+    const now = new Date("2026-10-08T12:00:00Z"); const since = new Date(now.getTime() - 1000);
+    const awaiting = await makeRun("waiting_approval"); const approval = await makeApproval(awaiting, "approved");
+    const failed = await makeRun("failed");
+    await db.update(approvals).set({ decidedAt: since }).where(eq(approvals.id, approval));
+    await db.update(runs).set({ finishedAt: since }).where(eq(runs.id, failed.id));
+    const result = await timedPage(now);
+    expect(result.items).toHaveLength(2);
+    expect(result.items.every((item) => item.timing?.state === "normal" && item.timing?.sinceAt === since.toISOString() && item.timing.elapsedSeconds === 1)).toBe(true);
+    expect((await timedPage(now, { timingState: "long-pending" })).items).toEqual([]);
   });
 });

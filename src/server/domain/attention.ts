@@ -1,5 +1,6 @@
 import { AttentionItem, AttentionMetadata, attentionLinks, type AttentionKind } from "@/contracts/attention";
 import { redactCredentialText, redactSensitiveText } from "@/server/domain/security/redact-sensitive";
+import { assessAttentionTiming } from "@/server/domain/attention-timing";
 
 const summaries: Record<AttentionKind, string> = {
   "approval-pending": "请读取完整成果后明确确认或退回",
@@ -27,15 +28,21 @@ function redactSummaryText(value: string, personal = false) {
     .replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^@\s/]*:[^@\s/]+$/gi, "$1[已隐藏敏感信息]");
 }
 
-export function presentAttentionItem(input: AttentionMetadata): AttentionItem {
-  const row = AttentionMetadata.parse(input);
-  const title = redactSummaryText(row.title);
+export function presentAttentionItem(input: AttentionMetadata, now?: Date): AttentionItem {
+  const { timingSource, ...row } = AttentionMetadata.parse(input);
+  if (timingSource && !now) throw new Error("展示等待分类须提供检查时间");
+  const timing = timingSource && now ? assessAttentionTiming(timingSource, now) : undefined;
+  const title = redactSummaryText(row.kind === "wait-event"
+    ? timing?.waitMode === "timer" ? "定时等待" : timing?.waitMode === "event" ? "等待外部消息" : "等待方式待核对"
+    : row.title);
   const agentName = row.agentName === null ? null : redactSummaryText(row.agentName);
   const error = row.error === null ? null : redactSummaryText(row.error, true);
   return AttentionItem.parse({
     ...row, title: cropText(title, 500), titleTruncated: row.titleTruncated || title.length > 500,
     agentName: agentName === null ? null : cropText(agentName, 200), agentNameTruncated: row.agentNameTruncated || (agentName?.length ?? 0) > 200,
     error: error === null ? null : cropText(error, 2000), errorTruncated: row.errorTruncated || (error?.length ?? 0) > 2000,
-    summary: summaries[row.kind], links: attentionLinks(row.kind, row.id, row.runId),
+    summary: row.kind === "wait-event" && timing?.waitMode === "timer" ? "这是定时等待，无需提交外部消息；预计时间已过时请检查执行状态"
+      : row.kind === "wait-event" && timing?.waitMode !== "event" ? "请打开任务核对等待方式，不要在未确认时提交消息" : summaries[row.kind],
+    links: attentionLinks(row.kind, row.id, row.runId), ...(timing ? { timing } : {}),
   });
 }
