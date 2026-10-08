@@ -34,6 +34,12 @@ export const REQUIRED_DATABASE_OBJECTS = [
   "public.tool_operations_workspace_run_idx",
   "public.tool_operations_workspace_created_id_idx",
   "public.tool_operations_workspace_status_created_id_idx",
+  "public.run_deliveries",
+  "public.run_deliveries_workspace_run_unique",
+  "public.run_deliveries_workspace_status_due_idx",
+  "public.run_deliveries_workspace_lease_idx",
+  "public.run_deliveries_workspace_status_created_id_idx",
+  "public.trace_events_workspace_run_kind_idx",
   "public.runs_workspace_status_created_idx",
   "public.runs_workspace_source_key_unique",
   "public.knowledge_sources_workspace_archived_created_idx",
@@ -61,6 +67,10 @@ export const REQUIRED_DATABASE_COLUMNS = [
   { tableName: "tool_operations", columnName: "created_by", requireNotNull: true, allowDefault: false },
   { tableName: "tool_operations", columnName: "retry_deadline", requireNotNull: true, allowDefault: true },
   { tableName: "tool_operations", columnName: "resolutions", requireNotNull: true, allowDefault: true },
+  { tableName: "run_deliveries", columnName: "workspace_id", requireNotNull: true, allowDefault: false },
+  { tableName: "run_deliveries", columnName: "created_by", requireNotNull: true, allowDefault: false },
+  { tableName: "run_deliveries", columnName: "retention_ms", requireNotNull: true, allowDefault: false },
+  { tableName: "run_deliveries", columnName: "resolutions", requireNotNull: true, allowDefault: true },
 ] as const;
 
 export async function isDatabaseReady() {

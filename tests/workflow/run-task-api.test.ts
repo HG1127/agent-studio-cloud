@@ -18,6 +18,8 @@ import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { decideApprovalAction } from "@/server/actions/decide-approval";
 import { resolvePath, runEvalContext } from "@/server/domain/runtime/condition-eval";
 import { projectWorkflowResult } from "@/server/domain/runtime/output-contract";
+import { AttentionListInput } from "@/contracts/attention";
+import { listAttention } from "@/server/queries/attention";
 import { waitForPendingApprovalHook } from "./approval-helpers";
 import { startModelJsonServer } from "../helpers/model-json-server";
 
@@ -176,8 +178,10 @@ describe("程序化任务到真实持久工作流的交付", () => {
     const approvalId = token.slice("approval:".length);
     const list = RunApprovalListResult.parse(await (await readApprovals(new Request(`${ORIGIN}/api/runs/${runId}/approvals`), { params: Promise.resolve({ runId: runId! }) })).json());
     expect(list).toMatchObject({ ok: true, items: [{ id: approvalId, state: "pending" }] });
+    expect(await listAttention(DEMO_WORKSPACE_ID, AttentionListInput.parse({ runId }))).toMatchObject({ ok: true, items: [{ kind: "approval-pending", id: approvalId }] });
     expect((await decideViaHttp(approvalId)).status).toBe(200);
     await expect(handle!.returnValue).resolves.toEqual({ status: "completed" });
+    expect(await listAttention(DEMO_WORKSPACE_ID, AttentionListInput.parse({ runId }))).toEqual({ ok: true, items: [], nextCursor: null });
     const completed = await readResult();
     expect(completed.response.status).toBe(200);
     expect(completed.body).toMatchObject({ ok: true, task: { status: "completed", result: { extract: { amount: 0, approved: false } } } });

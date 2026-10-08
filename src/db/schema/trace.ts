@@ -1,4 +1,4 @@
-import { integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 export const traceEvents = pgTable(
   "trace_events",
@@ -18,6 +18,9 @@ export const traceEvents = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("trace_events_run_id_seq_unique").on(t.runId, t.seq)],
+  (t) => [
+    uniqueIndex("trace_events_run_id_seq_unique").on(t.runId, t.seq),
+    index("trace_events_workspace_run_kind_idx").on(t.workspaceId, t.runId, t.kind),
+  ],
 );
 export type TraceEvent = typeof traceEvents.$inferSelect;

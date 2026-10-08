@@ -1,0 +1,2 @@
+CREATE INDEX "trace_events_workspace_run_kind_idx" ON "trace_events" USING btree ("workspace_id","run_id","kind");--> statement-breakpoint
+CREATE INDEX "run_deliveries_workspace_status_created_id_idx" ON "run_deliveries" USING btree ("workspace_id","status","created_at","id");

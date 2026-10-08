@@ -16,4 +16,5 @@ export const runDeliveries = pgTable("run_deliveries", {
   uniqueIndex("run_deliveries_workspace_run_unique").on(t.workspaceId, t.runId),
   index("run_deliveries_workspace_status_due_idx").on(t.workspaceId, t.status, t.nextAttemptAt),
   index("run_deliveries_workspace_lease_idx").on(t.workspaceId, t.leaseExpiresAt),
+  index("run_deliveries_workspace_status_created_id_idx").on(t.workspaceId, t.status, t.createdAt, t.id),
 ]);

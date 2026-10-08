@@ -197,6 +197,13 @@
       "when": 1791466326238,
       "tag": "0027_durable-run-deliveries",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1791470465945,
+      "tag": "0028_attention-query-indexes",
+      "breakpoints": true
     }
   ]
 }
