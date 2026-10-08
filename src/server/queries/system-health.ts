@@ -72,6 +72,7 @@ export const REQUIRED_DATABASE_OBJECTS = [
 ] as const;
 
 export const REQUIRED_DATABASE_COLUMNS = [
+  { tableName: "evaluation_cases", columnName: "result_schema", requireNotNull: false, allowDefault: false },
   { tableName: "runs", columnName: "model_usage_tracking_version", requireNotNull: false, allowDefault: false },
   { tableName: "runs", columnName: "parent_run_id", requireNotNull: false, allowDefault: false },
   { tableName: "runs", columnName: "collaboration_tracking_version", requireNotNull: false, allowDefault: false },

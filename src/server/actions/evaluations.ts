@@ -24,6 +24,7 @@ import { evaluationCaseSetsEqual, generateEvaluationCases } from "@/server/domai
 import { redactCredentialData } from "@/server/domain/security/redact-sensitive";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { jsonValuesEqual } from "@/server/domain/json-value";
+import { evaluationResultSchemaIssue } from "@/server/domain/evaluation-result-schema";
 import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
 const EVALUATION_START_CONCURRENCY = 5;
@@ -46,6 +47,7 @@ export async function generateEvaluationCasesAction(agentId: string): Promise<Ev
         name: evaluationCases.name,
         input: evaluationCases.input,
         expectations: evaluationCases.expectations,
+        resultSchema: evaluationCases.resultSchema,
       }).from(evaluationCases).where(and(
         eq(evaluationCases.agentId, agentId),
         eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID),
@@ -99,6 +101,9 @@ export async function createEvaluationCaseAction(input: unknown): Promise<Evalua
   }
   const storedInput = redactCredentialData(parsed.data.input) as Record<string, unknown>;
   const storedExpectations = redactCredentialData(parsed.data.expectations) as typeof parsed.data.expectations;
+  const storedResultSchema = parsed.data.resultSchema ?? null;
+  const schemaIssue = evaluationResultSchemaIssue(storedResultSchema);
+  if (schemaIssue) return { ok: false, error: schemaIssue };
   try {
     const result = await db.transaction(async (tx) => {
       const [agent] = await tx.select({ id: agents.id, name: agents.name }).from(agents).where(and(
@@ -112,7 +117,7 @@ export async function createEvaluationCaseAction(input: unknown): Promise<Evalua
       )).limit(1);
       if (running) return { ok: false as const, error: "自动验收运行期间不能修改验收样例" };
       const duplicates = await tx
-        .select({ input: evaluationCases.input, expectations: evaluationCases.expectations })
+        .select({ input: evaluationCases.input, expectations: evaluationCases.expectations, resultSchema: evaluationCases.resultSchema })
         .from(evaluationCases)
         .where(and(
           eq(evaluationCases.agentId, parsed.data.agentId),
@@ -122,7 +127,8 @@ export async function createEvaluationCaseAction(input: unknown): Promise<Evalua
         ));
       if (duplicates.some((testCase) =>
         jsonValuesEqual(testCase.input, storedInput)
-        && jsonValuesEqual(testCase.expectations, storedExpectations))) {
+        && jsonValuesEqual(testCase.expectations, storedExpectations)
+        && jsonValuesEqual(testCase.resultSchema ?? null, storedResultSchema))) {
         return { ok: true as const };
       }
       const [active] = await tx.select({ count: count() }).from(evaluationCases).where(and(
@@ -138,6 +144,7 @@ export async function createEvaluationCaseAction(input: unknown): Promise<Evalua
         name: parsed.data.name,
         input: storedInput,
         expectations: storedExpectations,
+        resultSchema: storedResultSchema,
       }).returning({ id: evaluationCases.id });
       await tx.insert(auditEvents).values(auditEventValues({
         workspaceId: DEMO_WORKSPACE_ID,
@@ -166,6 +173,8 @@ export async function updateEvaluationCaseAction(input: unknown): Promise<Evalua
   }
   const storedInput = redactCredentialData(parsed.data.input) as Record<string, unknown>;
   const storedExpectations = redactCredentialData(parsed.data.expectations) as typeof parsed.data.expectations;
+  const schemaIssue = evaluationResultSchemaIssue(parsed.data.resultSchema);
+  if (schemaIssue) return { ok: false, error: schemaIssue };
   try {
     const rows = await db.transaction(async (tx) => {
       const [agent] = await tx.select({ id: agents.id, name: agents.name }).from(agents).where(and(
@@ -183,15 +192,21 @@ export async function updateEvaluationCaseAction(input: unknown): Promise<Evalua
         name: evaluationCases.name,
         input: evaluationCases.input,
         expectations: evaluationCases.expectations,
+        resultSchema: evaluationCases.resultSchema,
         updatedAt: evaluationCases.updatedAt,
       }).from(evaluationCases).where(and(
         eq(evaluationCases.id, parsed.data.caseId), eq(evaluationCases.agentId, parsed.data.agentId),
         eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID), isNull(evaluationCases.archivedAt),
       )).limit(1);
       if (!current) return [];
+      const storedResultSchema = parsed.data.resultSchema === undefined ? current.resultSchema ?? null : parsed.data.resultSchema;
+      if (evaluationResultSchemaIssue(storedResultSchema)) return "invalid-schema" as const;
+      const stored = EvaluationCaseUpdateInput.safeParse({ ...parsed.data, input: storedInput, expectations: storedExpectations, resultSchema: storedResultSchema });
+      if (!stored.success) return { validationError: validationMessage(stored.error, "验收样例与结果规则超出限制，请缩小内容后重试") };
       if (current.name === parsed.data.name
         && jsonValuesEqual(current.input, storedInput)
-        && jsonValuesEqual(current.expectations, storedExpectations)) {
+        && jsonValuesEqual(current.expectations, storedExpectations)
+        && jsonValuesEqual(current.resultSchema ?? null, storedResultSchema)) {
         return "unchanged" as const;
       }
       if (current.updatedAt.getTime() !== new Date(parsed.data.expectedUpdatedAt).getTime()) return [];
@@ -199,6 +214,7 @@ export async function updateEvaluationCaseAction(input: unknown): Promise<Evalua
         name: parsed.data.name,
         input: storedInput,
         expectations: storedExpectations,
+        resultSchema: storedResultSchema,
         updatedAt: new Date(),
       }).where(and(
         eq(evaluationCases.id, parsed.data.caseId), eq(evaluationCases.agentId, parsed.data.agentId),
@@ -219,6 +235,8 @@ export async function updateEvaluationCaseAction(input: unknown): Promise<Evalua
       return rows;
     });
     if (rows === "running") return { ok: false, error: "自动验收运行期间不能修改验收样例" };
+    if (rows === "invalid-schema") return { ok: false, error: "验收结果字段规则无效，请明确修改或清除后重试" };
+    if (rows && typeof rows === "object" && "validationError" in rows) return { ok: false, error: rows.validationError };
     if (!rows) return { ok: false, error: "找不到这个助手，请刷新页面后重试" };
     if (rows === "unchanged") {
       revalidatePathsAfterCommit([`/agents/${parsed.data.agentId}`], "evaluation-case-update");

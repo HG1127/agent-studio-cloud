@@ -50,6 +50,38 @@ beforeEach(() => {
 });
 
 describe("改进回归样例的结果判定", () => {
+  it.each([{ amount: 0, status: "passed" }, { amount: 101, status: "failed" }])("结果规则按启动快照判定 $amount，不读取后改范围", async ({ amount, status }) => {
+    const schema = { type: "object", required: ["amount"], properties: { amount: { type: "number", minimum: 0, maximum: 100 } } };
+    mocks.selectRows.push(
+      [{ sourceType: "evaluation", sourceKey: `evaluation:${EVALUATION_ID}:${CASE_ID}`, workspaceId: WORKSPACE_ID }],
+      [{ caseSnapshot: { name: "金额范围", input: {}, expectations: [], resultSchema: schema }, expectations: [], resultSchema: { type: "object", required: ["amount"], properties: { amount: { type: "number", minimum: 101, maximum: 200 } } } }],
+      [{ agentId: CASE_ID, versionId: CASE_ID, workspaceId: WORKSPACE_ID, createdBy: CASE_ID, status: "running", totalCount: 1 }], [{ status }],
+    );
+    await completeEvaluationForRun("run-1", { amount });
+    expect(mocks.updateValues[0]).toMatchObject({ status });
+    expect(mocks.updateValues[1]).toMatchObject({ status: "completed", passedCount: Number(status === "passed"), failedCount: Number(status === "failed") });
+  });
+
+  it("历史快照未配置新规则时，不把后来新增的当前规则套回旧验收", async () => {
+    mocks.selectRows.push(
+      [{ sourceType: "evaluation", sourceKey: `evaluation:${EVALUATION_ID}:${CASE_ID}`, workspaceId: WORKSPACE_ID }],
+      [{ caseSnapshot: { name: "原验收", input: {}, expectations: [{ path: "answer", operator: "exists" }] }, expectations: [], resultSchema: { type: "object", required: ["amount"] } }],
+      [{ agentId: CASE_ID, versionId: CASE_ID, workspaceId: WORKSPACE_ID, createdBy: CASE_ID, status: "running", totalCount: 1 }], [{ status: "passed" }],
+    );
+    await completeEvaluationForRun("run-1", { answer: "原成果" });
+    expect(mocks.updateValues[0]).toMatchObject({ status: "passed", error: null });
+  });
+
+  it("有当前结果规则但无启动快照时明确失败，不猜测历史规则", async () => {
+    mocks.selectRows.push(
+      [{ sourceType: "evaluation", sourceKey: `evaluation:${EVALUATION_ID}:${CASE_ID}`, workspaceId: WORKSPACE_ID }],
+      [{ caseSnapshot: null, expectations: [], resultSchema: { type: "object" } }],
+      [{ agentId: CASE_ID, versionId: CASE_ID, workspaceId: WORKSPACE_ID, createdBy: CASE_ID, status: "running", totalCount: 1 }], [{ status: "failed" }],
+    );
+    await completeEvaluationForRun("run-1", { amount: 0 });
+    expect(mocks.updateValues[0]).toMatchObject({ status: "failed", error: "验收结果字段规则缺少启动快照，请重新验收" });
+  });
+
   it("已开始的验收也不能把空条件回归样例算作通过", async () => {
     mocks.selectRows.push(
       [{ sourceType: "evaluation", sourceKey: `evaluation:${EVALUATION_ID}:${CASE_ID}`, workspaceId: WORKSPACE_ID }],

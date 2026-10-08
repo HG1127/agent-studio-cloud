@@ -44,6 +44,26 @@ beforeEach(() => {
 });
 
 describe("改进回归样例的启动门禁", () => {
+  it("有效结果规则可作为空断言回归样例的条件，并冻结到原轮", async () => {
+    const resultSchema = { type: "object", required: ["amount"], properties: { amount: { type: "number", minimum: 0, maximum: 100 } } };
+    mocks.selectRows.push([{ id: AGENT_ID, name: "金额助手" }], [], [{ id: "00000000-0000-4000-8000-0000000000a3" }], [{ id: CASE_ID, name: "金额范围", input: {}, expectations: [], resultSchema }]);
+    await expect(prepareEvaluationRun(AGENT_ID)).resolves.toMatchObject({ ok: true });
+    expect(mocks.select).toHaveBeenCalledTimes(4);
+    expect(mocks.insertedValues[1]).toEqual([expect.objectContaining({ caseSnapshot: { name: "金额范围", input: {}, expectations: [], resultSchema } })]);
+  });
+
+  it("当前样例规则损坏时不建立验收运行", async () => {
+    mocks.selectRows.push([{ id: AGENT_ID, name: "金额助手" }], [], [{ id: "00000000-0000-4000-8000-0000000000a3" }], [{ id: CASE_ID, name: "金额范围", input: {}, expectations: [], resultSchema: { type: "object", $ref: "unknown" } }]);
+    await expect(prepareEvaluationRun(AGENT_ID)).resolves.toMatchObject({ ok: false });
+    expect(mocks.insert).not.toHaveBeenCalled();
+  });
+
+  it("原轮规则快照无效时拒绝继续，不退回当前可编辑条件", async () => {
+    mocks.selectRows.push([{ id: AGENT_ID, name: "金额助手" }], [{ id: "00000000-0000-4000-8000-0000000000a5", agentId: AGENT_ID, versionId: "00000000-0000-4000-8000-0000000000a3", status: "running" }], [{ id: CASE_ID, input: {}, caseSnapshot: { name: "金额范围", input: {}, expectations: [], resultSchema: { type: "object", $ref: "unknown" } } }]);
+    await expect(prepareEvaluationRun(AGENT_ID)).resolves.toEqual({ ok: false, error: "验收结果字段规则快照无效，请重新验收" });
+    expect(mocks.insert).not.toHaveBeenCalled();
+  });
+
   it("反馈关联的样例没有验收条件时拒绝启动，不创建验收运行", async () => {
     mocks.selectRows.push(
       [{ id: AGENT_ID, name: "客户助手" }],

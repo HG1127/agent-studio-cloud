@@ -6,7 +6,7 @@ import { evaluateExpectations } from "@/server/domain/evaluation";
 describe("数组字段验收文档", () => {
   it("实际共享契约接受完整样例，文档结果通过且错误业务值仍失败", () => {
     const document = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
-    const section = document.split("## 验收数组字段")[1]?.split("## 使用路径")[0];
+    const section = document.split("## 验收数组字段")[1]?.split(/\n## /)[0];
     expect(section).toBeTruthy();
     const examples = [...section!.matchAll(/```json\s*([\s\S]*?)```/g)].map((match) => JSON.parse(match[1]));
     expect(examples).toHaveLength(2);

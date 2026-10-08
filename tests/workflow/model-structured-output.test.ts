@@ -129,9 +129,11 @@ describe("持久工作流的结构化业务结果", () => {
   }, 240_000);
 
   it.each([
-    { label: "零金额和否定值符合业务预期", amount: 0, approved: false, passed: true },
-    { label: "格式正确但业务值不符", amount: 10, approved: true, passed: false },
-  ])("实际模型返回订单数组，$label 时正确执行验收上线门禁", async ({ amount, approved, passed }) => {
+    { label: "零金额和否定值符合业务预期", amount: 0, approved: false, passed: true, schemaOnly: false },
+    { label: "格式正确但业务值不符", amount: 10, approved: true, passed: false, schemaOnly: false },
+    { label: "只有结果规则且金额在范围内", amount: 50, approved: false, passed: true, schemaOnly: true },
+    { label: "模型格式有效但超出业务金额范围", amount: 101, approved: false, passed: false, schemaOnly: true },
+  ])("实际模型返回订单数组，$label 时正确执行验收上线门禁", async ({ amount, approved, passed, schemaOnly }) => {
     const output = { items: [{ amount, approved, labels: ["到货确认"] }] };
     const base = await prepare([JSON.stringify(output)]);
     const manifest = AgentManifest.parse({
@@ -154,11 +156,17 @@ describe("持久工作流的结构化业务结果", () => {
     const [run] = await db.select({ agentId: runs.agentId, versionId: runs.versionId }).from(runs).where(eq(runs.id, runId!));
     const caseId = crypto.randomUUID(), evaluationId = crypto.randomUUID();
     evaluationFixture = { agentId: run.agentId, versionId: run.versionId, caseId, evaluationId };
-    const snapshot = EvaluationCaseSnapshot.parse({ name: "订单数组验收", input: {}, expectations: [
+    const snapshot = EvaluationCaseSnapshot.parse({ name: "订单数组验收", input: {}, expectations: schemaOnly ? [] : [
       { path: "extract.items.0.amount", operator: "equals", value: 0 },
       { path: "extract.items.0.approved", operator: "equals", value: false },
       { path: "extract.items.0.labels.0", operator: "contains", value: "到货" },
-    ] });
+    ], ...(schemaOnly ? { resultSchema: {
+      type: "object", required: ["extract"], properties: { extract: {
+        type: "object", required: ["items"], properties: { items: {
+          type: "array", minItems: 1, maxItems: 1, items: { type: "object", required: ["amount"], properties: { amount: { type: "number", minimum: 0, maximum: 100 } } },
+        } },
+      } },
+    } } : {}) });
     const owner = { workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID };
     await db.insert(agents).values({ ...owner, id: run.agentId, name: "订单数组验收助手", intentText: "按业务字段验收订单明细" });
     await db.insert(agentVersions).values({ ...owner, id: run.versionId, agentId: run.agentId, version: 1, status: "candidate", manifest });
@@ -175,7 +183,7 @@ describe("持久工作流的结构化业务结果", () => {
     const [outcome] = await db.select().from(evaluationCaseResults).where(eq(evaluationCaseResults.evaluationRunId, evaluationId));
     expect(outcome).toMatchObject({ status: passed ? "passed" : "failed", caseSnapshot: snapshot, runId });
     if (passed) expect(outcome.error).toBeNull();
-    else expect(outcome.error).toContain("extract.items.0.");
+    else expect(outcome.error).toContain(schemaOnly ? "结果.extract.items[0].amount" : "extract.items.0.");
     const [summary] = await db.select().from(evaluationRuns).where(eq(evaluationRuns.id, evaluationId));
     expect(summary).toMatchObject({ status: "completed", totalCount: 1, passedCount: Number(passed), failedCount: Number(!passed) });
     const [version] = await db.select().from(agentVersions).where(eq(agentVersions.id, run.versionId));

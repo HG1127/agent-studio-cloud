@@ -1,6 +1,9 @@
-import type { EvaluationExpectation } from "@/contracts/evaluation";
+import type { EvaluationExpectation, EvaluationResultSchema } from "@/contracts/evaluation";
 import { jsonValuesEqual } from "@/server/domain/json-value";
 import { safeDataPathSegments } from "@/server/domain/runtime/data-path";
+import { evaluationResultSchemaIssue } from "@/server/domain/evaluation-result-schema";
+import { validateJsonObjectSchema } from "@/server/domain/json-schema";
+import { redactCredentialText } from "@/server/domain/security/redact-sensitive";
 
 export const REGRESSION_EXPECTATION_REQUIRED = "改进回归样例尚未设置验收条件，请先编辑样例";
 
@@ -23,12 +26,18 @@ function readPath(value: unknown, path: string): unknown {
 export function evaluateExpectations(
   result: Record<string, unknown>,
   expectations: EvaluationExpectation[],
-  options: { feedbackRegression?: boolean } = {},
+  options: { feedbackRegression?: boolean; resultSchema?: EvaluationResultSchema | null } = {},
 ): { passed: boolean; errors: string[] } {
-  if (options.feedbackRegression && expectations.length === 0) {
+  const schemaIssue = evaluationResultSchemaIssue(options.resultSchema);
+  if (schemaIssue) return { passed: false, errors: [schemaIssue] };
+  if (options.feedbackRegression && expectations.length === 0 && !options.resultSchema) {
     return { passed: false, errors: [REGRESSION_EXPECTATION_REQUIRED] };
   }
   const errors: string[] = [];
+  if (options.resultSchema) {
+    const issue = validateJsonObjectSchema(result, options.resultSchema);
+    if (issue) errors.push(redactCredentialText(issue).replace(/^消息/, "结果").slice(0, 1_000));
+  }
   for (const expectation of expectations) {
     const actual = readPath(result, expectation.path);
     if (expectation.operator === "exists") {

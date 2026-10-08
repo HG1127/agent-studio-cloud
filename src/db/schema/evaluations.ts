@@ -1,5 +1,5 @@
 import { index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
-import type { EvaluationCaseSnapshot, EvaluationExpectation } from "@/contracts/evaluation";
+import type { EvaluationCaseSnapshot, EvaluationExpectation, EvaluationResultSchema } from "@/contracts/evaluation";
 
 export const evaluationCases = pgTable("evaluation_cases", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -9,6 +9,7 @@ export const evaluationCases = pgTable("evaluation_cases", {
   name: text("name").notNull(),
   input: jsonb("input").$type<Record<string, unknown>>().notNull().default({}),
   expectations: jsonb("expectations").$type<EvaluationExpectation[]>().notNull().default([]),
+  resultSchema: jsonb("result_schema").$type<EvaluationResultSchema>(),
   archivedAt: timestamp("archived_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

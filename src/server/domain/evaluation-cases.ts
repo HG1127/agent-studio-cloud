@@ -14,6 +14,7 @@ interface ComparableEvaluationCase {
   name: string;
   input: unknown;
   expectations: unknown;
+  resultSchema?: unknown;
 }
 
 export function evaluationCaseSetsEqual(
@@ -25,7 +26,8 @@ export function evaluationCaseSetsEqual(
   return current.every((testCase) => {
     const matchIndex = unmatched.findIndex((candidate) => candidate.name === testCase.name
       && jsonValuesEqual(candidate.input, testCase.input)
-      && jsonValuesEqual(candidate.expectations, testCase.expectations));
+      && jsonValuesEqual(candidate.expectations, testCase.expectations)
+      && jsonValuesEqual(candidate.resultSchema ?? null, testCase.resultSchema ?? null));
     if (matchIndex < 0) return false;
     unmatched.splice(matchIndex, 1);
     return true;
