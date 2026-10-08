@@ -8,7 +8,7 @@ const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", child = "bbbbbbbb-bbbb-4bbb-8
 const snapshot = { version: "v1" as const, policyRevision: 0, limits: { maxModelCalls: 1, maxChildRuns: 1 }, coverage: "new-root" as const, frozenAt: "2026-10-09T12:00:00.000Z" };
 const root = { id, status: "running", executionRootRunId: id, executionResources: snapshot };
 const record = { runId: id, parentRunId: null, sourceType: "manual", sourceKey: null, status: "running", collaborationTrackingVersion: "v1" };
-const graph = () => ({ anchor: id, rootKnown: true, flags: { missingParent: false, cycleDetected: false, truncated: false }, included: new Map([[id, { row: record, depth: 0 }]]) });
+const graph = () => ({ anchor: id, rootKnown: true, flags: { missingParent: false, cycleDetected: false, truncated: false }, included: new Map([[id, { row: { ...record }, depth: 0 }]]) });
 const tx = {
   select: () => { const query = { from: () => query, where: (value: unknown) => { mocks.where(value); return query; }, for: () => { mocks.locks(); return query; }, limit: mocks.rows,
     then: (resolve: (value: unknown) => unknown, reject: (error: unknown) => unknown) => mocks.rows().then(resolve, reject) }; return query; },
@@ -52,8 +52,16 @@ describe("执行资源准入服务", () => {
     await expect(prepareExecutionResourceScope(tx, workspace, id)).rejects.toSatisfy(FatalError.is);
     expect(mocks.update).not.toHaveBeenCalled();
   });
-  it("已结束根任务和未知状态不允许继续调用", async () => {
-    mocks.rows.mockResolvedValueOnce([{ ...root, status: "completed" }]); await expect(prepareExecutionResourceScope(tx, workspace, id)).rejects.toSatisfy(FatalError.is);
+  it.each(["completed", "failed", "cancelled"])("%s 根任务明确禁止新的模型和协作操作，不写入资源记录", async (status) => {
+    mocks.rows.mockResolvedValueOnce([{ ...root, status }]);
+    const rejected = prepareExecutionResourceScope(tx, workspace, id);
+    await expect(rejected).rejects.toSatisfy(FatalError.is);
+    await expect(rejected).rejects.toThrow("不能发起模型调用或新协作任务");
+    expect(mocks.rows).toHaveBeenCalledTimes(1);
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+  it("未知状态不允许继续调用", async () => {
     const value = graph(); value.included.get(id)!.row.status = "unknown"; mocks.graph.mockResolvedValue(value);
     await expect(prepareExecutionResourceScope(tx, workspace, id)).rejects.toSatisfy(FatalError.is);
   });

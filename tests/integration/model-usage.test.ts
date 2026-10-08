@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
+import { FatalError } from "workflow";
 import { GET } from "@/app/api/runs/[runId]/usage/route";
 import { ModelCallSettlement, RunModelUsageResult } from "@/contracts/model-usage";
 import { WorkflowDraft } from "@/contracts/workflow";
@@ -47,8 +48,12 @@ describe("逐次模型账本真实数据库验收", () => {
     expect(await getRunModelUsage(workspaceId, id, now)).toMatchObject({ calls: { total: 3, pending: 3 }, usage: { incompleteCalls: 3, knownCallTotalTokens: null, recordedUsageComplete: false } });
   });
   it.each(["queued", "waiting_approval", "waiting_event", "completed", "failed", "cancelled"])("%s 任务不能发起新模型调用", async (status) => {
-    const id = await fixture({ status }); await expect(beginRunModelCall(reference(id))).rejects.toThrow("不能发起模型调用");
+    const id = await fixture({ status }), before = await db.select().from(runs).where(eq(runs.id, id));
+    const rejected = beginRunModelCall(reference(id));
+    await expect(rejected).rejects.toThrow("不能发起模型调用");
+    await expect(rejected).rejects.toSatisfy(FatalError.is);
     expect(await db.select().from(modelCalls).where(eq(modelCalls.runId, id))).toHaveLength(0);
+    expect(await db.select().from(runs).where(eq(runs.id, id))).toEqual(before);
   });
   it("不存在的任务不能建意图，同一结果并发补记幂等且不刷新完成时间", async () => {
     await expect(beginRunModelCall(reference(randomUUID()))).rejects.toThrow("不能发起模型调用");

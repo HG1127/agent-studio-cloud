@@ -66,7 +66,7 @@ async function prepareScope(tx: ExecutionResourceTransaction, workspaceId: strin
   const ids = [...graph.included.keys()];
   const [root] = await tx.select({ id: runs.id, status: runs.status, executionRootRunId: runs.executionRootRunId, executionResources: runs.executionResources })
     .from(runs).where(and(eq(runs.id, graph.anchor), eq(runs.workspaceId, workspace))).for("update").limit(1);
-  if (!root || !["queued", "running", "waiting_approval", "waiting_event"].includes(root.status)) throw new FatalError("主任务已结束，不能继续发起新副作用");
+  if (!root || !["queued", "running", "waiting_approval", "waiting_event"].includes(root.status)) throw new FatalError("主任务已结束或不可用，不能发起模型调用或新协作任务");
   const records = await tx.select({ id: runs.id, executionRootRunId: runs.executionRootRunId, executionResources: runs.executionResources })
     .from(runs).where(and(eq(runs.workspaceId, workspace), inArray(runs.id, ids)));
   if (records.length !== ids.length || records.some((row) => (row.executionRootRunId === null) !== (row.executionResources === null)
