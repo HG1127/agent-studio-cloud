@@ -186,6 +186,7 @@ export async function agentRunWorkflow(
   await initializeRun(runId, draft, executionContext.startToken);
   let currentId: string | null = draft.startNodeId;
   let outputs: Record<string, unknown> = {};
+  let lastModelOutputNodeId: string | null = null;
   const loopStates: Record<string, {
     items: unknown[];
     sourceCount: number;
@@ -194,6 +195,7 @@ export async function agentRunWorkflow(
     index: number;
     iterations: Array<{ iteration: number; item: unknown; bodyOutput: unknown }>;
     baselineOutputs: Record<string, unknown>;
+    baselineModelOutputNodeId: string | null;
     baselineRepairAttempts: Record<string, number>;
   }> = {};
   const activeLoops: Array<{ loopId: string; iteration: number; total: number; item: unknown }> = [];
@@ -231,11 +233,13 @@ export async function agentRunWorkflow(
         try {
           const r = await runModelStep({ runId, node, manifest, outputs, input });
           outputs[node.id] = r.output;
+          lastModelOutputNodeId = node.id;
           currentId = node.next;
         } catch (error) {
           if (!node.onErrorNext) throw error;
           const reason = executionFailureReason(error, `步骤「${node.title}」执行失败`);
           outputs[node.id] = { status: "failed", error: reason };
+          lastModelOutputNodeId = node.id;
           await appendTrace({ runId, nodeId: node.id, kind: "step.failed_handled", level: "warn", title: `「${node.title}」未完成，转入备用处理`, detail: reason });
           currentId = node.onErrorNext;
         }
@@ -386,10 +390,12 @@ export async function agentRunWorkflow(
           try {
             const result = await runModelStep({ runId, node, manifest, outputs, input });
             outputs[node.id] = result.output;
+            lastModelOutputNodeId = node.id;
             currentId = node.next;
           } catch (error) {
             const handled = await recordHandledNodeFailure({ runId, node, error, fallback: `步骤「${node.title}」执行业务判断失败` });
             outputs[node.id] = handled.output;
+            lastModelOutputNodeId = node.id;
             currentId = handled.next;
           }
           continue;
@@ -411,6 +417,7 @@ export async function agentRunWorkflow(
               qualityFeedback: quality.repair.feedback,
             });
             outputs[repairNode.id] = repaired.output;
+            lastModelOutputNodeId = repairNode.id;
             currentId = node.id;
             continue;
           }
@@ -437,7 +444,8 @@ export async function agentRunWorkflow(
       }
       if (node.type === "human") {
         await persistContext(runId, outputs);
-        const approval = await requestApproval({ runId, node, outputs, nodes: draft.nodes });
+        const approval = await requestApproval({ runId, node, outputs, nodes: draft.nodes,
+          ...(lastModelOutputNodeId ? { reviewSourceNodeId: lastModelOutputNodeId } : {}) });
         const { approvalId } = approval;
         const decision = await awaitApprovalDecision(runId, approval);
         const recordedDecision = await recordDecision({ runId, node, approvalId, decision });
@@ -529,6 +537,7 @@ export async function agentRunWorkflow(
             index: 0,
             iterations: [],
             baselineOutputs: { ...outputs },
+            baselineModelOutputNodeId: lastModelOutputNodeId,
             baselineRepairAttempts: { ...qualityRepairAttempts },
           };
         }
@@ -544,6 +553,7 @@ export async function agentRunWorkflow(
           if (state.index > 0) {
             // 下一项不能借用上一项的步骤产出或返工次数，保留入循环前的上游上下文。
             outputs = { ...state.baselineOutputs };
+            lastModelOutputNodeId = state.baselineModelOutputNodeId;
             qualityRepairAttempts = { ...state.baselineRepairAttempts };
           }
           const item = state.items[state.index];

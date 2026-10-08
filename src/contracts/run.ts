@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isPlainJsonObject } from "./json";
+import { boundedJsonStorageValue, isPlainJsonObject } from "./json";
 import { AgentInputContract } from "./manifest";
 import { RunFeedbackView } from "./run-feedback";
 import { WorkflowDraft } from "./workflow";
@@ -208,10 +208,21 @@ export const TraceEventView = z.object({
 });
 export type TraceEventView = z.infer<typeof TraceEventView>;
 
+export const MAX_APPROVAL_REVIEW_BYTES = MAX_RUN_RESULT_BYTES;
+const ApprovalReviewJson = boundedJsonStorageValue(MAX_APPROVAL_REVIEW_BYTES, "待确认内容");
 export const ApprovalReview = z.object({
   sourceNodeId: z.string(),
   sourceTitle: z.string(),
-  content: z.string().min(1),
+  content: z.string().min(1).refine((value) => new TextEncoder().encode(value).byteLength <= MAX_APPROVAL_REVIEW_BYTES, "待确认内容不能超过 2MB"),
+  format: z.enum(["text", "json"]).optional(),
+}).superRefine((review, context) => {
+  if (review.format !== "json" || new TextEncoder().encode(review.content).byteLength > MAX_APPROVAL_REVIEW_BYTES) return;
+  try {
+    const value: unknown = JSON.parse(review.content);
+    if (value === null || typeof value !== "object" || !ApprovalReviewJson.safeParse(value).success) throw new Error();
+  } catch {
+    context.addIssue({ code: "custom", path: ["content"], message: "结构化待确认内容必须是有效的 JSON 对象或数组" });
+  }
 });
 export type ApprovalReview = z.infer<typeof ApprovalReview>;
 

@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { redactCredentialData, redactCredentialText, redactSensitiveData, redactSensitiveText } from "@/server/domain/security/redact-sensitive";
+import { redactCredentialData, redactCredentialText, redactSensitiveData, redactSensitiveText, redactStructuredCredentialData } from "@/server/domain/security/redact-sensitive";
 
 describe("敏感数据脱敏", () => {
+  it("结构化专用脱敏保留有界深层字段，但不改变普通上下文的旧层级限制", () => {
+    let value: Record<string, unknown> = { amount: 0, apiKey: "private-deep-value" };
+    for (let index = 0; index < 20; index += 1) value = { child: value };
+    const original = JSON.stringify(value);
+    expect(JSON.stringify(redactCredentialData(value))).toContain("已省略");
+    const safe = JSON.stringify(redactStructuredCredentialData(value));
+    expect(safe).not.toMatch(/private-deep-value|已省略/);
+    expect(safe).toContain('"amount":0');
+    expect(JSON.stringify(value)).toBe(original);
+  });
   it("递归隐藏中英文敏感字段并保留业务数据", () => {
     expect(redactSensitiveData({
       customer: "甲公司",

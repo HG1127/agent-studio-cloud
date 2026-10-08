@@ -18,6 +18,7 @@ import { db } from "@/lib/db";
 import { cancelRunAction } from "@/server/actions/cancel-run";
 import { POST as cancelTask } from "@/app/api/runs/[runId]/cancel/route";
 import { RunTaskCancelResult } from "@/contracts/run-task";
+import { ApprovalPayload } from "@/contracts/run";
 import { recordDecision, requestApproval } from "@/server/steps/approval-step";
 import { failRun, finalizeRun, initializeRun, markRunRunning, persistContext, persistStep } from "@/server/steps/run-state";
 import { createRunStartLease, RUN_START_LEASE_KEY, RUN_START_LEASE_MS, withRunStartLease } from "@/server/services/run-start-lease";
@@ -446,6 +447,29 @@ describe("取消运行", () => {
 
     const [unchanged] = await db.select().from(approvals).where(eq(approvals.id, approval.id));
     expect(unchanged).toMatchObject({ status: "rejected", note: "运行已取消，确认未继续" });
+    expect(appendTraceMock).not.toHaveBeenCalled();
+  });
+
+  it("确认持久保存结构化成果快照，隐藏对象凭据且保留业务否定值", async () => {
+    await insertWaitingRun();
+    const output = { amount: 0, approved: false, email: "customer@example.com", password: "plain-private-value", nested: { apiKey: "nested-private-value" } };
+    const nodes = { ...draft.nodes, extract: { ...draft.nodes.start, id: "extract", title: "提取业务字段", type: "ai" as const } };
+    const handle = await requestApproval({ runId: RUN_ID, node: draft.nodes.confirm, outputs: { extract: output }, nodes });
+    output.amount = 100;
+    const [saved] = await db.select().from(approvals).where(eq(approvals.id, handle.approvalId));
+    const review = ApprovalPayload.parse(saved.payload).review!;
+    expect(review).toMatchObject({ sourceNodeId: "extract", sourceTitle: "提取业务字段", format: "json" });
+    expect(JSON.parse(review.content)).toMatchObject({ amount: 0, approved: false, email: "customer@example.com" });
+    expect(review.content).not.toMatch(/plain-private-value|nested-private-value/);
+  });
+
+  it("不安全的模型对象明确停止确认，不用空预览发起审批", async () => {
+    await insertWaitingRun();
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const nodes = { ...draft.nodes, extract: { ...draft.nodes.start, id: "extract", title: "提取业务字段", type: "ai" as const } };
+    await expect(requestApproval({ runId: RUN_ID, node: draft.nodes.confirm, outputs: { extract: circular }, nodes })).rejects.toThrow("待确认内容无法安全展示，已停止发起确认");
+    expect(await db.select().from(approvals).where(and(eq(approvals.runId, RUN_ID), eq(approvals.nodeId, "confirm")))).toHaveLength(0);
     expect(appendTraceMock).not.toHaveBeenCalled();
   });
 

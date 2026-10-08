@@ -20,6 +20,7 @@ export interface RequestApprovalInput {
   node: WorkflowNode;
   outputs: Record<string, unknown>;
   nodes: Record<string, WorkflowNode>;
+  reviewSourceNodeId?: string;
 }
 
 export interface ApprovalHandle {
@@ -50,7 +51,12 @@ export async function requestApproval(args: RequestApprovalInput): Promise<Appro
   const stableApprovalId = approvalRecordId(args.runId, node.id, workflowStepId);
   const role = redactCredentialText(node.approval?.role ?? "业务负责人");
   const reason = redactCredentialText(node.approval?.reason ?? `确认「${node.title}」后流程才会继续`);
-  const payload = ApprovalPayload.parse(redactCredentialData({ review: selectApprovalReview(args.outputs, args.nodes) }));
+  let payload: ApprovalPayload;
+  try {
+    payload = ApprovalPayload.parse(redactCredentialData({ review: selectApprovalReview(args.outputs, args.nodes, args.reviewSourceNodeId) }));
+  } catch {
+    throw new FatalError("待确认内容无法安全展示，已停止发起确认");
+  }
   const now = new Date();
   const result = await withSafeWorkflowError(() => db.transaction(async (tx) => {
     const [run] = await tx

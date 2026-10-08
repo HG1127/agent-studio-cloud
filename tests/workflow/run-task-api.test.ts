@@ -8,6 +8,7 @@ import { GET as getResult } from "@/app/api/runs/[runId]/result/route";
 import { POST as cancelTask } from "@/app/api/runs/[runId]/cancel/route";
 import { AgentManifest } from "@/contracts/manifest";
 import { RunTaskResult, RunTaskStartResult, RunTaskStatusResult } from "@/contracts/run-task";
+import { ApprovalPayload } from "@/contracts/run";
 import { agents, agentVersions, approvals, runs, runSteps, traceEvents } from "@/db/schema";
 import { db } from "@/lib/db";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
@@ -44,10 +45,10 @@ afterEach(async () => {
   handle = undefined;
   vi.unstubAllEnvs();
 });
-async function prepare(needsApproval = false, invalidReply = false) {
+async function prepare(needsApproval = false, invalidReply = false, replies?: string[]) {
   agentId = randomUUID();
   versionId = randomUUID();
-  service = await startModelJsonServer([invalidReply ? '{"amount":"sk-private-invalid-123456","approved":false}' : '{"amount":0,"approved":false}']);
+  service = await startModelJsonServer(replies ?? [invalidReply ? '{"amount":"sk-private-invalid-123456","approved":false}' : '{"amount":0,"approved":false}']);
   vi.stubEnv("MODEL_BASE_URL", service.baseUrl + "/v1");
   vi.stubEnv("MODEL_API_KEY", "test-task-workflow-only-key");
   vi.stubEnv("MODEL_ID", "test-model");
@@ -96,6 +97,29 @@ async function readResult() {
 }
 
 describe("程序化任务到真实持久工作流的交付", () => {
+  it.each(["ai", "rule"] as const)("同一 %s 模型步骤返工后，人工确认审核最新成果而非旧参考", async (type) => {
+    await prepare(true, false, [1, 2, 3].map((amount) => JSON.stringify({ amount, approved: false })));
+    const [version] = await db.select({ manifest: agentVersions.manifest }).from(agentVersions).where(eq(agentVersions.id, versionId!));
+    const original = AgentManifest.parse(version.manifest);
+    const revised = AgentManifest.parse({ ...original, workflowSnapshot: { ...original.workflowSnapshot,
+      nodes: { ...original.workflowSnapshot.nodes,
+        extract: { ...original.workflowSnapshot.nodes.extract, type, ...(type === "rule" ? { rule: { kind: "business_rule" } } : {}), next: "check_revision" },
+        check_revision: { id: "check_revision", title: "检查返工次数", type: "condition", condition: { source: "context.extract.amount", operator: "gte", branches: [{ label: "完成本次修订", value: 3, next: "confirm" }], defaultNext: "reference" } },
+        reference: { id: "reference", title: "生成参考方案", type: "ai", next: "extract", modelOutput: original.workflowSnapshot.nodes.extract.modelOutput },
+      } } });
+    await db.update(agentVersions).set({ manifest: revised }).where(eq(agentVersions.id, versionId!));
+    await submit(randomUUID());
+    const token = await waitForPendingApprovalHook(handle!, runId!);
+    const [confirmation] = await db.select({ payload: approvals.payload }).from(approvals).where(eq(approvals.id, token.slice("approval:".length)));
+    const review = ApprovalPayload.parse(confirmation.payload).review!;
+    expect(review.sourceNodeId).toBe("extract");
+    expect(JSON.parse(review.content)).toEqual({ amount: 3, approved: false });
+    expect(service!.modelRequests).toHaveLength(3);
+    expect(await decideApprovalAction(runId!, token.slice("approval:".length), { decision: "approved" })).toEqual({ ok: true });
+    await expect(handle!.returnValue).resolves.toEqual({ status: "completed" });
+    expect((await readResult()).body).toMatchObject({ ok: true, task: { result: { extract: { amount: 3, approved: false } } } });
+  });
+
   it("等待审批时从 HTTP 取消真实执行引擎，重复取消不交付过程成果", async () => {
     await prepare(true);
     await submit(randomUUID());
@@ -131,6 +155,10 @@ describe("程序化任务到真实持久工作流的交付", () => {
     await prepare(true);
     await submit(randomUUID());
     const token = await waitForPendingApprovalHook(handle!, runId!);
+    const [confirmation] = await db.select({ payload: approvals.payload }).from(approvals).where(eq(approvals.id, token.slice("approval:".length)));
+    const review = ApprovalPayload.parse(confirmation.payload).review!;
+    expect(review).toMatchObject({ sourceNodeId: "extract", sourceTitle: "提取金额", format: "json" });
+    expect(JSON.parse(review.content)).toEqual({ amount: 0, approved: false });
     const pending = await readResult();
     expect(pending.response.status).toBe(202);
     expect(pending.body).toMatchObject({ ok: true, task: { status: "waiting_approval", ready: false, result: null } });
