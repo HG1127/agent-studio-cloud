@@ -1,13 +1,14 @@
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { AttentionListInput, AttentionListResult, type AttentionMetadata } from "@/contracts/attention";
-import { agents, approvals, runDeliveries, runs, toolOperations, traceEvents } from "@/db/schema";
+import { agents, approvals, attentionCases, runDeliveries, runs, toolOperations, traceEvents } from "@/db/schema";
+import { AttentionReference } from "@/contracts/attention-reference";
 import { db } from "@/lib/db";
 import { presentAttentionItem } from "@/server/domain/attention";
 import { ATTENTION_EXPECTED_GRACE_MS, ATTENTION_LONG_PENDING_MS } from "@/contracts/attention-timing";
 import { MIN_OPERATIONAL_EPOCH_MS, MAX_OPERATIONAL_EPOCH_MS } from "@/contracts/wait-timing";
 
-export async function listAttention(workspaceId: string, input: AttentionListInput, now = new Date()): Promise<AttentionListResult> {
+async function readAttentionRows(workspaceId: string, input: AttentionListInput, now: Date, reader: Pick<typeof db, "execute"> = db, reference?: AttentionReference) {
   const workspace = z.string().uuid().parse(workspaceId);
   const filters = AttentionListInput.parse(input);
   const current = z.number().min(MIN_OPERATIONAL_EPOCH_MS).max(MAX_OPERATIONAL_EPOCH_MS).parse(now.getTime());
@@ -17,7 +18,8 @@ export async function listAttention(workspaceId: string, input: AttentionListInp
       ${agents.name} as agent_name, ${runs.status} as run_status, ${approvals.nodeTitle} as title,
       null::text as error, ${approvals.createdAt} as created_at, 'none'::text as wait_mode,
       extract(epoch from case when ${approvals.status} = 'pending' then ${approvals.createdAt} else ${approvals.decidedAt} end) * 1000 as since_epoch_ms,
-      null::numeric as expected_epoch_ms, null::numeric as retry_epoch_ms
+      null::numeric as expected_epoch_ms, null::numeric as retry_epoch_ms,
+      ${approvals.status} || ':' || coalesce(to_char(${approvals.decidedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'), 'undecided') as revision_seed
       from ${approvals}
       inner join ${runs} on ${runs.id} = ${approvals.runId} and ${runs.workspaceId} = ${approvals.workspaceId}
       left join ${agents} on ${agents.id} = ${runs.agentId} and ${agents.workspaceId} = ${runs.workspaceId}
@@ -34,10 +36,11 @@ export async function listAttention(workspaceId: string, input: AttentionListInp
         when wait_entry.mode in ('delay', 'until') then 'timer'
         when wait_entry.mode = 'event' or wait_entry.legacy_event then 'event' else 'unknown' end as wait_mode,
       extract(epoch from case when ${runs.status} = 'waiting_event' then wait_entry.at else ${runs.finishedAt} end) * 1000 as since_epoch_ms,
-      wait_entry.expected_epoch_ms, null::numeric as retry_epoch_ms
+      wait_entry.expected_epoch_ms, null::numeric as retry_epoch_ms,
+      case when ${runs.status} = 'waiting_event' then coalesce(wait_entry.id::text, 'unknown') else coalesce(to_char(${runs.finishedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'), 'unknown') end as revision_seed
       from ${runs} left join ${agents} on ${agents.id} = ${runs.agentId} and ${agents.workspaceId} = ${runs.workspaceId}
       left join lateral (
-        select ${traceEvents.at} as at, ${traceEvents.data} -> 'timing' ->> 'mode' as mode,
+        select ${traceEvents.id} as id, ${traceEvents.at} as at, ${traceEvents.data} -> 'timing' ->> 'mode' as mode,
           jsonb_typeof(${traceEvents.data} -> 'eventKey') = 'string' and length(${traceEvents.data} ->> 'eventKey') > 0 as legacy_event,
           case when jsonb_typeof(${traceEvents.data} -> 'timing' -> 'expectedAtMs') = 'number'
             and ${traceEvents.data} -> 'timing' ->> 'mode' in ('delay', 'until', 'event')
@@ -52,7 +55,8 @@ export async function listAttention(workspaceId: string, input: AttentionListInp
       ${runs.agentId} as agent_id, ${agents.name} as agent_name, ${runs.status} as run_status,
       ${toolOperations.nodeTitle} as title, ${toolOperations.error} as error, ${toolOperations.createdAt} as created_at,
       'none'::text as wait_mode, extract(epoch from ${toolOperations.updatedAt}) * 1000 as since_epoch_ms,
-      null::numeric as expected_epoch_ms, extract(epoch from ${toolOperations.retryDeadline}) * 1000 as retry_epoch_ms
+      null::numeric as expected_epoch_ms, extract(epoch from ${toolOperations.retryDeadline}) * 1000 as retry_epoch_ms,
+      to_char(${toolOperations.updatedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') || ':' || jsonb_array_length(${toolOperations.resolutions})::text as revision_seed
       from ${toolOperations} left join ${runs} on ${runs.id} = ${toolOperations.sourceRunId} and ${runs.workspaceId} = ${toolOperations.workspaceId}
       left join ${agents} on ${agents.id} = ${runs.agentId} and ${agents.workspaceId} = ${toolOperations.workspaceId}
       where ${toolOperations.workspaceId} = ${workspace} and ${toolOperations.status} = 'blocked'`,
@@ -60,7 +64,8 @@ export async function listAttention(workspaceId: string, input: AttentionListInp
       ${runs.agentId} as agent_id, ${agents.name} as agent_name, ${runs.status} as run_status,
       '成果投递失败'::text as title, ${runDeliveries.error} as error, ${runDeliveries.createdAt} as created_at,
       'none'::text as wait_mode, extract(epoch from ${runDeliveries.updatedAt}) * 1000 as since_epoch_ms,
-      null::numeric as expected_epoch_ms, extract(epoch from ${runDeliveries.retryDeadline}) * 1000 as retry_epoch_ms
+      null::numeric as expected_epoch_ms, extract(epoch from ${runDeliveries.retryDeadline}) * 1000 as retry_epoch_ms,
+      to_char(${runDeliveries.updatedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') || ':' || ${runDeliveries.attempts}::text || ':' || jsonb_array_length(${runDeliveries.resolutions})::text as revision_seed
       from ${runDeliveries} left join ${runs} on ${runs.id} = ${runDeliveries.runId} and ${runs.workspaceId} = ${runDeliveries.workspaceId}
       left join ${agents} on ${agents.id} = ${runs.agentId} and ${agents.workspaceId} = ${runDeliveries.workspaceId}
       where ${runDeliveries.workspaceId} = ${workspace} and ${runDeliveries.status} = 'failed' and ${runDeliveries.archivedAt} is null`,
@@ -70,12 +75,14 @@ export async function listAttention(workspaceId: string, input: AttentionListInp
     filters.agentId ? sql`agent_id = ${filters.agentId}::uuid` : sql`true`,
     filters.runId ? sql`run_id = ${filters.runId}::uuid` : sql`true`,
     filters.timingState ? sql`timing_state = ${filters.timingState}` : sql`true`,
+    filters.handlingState ? sql`coalesce(handling_state, 'open') = ${filters.handlingState}` : sql`true`,
+    reference ? sql`id = ${reference.id}::uuid` : sql`true`,
     filters.before ? sql`(created_at, id, kind COLLATE "C") < (${filters.before}::timestamptz, ${filters.beforeId}::uuid, ${filters.beforeKind}::text COLLATE "C")` : sql`true`,
   ];
-  const rows = await db.execute<AttentionMetadata>(sql`
+  return await reader.execute<AttentionMetadata>(sql`
     with raw_attention as (${sql.join(sources, sql` union all `)}),
     normalized as (
-      select *,
+      select *, to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') || ':' || revision_seed as occurrence,
         case when since_epoch_ms between ${MIN_OPERATIONAL_EPOCH_MS} and ${MAX_OPERATIONAL_EPOCH_MS} then since_epoch_ms else null end as valid_since,
         case when expected_epoch_ms between ${MIN_OPERATIONAL_EPOCH_MS} and ${MAX_OPERATIONAL_EPOCH_MS} then expected_epoch_ms else null end as valid_expected,
         case when retry_epoch_ms between ${MIN_OPERATIONAL_EPOCH_MS} and ${MAX_OPERATIONAL_EPOCH_MS} then retry_epoch_ms else null end as valid_retry
@@ -94,10 +101,28 @@ export async function listAttention(workspaceId: string, input: AttentionListInp
       left(title, 500) as title, length(title) > 500 as "titleTruncated",
       left(error, 2000) as error, coalesce(length(error) > 2000, false) as "errorTruncated",
       to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as "createdAt",
-      jsonb_build_object('waitMode', wait_mode, 'sinceEpochMs', valid_since, 'expectedEpochMs', valid_expected, 'retryEpochMs', valid_retry) as "timingSource"
-    from attention where ${sql.join(conditions, sql` and `)}
+      jsonb_build_object('waitMode', wait_mode, 'sinceEpochMs', valid_since, 'expectedEpochMs', valid_expected, 'retryEpochMs', valid_retry) as "timingSource", occurrence,
+      coalesce(handling_info, jsonb_build_object('caseId', null, 'status', 'open', 'revision', 0, 'entryCount', 0, 'updatedAt', null, 'closedAt', null)) as handling
+    from attention left join lateral (
+      select ${attentionCases.status} as handling_state, jsonb_build_object('caseId', ${attentionCases.id}, 'status', ${attentionCases.status}, 'revision', ${attentionCases.revision},
+        'entryCount', jsonb_array_length(${attentionCases.entries}), 'updatedAt', to_char(${attentionCases.updatedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+        'closedAt', to_char(${attentionCases.closedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')) as handling_info
+      from ${attentionCases} where ${attentionCases.workspaceId} = ${workspace} and ${attentionCases.kind} = attention.kind
+        and ${attentionCases.sourceId} = attention.id and ${attentionCases.runId} = attention.run_id and ${attentionCases.occurrence} = attention.occurrence and ${attentionCases.archivedAt} is null
+    ) as handling_entry on true where ${sql.join(conditions, sql` and `)}
     order by created_at desc, id desc, kind COLLATE "C" desc limit ${filters.limit + 1}
   `);
+}
+
+export async function findCurrentAttention(workspaceId: string, input: AttentionReference, reader: Pick<typeof db, "execute"> = db) {
+  const reference = AttentionReference.parse(input); const now = new Date();
+  const rows = await readAttentionRows(workspaceId, AttentionListInput.parse({ kind: reference.kind, runId: reference.runId, limit: 1 }), now, reader, reference);
+  return rows[0] ? presentAttentionItem(rows[0], now) : null;
+}
+
+export async function listAttention(workspaceId: string, input: AttentionListInput, now = new Date()): Promise<AttentionListResult> {
+  const filters = AttentionListInput.parse(input);
+  const rows = await readAttentionRows(workspaceId, filters, now);
   const items = rows.slice(0, filters.limit).map((row) => presentAttentionItem(row, now));
   const last = items.at(-1);
   return AttentionListResult.parse({ ok: true, items,

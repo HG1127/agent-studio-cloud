@@ -19,7 +19,7 @@ function cropText(value: string, maxLength: number) {
   return value.slice(0, end);
 }
 
-function redactSummaryText(value: string, personal = false) {
+export function redactAttentionText(value: string, personal = false) {
   // 摘要可能已在数据库截断，不能依赖凭据的结束标记。
   return (personal ? redactSensitiveText(value) : redactCredentialText(value))
     .replace(/-----BEGIN [^-\r\n]{0,40}PRIVATE KEY-----[\s\S]*$/g, "[已隐藏敏感信息]")
@@ -32,11 +32,11 @@ export function presentAttentionItem(input: AttentionMetadata, now?: Date): Atte
   const { timingSource, ...row } = AttentionMetadata.parse(input);
   if (timingSource && !now) throw new Error("展示等待分类须提供检查时间");
   const timing = timingSource && now ? assessAttentionTiming(timingSource, now) : undefined;
-  const title = redactSummaryText(row.kind === "wait-event"
+  const title = redactAttentionText(row.kind === "wait-event"
     ? timing?.waitMode === "timer" ? "定时等待" : timing?.waitMode === "event" ? "等待外部消息" : "等待方式待核对"
     : row.title);
-  const agentName = row.agentName === null ? null : redactSummaryText(row.agentName);
-  const error = row.error === null ? null : redactSummaryText(row.error, true);
+  const agentName = row.agentName === null ? null : redactAttentionText(row.agentName);
+  const error = row.error === null ? null : redactAttentionText(row.error, true);
   return AttentionItem.parse({
     ...row, title: cropText(title, 500), titleTruncated: row.titleTruncated || title.length > 500,
     agentName: agentName === null ? null : cropText(agentName, 200), agentNameTruncated: row.agentNameTruncated || (agentName?.length ?? 0) > 200,

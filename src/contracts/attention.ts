@@ -1,15 +1,17 @@
 import { z } from "zod";
 import { RunStatus } from "./run";
 import { AttentionTiming, AttentionTimingSource, AttentionTimingState } from "./attention-timing";
+import { AttentionIdentifier, AttentionKind, AttentionOccurrence } from "./attention-reference";
+import { AttentionHandlingStatus, AttentionHandlingSummary } from "./attention-handling";
 
-export const AttentionKind = z.enum(["approval-pending", "approval-resume", "wait-event", "run-failed", "tool-operation", "delivery-failed"]);
-export type AttentionKind = z.infer<typeof AttentionKind>;
-const Identifier = z.string().uuid().transform((value) => value.toLowerCase());
+export { AttentionKind } from "./attention-reference";
+const Identifier = AttentionIdentifier;
 const Timestamp = z.string().datetime().max(32);
 export const AttentionCursor = z.object({ createdAt: Timestamp, id: Identifier, kind: AttentionKind }).strict();
 export type AttentionCursor = z.infer<typeof AttentionCursor>;
 export const AttentionListInput = z.object({
   kind: AttentionKind.optional(), agentId: Identifier.optional(), runId: Identifier.optional(), timingState: AttentionTimingState.optional(),
+  handlingState: AttentionHandlingStatus.optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
   before: Timestamp.optional(), beforeId: Identifier.optional(), beforeKind: AttentionKind.optional(),
 }).strict().superRefine((input, context) => {
@@ -22,6 +24,7 @@ export const AttentionMetadata = z.object({
   agentName: z.string().max(400).nullable(), agentNameTruncated: z.boolean(), runStatus: RunStatus.nullable(),
   title: z.string().max(1000), titleTruncated: z.boolean(), error: z.string().max(4000).nullable(), errorTruncated: z.boolean(),
   createdAt: Timestamp, timingSource: AttentionTimingSource.optional(),
+  occurrence: AttentionOccurrence.optional(), handling: AttentionHandlingSummary.optional(),
 }).strict();
 export type AttentionMetadata = z.infer<typeof AttentionMetadata>;
 export function attentionLinks(kind: AttentionKind, id: string, runId: string) {

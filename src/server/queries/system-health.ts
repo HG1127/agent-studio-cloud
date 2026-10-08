@@ -40,6 +40,10 @@ export const REQUIRED_DATABASE_OBJECTS = [
   "public.run_deliveries_workspace_lease_idx",
   "public.run_deliveries_workspace_status_created_id_idx",
   "public.trace_events_workspace_run_kind_idx",
+  "public.attention_cases",
+  "public.attention_cases_workspace_source_occurrence_unique",
+  "public.attention_cases_workspace_created_id_idx",
+  "public.attention_cases_workspace_run_idx",
   "public.runs_workspace_status_created_idx",
   "public.runs_workspace_source_key_unique",
   "public.knowledge_sources_workspace_archived_created_idx",
@@ -71,6 +75,10 @@ export const REQUIRED_DATABASE_COLUMNS = [
   { tableName: "run_deliveries", columnName: "created_by", requireNotNull: true, allowDefault: false },
   { tableName: "run_deliveries", columnName: "retention_ms", requireNotNull: true, allowDefault: false },
   { tableName: "run_deliveries", columnName: "resolutions", requireNotNull: true, allowDefault: true },
+  { tableName: "attention_cases", columnName: "workspace_id", requireNotNull: true, allowDefault: false },
+  { tableName: "attention_cases", columnName: "created_by", requireNotNull: true, allowDefault: false },
+  { tableName: "attention_cases", columnName: "occurrence", requireNotNull: true, allowDefault: false },
+  { tableName: "attention_cases", columnName: "entries", requireNotNull: true, allowDefault: true },
 ] as const;
 
 export async function isDatabaseReady() {

@@ -17,9 +17,11 @@ describe("统一待处理有界查询", () => {
     expect(result).toMatchObject({ ok: true, items: [{ id: runId }], nextCursor: null });
     expect(JSON.stringify(result)).not.toContain("private-error");
     const query = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0][0]);
-    expect(query.sql).not.toMatch(/"(?:payload|receipt|input|context|step_states|workflow_run_id|note|resolutions|target_hash)"/);
+    const projections = query.sql.replace(/jsonb_array_length\("[a-z_]+"\."(?:entries|resolutions)"\)/g, "count_only");
+    expect(projections).not.toMatch(/"(?:payload|receipt|input|context|step_states|workflow_run_id|note|resolutions|target_hash)"/);
     expect(query.sql).toContain('kind COLLATE "C"');
-    expect(query.params.filter((value) => value === workspace)).toHaveLength(4);
+    expect(query.params.filter((value) => value === workspace)).toHaveLength(5);
+    expect(query.sql).toContain('"attention_cases"."workspace_id"');
     expect(query.params.at(-1)).toBe(2);
     expect(mocks.execute).toHaveBeenCalledTimes(1);
   });
@@ -49,5 +51,15 @@ describe("统一待处理有界查询", () => {
     const query = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0][0]);
     expect(query.params).toContain("unknown");
     expect(query.sql.indexOf("timing_state =")).toBeLessThan(query.sql.lastIndexOf("limit"));
+  });
+  it("处理状态筛选在分页前执行，只投影条数与状态而非处理正文", async () => {
+    mocks.execute.mockResolvedValue([]);
+    await listAttention(workspace, AttentionListInput.parse({ handlingState: "closed" }));
+    const query = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0][0]);
+    expect(query.params).toContain("closed");
+    expect(query.sql).toContain('"attention_cases"."occurrence" = attention.occurrence');
+    expect(query.sql.indexOf("coalesce(handling_state")).toBeLessThan(query.sql.lastIndexOf("limit"));
+    expect(query.sql).toContain('jsonb_array_length("attention_cases"."entries")');
+    expect(query.sql).not.toMatch(/entries"\s+as\s+"entries"/);
   });
 });
