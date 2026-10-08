@@ -13,6 +13,7 @@ import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 import { withSafeWorkflowError } from "@/server/security/workflow-error";
+import { enforceChildRunResourceLimit, ExecutionResourceLimitError, lockExecutionWorkspace, prepareExecutionResourceScope } from "@/server/services/execution-resources";
 
 export async function beginHandoff(args: {
   runId: string;
@@ -62,13 +63,18 @@ export async function beginHandoff(args: {
   await persistStep({ runId: args.runId, nodeId: args.node.id, nodeTitle: args.node.title, nodeType: args.node.type, status: "running" });
   const sourceKey = `handoff:${args.runId}:${args.node.id}:${getStepMetadata().stepId}`;
   const childRunId = await withSafeWorkflowError(() => db.transaction(async (tx) => {
+    await lockExecutionWorkspace(tx, parent.workspaceId);
+    const scope = await prepareExecutionResourceScope(tx, parent.workspaceId, args.runId);
     const [lockedParent] = await tx
       .select({ id: runs.id })
       .from(runs)
-      .where(and(eq(runs.id, args.runId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])))
+      .where(and(eq(runs.id, args.runId), eq(runs.workspaceId, parent.workspaceId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])))
       .for("update")
       .limit(1);
     if (!lockedParent) return null;
+    const [existing] = await tx.select({ id: runs.id }).from(runs).where(and(eq(runs.workspaceId, parent.workspaceId), eq(runs.sourceKey, sourceKey))).limit(1);
+    if (existing) return existing.id;
+    enforceChildRunResourceLimit(scope);
     const [inserted] = await tx
       .insert(runs)
       .values({
@@ -80,6 +86,8 @@ export async function beginHandoff(args: {
         input: validatedInput.data,
         sourceType: "handoff",
         parentRunId: args.runId,
+        executionRootRunId: scope.rootRunId,
+        executionResources: scope.snapshot,
         sourceKey,
       })
       .onConflictDoNothing()
@@ -90,7 +98,10 @@ export async function beginHandoff(args: {
         eq(runs.sourceKey, sourceKey),
       )).limit(1)
     )[0]?.id ?? null;
-  }), "交接任务暂时无法创建，请稍后重试");
+  }), "交接任务暂时无法创建，请稍后重试").catch(async (error) => {
+    if (error instanceof ExecutionResourceLimitError) await persistStep({ runId: args.runId, nodeId: args.node.id, nodeTitle: args.node.title, nodeType: args.node.type, status: "failed", error: error.message });
+    throw error;
+  });
   if (!childRunId) throw new FatalError(`步骤「${args.node.title}」无法创建交接任务`);
   await appendTrace({
     runId: args.runId,

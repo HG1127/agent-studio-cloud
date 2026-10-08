@@ -26,7 +26,7 @@ export async function POST(request: Request) {
     const started = await startRunTaskAction(input.data);
     const result = RunTaskStartResult.parse(started.ok ? { ...started, links: runTaskLinks(started.runId) } : started);
     return Response.json(result, {
-      status: result.ok ? 202 : result.retryable ? 503 : 409,
+      status: result.ok ? 202 : result.resourceLimit?.kind === "concurrent-chains" ? 429 : result.retryable ? 503 : 409,
       headers: { ...noStore, ...(result.ok ? { location: result.links.status } : result.retryable ? { "retry-after": "2" } : {}) },
     });
   } catch (error) {

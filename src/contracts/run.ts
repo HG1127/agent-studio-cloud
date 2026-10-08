@@ -3,6 +3,7 @@ import { boundedJsonStorageValue, isPlainJsonObject } from "./json";
 import { AgentInputContract } from "./manifest";
 import { RunFeedbackView } from "./run-feedback";
 import { WorkflowDraft } from "./workflow";
+import { ExecutionResourceLimit } from "./execution-resources";
 
 export const MAX_RUN_INPUT_BYTES = 100 * 1024;
 export const MAX_RUN_RESULT_BYTES = 2 * 1024 * 1024;
@@ -146,7 +147,7 @@ export type PendingWaitView = z.infer<typeof PendingWaitView>;
 // 启动动作返回的判别联合唯一来源：状态待确认时沿用原请求标识重试
 export const StartRunResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true), runId: z.string().uuid() }),
-  z.object({ ok: z.literal(false), error: z.string(), retryable: z.literal(true).optional() }),
+  z.object({ ok: z.literal(false), error: z.string(), retryable: z.literal(true).optional(), resourceLimit: ExecutionResourceLimit.optional() }),
 ]);
 export type StartRunResult = z.infer<typeof StartRunResult>;
 

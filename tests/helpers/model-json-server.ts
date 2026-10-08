@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 
-export async function startModelJsonServer(replies: string[]) {
+export async function startModelJsonServer(replies: string[], responseStatuses: number[] = []) {
   const modelRequests: Record<string, unknown>[] = [];
   const toolRequests: Record<string, unknown>[] = [];
   const server = createServer((request, response) => {
@@ -10,6 +10,12 @@ export async function startModelJsonServer(replies: string[]) {
       const payload = JSON.parse(body || "{}") as Record<string, unknown>;
       if (request.url?.endsWith("/chat/completions")) {
         const index = modelRequests.push(payload) - 1;
+        const status = responseStatuses[index] ?? 200;
+        if (status !== 200) {
+          response.writeHead(status, { "content-type": "application/json" });
+          response.end(JSON.stringify({ error: { message: "测试供应商暂时不可用", type: "test-unavailable" } }));
+          return;
+        }
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify({
           id: "test-completion-" + index, object: "chat.completion", created: 1, model: "test-model",

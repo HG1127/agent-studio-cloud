@@ -40,6 +40,7 @@ import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { jsonValuesEqual } from "@/server/domain/json-value";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding";
+import { ExecutionResourceRejected, lockExecutionWorkspace, reserveRootExecutionResources } from "@/server/services/execution-resources";
 
 // 发布快照允许进入运行引擎的完整节点类型；未知类型必须在创建 run 前拒绝。
 const SUPPORTED_NODE_TYPES: ReadonlySet<string> = new Set([
@@ -93,6 +94,12 @@ async function createRunWithLockedDependencies(args: {
   deliveryBinding?: RunDeliveryBinding;
 }): Promise<{ runId: string | null; error: string | null }> {
   return db.transaction(async (tx) => {
+    await lockExecutionWorkspace(tx, args.workspaceId);
+    if (args.sourceKey) {
+      const [existing] = await tx.select({ id: runs.id }).from(runs)
+        .where(and(eq(runs.workspaceId, args.workspaceId), eq(runs.sourceKey, args.sourceKey))).limit(1);
+      if (existing) return { runId: null, error: null };
+    }
     const collaborationKeys = workflowCollaborationKeys(args.manifest.workflowSnapshot);
     let collaborationAgentIds: string[] = [];
     let collaborationKnowledgeIds: string[] = [];
@@ -151,9 +158,14 @@ async function createRunWithLockedDependencies(args: {
       }
     }
 
+    const executionResources = await reserveRootExecutionResources(tx, args.workspaceId);
+    const rootRunId = crypto.randomUUID();
     const [run] = await tx
       .insert(runs)
       .values({
+        id: rootRunId,
+        executionRootRunId: rootRunId,
+        executionResources,
         workspaceId: args.workspaceId,
         createdBy: DEMO_USER_ID,
         agentId: args.agentId,
@@ -702,6 +714,7 @@ export async function startRunCore(args: {
     if (!created.runId) return { ok: false, error: "运行启动冲突，请稍后重试" };
     return launchClaimedRun({ runId: created.runId, manifest, input: runInput, lease });
   } catch (error) {
+    if (error instanceof ExecutionResourceRejected) return { ok: false, error: error.message, resourceLimit: error.limit, retryable: true };
     console.error("运行启动失败：", safeErrorForLog(error));
     if (args.sourceKey) {
       try {

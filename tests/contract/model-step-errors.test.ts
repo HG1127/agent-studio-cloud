@@ -4,7 +4,7 @@ import { AgentManifest } from "@/contracts/manifest";
 import { WorkflowNode } from "@/contracts/workflow";
 
 const mocks = vi.hoisted(() => ({ generateText: vi.fn(), persistStep: vi.fn(), select: vi.fn() }));
-vi.mock("ai", () => ({ generateText: mocks.generateText }));
+vi.mock("ai", async (original) => ({ ...await original<typeof import("ai")>(), generateText: mocks.generateText }));
 vi.mock("@ai-sdk/openai-compatible", () => ({ createOpenAICompatible: () => () => ({}) }));
 vi.mock("@/lib/db", () => ({ db: { select: mocks.select } }));
 vi.mock("@/server/steps/run-state", () => ({ persistStep: mocks.persistStep }));

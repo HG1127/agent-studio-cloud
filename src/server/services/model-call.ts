@@ -5,15 +5,21 @@ import { modelCalls, runs } from "@/db/schema";
 import { db } from "@/lib/db";
 import { canonicalJson } from "@/server/domain/canonical-json";
 import { modelUsageLabel } from "@/server/domain/model-usage";
+import { enforceModelCallResourceLimit, lockExecutionWorkspace, prepareExecutionResourceScope } from "./execution-resources";
 
 export async function beginRunModelCall(input: ModelCallStartInput): Promise<ModelCallIdentity> {
   const parsed = ModelCallStartInput.parse(input);
   const args = { ...parsed, nodeTitle: modelUsageLabel(parsed.nodeTitle), modelId: modelUsageLabel(parsed.modelId) };
   try {
     return await db.transaction(async (tx) => {
+      const [owner] = await tx.select({ workspaceId: runs.workspaceId }).from(runs).where(eq(runs.id, args.runId)).limit(1);
+      if (!owner) throw new FatalError("找不到这次运行，不能发起模型调用");
+      await lockExecutionWorkspace(tx, owner.workspaceId);
+      const scope = await prepareExecutionResourceScope(tx, owner.workspaceId, args.runId);
       const [run] = await tx.select({ workspaceId: runs.workspaceId, createdBy: runs.createdBy, agentId: runs.agentId, versionId: runs.versionId, status: runs.status })
-        .from(runs).where(eq(runs.id, args.runId)).limit(1).for("update");
+        .from(runs).where(and(eq(runs.id, args.runId), eq(runs.workspaceId, owner.workspaceId))).limit(1).for("update");
       if (!run || run.status !== "running") throw new FatalError("任务已结束或尚未开始，不能发起模型调用");
+      await enforceModelCallResourceLimit(tx, run.workspaceId, scope);
       const [entry] = await tx.insert(modelCalls).values({
         ...args, workspaceId: run.workspaceId, createdBy: run.createdBy, agentId: run.agentId, versionId: run.versionId, state: "pending",
       }).returning({ id: modelCalls.id, workspaceId: modelCalls.workspaceId, runId: modelCalls.runId });

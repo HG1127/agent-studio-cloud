@@ -31,6 +31,11 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("任务提交 HTTP 接口", () => {
+  it("资源名额已满返回明确 429 和原请求重试提示，不伪报启动成功", async () => {
+    mocks.start.mockResolvedValue({ ok: false, error: "当前并发名额已满", retryable: true, resourceLimit: { kind: "concurrent-chains", current: 1, maximum: 1 } });
+    const response = await POST(request()); expect(response.status).toBe(429); expect(response.headers.get("retry-after")).toBe("2");
+    expect(RunTaskStartResult.parse(await response.json())).toMatchObject({ ok: false, resourceLimit: { kind: "concurrent-chains" } });
+  });
   it("按共享契约返回已接收和任务入口，不把接收等同于执行成功", async () => {
     const response = await POST(request());
     expect(response.status).toBe(202);

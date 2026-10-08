@@ -19,6 +19,8 @@ import { appendTrace } from "@/server/steps/trace-step";
 import { validateModelJsonOutput, validateModelOutputConfiguration } from "@/server/domain/runtime/model-output";
 import { resolveNodeInput } from "@/server/domain/runtime/input-mapping";
 import { recordRunModel } from "@/server/model/recorded-run-model";
+import { runModelControlError } from "@/server/model/run-model-control-error";
+import { ExecutionResourceLimitError } from "@/server/services/execution-resources";
 
 export interface RunModelStepInput {
   runId: string;
@@ -214,7 +216,12 @@ export async function runModelStep(args: RunModelStepInput): Promise<ModelStepRe
     }
     throw new StructuredModelOutputError("模型结果未满足字段契约，已停止后续执行");
   } catch (error) {
-    if (FatalError.is(error) || RetryableError.is(error)) throw error;
+    const controlError = runModelControlError(error);
+    if (controlError) {
+      if (controlError instanceof ExecutionResourceLimitError) await persistStep({ runId: args.runId, nodeId: node.id, nodeTitle: node.title, nodeType: node.type, status: "failed", error: controlError.message,
+        ...(outputConfig ? { output: { usage: usageTotals, mock: false, repairCount } } : {}) });
+      throw controlError;
+    }
     const retryable = isTransientModelError(error);
     const reason = error instanceof StructuredModelOutputError ? error.message : retryable
       ? "模型服务暂时不可用，稍后自动重试"
