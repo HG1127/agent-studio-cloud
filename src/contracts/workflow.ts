@@ -3,9 +3,11 @@ import { JsonStorageValue } from "./json";
 import { ModelOutputConfig } from "./model-output";
 import { InputMapping } from "./input-mapping";
 import { ToolOperationConfig } from "./tool-operation";
+import { RUN_DELIVERY_INTENT_KEY } from "./run-delivery-config";
 
 const RESERVED_FIELD_NAMES: ReadonlySet<string> = new Set(["__proto__", "prototype", "constructor"]);
 const RESERVED_WORKFLOW_NODE_IDS: ReadonlySet<string> = new Set([
+  RUN_DELIVERY_INTENT_KEY,
   ...RESERVED_FIELD_NAMES,
   ...Object.getOwnPropertyNames(Object.prototype),
 ]);

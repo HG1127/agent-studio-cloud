@@ -2,23 +2,25 @@ import { z } from "zod";
 import { boundedJsonStorageValue } from "./json";
 import { CancelRunResult, MAX_RUN_INPUT_BYTES, MAX_RUN_RESULT_BYTES, RunStartInput, RunStatus, StartRunResult } from "./run";
 import { WorkflowDraft } from "./workflow";
+import { RunDeliverySelection } from "./run-delivery-config";
 
 export const MAX_RUN_TASK_REQUEST_BYTES = MAX_RUN_INPUT_BYTES + 4096;
 const RunTaskId = z.string().uuid().transform((value) => value.toLowerCase());
 export const RunTaskReference = z.object({ runId: RunTaskId });
 export type RunTaskReference = z.infer<typeof RunTaskReference>;
-export const RunTaskStartInput = RunStartInput.extend({ agentId: RunTaskId, requestId: RunTaskId, versionId: RunTaskId.optional() }).strict();
+export const RunTaskStartInput = RunStartInput.extend({ agentId: RunTaskId, requestId: RunTaskId, versionId: RunTaskId.optional(), delivery: RunDeliverySelection.optional() }).strict();
 export type RunTaskStartInput = z.infer<typeof RunTaskStartInput>;
 export const RunTaskTerminalStatus = RunStatus.extract(["completed", "failed", "cancelled"]);
 export type RunTaskTerminalStatus = z.infer<typeof RunTaskTerminalStatus>;
-const RunTaskLocalLink = z.string().max(200).regex(/^\/(?:api\/)?runs\/[0-9a-f-]{36}(?:\/(?:result|export|events|approvals))?$/i);
-export const RunTaskLinks = z.object({ status: RunTaskLocalLink, result: RunTaskLocalLink, report: RunTaskLocalLink, events: RunTaskLocalLink, view: RunTaskLocalLink, approvals: RunTaskLocalLink.optional() }).strict();
+const RunTaskLocalLink = z.string().max(200).regex(/^\/(?:api\/)?runs\/[0-9a-f-]{36}(?:\/(?:result|export|events|approvals|delivery))?$/i);
+export const RunTaskLinks = z.object({ status: RunTaskLocalLink, result: RunTaskLocalLink, report: RunTaskLocalLink, events: RunTaskLocalLink, view: RunTaskLocalLink, approvals: RunTaskLocalLink.optional(), delivery: RunTaskLocalLink.optional() }).strict();
 export type RunTaskLinks = z.infer<typeof RunTaskLinks>;
 function checkLinks(runId: string, links: RunTaskLinks, context: z.RefinementCtx) {
   const expected = {
     status: `/api/runs/${runId}`, result: `/api/runs/${runId}/result`, report: `/api/runs/${runId}/export`,
     events: `/api/runs/${runId}/events`, view: `/runs/${runId}`,
     ...(links.approvals === undefined ? {} : { approvals: `/api/runs/${runId}/approvals` }),
+    ...(links.delivery === undefined ? {} : { delivery: `/api/runs/${runId}/delivery` }),
   };
   if (Object.entries(expected).some(([key, value]) => links[key as keyof RunTaskLinks] !== value)) {
     context.addIssue({ code: "custom", message: "任务入口与运行标识不一致" });

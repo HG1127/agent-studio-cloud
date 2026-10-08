@@ -7,6 +7,7 @@ export function runTaskLinks(runId: string): RunTaskLinks {
     status: `/api/runs/${runId}`, result: `/api/runs/${runId}/result`, report: `/api/runs/${runId}/export`,
     events: `/api/runs/${runId}/events`, view: `/runs/${runId}`,
     approvals: `/api/runs/${runId}/approvals`,
+    delivery: `/api/runs/${runId}/delivery`,
   });
 }
 export function presentRunTaskStatus(task: Omit<RunTaskStatusView, "terminal" | "links">): RunTaskStatusView {

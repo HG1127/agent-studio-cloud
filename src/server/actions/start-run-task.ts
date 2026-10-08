@@ -13,6 +13,7 @@ export async function startRunTaskAction(input: RunTaskStartInput): Promise<Star
     const result = StartRunResult.parse(await startRunCore({
       agentId: parsed.data.agentId, versionId: parsed.data.versionId, input: parsed.data.input,
       sourceType: "manual", sourceKey: `manual:${parsed.data.requestId}`,
+      ...(parsed.data.delivery ? { deliveryTargetId: parsed.data.delivery.targetId } : {}),
     }));
     if (result.ok) revalidatePathsAfterCommit([`/agents/${parsed.data.agentId}`, "/agents", "/runs"], "run-task-start");
     return result;

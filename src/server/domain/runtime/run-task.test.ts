@@ -8,7 +8,7 @@ const base = { runId: ID, agentId: ID, agentName: "金额助手", versionId: ID,
 
 describe("任务状态与交付投影", () => {
   it("生成当前任务的本地入口并拒绝无效标识", () => {
-    expect(runTaskLinks(ID)).toEqual({ status: `/api/runs/${ID}`, result: `/api/runs/${ID}/result`, report: `/api/runs/${ID}/export`, events: `/api/runs/${ID}/events`, view: `/runs/${ID}`, approvals: `/api/runs/${ID}/approvals` });
+    expect(runTaskLinks(ID)).toEqual({ status: `/api/runs/${ID}`, result: `/api/runs/${ID}/result`, report: `/api/runs/${ID}/export`, events: `/api/runs/${ID}/events`, view: `/runs/${ID}`, approvals: `/api/runs/${ID}/approvals`, delivery: `/api/runs/${ID}/delivery` });
     expect(() => runTaskLinks("../../unsafe")).toThrow();
   });
   it.each(RunStatus.options)("状态 %s 使用统一结束判定并脱敏错误", (status) => {

@@ -3,7 +3,10 @@ import { z } from "zod";
 import { start } from "workflow/api";
 import { AgentManifest } from "@/contracts/manifest";
 import { RunInputPayload, type StartRunResult } from "@/contracts/run";
-import { agentVersions, agents, knowledgeSources, runs } from "@/db/schema";
+import { agentVersions, agents, knowledgeSources, runDeliveries, runs } from "@/db/schema";
+import { RUN_DELIVERY_INTENT_KEY, type RunDeliveryBinding } from "@/contracts/run-delivery-config";
+import { deliveryTargetBinding, getDeliveryTarget } from "@/server/delivery/target-registry";
+import { runDeliveryIntentMatches } from "@/server/domain/runtime/run-delivery";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { prepareParallelBranches } from "@/server/domain/runtime/parallel-runtime";
@@ -87,6 +90,7 @@ async function createRunWithLockedDependencies(args: {
   sourceType: "manual" | "schedule" | "evaluation";
   sourceKey: string | null;
   lease: RunStartLease;
+  deliveryBinding?: RunDeliveryBinding;
 }): Promise<{ runId: string | null; error: string | null }> {
   return db.transaction(async (tx) => {
     const collaborationKeys = workflowCollaborationKeys(args.manifest.workflowSnapshot);
@@ -156,12 +160,16 @@ async function createRunWithLockedDependencies(args: {
         versionId: args.versionId,
         status: "queued",
         input: args.input,
-        stepStates: withRunStartLease({}, args.lease),
+        stepStates: withRunStartLease(args.deliveryBinding ? { [RUN_DELIVERY_INTENT_KEY]: args.deliveryBinding } : {}, args.lease),
         sourceType: args.sourceType,
         sourceKey: args.sourceKey,
       })
       .onConflictDoNothing()
       .returning({ id: runs.id });
+    if (run && args.deliveryBinding) {
+      await tx.insert(runDeliveries).values({ workspaceId: args.workspaceId, createdBy: DEMO_USER_ID, runId: run.id,
+        targetId: args.deliveryBinding.targetId, targetHash: args.deliveryBinding.targetHash, retentionMs: args.deliveryBinding.retentionMs });
+    }
     return { runId: run?.id ?? null, error: null };
   });
 }
@@ -563,6 +571,7 @@ async function reuseExistingRun(args: {
   input: Record<string, unknown>;
   sourceType: "manual" | "schedule" | "evaluation";
   sourceKey: string;
+  deliveryTargetId?: string;
 }): Promise<StartRunResult | null> {
   const [existing] = await db
     .select({
@@ -586,6 +595,9 @@ async function reuseExistingRun(args: {
   }
   if (args.sourceType === "manual" && !jsonValuesEqual(existing.input, args.input)) {
     return { ok: false, error: "运行输入已改变，请重新发起" };
+  }
+  if (!runDeliveryIntentMatches(existing.stepStates ?? {}, args.deliveryTargetId)) {
+    return { ok: false, error: "成果接收方已改变，请使用新的请求标识" };
   }
   if (args.versionId && existing.versionId !== args.versionId) {
     return { ok: false, error: "这项请求标识已用于另一个版本，请重新发起" };
@@ -617,6 +629,7 @@ export async function startRunCore(args: {
   sourceType?: "manual" | "schedule" | "evaluation";
   sourceKey?: string | null;
   versionId?: string;
+  deliveryTargetId?: string;
 }): Promise<StartRunResult> {
   const { agentId } = args;
   const sourceType = args.sourceType ?? "manual";
@@ -627,9 +640,11 @@ export async function startRunCore(args: {
   const runInput = parsedRunInput.data;
   try {
     if (args.sourceKey) {
-      const existing = await reuseExistingRun({ agentId, versionId: args.versionId, input: runInput, sourceType, sourceKey: args.sourceKey });
+      const existing = await reuseExistingRun({ agentId, versionId: args.versionId, input: runInput, sourceType, sourceKey: args.sourceKey, deliveryTargetId: args.deliveryTargetId });
       if (existing) return existing;
     }
+    const target = args.deliveryTargetId ? getDeliveryTarget(args.deliveryTargetId) : null;
+    if (args.deliveryTargetId !== undefined && !target) return { ok: false, error: "成果接收方尚未在服务端正确配置" };
     const [agent] = await db
       .select()
       .from(agents)
@@ -677,10 +692,11 @@ export async function startRunCore(args: {
       sourceType,
       sourceKey: args.sourceKey ?? null,
       lease,
+      ...(target ? { deliveryBinding: deliveryTargetBinding(target) } : {}),
     });
     if (created.error) return { ok: false, error: created.error };
     if (!created.runId && args.sourceKey) {
-      return await reuseExistingRun({ agentId, versionId: args.versionId, input: runInput, sourceType, sourceKey: args.sourceKey })
+      return await reuseExistingRun({ agentId, versionId: args.versionId, input: runInput, sourceType, sourceKey: args.sourceKey, deliveryTargetId: args.deliveryTargetId })
         ?? { ok: false, error: "运行启动冲突，请稍后重试" };
     }
     if (!created.runId) return { ok: false, error: "运行启动冲突，请稍后重试" };
@@ -689,7 +705,7 @@ export async function startRunCore(args: {
     console.error("运行启动失败：", safeErrorForLog(error));
     if (args.sourceKey) {
       try {
-        const existing = await reuseExistingRun({ agentId, versionId: args.versionId, input: runInput, sourceType, sourceKey: args.sourceKey });
+        const existing = await reuseExistingRun({ agentId, versionId: args.versionId, input: runInput, sourceType, sourceKey: args.sourceKey, deliveryTargetId: args.deliveryTargetId });
         if (existing) return existing;
       } catch (lookupError) {
         console.error("核对运行启动状态失败：", safeErrorForLog(lookupError));
