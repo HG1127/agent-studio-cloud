@@ -21,6 +21,9 @@ describe("数据库就绪检查", () => {
       "public.run_feedback_workspace_case_idx",
       "public.runs_workspace_source_key_unique",
       "public.wait_event_submissions",
+      "public.tool_operations",
+      "public.tool_operations_workspace_key_unique",
+      "public.tool_operations_workspace_run_idx",
       "public.wait_event_submissions_token_unique",
       "public.wait_event_submissions_run_created_idx",
       "public.evaluation_runs_workspace_request_unique",
@@ -47,6 +50,7 @@ describe("数据库就绪检查", () => {
       allowDefault: false,
     });
     expect(LATEST_MIGRATION_WHEN).toBe(migrationJournal.entries.at(-1)?.when);
+    expect(REQUIRED_DATABASE_COLUMNS).toContainEqual({ tableName: "tool_operations", columnName: "retry_deadline", requireNotNull: true, allowDefault: true });
   });
 
   it("只在数据库结构、最新迁移和演示租户都就绪时返回正常", async () => {

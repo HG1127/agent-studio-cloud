@@ -1,4 +1,4 @@
-import { InputMapping } from "@/contracts/input-mapping";
+import { InputMapping, type InputValueSource } from "@/contracts/input-mapping";
 import { RunInputPayload } from "@/contracts/run";
 import type { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
 import { prepareParallelBranches } from "./parallel-runtime";
@@ -11,6 +11,12 @@ function readOwnPath(value: unknown, path: string[]): unknown {
     current = (current as Record<string, unknown>)[segment];
   }
   return current;
+}
+
+export function resolveInputValue(source: InputValueSource, input: Record<string, unknown>, outputs: Record<string, unknown>): unknown {
+  return source.kind === "literal" ? source.value
+    : source.kind === "input" ? readOwnPath(input, source.path)
+    : readOwnPath(Object.hasOwn(outputs, source.nodeId) ? outputs[source.nodeId] : undefined, source.path);
 }
 
 export function resolveNodeInput(args: {
@@ -26,9 +32,7 @@ export function resolveNodeInput(args: {
   const input: Record<string, unknown> = {};
   for (const binding of parsed.data.fields) {
     const source = binding.source;
-    let value = source.kind === "literal" ? source.value
-      : source.kind === "input" ? readOwnPath(args.input, source.path)
-      : readOwnPath(Object.hasOwn(args.outputs, source.nodeId) ? args.outputs[source.nodeId] : undefined, source.path);
+    let value = resolveInputValue(source, args.input, args.outputs);
     if (value === undefined) value = binding.fallback;
     if (value === undefined) {
       if (binding.required) return { ok: false, error: `步骤「${args.node.title}」缺少映射字段“${binding.target.join(".")}”的来源数据` };
@@ -66,6 +70,10 @@ export function validateInputMappingReferences(draft: Pick<WorkflowDraft, "nodes
   }
   const availableIds = new Set(allNodes.map((node) => node.id));
   for (const node of allNodes) {
+    const operationKey = node.toolOperation?.key;
+    if (operationKey?.kind === "output" && !availableIds.has(operationKey.nodeId)) {
+      return `步骤「${node.title}」的操作防重标识引用了不存在的来源步骤`;
+    }
     for (const binding of node.inputMapping?.fields ?? []) {
       if (binding.source.kind === "output" && !availableIds.has(binding.source.nodeId)) {
         return `步骤「${node.title}」的字段映射引用了不存在的来源步骤`;

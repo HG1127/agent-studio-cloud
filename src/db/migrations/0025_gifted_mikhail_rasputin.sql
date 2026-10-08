@@ -1,0 +1,2 @@
+ALTER TABLE "tool_operations" ADD COLUMN "retry_deadline" timestamp with time zone DEFAULT '1970-01-01T00:00:00.000Z' NOT NULL;--> statement-breakpoint
+ALTER TABLE "tool_operations" ADD COLUMN "resolutions" jsonb DEFAULT '[]'::jsonb NOT NULL;

@@ -169,6 +169,20 @@
       "when": 1790555496347,
       "tag": "0023_bumpy_bishop",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1791446693785,
+      "tag": "0024_narrow_thunderbird",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791447566651,
+      "tag": "0025_gifted_mikhail_rasputin",
+      "breakpoints": true
     }
   ]
 }

@@ -29,6 +29,9 @@ export const REQUIRED_DATABASE_OBJECTS = [
   "public.audit_events",
   "public.run_feedback",
   "public.wait_event_submissions",
+  "public.tool_operations",
+  "public.tool_operations_workspace_key_unique",
+  "public.tool_operations_workspace_run_idx",
   "public.runs_workspace_status_created_idx",
   "public.runs_workspace_source_key_unique",
   "public.knowledge_sources_workspace_archived_created_idx",
@@ -52,6 +55,10 @@ export const REQUIRED_DATABASE_COLUMNS = [
   { tableName: "evaluation_runs", columnName: "request_id", requireNotNull: false, allowDefault: false },
   { tableName: "schedules", columnName: "request_id", requireNotNull: false, allowDefault: false },
   { tableName: "evaluation_case_results", columnName: "case_snapshot", requireNotNull: false, allowDefault: false },
+  { tableName: "tool_operations", columnName: "workspace_id", requireNotNull: true, allowDefault: false },
+  { tableName: "tool_operations", columnName: "created_by", requireNotNull: true, allowDefault: false },
+  { tableName: "tool_operations", columnName: "retry_deadline", requireNotNull: true, allowDefault: true },
+  { tableName: "tool_operations", columnName: "resolutions", requireNotNull: true, allowDefault: true },
 ] as const;
 
 export async function isDatabaseReady() {
