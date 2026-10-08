@@ -18,6 +18,7 @@ import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 import { validateModelJsonOutput, validateModelOutputConfiguration } from "@/server/domain/runtime/model-output";
 import { resolveNodeInput } from "@/server/domain/runtime/input-mapping";
+import { recordRunModel } from "@/server/model/recorded-run-model";
 
 export interface RunModelStepInput {
   runId: string;
@@ -158,7 +159,10 @@ export async function runModelStep(args: RunModelStepInput): Promise<ModelStepRe
       });
       try {
         const generated = await generateText({
-          model: provider(target.kind === "mock" ? "" : target.modelId),
+          model: recordRunModel(provider(target.kind === "mock" ? "" : target.modelId), {
+            runId: args.runId, nodeId: node.id, nodeTitle: node.title, modelId: target.kind === "mock" ? "mock" : target.modelId,
+            connectionId: target.kind === "connection" ? target.connectionId : null,
+          }),
           system: currentPrompt.system,
           prompt: currentPrompt.user,
           abortSignal: AbortSignal.timeout(60_000),

@@ -10,6 +10,7 @@ export const runs = pgTable(
     agentId: uuid("agent_id").notNull(),
     versionId: uuid("version_id").notNull(),
     workflowRunId: text("workflow_run_id"),
+    modelUsageTrackingVersion: text("model_usage_tracking_version"),
     status: text("status").notNull().default("queued"),
     input: jsonb("input").$type<Record<string, unknown>>().notNull().default({}),
     context: jsonb("context").$type<Record<string, unknown>>().notNull().default({}),

@@ -46,6 +46,9 @@ export const REQUIRED_DATABASE_OBJECTS = [
   "public.attention_cases_workspace_run_idx",
   "public.runs_workspace_status_created_idx",
   "public.runs_workspace_finished_idx",
+  "public.model_calls",
+  "public.model_calls_workspace_run_created_idx",
+  "public.model_calls_workspace_agent_created_idx",
   "public.runs_workspace_agent_finished_idx",
   "public.runs_workspace_source_key_unique",
   "public.knowledge_sources_workspace_archived_created_idx",
@@ -60,6 +63,10 @@ export const REQUIRED_DATABASE_OBJECTS = [
 ] as const;
 
 export const REQUIRED_DATABASE_COLUMNS = [
+  { tableName: "runs", columnName: "model_usage_tracking_version", requireNotNull: false, allowDefault: false },
+  { tableName: "model_calls", columnName: "workspace_id", requireNotNull: true, allowDefault: false },
+  { tableName: "model_calls", columnName: "created_by", requireNotNull: true, allowDefault: false },
+  { tableName: "model_calls", columnName: "measurement", requireNotNull: false, allowDefault: false },
   { tableName: "run_steps", columnName: "created_by", requireNotNull: true, allowDefault: false },
   { tableName: "trace_events", columnName: "created_by", requireNotNull: true, allowDefault: false },
   { tableName: "trace_events", columnName: "updated_at", requireNotNull: true, allowDefault: true },

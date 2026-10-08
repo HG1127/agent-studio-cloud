@@ -1,11 +1,13 @@
 import { and, eq } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { start } from "workflow/api";
 import { AgentManifest } from "@/contracts/manifest";
-import { knowledgeChunks, knowledgeSources, runSteps, runs, traceEvents } from "@/db/schema";
+import { knowledgeChunks, knowledgeSources, modelCalls, runSteps, runs, traceEvents } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
+import { getRunModelUsage } from "@/server/queries/model-usage";
+import { startModelJsonServer } from "../helpers/model-json-server";
 
 const AGENT_ID = "00000000-0000-4000-8000-0000000000c3";
 const VERSION_ID = "00000000-0000-4000-8000-0000000000c4";
@@ -77,6 +79,25 @@ async function cleanup(runId: string) {
 }
 
 describe("逐项处理运行", () => {
+  it("真实模型重复执行同一节点逐次入账，不把最后一次步骤回执冒充整个循环用量", async () => {
+    const service = await startModelJsonServer(["第一位客户处理完成", "第三位客户处理完成"]);
+    const runId = crypto.randomUUID();
+    try {
+      vi.stubEnv("MODEL_BASE_URL", service.baseUrl + "/v1"); vi.stubEnv("MODEL_API_KEY", "test-loop-only-key");
+      vi.stubEnv("MODEL_ID", "test-model"); vi.stubEnv("REAL_MODELS_ENABLED", "1");
+      const actual = AgentManifest.parse({ ...manifest, resourceSelection: { model: { modelId: "test-model", mock: false } } });
+      const input = { customers: [{ id: "C-1", priority: "high" }, { id: "C-2", priority: "normal" }, { id: "C-3", priority: "high" }] };
+      await db.insert(runs).values({ id: runId, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, agentId: AGENT_ID, versionId: VERSION_ID, status: "queued", input });
+      const handle = await start(agentRunWorkflow, [runId, actual, input]); await expect(handle.returnValue).resolves.toEqual({ status: "completed" });
+      expect(service.modelRequests).toHaveLength(2);
+      const calls = await db.select().from(modelCalls).where(eq(modelCalls.runId, runId));
+      expect(calls).toHaveLength(2); expect(new Set(calls.map((call) => call.id)).size).toBe(2); expect(calls.every((call) => call.nodeId === "handle")).toBe(true);
+      const [latest] = await db.select().from(runSteps).where(and(eq(runSteps.runId, runId), eq(runSteps.nodeId, "handle")));
+      expect(latest).toMatchObject({ attempt: 2, output: { usage: { inputTokens: 12, outputTokens: 6 } } });
+      expect(await getRunModelUsage(DEMO_WORKSPACE_ID, runId)).toMatchObject({ tracking: "tracked-v1", calls: { total: 2, returned: 2 }, usage: { knownInputTokens: 24, knownOutputTokens: 12, knownCallTotalTokens: 36, recordedUsageComplete: true } });
+    } finally { await service.close(); vi.unstubAllEnvs(); await cleanup(runId); }
+  }, 240_000);
+
   it("每条记录都进入循环，条件可读取当前项并在结束后走退出路径", async () => {
     const runId = await runWith({
       customers: [

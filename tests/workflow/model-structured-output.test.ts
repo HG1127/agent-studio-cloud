@@ -2,10 +2,11 @@ import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { start } from "workflow/api";
 import { AgentManifest } from "@/contracts/manifest";
-import { runSteps, runs, traceEvents } from "@/db/schema";
+import { modelCalls, runSteps, runs, traceEvents } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
+import { getRunModelUsage } from "@/server/queries/model-usage";
 import { startModelJsonServer } from "../helpers/model-json-server";
 
 let service: Awaited<ReturnType<typeof startModelJsonServer>> | undefined;
@@ -83,6 +84,10 @@ describe("持久工作流的结构化业务结果", () => {
     const handle = await start(agentRunWorkflow, [runId!, manifest, {}]);
     await expect(handle.returnValue).resolves.toEqual({ status: "completed" });
     expect(service!.modelRequests).toHaveLength(2);
+    expect(await getRunModelUsage(DEMO_WORKSPACE_ID, runId!)).toMatchObject({ tracking: "tracked-v1", calls: { total: 2, returned: 2, failed: 0, pending: 0 }, usage: { completeCalls: 2, knownInputTokens: 24, knownOutputTokens: 12, knownCallTotalTokens: 36, recordedUsageComplete: true } });
+    const calls = await db.select().from(modelCalls).where(eq(modelCalls.runId, runId!));
+    expect(calls).toHaveLength(2); expect(new Set(calls.map((call) => call.id)).size).toBe(2);
+    expect(JSON.stringify(calls)).not.toMatch(/sk-private-field-name|private-field-value/);
     expect(service!.toolRequests).toEqual([expect.objectContaining({ outputs: { extract: { amount: 123.5, approved: true }, choose: expect.any(Object) } })]);
     const [completed] = await db.select().from(runs).where(eq(runs.id, runId!));
     expect(completed.result).toMatchObject({ extract: { amount: 123.5, approved: true }, record: { ok: true } });
@@ -106,6 +111,7 @@ describe("持久工作流的结构化业务结果", () => {
     }, { timeout: 30_000, interval: 500 });
     expect(service!.modelRequests).toHaveLength(2);
     expect(service!.toolRequests).toHaveLength(0);
+    expect(await getRunModelUsage(DEMO_WORKSPACE_ID, runId!)).toMatchObject({ calls: { total: 2, returned: 2 }, usage: { knownCallTotalTokens: 36, recordedUsageComplete: true } });
     const [failed] = await db.select().from(runs).where(eq(runs.id, runId!));
     const steps = await db.select().from(runSteps).where(eq(runSteps.runId, runId!));
     const traces = await db.select().from(traceEvents).where(eq(traceEvents.runId, runId!));
@@ -119,6 +125,7 @@ describe("持久工作流的结构化业务结果", () => {
     const handle = await start(agentRunWorkflow, [runId!, manifest, {}]);
     await expect(handle.returnValue).resolves.toEqual({ status: "completed" });
     expect(service!.modelRequests).toHaveLength(0);
+    expect(await getRunModelUsage(DEMO_WORKSPACE_ID, runId!)).toMatchObject({ tracking: "tracked-v1", calls: { total: 0 }, usage: { knownInputTokens: null, knownOutputTokens: null, knownCallTotalTokens: null, recordedUsageComplete: true } });
     expect(service!.toolRequests).toHaveLength(0);
     const [completed] = await db.select().from(runs).where(eq(runs.id, runId!));
     expect(completed.result).toMatchObject({ extract: { amount: 10, approved: false }, low_amount: expect.any(Object) });

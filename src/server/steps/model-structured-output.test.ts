@@ -9,6 +9,7 @@ vi.mock("@ai-sdk/openai-compatible", () => ({ createOpenAICompatible: mocks.prov
 vi.mock("@/lib/db", () => ({ db: {} }));
 vi.mock("@/server/steps/run-state", () => ({ persistStep: mocks.persistStep }));
 vi.mock("@/server/steps/trace-step", () => ({ appendTrace: mocks.appendTrace }));
+vi.mock("@/server/model/recorded-run-model", () => ({ recordRunModel: (model: unknown) => model }));
 import { runModelStep } from "./model-step";
 
 const schema = { type: "object", required: ["amount"], properties: { amount: { type: "number" } }, additionalProperties: false };

@@ -21,6 +21,9 @@ describe("数据库就绪检查", () => {
       "public.run_feedback_workspace_case_idx",
       "public.runs_workspace_source_key_unique",
       "public.runs_workspace_finished_idx",
+      "public.model_calls",
+      "public.model_calls_workspace_run_created_idx",
+      "public.model_calls_workspace_agent_created_idx",
       "public.runs_workspace_agent_finished_idx",
       "public.wait_event_submissions",
       "public.tool_operations",
@@ -64,6 +67,8 @@ describe("数据库就绪检查", () => {
       allowDefault: false,
     });
     expect(LATEST_MIGRATION_WHEN).toBe(migrationJournal.entries.at(-1)?.when);
+    expect(REQUIRED_DATABASE_COLUMNS).toContainEqual({ tableName: "runs", columnName: "model_usage_tracking_version", requireNotNull: false, allowDefault: false });
+    expect(REQUIRED_DATABASE_COLUMNS).toContainEqual({ tableName: "model_calls", columnName: "created_by", requireNotNull: true, allowDefault: false });
     expect(REQUIRED_DATABASE_COLUMNS).toContainEqual({ tableName: "tool_operations", columnName: "retry_deadline", requireNotNull: true, allowDefault: true });
     expect(REQUIRED_DATABASE_COLUMNS).toContainEqual({ tableName: "run_deliveries", columnName: "workspace_id", requireNotNull: true, allowDefault: false });
     expect(REQUIRED_DATABASE_COLUMNS).toContainEqual({ tableName: "run_deliveries", columnName: "retention_ms", requireNotNull: true, allowDefault: false });
