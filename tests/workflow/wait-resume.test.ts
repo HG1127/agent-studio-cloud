@@ -15,6 +15,8 @@ import { getPendingWaitHook } from "@/server/queries/runs";
 import { POST as submitWaitMessage } from "@/app/api/runs/[runId]/events/[eventKey]/route";
 import { AttentionListInput } from "@/contracts/attention";
 import { listAttention } from "@/server/queries/attention";
+import { RuntimeOverviewInput } from "@/contracts/runtime-overview";
+import { getRuntimeOverview } from "@/server/queries/runtime-overview";
 
 const AGENT_ID = "00000000-0000-4000-8000-0000000000b1";
 const VERSION_ID = "00000000-0000-4000-8000-0000000000b2";
@@ -137,6 +139,7 @@ describe("等待节点暂停与恢复", () => {
       expect(waiting?.status).toBe("waiting_event");
       expect(pending?.submissionToken).toMatch(/^[A-Za-z0-9_-]{40,}$/);
       expect(pending?.submissionToken).not.toBe(token);
+      expect(await getRuntimeOverview(DEMO_WORKSPACE_ID, RuntimeOverviewInput.parse({ agentId: AGENT_ID }))).toMatchObject({ active: { waitingEvent: 1, total: 1 }, finished: { total: 0, failureRatePercent: null } });
       expect(await listAttention(DEMO_WORKSPACE_ID, AttentionListInput.parse({ runId }))).toMatchObject({ ok: true, items: [{ timing: { waitMode: "event", state: "normal", expectedAt: null } }] });
 
       await resumeHook(token, { customerId: "C-100", complete: true });
@@ -154,6 +157,7 @@ describe("等待节点暂停与恢复", () => {
       const traces = await db.select().from(traceEvents).where(eq(traceEvents.runId, runId));
       expect(traces.map((item) => item.kind)).toEqual(expect.arrayContaining(["wait.started", "wait.resumed", "run.completed"]));
       expect(await listAttention(DEMO_WORKSPACE_ID, AttentionListInput.parse({ runId }))).toEqual({ ok: true, items: [], nextCursor: null });
+      expect(await getRuntimeOverview(DEMO_WORKSPACE_ID, RuntimeOverviewInput.parse({ agentId: AGENT_ID }))).toMatchObject({ active: { total: 0 }, finished: { completed: 1, total: 1, failureRatePercent: 0 } });
     } finally {
       await cleanup(runId);
     }

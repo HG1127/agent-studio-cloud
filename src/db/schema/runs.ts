@@ -28,6 +28,8 @@ export const runs = pgTable(
     index("runs_workspace_created_idx").on(t.workspaceId, t.createdAt),
     index("runs_workspace_status_created_idx").on(t.workspaceId, t.status, t.createdAt),
     index("runs_workspace_agent_created_idx").on(t.workspaceId, t.agentId, t.createdAt),
+    index("runs_workspace_finished_idx").on(t.workspaceId, t.finishedAt),
+    index("runs_workspace_agent_finished_idx").on(t.workspaceId, t.agentId, t.finishedAt),
   ],
 );
 export type Run = typeof runs.$inferSelect;

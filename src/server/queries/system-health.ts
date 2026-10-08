@@ -45,6 +45,8 @@ export const REQUIRED_DATABASE_OBJECTS = [
   "public.attention_cases_workspace_created_id_idx",
   "public.attention_cases_workspace_run_idx",
   "public.runs_workspace_status_created_idx",
+  "public.runs_workspace_finished_idx",
+  "public.runs_workspace_agent_finished_idx",
   "public.runs_workspace_source_key_unique",
   "public.knowledge_sources_workspace_archived_created_idx",
   "public.run_feedback_workspace_run_unique",

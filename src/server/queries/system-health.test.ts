@@ -20,6 +20,8 @@ describe("数据库就绪检查", () => {
       "public.run_feedback_workspace_agent_updated_idx",
       "public.run_feedback_workspace_case_idx",
       "public.runs_workspace_source_key_unique",
+      "public.runs_workspace_finished_idx",
+      "public.runs_workspace_agent_finished_idx",
       "public.wait_event_submissions",
       "public.tool_operations",
       "public.tool_operations_workspace_key_unique",
