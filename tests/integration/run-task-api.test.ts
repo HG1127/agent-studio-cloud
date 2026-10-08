@@ -183,6 +183,27 @@ describe("任务接口的真实数据库边界", () => {
     expect(resultResponse.status).toBe(200);
     expect(RunTaskResult.parse(await resultResponse.json())).toMatchObject({ ok: true, task: { status: "completed", ready: true, error: null, result: { ...input, rows: [0, false], apiKey: "[已隐藏敏感信息]" }, outputContract: { fields: [{ path: "amount", label: "金额", required: true }] } } });
   });
+  it("深层最终成果经真实查询完整交付并隐藏凭据，不丢业务零值", async () => {
+    const { body } = await submit(randomUUID()); if (!body.ok) throw new Error(body.error);
+    let nested: Record<string, unknown> = { amount: 0, approved: false, contact: "finance@example.com", apiKey: "private-deep-key" };
+    for (let index = 0; index < 26; index++) nested = { nested };
+    await db.update(runs).set({ status: "completed", result: { amount: 0, nested } }).where(eq(runs.id, body.runId));
+    const response = await getResult(new Request(`${ORIGIN}/api/runs/${body.runId}/result`), { params: Promise.resolve({ runId: body.runId }) });
+    expect(response.status).toBe(200);
+    const result = RunTaskResult.parse(await response.json()); if (!result.ok) throw new Error(result.error);
+    const serialized = JSON.stringify(result.task.result);
+    expect(serialized).toContain('"amount":0'); expect(serialized).toContain('"approved":false'); expect(serialized).toContain("finance@example.com");
+    expect(serialized).not.toContain("private-deep-key"); expect(serialized).not.toContain("深层内容");
+  });
+  it("超契约层级的历史完成结果拒绝读取，不通过截断伪报成功", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { body } = await submit(randomUUID()); if (!body.ok) throw new Error(body.error);
+    let result: Record<string, unknown> = { amount: 0 };
+    for (let index = 0; index < 35; index++) result = { nested: result };
+    await db.update(runs).set({ status: "completed", result }).where(eq(runs.id, body.runId));
+    const response = await getResult(new Request(`${ORIGIN}/api/runs/${body.runId}/result`), { params: Promise.resolve({ runId: body.runId }) });
+    expect(response.status).toBe(503); expect((await response.json()).ok).toBe(false);
+  });
   it("查询与提交均不跨工作区，非法标识不触及数据库", async () => {
     const otherWorkspace = randomUUID();
     const other = await seed(otherWorkspace);

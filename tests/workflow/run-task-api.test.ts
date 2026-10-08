@@ -17,6 +17,7 @@ import { db } from "@/lib/db";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { decideApprovalAction } from "@/server/actions/decide-approval";
 import { resolvePath, runEvalContext } from "@/server/domain/runtime/condition-eval";
+import { projectWorkflowResult } from "@/server/domain/runtime/output-contract";
 import { waitForPendingApprovalHook } from "./approval-helpers";
 import { startModelJsonServer } from "../helpers/model-json-server";
 
@@ -219,6 +220,34 @@ describe("程序化任务到真实持久工作流的交付", () => {
     expect(result.response.status).toBe(200);
     expect(result.body).toMatchObject({ ok: true, task: { status: "failed", ready: true, result: null } });
     expect(JSON.stringify(result.body)).not.toContain("sk-private-invalid");
+    expect(service!.modelRequests).toHaveLength(1);
+  });
+  it("深层成果从真实模型步骤经审批到最终交付完整保留，只隐藏凭据", async () => {
+    let nested: Record<string, unknown> = { count: 0, accepted: false, contact: "finance@example.com", apiKey: "private-deep-key" };
+    for (let index = 0; index < 26; index++) nested = { nested };
+    await prepare(true, false, [JSON.stringify({ amount: 0, approved: false, nested })]);
+    const deliveryContract = { fields: [...outputContract.fields, { path: "extract.nested", label: "业务明细", required: true }] };
+    const [version] = await db.select({ manifest: agentVersions.manifest }).from(agentVersions).where(eq(agentVersions.id, versionId!));
+    const original = AgentManifest.parse(version.manifest);
+    const manifest = AgentManifest.parse({ ...original, outputContract: deliveryContract, workflowSnapshot: { ...original.workflowSnapshot, nodes: {
+      ...original.workflowSnapshot.nodes,
+      extract: { ...original.workflowSnapshot.nodes.extract, modelOutput: { ...original.workflowSnapshot.nodes.extract.modelOutput!, schema: { ...schema, additionalProperties: true } } },
+    } } });
+    expect(projectWorkflowResult({ extract: { amount: 0, approved: false, nested } }, deliveryContract.fields)).toMatchObject({ ok: true, result: { extract: { nested } } });
+    await db.update(agentVersions).set({ manifest }).where(eq(agentVersions.id, versionId!));
+    await submit(randomUUID());
+    const approvalId = (await waitForPendingApprovalHook(handle!, runId!)).slice("approval:".length);
+    const review = RunApprovalGetResult.parse(await (await readApproval(new Request(`${ORIGIN}/api/runs/${runId}/approvals/${approvalId}`), { params: Promise.resolve({ runId: runId!, approvalId }) })).json());
+    if (!review.ok) throw new Error(review.error);
+    const reviewed = JSON.parse(review.approval.review!.content) as Record<string, unknown>;
+    expect((await decideViaHttp(approvalId)).status).toBe(200);
+    await expect(handle!.returnValue).resolves.toEqual({ status: "completed" });
+    const completed = (await readResult()).body; if (!completed.ok) throw new Error(completed.error);
+    const delivered = (completed.task.result as Record<string, unknown>).extract;
+    expect(delivered).toEqual(reviewed);
+    const serialized = JSON.stringify(delivered);
+    expect(serialized).toContain('"count":0'); expect(serialized).toContain('"accepted":false'); expect(serialized).toContain("finance@example.com");
+    expect(serialized).not.toContain("private-deep-key"); expect(serialized).not.toContain("深层内容");
     expect(service!.modelRequests).toHaveLength(1);
   });
 });

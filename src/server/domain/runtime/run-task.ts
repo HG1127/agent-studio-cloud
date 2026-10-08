@@ -1,5 +1,5 @@
 import { RunTaskLinks, RunTaskReference, RunTaskResultView, RunTaskStatusView, RunTaskTerminalStatus } from "@/contracts/run-task";
-import { redactCredentialData, redactSensitiveText } from "@/server/domain/security/redact-sensitive";
+import { redactSensitiveText, redactStructuredCredentialData } from "@/server/domain/security/redact-sensitive";
 
 export function runTaskLinks(runId: string): RunTaskLinks {
   RunTaskReference.parse({ runId });
@@ -18,8 +18,9 @@ export function presentRunTaskStatus(task: Omit<RunTaskStatusView, "terminal" | 
 }
 export function presentRunTaskResult(task: Omit<RunTaskResultView, "ready" | "links">): RunTaskResultView {
   const ready = RunTaskTerminalStatus.safeParse(task.status).success;
+  const result = task.status === "completed" ? RunTaskResultView.shape.result.parse(task.result) : null;
   return RunTaskResultView.parse({
-    ...task, ready, result: task.status === "completed" ? redactCredentialData(task.result) : null,
+    ...task, ready, result: result === null ? null : redactStructuredCredentialData(result),
     error: task.status === "completed" || !ready ? null : task.error ? redactSensitiveText(task.error)
       : task.status === "cancelled" ? "任务已取消" : "任务执行失败，请查看运行报告",
     links: runTaskLinks(task.runId),
