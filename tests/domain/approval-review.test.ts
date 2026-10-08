@@ -39,6 +39,10 @@ describe("selectApprovalReview", () => {
     expect(() => selectApprovalReview({ draft: "旧稿", verify: { ok: true } }, nodes, "verify")).toThrow("本次待确认成果来源不完整");
   });
 
+  it.each(["", "   ", null])("本次模型没有成果时不回退旧草稿 %j", (value) => {
+    expect(() => selectApprovalReview({ draft: "旧稿", later: value }, nodes, "later")).toThrow("本次模型没有可审核成果");
+  });
+
   it("最后生成的业务对象优先于旧文本，保留零金额和否定值", () => {
     const review = selectApprovalReview({ draft: "过时草稿", later: { amount: 0, approved: false, lines: [{ count: 0 }] } }, nodes);
     expect(review).toMatchObject({ sourceNodeId: "later", sourceTitle: "完善回复草稿", format: "json" });

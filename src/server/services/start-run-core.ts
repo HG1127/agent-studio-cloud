@@ -595,7 +595,18 @@ async function reuseExistingRun(args: {
   }
   if (existing.status === "queued" && !existing.workflowRunId
     && isRunStartLeaseExpired(existing.stepStates, existing.updatedAt)) {
-    return resumeQueuedRunStartCore(existing.id);
+    const resumed = await resumeQueuedRunStartCore(existing.id);
+    if (resumed.ok || resumed.retryable) return resumed;
+    // 读到过期租约之后另一请求可能已领取或启动；原任务已被接收，不应伪报业务冲突。
+    const [current] = await db.select({
+      status: runs.status, workflowRunId: runs.workflowRunId, stepStates: runs.stepStates, updatedAt: runs.updatedAt,
+    }).from(runs).where(and(eq(runs.id, existing.id), eq(runs.workspaceId, DEMO_WORKSPACE_ID))).limit(1);
+    if (current && (current.workflowRunId
+      || ["running", "waiting_approval", "waiting_event", "completed", "cancelled"].includes(current.status)
+      || (current.status === "queued" && !isRunStartLeaseExpired(current.stepStates, current.updatedAt)))) {
+      return { ok: true, runId: existing.id };
+    }
+    return resumed;
   }
   return { ok: true, runId: existing.id };
 }

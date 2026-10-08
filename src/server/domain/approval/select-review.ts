@@ -22,6 +22,9 @@ export function selectApprovalReview(
   for (const [nodeId, output] of candidates) {
     const node = nodes[nodeId];
     if (node?.type !== "ai" && !(node?.type === "rule" && node.rule?.kind === "business_rule" && !node.quality)) continue;
+    if (nodeId === preferredSourceNodeId && (output === null || (typeof output !== "object" && !(typeof output === "string" && output.trim())))) {
+      throw new Error("本次模型没有可审核成果");
+    }
     if (typeof output === "string" && output.trim()) {
       return ApprovalReview.parse({ sourceNodeId: nodeId, sourceTitle: node.title, content: output });
     }

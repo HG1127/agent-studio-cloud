@@ -334,6 +334,42 @@ describe("运行启动句柄恢复", () => {
     expect(await db.select().from(runs).where(eq(runs.sourceKey, sourceKey))).toHaveLength(1);
   });
 
+  it.each(["claimed", "started"] as const)("过期记录被另一请求 %s 后，原请求重试找回任务而非误报冲突", async (mode) => {
+    const sourceKey = mode === "claimed" ? "manual:00000000-0000-4000-8000-0000000007d2" : "manual:00000000-0000-4000-8000-0000000007d3";
+    const [existing] = await db.insert(runs).values({
+      workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, agentId: AGENT_ID, versionId: VERSION_ID,
+      status: "queued", input: {}, sourceType: "manual", sourceKey,
+      stepStates: withRunStartLease({}, createRunStartLease(new Date(Date.now() - RUN_START_LEASE_MS * 2))),
+    }).returning();
+    const originalSelect = db.select.bind(db);
+    const candidate = {
+      from: () => candidate, leftJoin: () => candidate, where: () => candidate,
+      limit: async () => {
+        const now = new Date();
+        if (mode === "started") {
+          await db.update(runs).set({ workflowRunId: "wrun_other_request", updatedAt: now }).where(eq(runs.id, existing.id));
+          return [];
+        }
+        const states = withRunStartLease(existing.stepStates, createRunStartLease(now, 2));
+        await db.update(runs).set({ stepStates: states, updatedAt: now }).where(eq(runs.id, existing.id));
+        return [{ ...existing, stepStates: states, updatedAt: now, manifest, existingAgentId: AGENT_ID, agentArchivedAt: null }];
+      },
+    };
+    const select = vi.spyOn(db, "select")
+      .mockImplementationOnce(() => originalSelect({
+        id: runs.id, agentId: runs.agentId, versionId: runs.versionId, sourceType: runs.sourceType, input: runs.input,
+        status: runs.status, workflowRunId: runs.workflowRunId, stepStates: runs.stepStates, updatedAt: runs.updatedAt, error: runs.error,
+      }) as ReturnType<typeof db.select>)
+      .mockImplementationOnce(() => candidate as unknown as ReturnType<typeof db.select>);
+    try {
+      expect(await startRunCore({ agentId: AGENT_ID, input: {}, sourceKey })).toEqual({ ok: true, runId: existing.id });
+      expect(startMock).not.toHaveBeenCalled();
+      expect(await db.select().from(runs).where(eq(runs.sourceKey, sourceKey))).toHaveLength(1);
+    } finally {
+      select.mockRestore();
+    }
+  });
+
   it("没有启动租约的旧微秒记录也能补启，而非不断返回排队任务", async () => {
     const [existing] = await db.insert(runs).values({
       workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, agentId: AGENT_ID, versionId: VERSION_ID,
