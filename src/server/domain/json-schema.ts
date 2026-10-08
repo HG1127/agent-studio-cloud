@@ -34,6 +34,33 @@ const MAX_PATTERN_INPUT_LENGTH = 4096;
 const MAX_VALUE_DEPTH = 32;
 const MAX_VALUE_NODES = 50_000;
 
+function variableQuantifierCount(pattern: string): number {
+  let count = 0;
+  let inCharacterClass = false;
+  for (let index = 0; index < pattern.length; index += 1) {
+    const character = pattern[index];
+    if (character === "\\") { index += 1; continue; }
+    if (inCharacterClass) {
+      if (character === "]") inCharacterClass = false;
+      continue;
+    }
+    if (character === "[") { inCharacterClass = true; continue; }
+    if (character === "*" || character === "+" || character === "?") {
+      count += 1;
+      if (pattern[index + 1] === "?") index += 1;
+    } else if (character === "{") {
+      const quantity = /^\{(\d+)(?:,(\d*))?\}/.exec(pattern.slice(index));
+      if (!quantity) continue;
+      const normalize = (value: string) => value.replace(/^0+/, "") || "0";
+      if (quantity[2] !== undefined && (quantity[2] === "" || normalize(quantity[1]) !== normalize(quantity[2]))) count += 1;
+      index += quantity[0].length - 1;
+      if (pattern[index + 1] === "?") index += 1;
+    }
+    if (count > 1) return count;
+  }
+  return count;
+}
+
 function jsonValueSafetyIssue(value: unknown): string | null {
   const stack: Array<{ value: unknown; path: string; depth: number }> = [{ value, path: "消息", depth: 0 }];
   const visited = new WeakSet<object>();
@@ -130,6 +157,8 @@ function validateSchemaRule(schema: unknown, path: string, depth: number): strin
     if (/[()|]/.test(unescaped) || /\\[1-9]/.test(rule.pattern)) {
       return `${path}的 pattern 只能使用简单文字、字符范围和数量规则`;
     }
+    // 无分组的多处可变重复同样会组合回溯，短输入也能长期占用服务端。
+    if (variableQuantifierCount(rule.pattern) > 1) return `${path}的 pattern 最多允许一处不固定数量规则，其余请使用固定数量`;
     if (!nonnegativeIntegerRule(rule.maxLength) || rule.maxLength > MAX_PATTERN_INPUT_LENGTH) {
       return `${path}使用 pattern 时必须设置不超过 ${MAX_PATTERN_INPUT_LENGTH} 的 maxLength`;
     }

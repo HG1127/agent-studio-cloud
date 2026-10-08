@@ -10,6 +10,17 @@ const tool = {
 };
 
 describe("业务工具注册表", () => {
+  it.each(["inputSchema", "outputSchema"])("注册时拒绝 %s 中可组合回溯的格式规则", (field) => {
+    const schema = { type: "object", properties: { code: { type: "string", pattern: "^a+a+a+a+a+a+b$", maxLength: 80 } } };
+    expect(parseToolRegistry(JSON.stringify([{ ...tool, [field]: schema }]))).toEqual([]);
+  });
+
+  it("仍注册包含固定前缀与单处可变重复的格式规则", () => {
+    const schema = { type: "object", properties: { code: { type: "string", pattern: "^[A-Z]{2}[0-9]+$", maxLength: 80 } } };
+    expect(parseToolRegistry(JSON.stringify([{ ...tool, inputSchema: schema, outputSchema: schema }])))
+      .toEqual([expect.objectContaining({ inputSchema: schema, outputSchema: schema })]);
+  });
+
   it("接收可供 HTTP 请求使用的凭据请求头", () => {
     expect(parseToolRegistry(JSON.stringify([{ ...tool, headers: { Authorization: "Bearer test" } }])))
       .toEqual([expect.objectContaining({ headers: { Authorization: "Bearer test" } })]);
