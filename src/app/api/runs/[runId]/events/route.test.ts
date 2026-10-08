@@ -2,12 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   batches: [] as Array<{ events: unknown[]; nextCursor: number; scannedCount: number }>,
-  getRunRow: vi.fn(async () => ({ id: "00000000-0000-4000-8000-0000000000f6", status: "completed" })),
+  getRunStatus: vi.fn(async () => "completed"),
   hasRunTraceKind: vi.fn(async () => false),
   listTraceSince: vi.fn(async () => mocks.batches.shift() ?? { events: [], nextCursor: 1, scannedCount: 0 }),
 }));
 
-vi.mock("@/server/queries/runs", () => ({ getRunRow: mocks.getRunRow }));
+vi.mock("@/server/queries/runs", () => ({ getRunStatus: mocks.getRunStatus }));
 vi.mock("@/server/queries/trace", () => ({
   hasRunTraceKind: mocks.hasRunTraceKind,
   listTraceSince: mocks.listTraceSince,
@@ -32,7 +32,7 @@ describe("运行轨迹流终态收尾", () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     mocks.batches.length = 0;
-    mocks.getRunRow.mockResolvedValue({ id: RUN_ID, status: "completed" });
+    mocks.getRunStatus.mockResolvedValue("completed");
     mocks.hasRunTraceKind.mockResolvedValue(false);
   });
 
@@ -75,7 +75,7 @@ describe("运行轨迹流终态收尾", () => {
 
   it("首次查询失败时返回可重试错误且不泄露原始异常", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    mocks.getRunRow.mockRejectedValueOnce(new Error("token=private-events-token"));
+    mocks.getRunStatus.mockRejectedValueOnce(new Error("token=private-events-token"));
 
     const response = await GET(new Request(`http://localhost/api/runs/${RUN_ID}/events`), {
       params: Promise.resolve({ runId: RUN_ID }),

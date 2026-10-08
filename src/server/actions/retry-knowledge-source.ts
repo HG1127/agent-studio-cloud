@@ -3,7 +3,6 @@
 import { randomUUID } from "node:crypto";
 import { get } from "@vercel/blob";
 import { and, eq, isNull } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { start } from "workflow/api";
 import { z } from "zod";
 import type { KnowledgeRetryResult } from "@/contracts/knowledge";
@@ -12,8 +11,9 @@ import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { auditEventValues } from "@/server/audit/event-values";
 import { knowledgeIngestWorkflow } from "@/server/workflows/knowledge-ingest";
-import { isKnowledgeParsingStalled } from "@/server/domain/knowledge/source-state";
+import { isKnowledgeParsingStalled, KNOWLEDGE_START_UNCONFIRMED_ERROR } from "@/server/domain/knowledge/source-state";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
 async function cancelBlobStream(stream: ReadableStream<Uint8Array>): Promise<void> {
   try {
@@ -49,7 +49,7 @@ export async function retryKnowledgeSourceAction(sourceId: string): Promise<Know
     if (!source) return { ok: false, error: "找不到这份知识资料，请刷新页面后重试" };
     const parsingStalled = isKnowledgeParsingStalled(source);
     if (source.status === "parsing" && !parsingStalled) {
-      revalidatePath("/knowledge");
+      revalidatePathsAfterCommit(["/knowledge"], "knowledge-retry-resume");
       return { ok: true };
     }
     if (source.status !== "failed" && !parsingStalled) {
@@ -66,42 +66,85 @@ export async function retryKnowledgeSourceAction(sourceId: string): Promise<Know
     }
     if (!blob?.stream) return { ok: false, error: "原文件不存在或暂时无法读取，请重新上传同一文件" };
     const ingestToken = `pending:${randomUUID()}`;
-    const claimed = await db.transaction(async (tx) => {
-      const [current] = await tx
-        .select({
-          id: knowledgeSources.id,
-          name: knowledgeSources.name,
-          mime: knowledgeSources.mime,
-          status: knowledgeSources.status,
-          blobPathname: knowledgeSources.blobPathname,
-          updatedAt: knowledgeSources.updatedAt,
-        })
-        .from(knowledgeSources)
-        .where(and(
-          eq(knowledgeSources.id, sourceId),
-          eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID),
-          isNull(knowledgeSources.archivedAt),
-        ))
-        .for("update")
-        .limit(1);
-      if (!current
-        || (current.status !== "failed" && !isKnowledgeParsingStalled(current))
-        || current.blobPathname !== source.blobPathname) return null;
-      await tx
-        .update(knowledgeSources)
-        .set({ status: "parsing", error: null, parseEngine: ingestToken, updatedAt: new Date() })
-        .where(and(eq(knowledgeSources.id, current.id), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)));
-      await tx.insert(auditEvents).values(auditEventValues({
-        workspaceId: DEMO_WORKSPACE_ID,
-        createdBy: DEMO_USER_ID,
-        action: "knowledge.reingested",
-        targetType: "knowledge",
-        targetId: current.id,
-        summary: `重新解析知识资料「${current.name}」`,
-        data: { previousStatus: current.status },
-      }));
-      return current;
-    });
+    let claimed: typeof source | null;
+    try {
+      claimed = await db.transaction(async (tx) => {
+        const [current] = await tx
+          .select({
+            id: knowledgeSources.id,
+            name: knowledgeSources.name,
+            mime: knowledgeSources.mime,
+            status: knowledgeSources.status,
+            blobPathname: knowledgeSources.blobPathname,
+            updatedAt: knowledgeSources.updatedAt,
+          })
+          .from(knowledgeSources)
+          .where(and(
+            eq(knowledgeSources.id, sourceId),
+            eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID),
+            isNull(knowledgeSources.archivedAt),
+          ))
+          .for("update")
+          .limit(1);
+        if (!current
+          || (current.status !== "failed" && !isKnowledgeParsingStalled(current))
+          || current.blobPathname !== source.blobPathname) return null;
+        await tx
+          .update(knowledgeSources)
+          .set({ status: "parsing", error: null, parseEngine: ingestToken, updatedAt: new Date() })
+          .where(and(eq(knowledgeSources.id, current.id), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)));
+        await tx.insert(auditEvents).values(auditEventValues({
+          workspaceId: DEMO_WORKSPACE_ID,
+          createdBy: DEMO_USER_ID,
+          action: "knowledge.reingested",
+          targetType: "knowledge",
+          targetId: current.id,
+          summary: `重新解析知识资料「${current.name}」`,
+          data: { previousStatus: current.status },
+        }));
+        return current;
+      });
+    } catch (error) {
+      let current: {
+        id: string;
+        name: string;
+        mime: string;
+        status: string;
+        blobPathname: string | null;
+        updatedAt: Date;
+        parseEngine: string | null;
+        archivedAt: Date | null;
+      } | undefined;
+      try {
+        [current] = await db
+          .select({
+            id: knowledgeSources.id,
+            name: knowledgeSources.name,
+            mime: knowledgeSources.mime,
+            status: knowledgeSources.status,
+            blobPathname: knowledgeSources.blobPathname,
+            updatedAt: knowledgeSources.updatedAt,
+            parseEngine: knowledgeSources.parseEngine,
+            archivedAt: knowledgeSources.archivedAt,
+          })
+          .from(knowledgeSources)
+          .where(and(eq(knowledgeSources.id, sourceId), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)))
+          .limit(1);
+      } catch (recoveryError) {
+        await cancelBlobStream(blob.stream);
+        console.error("核对知识重新解析结果失败", safeErrorForLog(recoveryError));
+        throw error;
+      }
+      if (current?.status === "parsing"
+        && !current.archivedAt
+        && current.parseEngine === ingestToken
+        && current.blobPathname === source.blobPathname) {
+        claimed = current;
+      } else {
+        await cancelBlobStream(blob.stream);
+        throw error;
+      }
+    }
     if (!claimed) {
       await cancelBlobStream(blob.stream);
       return { ok: false, error: "资料状态已经变化，请刷新页面查看最新状态" };
@@ -115,19 +158,12 @@ export async function retryKnowledgeSourceAction(sourceId: string): Promise<Know
         ingestToken,
       }]);
     } catch (error) {
-      console.error("知识重新解析工作流启动失败", safeErrorForLog(error));
-      await cancelBlobStream(blob.stream);
-      await db
-        .update(knowledgeSources)
-        .set({ status: "failed", error: "解析任务启动失败，请稍后重试", parseEngine: null, updatedAt: new Date() })
-        .where(and(
-          eq(knowledgeSources.id, claimed.id),
-          eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID),
-          eq(knowledgeSources.parseEngine, ingestToken),
-        ));
-      return { ok: false, error: "解析任务启动失败，请稍后重试" };
+      console.error("知识重新解析工作流启动状态未确认", safeErrorForLog(error));
+      // 无法区分确实未启动和仅丢失启动回执；原流与令牌须留给可能已开始的工作流。
+      revalidatePathsAfterCommit(["/knowledge"], "knowledge-retry-unconfirmed");
+      return { ok: false, error: KNOWLEDGE_START_UNCONFIRMED_ERROR };
     }
-    revalidatePath("/knowledge");
+    revalidatePathsAfterCommit(["/knowledge"], "knowledge-retry");
     return { ok: true };
   } catch (error) {
     console.error("重新解析知识资料失败", safeErrorForLog(error));

@@ -3,7 +3,7 @@
 // SSE 不可用或断流时降级为低频刷新，恢复连接后自动停止轮询。
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { MAX_VISIBLE_TRACE_EVENTS, TraceEventView } from "@/contracts/run";
+import { MAX_VISIBLE_TRACE_EVENTS, RunStreamDone, TraceEventView } from "@/contracts/run";
 
 function mergeEvents(groups: ReadonlyArray<ReadonlyArray<TraceEventView>>): TraceEventView[] {
   const bySeq = new Map<number, TraceEventView>();
@@ -56,14 +56,16 @@ export function useRunStream(runId: string, initialEvents: TraceEventView[], liv
     };
     const onDone = (event: MessageEvent<string>) => {
       try {
-        const payload = JSON.parse(event.data) as { status?: unknown };
+        const payload = RunStreamDone.parse(JSON.parse(event.data));
         if (payload.status === "error") {
           startFallback();
           router.refresh();
           return;
         }
       } catch {
-        // 无法识别的 done 仍按终态处理，避免损坏消息导致无限重连。
+        startFallback();
+        router.refresh();
+        return;
       }
       closedByDone = true;
       stopFallback();

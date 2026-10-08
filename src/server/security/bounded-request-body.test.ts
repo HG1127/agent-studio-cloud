@@ -43,6 +43,20 @@ describe("受限请求正文读取", () => {
     });
   });
 
+  it("拒绝无效 UTF-8 而不将消息内容改写成替换字符", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([123, 34, 120, 34, 58, 34, 255, 34, 125]));
+        controller.close();
+      },
+    });
+
+    await expect(readBoundedRequestText(requestWithBody(body), 100)).resolves.toEqual({
+      ok: false,
+      reason: "read_failed",
+    });
+  });
+
   it("按原始字节保留二进制正文", async () => {
     const body = new ReadableStream<Uint8Array>({
       start(controller) {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AgentCreateInput, AgentDetailView } from "@/contracts/agent";
 import { ApprovalDecisionInput, MAX_RUN_INPUT_BYTES, RunStartInput, RunStepView, WaitEventPayload } from "@/contracts/run";
 
@@ -157,5 +157,28 @@ describe("WaitEventPayload", () => {
     expect(WaitEventPayload.safeParse(nested).success).toBe(false);
     expect(WaitEventPayload.safeParse({ items: Array.from({ length: 2_001 }, (_, index) => index) }).success).toBe(false);
     expect(WaitEventPayload.safeParse(reserved).success).toBe(false);
+  });
+
+  it("超大数组在展开内容前即被拒绝", () => {
+    const oversized = Array(1_000_000) as unknown[];
+    oversized.map = () => { throw new Error("不应为超限数组构造中间列表"); };
+
+    expect(WaitEventPayload.safeParse({ items: oversized }).success).toBe(false);
+    expect(RunStartInput.safeParse({ agentId: uuid, input: { items: oversized } }).success).toBe(false);
+  });
+
+  it("超长字符串在 UTF-8 编码前即被拒绝", () => {
+    const encode = vi.spyOn(TextEncoder.prototype, "encode").mockImplementation(() => {
+      throw new Error("超限字符串不应进入 UTF-8 编码");
+    });
+    try {
+      const oversized = "x".repeat(1_000_000);
+      expect(RunStartInput.safeParse({ agentId: uuid, input: { text: oversized } }).success).toBe(false);
+      expect(WaitEventPayload.safeParse({ text: oversized }).success).toBe(false);
+      expect(RunStartInput.safeParse({ agentId: uuid, input: { first: "x".repeat(60_000), second: "x".repeat(60_000) } }).success).toBe(false);
+      expect(WaitEventPayload.safeParse({ first: "x".repeat(140_000), second: "x".repeat(140_000) }).success).toBe(false);
+    } finally {
+      encode.mockRestore();
+    }
   });
 });

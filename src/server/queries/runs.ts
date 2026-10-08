@@ -9,11 +9,13 @@ import {
   RunStepView,
   type RunStepView as RunStepViewType,
   type RunListFilters,
+  RunStatus,
+  type RunStatus as RunStatusType,
   RunSummary,
   RunView,
 } from "@/contracts/run";
 import { AgentManifest } from "@/contracts/manifest";
-import { agentVersions, agents, approvals, runSteps, runs, traceEvents, type Run } from "@/db/schema";
+import { agentVersions, agents, approvals, runSteps, runs, traceEvents } from "@/db/schema";
 import { db } from "@/lib/db";
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
 import { isRunStartLeaseExpired } from "@/server/services/run-start-lease";
@@ -54,7 +56,7 @@ export async function listRuns(
       filters.sourceType ? eq(runs.sourceType, filters.sourceType) : undefined,
       filters.agentId ? eq(runs.agentId, filters.agentId) : undefined,
     ))
-    .orderBy(desc(runs.createdAt))
+    .orderBy(desc(runs.createdAt), desc(runs.id))
     .limit(limit)
     .offset(offset);
   return parseQueryRows("运行列表", RunSummary, rows.map((row) => ({
@@ -237,15 +239,14 @@ export async function getRunView(runId: string, workspaceId: string): Promise<Ru
   return parsed.success ? parsed.data : null;
 }
 
-// SSE 路由与详情页共用的原始行读取（context/result 等契约外字段）
-export async function getRunRow(runId: string, workspaceId: string): Promise<Run | null> {
+export async function getRunStatus(runId: string, workspaceId: string): Promise<RunStatusType | null> {
   if (!RUN_ID.safeParse(runId).success) return null;
   const [row] = await db
-    .select()
+    .select({ status: runs.status })
     .from(runs)
     .where(and(eq(runs.id, runId), eq(runs.workspaceId, workspaceId)))
     .limit(1);
-  return row ?? null;
+  return row ? RunStatus.parse(row.status) : null;
 }
 
 export async function getRunContext(runId: string, workspaceId: string): Promise<Record<string, unknown> | null> {
@@ -259,23 +260,38 @@ export async function getRunContext(runId: string, workspaceId: string): Promise
 }
 
 export async function listRunSteps(runId: string, workspaceId: string): Promise<RunStepViewType[]> {
-  if (!RUN_ID.safeParse(runId).success) return [];
+  return (await listRunStepsForReport(runId, workspaceId)).steps;
+}
+
+export async function listRunStepsForReport(runId: string, workspaceId: string): Promise<{
+  steps: RunStepViewType[];
+  omittedCount: number;
+}> {
+  if (!RUN_ID.safeParse(runId).success) return { steps: [], omittedCount: 0 };
   const rows = await db
     .select()
     .from(runSteps)
     .where(and(eq(runSteps.runId, runId), eq(runSteps.workspaceId, workspaceId)))
     .orderBy(asc(runSteps.startedAt), asc(runSteps.createdAt));
-  return parseQueryRows("运行步骤", RunStepView, rows);
+  const steps = parseQueryRows("运行步骤", RunStepView, rows);
+  return { steps, omittedCount: rows.length - steps.length };
 }
 
 export async function listApprovals(runId: string, workspaceId: string): Promise<ApprovalView[]> {
-  if (!RUN_ID.safeParse(runId).success) return [];
+  return (await listApprovalsForReport(runId, workspaceId)).approvals;
+}
+
+export async function listApprovalsForReport(runId: string, workspaceId: string): Promise<{
+  approvals: ApprovalView[];
+  omittedCount: number;
+}> {
+  if (!RUN_ID.safeParse(runId).success) return { approvals: [], omittedCount: 0 };
   const rows = await db
     .select()
     .from(approvals)
     .where(and(eq(approvals.runId, runId), eq(approvals.workspaceId, workspaceId)))
     .orderBy(asc(approvals.createdAt));
-  return parseQueryRows("确认记录", ApprovalView, rows.map((row) => ({
+  const valid = parseQueryRows("确认记录", ApprovalView, rows.map((row) => ({
       id: row.id,
       runId: row.runId,
       nodeId: row.nodeId,
@@ -287,4 +303,5 @@ export async function listApprovals(runId: string, workspaceId: string): Promise
       note: row.note ? redactCredentialText(row.note) : null,
       decidedAt: row.decidedAt?.toISOString() ?? null,
     })));
+  return { approvals: valid, omittedCount: rows.length - valid.length };
 }

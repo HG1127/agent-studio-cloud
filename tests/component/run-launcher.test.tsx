@@ -16,6 +16,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: pushMock }) }));
 const AGENT_ID = "5a1b2c3d-4e5f-4a6b-8c9d-0e1f2a3b4c5d";
 const RUN_ID = "3f0d2c9e-8a7b-4c1d-9e2f-1a2b3c4d5e6f";
 const REQUEST_ID = "00000000-0000-4000-8000-000000000099";
+const NEXT_REQUEST_ID = "00000000-0000-4000-8000-000000000098";
 
 // JSON 文本含 {}[] 等按键修饰符，改用 change 事件直接设值
 function fillInput(value: string) {
@@ -110,6 +111,40 @@ describe("RunLauncher", () => {
 
   it("网络中断后重试复用请求标识", async () => {
     startRunMock.mockRejectedValueOnce(new Error("response lost")).mockResolvedValueOnce({ ok: true, runId: RUN_ID });
+    const user = userEvent.setup();
+    render(<RunLauncher agentId={AGENT_ID} />);
+
+    await user.click(screen.getByRole("button", { name: "运行此助手" }));
+    await screen.findByRole("alert");
+    await user.click(screen.getByRole("button", { name: "运行此助手" }));
+
+    await waitFor(() => expect(startRunMock).toHaveBeenCalledTimes(2));
+    expect(startRunMock.mock.calls[0]?.[0].requestId).toBe(REQUEST_ID);
+    expect(startRunMock.mock.calls[1]?.[0].requestId).toBe(REQUEST_ID);
+  });
+
+  it("网络中断后修改运行输入会使用新的请求标识", async () => {
+    vi.mocked(globalThis.crypto.randomUUID)
+      .mockReturnValueOnce(REQUEST_ID)
+      .mockReturnValueOnce(NEXT_REQUEST_ID);
+    startRunMock.mockRejectedValueOnce(new Error("response lost")).mockResolvedValueOnce({ ok: true, runId: RUN_ID });
+    const user = userEvent.setup();
+    render(<RunLauncher agentId={AGENT_ID} />);
+
+    fillInput('{"question":"原任务"}');
+    await user.click(screen.getByRole("button", { name: "运行此助手" }));
+    await screen.findByRole("alert");
+    fillInput('{"question":"新任务"}');
+    await user.click(screen.getByRole("button", { name: "运行此助手" }));
+
+    await waitFor(() => expect(startRunMock).toHaveBeenCalledTimes(2));
+    expect(startRunMock.mock.calls[0]?.[0]).toMatchObject({ input: { question: "原任务" }, requestId: REQUEST_ID });
+    expect(startRunMock.mock.calls[1]?.[0]).toMatchObject({ input: { question: "新任务" }, requestId: NEXT_REQUEST_ID });
+  });
+
+  it("服务端返回待确认回执时以同一标识重试", async () => {
+    startRunMock.mockResolvedValueOnce({ ok: false, error: "运行启动状态待确认", retryable: true })
+      .mockResolvedValueOnce({ ok: true, runId: RUN_ID });
     const user = userEvent.setup();
     render(<RunLauncher agentId={AGENT_ID} />);
 

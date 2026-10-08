@@ -1,7 +1,6 @@
 "use server";
 
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { AuditFixActionResult } from "@/contracts/audit";
 import { WorkflowDraft } from "@/contracts/workflow";
@@ -13,6 +12,7 @@ import { auditEventValues } from "@/server/audit/event-values";
 import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
 import { validateInlineWorkflows } from "@/server/domain/runtime/inline-workflow";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
 export async function applyAuditFixesAction(agentId: string): Promise<AuditFixActionResult> {
   if (!z.string().uuid().safeParse(agentId).success) return { ok: false, error: "助手信息不正确，请刷新页面后重试" };
@@ -59,7 +59,7 @@ export async function applyAuditFixesAction(agentId: string): Promise<AuditFixAc
     if (outcome.kind === "definition-missing") return { ok: false, error: "找不到这个助手的流程草稿" };
     if (outcome.kind === "definition-invalid") return { ok: false, error: "流程草稿格式不完整，无法自动修复" };
     if (outcome.kind === "inline-invalid") return { ok: false, error: `流程草稿无法执行：${outcome.error}` };
-    revalidatePath(`/agents/${outcome.agentId}`);
+    revalidatePathsAfterCommit([`/agents/${outcome.agentId}`], "audit-fixes");
     return {
       ok: true,
       applied: outcome.result.applied,

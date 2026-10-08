@@ -1,7 +1,8 @@
 const MAX_JSON_COMPARISON_DEPTH = 32;
 
 export function jsonValuesEqual(left: unknown, right: unknown, depth = 0): boolean {
-  if (Object.is(left, right)) return true;
+  // JSON 序列化会把 -0 与 0 规范为相同数字。
+  if (left === right) return true;
   if (depth > MAX_JSON_COMPARISON_DEPTH) return false;
   if (Array.isArray(left) || Array.isArray(right)) {
     if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;

@@ -36,12 +36,6 @@ export async function beginWait(args: { runId: string; node: WorkflowNode; hookT
     nodeType: args.node.type,
     status: "running",
   });
-  const updated = await withSafeWorkflowError(() => db
-    .update(runs)
-    .set({ status: "waiting_event", updatedAt: new Date() })
-    .where(and(eq(runs.id, args.runId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])))
-    .returning({ id: runs.id }), "等待状态暂时无法保存，请稍后重试");
-  if (updated.length === 0) throw new FatalError("运行已经结束，不能再进入等待状态");
   const submissionToken = args.node.wait.mode === "event" ? createWaitEventToken() : undefined;
   await appendTrace({
     runId: args.runId,
@@ -59,6 +53,13 @@ export async function beginWait(args: { runId: string; node: WorkflowNode; hookT
       : null,
     dedupeKey: `wait-started:${stepId}`,
   });
+  // 先保存本次等待凭据，再开放等待状态，避免读到上一次等待的消息凭据。
+  const updated = await withSafeWorkflowError(() => db
+    .update(runs)
+    .set({ status: "waiting_event", updatedAt: new Date() })
+    .where(and(eq(runs.id, args.runId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])))
+    .returning({ id: runs.id }), "等待状态暂时无法保存，请稍后重试");
+  if (updated.length === 0) throw new FatalError("运行已经结束，不能再进入等待状态");
 }
 
 export async function completeWait(args: {

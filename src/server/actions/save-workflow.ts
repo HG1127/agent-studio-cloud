@@ -1,7 +1,6 @@
 "use server";
 
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { SaveWorkflowResult } from "@/contracts/run";
 import { WorkflowDraft } from "@/contracts/workflow";
@@ -17,6 +16,7 @@ import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
 import { validationMessage } from "@/server/domain/validation-message";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { stableStringify } from "@/server/domain/pipeline";
+import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
 export async function saveWorkflowAction(
   agentId: string,
@@ -44,7 +44,7 @@ export async function saveWorkflowAction(
   const expectedRevision = expectedUpdatedAt === undefined || expectedUpdatedAt === null
     ? null
     : new Date(expectedUpdatedAt);
-  if (expectedRevision && Number.isNaN(expectedRevision.getTime())) {
+  if (!expectedRevision || Number.isNaN(expectedRevision.getTime())) {
     return { ok: false, error: "流程版本信息不正确，请刷新页面后重试" };
   }
   try {
@@ -66,13 +66,11 @@ export async function saveWorkflowAction(
         .limit(1);
       if (!definition) return "definition-missing" as const;
       const storedDraft = bindWorkflowRootAgent(parsed.data, { id: agentId, name: agent.name });
-      if (expectedRevision && definition.updatedAt.getTime() !== expectedRevision.getTime()) {
-        const currentDraft = WorkflowDraft.safeParse(definition.draft);
-        if (currentDraft.success && stableStringify(currentDraft.data) === stableStringify(storedDraft)) {
-          return { kind: "saved" as const, updatedAt: definition.updatedAt.toISOString() };
-        }
-        return "stale" as const;
+      const currentDraft = WorkflowDraft.safeParse(definition.draft);
+      if (currentDraft.success && stableStringify(currentDraft.data) === stableStringify(storedDraft)) {
+        return { kind: "saved" as const, updatedAt: definition.updatedAt.toISOString() };
       }
+      if (definition.updatedAt.getTime() !== expectedRevision.getTime()) return "stale" as const;
       const now = new Date();
       await tx
         .update(workflowDefinitions)
@@ -101,7 +99,7 @@ export async function saveWorkflowAction(
     if (result === "stale") {
       return { ok: false, error: "流程已在其他页面发生变化；你的修改仍保留在本页，请刷新核对后再保存" };
     }
-    revalidatePath(`/agents/${agentId}`);
+    revalidatePathsAfterCommit([`/agents/${agentId}`], "workflow-save");
     return { ok: true, updatedAt: result.updatedAt };
   } catch (error) {
     console.error("保存流程失败", safeErrorForLog(error));

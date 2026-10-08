@@ -1,7 +1,6 @@
 "use server";
 
 import { and, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { AgentArchiveInput, type AgentArchiveResult } from "@/contracts/agent";
 import { agents, agentVersions, auditEvents, evaluationRuns, runs, schedules } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
@@ -9,6 +8,7 @@ import { db } from "@/lib/db";
 import { auditEventValues } from "@/server/audit/event-values";
 import { activeVersionDependingOnAgent, liveRunDependingOnAgent } from "@/server/domain/runtime/collaboration-dependencies";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
 export async function setAgentArchivedAction(input: unknown): Promise<AgentArchiveResult> {
   const parsed = AgentArchiveInput.safeParse(input);
@@ -27,7 +27,21 @@ export async function setAgentArchivedAction(input: unknown): Promise<AgentArchi
         .for("update")
         .limit(1);
       if (!agent) return false;
-      if (parsed.data.archived === (agent.archivedAt !== null)) return true;
+      if (parsed.data.archived === (agent.archivedAt !== null)) {
+        if (parsed.data.archived) {
+          // 重复停用请求也修复旧数据中残留的启用任务，不重复写审计事件。
+          await tx
+            .update(schedules)
+            .set({ status: "paused", leaseUntil: null, updatedAt: now })
+            .where(and(
+              eq(schedules.agentId, parsed.data.agentId),
+              eq(schedules.workspaceId, DEMO_WORKSPACE_ID),
+              isNull(schedules.archivedAt),
+              ne(schedules.status, "paused"),
+            ));
+        }
+        return true;
+      }
 
       if (parsed.data.archived) {
         const [runningEvaluation] = await tx
@@ -72,6 +86,22 @@ export async function setAgentArchivedAction(input: unknown): Promise<AgentArchi
           parsed.data.agentId,
         );
         if (liveDependent) return { kind: "run-in-use" as const, inUseBy: liveDependent.agentName };
+        // 定时任务会继续运行创建时冻结的退役版本，不能只检查当前版本与进行中的运行。
+        const activeSchedules = await tx
+          .select({ versionId: schedules.versionId })
+          .from(schedules)
+          .where(and(
+            eq(schedules.workspaceId, DEMO_WORKSPACE_ID),
+            ne(schedules.agentId, parsed.data.agentId),
+            eq(schedules.status, "active"),
+            isNull(schedules.archivedAt),
+          ));
+        const scheduledDependent = liveRunDependingOnAgent(
+          dependencyVersions,
+          new Set(activeSchedules.map((schedule) => schedule.versionId)),
+          parsed.data.agentId,
+        );
+        if (scheduledDependent) return { kind: "schedule-in-use" as const, inUseBy: scheduledDependent.agentName };
       }
 
       const rows = await tx
@@ -113,13 +143,14 @@ export async function setAgentArchivedAction(input: unknown): Promise<AgentArchi
     if (typeof updated === "object" && updated.kind === "run-in-use") {
       return { ok: false, error: `助手「${updated.inUseBy}」仍有运行中的任务需要这个协作助手，请等待运行结束后再停用` };
     }
+    if (typeof updated === "object" && updated.kind === "schedule-in-use") {
+      return { ok: false, error: `助手「${updated.inUseBy}」仍有启用中的定时任务需要这个协作助手，请先暂停相关定时任务` };
+    }
     if (typeof updated === "object") {
       return { ok: false, error: `助手「${updated.inUseBy}」的当前版本或待验收版本仍在使用它，请先调整并重新发布` };
     }
     if (!updated) return { ok: false, error: "助手状态已经变化，请刷新页面后重试" };
-    revalidatePath("/agents");
-    revalidatePath(`/agents/${parsed.data.agentId}`);
-    revalidatePath("/schedules");
+    revalidatePathsAfterCommit(["/agents", `/agents/${parsed.data.agentId}`, "/schedules"], "agent-archive");
     return { ok: true };
   } catch (error) {
     console.error("更新助手状态失败", safeErrorForLog(error));

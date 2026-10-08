@@ -7,9 +7,10 @@ const fixture = vi.hoisted(() => ({
   userId: crypto.randomUUID(),
   generateText: vi.fn(),
   provider: vi.fn(),
+  revalidatePath: vi.fn(),
 }));
 vi.mock("@/lib/constants", () => ({ DEMO_WORKSPACE_ID: fixture.workspaceId, DEMO_USER_ID: fixture.userId }));
-vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("next/cache", () => ({ revalidatePath: fixture.revalidatePath }));
 vi.mock("ai", () => ({ generateText: fixture.generateText }));
 vi.mock("@ai-sdk/openai-compatible", () => ({ createOpenAICompatible: fixture.provider }));
 
@@ -32,6 +33,7 @@ beforeEach(() => {
   vi.stubEnv("MODEL_ENCRYPTION_KEY", "9".repeat(64));
   fixture.generateText.mockReset().mockResolvedValue({ text: " pong " });
   fixture.provider.mockReset().mockImplementation(() => (modelId: string) => ({ modelId }));
+  fixture.revalidatePath.mockReset();
 });
 afterEach(() => vi.unstubAllEnvs());
 afterAll(async () => {
@@ -163,6 +165,22 @@ describe("模型连接管理", () => {
     expect(await getRow(id)).toMatchObject({ archivedAt: expect.any(Date), isDefaultCompile: false });
     expect((await testModelConnectionAction(id)).ok).toBe(false);
     expect((await saveModelConnectionAction({ ...input, id })).ok).toBe(false);
+  });
+
+  it("保存或删除已提交后缓存刷新失败仍返回成功", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      fixture.revalidatePath.mockImplementationOnce(() => { throw new Error("缓存暂时不可用"); });
+      const id = await save();
+      expect(await getRow(id)).toMatchObject({ name: input.name, archivedAt: null });
+      fixture.revalidatePath.mockImplementationOnce(() => { throw new Error("缓存暂时不可用"); });
+      expect(await deleteModelConnectionAction(id)).toEqual({ ok: true });
+      expect((await getRow(id)).archivedAt).toBeInstanceOf(Date);
+      expect(fixture.revalidatePath).toHaveBeenCalledTimes(2);
+      expect(log).toHaveBeenCalledTimes(2);
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it("不能查询、编辑、删除或测试其他工作区的连接", async () => {

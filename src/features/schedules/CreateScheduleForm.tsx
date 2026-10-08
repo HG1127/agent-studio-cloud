@@ -1,6 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { ScheduleAgentOption } from "@/contracts/schedule";
 import { createScheduleAction } from "@/server/actions/create-schedule";
 
@@ -33,6 +33,8 @@ export function CreateScheduleForm({ agents }: { agents: ScheduleAgentOption[] }
   const [inputText, setInputText] = useState("{}");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const requestRef = useRef<{ fingerprint: string; id: string } | null>(null);
 
   const toggleNumber = (list: number[], value: number): number[] =>
     list.includes(value) ? list.filter((item) => item !== value) : [...list, value].sort((a, b) => a - b);
@@ -46,6 +48,7 @@ export function CreateScheduleForm({ agents }: { agents: ScheduleAgentOption[] }
         className="flex flex-col gap-3"
         onSubmit={async (event) => {
           event.preventDefault();
+          if (submittingRef.current) return;
           setError(null);
           let spec: SpecDraft;
           if (kind === "once") {
@@ -70,14 +73,27 @@ export function CreateScheduleForm({ agents }: { agents: ScheduleAgentOption[] }
             setError("运行输入不是有效的 JSON，请检查后重试");
             return;
           }
+          const fingerprint = JSON.stringify({ agentId, spec, input });
+          const request = requestRef.current?.fingerprint === fingerprint
+            ? requestRef.current
+            : { fingerprint, id: crypto.randomUUID() };
+          requestRef.current = request;
+          submittingRef.current = true;
           setSubmitting(true);
-          const result = await createScheduleAction({ agentId, spec, input });
-          setSubmitting(false);
-          if (!result.ok) {
-            setError(result.error);
-            return;
+          try {
+            const result = await createScheduleAction({ agentId, spec, input, requestId: request.id });
+            if (!result.ok) {
+              if (!result.retryable) requestRef.current = null;
+              setError(result.error);
+              return;
+            }
+            router.refresh();
+          } catch {
+            setError("创建状态待确认，请检查网络后用同一设置重试");
+          } finally {
+            submittingRef.current = false;
+            setSubmitting(false);
           }
-          router.refresh();
         }}
       >
         <div className="flex flex-wrap gap-3">

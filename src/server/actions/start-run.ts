@@ -1,8 +1,8 @@
 "use server";
-import { revalidatePath } from "next/cache";
 import { RunStartInput, type StartRunResult } from "@/contracts/run";
 import { validationMessage } from "@/server/domain/validation-message";
 import { startRunCore } from "@/server/services/start-run-core";
+import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
 export async function startRunAction(input: RunStartInput): Promise<StartRunResult> {
   const parsedInput = RunStartInput.safeParse(input);
@@ -15,9 +15,9 @@ export async function startRunAction(input: RunStartInput): Promise<StartRunResu
     sourceType: "manual",
     sourceKey: parsedInput.data.requestId ? `manual:${parsedInput.data.requestId}` : null,
   });
+  if (!result.ok && result.retryable) throw new Error("运行启动状态待确认，请用同一次请求重试");
   if (result.ok) {
-    revalidatePath(`/agents/${parsedInput.data.agentId}`);
-    revalidatePath("/agents");
+    revalidatePathsAfterCommit([`/agents/${parsedInput.data.agentId}`, "/agents"], "run-start");
   }
   return result;
 }

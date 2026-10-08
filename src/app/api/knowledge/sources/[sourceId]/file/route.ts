@@ -31,7 +31,7 @@ export async function GET(_request: Request, context: { params: Promise<{ source
     const blob = await get(source.blobPathname, { access: "private", token });
     if (!blob?.stream) return Response.json({ ok: false, error: "原文件不存在或暂时无法读取" }, { status: 404 });
     const headers = new Headers({
-      "content-type": blob.blob.contentType || source.mime || "application/octet-stream",
+      "content-type": source.mime || blob.blob.contentType || "application/octet-stream",
       "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(source.name)}`,
       "cache-control": "private, no-store",
     });

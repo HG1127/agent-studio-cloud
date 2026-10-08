@@ -1,7 +1,6 @@
 "use server";
 
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { AgentManifest } from "@/contracts/manifest";
 import { VersionSummary, type RestoreVersionResult } from "@/contracts/version";
@@ -24,6 +23,7 @@ import { validateWorkflowRoutes } from "@/server/domain/runtime/workflow-routes"
 import { validateInlineWorkflows } from "@/server/domain/runtime/inline-workflow";
 import { auditWorkflow } from "@/server/domain/audit";
 import { deriveDesignAuditStatus, filterPublishBlockers, workflowFingerprint } from "@/server/domain/pipeline";
+import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
 export async function restoreVersionAction(agentId: string, versionId: string): Promise<RestoreVersionResult> {
   if (!z.string().uuid().safeParse(agentId).success || !z.string().uuid().safeParse(versionId).success) {
@@ -280,7 +280,7 @@ export async function restoreVersionAction(agentId: string, versionId: string): 
           return { ok: false, error: `${restoreOutcome.error}，无法恢复这个历史版本` };
         }
         if (restoreOutcome.kind === "knowledge-unavailable") return { ok: false, error: restoreOutcome.error };
-        revalidatePath(`/agents/${agentId}`);
+        revalidatePathsAfterCommit([`/agents/${agentId}`], "version-restore");
         return { ok: true, version: restoreOutcome.version };
       } catch (error) {
         if (!isUniqueViolation(error)) throw error;

@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { JsonStorageValue } from "./json";
+import { ModelOutputConfig } from "./model-output";
+import { InputMapping } from "./input-mapping";
 
 const RESERVED_FIELD_NAMES: ReadonlySet<string> = new Set(["__proto__", "prototype", "constructor"]);
 const RESERVED_WORKFLOW_NODE_IDS: ReadonlySet<string> = new Set([
@@ -21,6 +23,7 @@ const InlineStepData = z.record(z.string(), z.unknown()).transform((step) => {
 });
 
 export const MAX_WORKFLOW_NODES = 200;
+export const MAX_KNOWLEDGE_SOURCES_PER_NODE = 100;
 export const MAX_WORKFLOW_BYTES = 1024 * 1024;
 export const MAX_CONDITION_BRANCHES = 20;
 export const MAX_PARALLEL_BRANCHES = 8;
@@ -113,13 +116,15 @@ export const WorkflowNode = z.object({
   retry: z.object({ maxAttempts: z.number().int().min(1).max(8), backoffMs: z.number().int().min(50).max(60000) }).optional(),
   // 类型专属（宽松可选，具体节点类型由运行时 switch 消费）
   modelClass: z.string().optional(),
+  modelOutput: ModelOutputConfig.optional(),
+  inputMapping: InputMapping.optional(),
   purpose: z.string().optional(),
   approval: z.object({ role: z.string(), reason: z.string() }).optional(),
   tool: ToolSpec.optional(),
   knowledge: z.object({
     space: z.string(),
     query: z.string().optional(),
-    sourceIds: z.array(z.string().uuid()).max(100).optional(),
+    sourceIds: z.array(z.string().uuid()).max(MAX_KNOWLEDGE_SOURCES_PER_NODE).optional(),
     selectionRequired: z.boolean().optional(),
   }).optional(),
   condition: z.object({
@@ -147,6 +152,16 @@ export const WorkflowNode = z.object({
   toAgent: z.object({ id: z.string(), name: z.string().optional(), versionId: z.string().optional() }).optional(),
   contract: HandoffContract.optional(),
   businessSpec: z.record(z.string(), z.unknown()).nullable().default(null),
+}).superRefine((node, context) => {
+  if (node.inputMapping && !["tool", "ai", "agent_call", "handoff"].includes(node.type) && !(node.type === "rule" && node.rule?.kind === "business_rule" && !node.quality)) {
+    context.addIssue({ code: "custom", path: ["inputMapping"], message: "只有智能处理、业务判断、工具和助手协作步骤可以配置输入映射" });
+  }
+  if (node.inputMapping?.includeUpstreamOutputs && ["agent_call", "handoff"].includes(node.type)) {
+    context.addIssue({ code: "custom", path: ["inputMapping", "includeUpstreamOutputs"], message: "助手协作请逐项映射需要的上游字段，不能额外携带全部成果" });
+  }
+  if (node.modelOutput && node.type !== "ai" && !(node.type === "rule" && node.rule?.kind === "business_rule" && !node.quality)) {
+    context.addIssue({ code: "custom", path: ["modelOutput"], message: "只有智能处理和业务判断步骤可以配置模型结果字段" });
+  }
 }).transform(omitUndefined);
 export const WorkflowDraft = z.object({
   id: z.string(), versionId: z.string().nullable().default(null),

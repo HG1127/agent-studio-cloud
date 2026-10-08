@@ -46,10 +46,10 @@ describe("冻结版本导出", () => {
       params: Promise.resolve({ agentId: AGENT_ID, versionId: VERSION_ID }),
     });
     expect(response.status).toBe(200);
-    expect(response.headers.get("content-disposition")).toContain(encodeURIComponent("合同-审核助手-版本-3.json"));
+    expect(response.headers.get("content-disposition")).toContain(encodeURIComponent("合同审核助手-版本-3.json"));
     expect(await response.json()).toMatchObject({
       format: "agent-studio-cloud-version",
-      agent: { name: "合同 审核助手" },
+      agent: { name: "合同审核助手" },
       version: { number: 3, status: "retired" },
       manifest: { schemaVersion: "4.0" },
     });
@@ -65,9 +65,17 @@ describe("冻结版本导出", () => {
   });
 
   it("历史版本的助手名称不符合当前格式时不抛出 500", async () => {
+    const original = await getSource();
     getSource.mockResolvedValueOnce({
-      ...(await getSource()),
+      ...original,
       agentName: " ",
+      manifest: {
+        ...original.manifest,
+        workflowSnapshot: {
+          ...original.manifest.workflowSnapshot,
+          rootAgent: { id: "root", name: " ", role: "业务助手" },
+        },
+      },
     });
 
     const response = await GET(new Request("http://localhost"), {

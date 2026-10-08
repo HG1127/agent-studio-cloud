@@ -3,7 +3,6 @@
 import { generateText } from "ai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { and, eq, isNull } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { AgentCreateInput, type CreateAgentResult } from "@/contracts/agent";
 import { WorkflowDraft } from "@/contracts/workflow";
@@ -19,6 +18,7 @@ import { auditEventValues } from "@/server/audit/event-values";
 import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { agentIdentityMatches } from "@/server/domain/agent-identity";
+import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
 async function resolveCompileModel(): Promise<{ baseUrl: string; apiKey: string; modelId: string } | null> {
   const [connection] = await db.select({
@@ -139,7 +139,7 @@ export async function createAgentAction(input: AgentCreateInput, requestId?: str
       }));
       return created.id;
     });
-    revalidatePath("/agents");
+    revalidatePathsAfterCommit(["/agents"], "agent-create");
     return { ok: true, agentId: createdAgentId };
   } catch (error) {
     if (requestId) {
@@ -157,7 +157,7 @@ export async function createAgentAction(input: AgentCreateInput, requestId?: str
           eq(agents.workspaceId, DEMO_WORKSPACE_ID),
         )).limit(1);
         if (existing && agentIdentityMatches(existing, identity)) {
-          revalidatePath("/agents");
+          revalidatePathsAfterCommit(["/agents"], "agent-create-recover");
           return { ok: true, agentId: existing.id };
         }
       } catch (recoveryError) {

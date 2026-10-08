@@ -8,9 +8,10 @@ const mocks = vi.hoisted(() => ({
     sourceType: "manual",
   } as { agentId: string; versionId: string; input: Record<string, unknown>; sourceType: string } | null,
   startRun: vi.fn(),
+  revalidatePath: vi.fn(),
 }));
 
-vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 vi.mock("@/lib/db", () => ({
   db: {
     select: () => ({
@@ -34,6 +35,7 @@ describe("再次运行幂等键", () => {
       ok: true,
       runId: "00000000-0000-4000-8000-000000000075",
     });
+    mocks.revalidatePath.mockReset();
   });
 
   it("把原运行和本次请求映射为唯一来源键", async () => {
@@ -46,6 +48,24 @@ describe("再次运行幂等键", () => {
       sourceType: "manual",
       sourceKey: `manual-retry:${RUN_ID}:${REQUEST_ID}`,
     });
+  });
+
+  it("再次运行状态待确认时抛出错误以保留原请求标识", async () => {
+    mocks.startRun.mockResolvedValueOnce({ ok: false, error: "运行启动状态待确认", retryable: true });
+
+    await expect(retryRunAction(RUN_ID, REQUEST_ID)).rejects.toThrow("运行启动状态待确认");
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("新运行已启动后缓存刷新失败不误报再次运行失败", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.revalidatePath.mockImplementationOnce(() => { throw new Error("缓存暂时不可用"); });
+
+    await expect(retryRunAction(RUN_ID, REQUEST_ID)).resolves.toEqual({
+      ok: true, runId: "00000000-0000-4000-8000-000000000075",
+    });
+    expect(mocks.revalidatePath.mock.calls.map(([path]) => path)).toEqual(["/runs", `/runs/${RUN_ID}`]);
+    log.mockRestore();
   });
 
   it("拒绝无效请求标识", async () => {

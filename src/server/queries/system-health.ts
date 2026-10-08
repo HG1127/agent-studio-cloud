@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import migrationJournal from "@/db/migrations/meta/_journal.json";
 
 export const LATEST_MIGRATION_WHEN = migrationJournal.entries.at(-1)?.when;
@@ -19,6 +20,7 @@ export const REQUIRED_DATABASE_OBJECTS = [
   "public.knowledge_sources",
   "public.knowledge_chunks",
   "public.schedules",
+  "public.schedules_workspace_request_idx",
   "public.model_connections",
   "public.agent_memories",
   "public.evaluation_cases",
@@ -32,9 +34,12 @@ export const REQUIRED_DATABASE_OBJECTS = [
   "public.knowledge_sources_workspace_archived_created_idx",
   "public.run_feedback_workspace_run_unique",
   "public.run_feedback_workspace_agent_updated_idx",
+  "public.run_feedback_workspace_case_idx",
   "public.wait_event_submissions_token_unique",
   "public.wait_event_submissions_run_created_idx",
   "public.evaluation_runs_workspace_request_unique",
+  "public.knowledge_chunks_content_trgm_idx",
+  "public.agent_memories_content_trgm_idx",
 ] as const;
 
 export const REQUIRED_DATABASE_COLUMNS = [
@@ -45,6 +50,8 @@ export const REQUIRED_DATABASE_COLUMNS = [
   { tableName: "knowledge_chunks", columnName: "created_by", requireNotNull: true, allowDefault: false },
   { tableName: "knowledge_chunks", columnName: "updated_at", requireNotNull: true, allowDefault: true },
   { tableName: "evaluation_runs", columnName: "request_id", requireNotNull: false, allowDefault: false },
+  { tableName: "schedules", columnName: "request_id", requireNotNull: false, allowDefault: false },
+  { tableName: "evaluation_case_results", columnName: "case_snapshot", requireNotNull: false, allowDefault: false },
 ] as const;
 
 export async function isDatabaseReady() {
@@ -81,5 +88,14 @@ export async function isDatabaseReady() {
     select coalesce(max(created_at), 0) >= ${LATEST_MIGRATION_WHEN} as current
     from drizzle.__drizzle_migrations
   `);
-  return migrationRows[0]?.current === true;
+  if (migrationRows[0]?.current !== true) return false;
+  const tenantRows = await db.execute<{ ready: boolean }>(sql`
+    select
+      exists (select 1 from public.workspaces where id = ${DEMO_WORKSPACE_ID})
+      and exists (
+        select 1 from public.users
+        where id = ${DEMO_USER_ID} and workspace_id = ${DEMO_WORKSPACE_ID}
+      ) as ready
+  `);
+  return tenantRows[0]?.ready === true;
 }

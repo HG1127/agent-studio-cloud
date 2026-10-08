@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import { MAX_SUBFLOW_STEPS, WorkflowNode } from "@/contracts/workflow";
 import { prepareSubflow } from "@/server/domain/runtime/subflow-runtime";
@@ -18,6 +19,22 @@ function subflowNode(steps: Array<Record<string, unknown>>) {
 }
 
 describe("一组步骤运行准备", () => {
+  it("接受持久工作流隔离环境反序列化的结构化配置与对象固定值", () => {
+    const steps = runInNewContext('JSON.parse(payload)', { payload: JSON.stringify([
+      { id: "extract", title: "提取金额", type: "ai", modelOutput: {
+        format: "json", schema: { type: "object", properties: { amount: { type: "number" } } }, mockOutput: { amount: 123.5 },
+      } },
+      { id: "record", title: "记录金额", type: "tool", inputMapping: { fields: [
+        { target: ["customer"], source: { kind: "literal", value: { id: "c1" } } },
+        { target: ["amount"], source: { kind: "output", nodeId: "research.extract", path: ["amount"] }, fallback: { missing: true } },
+      ] } },
+    ]) });
+    const prepared = prepareSubflow(subflowNode(steps));
+    expect(prepared).toMatchObject({ ok: true });
+    if (!prepared.ok) return;
+    expect(prepared.steps[0].modelOutput).toMatchObject({ mockOutput: { amount: 123.5 } });
+    expect(prepared.steps[1].inputMapping?.fields[0].source).toEqual({ kind: "literal", value: { id: "c1" } });
+  });
   it("按顺序生成隔离的子步骤标识，并兼容未声明类型的内容步骤", () => {
     const result = prepareSubflow(subflowNode([
       { id: "collect", title: "收集材料", type: "knowledge", knowledge: { space: "业务知识库" } },

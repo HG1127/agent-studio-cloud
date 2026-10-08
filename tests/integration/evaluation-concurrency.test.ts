@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentManifest } from "@/contracts/manifest";
+import { MAX_EVALUATION_CASES } from "@/contracts/evaluation";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
@@ -8,8 +9,9 @@ import { agentVersions, agents, evaluationCaseResults, evaluationCases, evaluati
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { createEvaluationCaseAction, generateEvaluationCasesAction, setEvaluationCaseArchivedAction, startEvaluationAction, updateEvaluationCaseAction } from "@/server/actions/evaluations";
-import { completeEvaluationForRun } from "@/server/services/evaluation-state";
+import { completeEvaluationForRun, reconcileEvaluationSummary } from "@/server/services/evaluation-state";
 import { prepareEvaluationRun } from "@/server/services/evaluation-start";
+import { listEvaluationRuns } from "@/server/queries/evaluations";
 
 const AGENT_ID = "00000000-0000-4000-8000-0000000000a1";
 const VERSION_ID = "00000000-0000-4000-8000-0000000000a2";
@@ -174,12 +176,39 @@ describe("自动验收并发启动", () => {
     const [archived] = await db.select().from(evaluationCases).where(eq(evaluationCases.id, CASE_ID));
     expect(archived.archivedAt).toEqual(archivedAt);
 
-    await db.update(evaluationCases).set({ archivedAt: null }).where(eq(evaluationCases.id, CASE_ID));
     expect(await setEvaluationCaseArchivedAction({
       caseId: CASE_ID,
       agentId: AGENT_ID,
       archived: false,
     })).toEqual({ ok: true });
+    const [restored] = await db.select().from(evaluationCases).where(eq(evaluationCases.id, CASE_ID));
+    expect(restored.archivedAt).toBeNull();
+    expect(await setEvaluationCaseArchivedAction({
+      caseId: CASE_ID,
+      agentId: AGENT_ID,
+      archived: false,
+    })).toEqual({ ok: true });
+  });
+
+  it("启用样例已达上限时不能恢复归档样例", async () => {
+    await insertFixture();
+    await db.update(evaluationCases).set({ archivedAt: new Date() }).where(eq(evaluationCases.id, CASE_ID));
+    await db.insert(evaluationCases).values(Array.from({ length: MAX_EVALUATION_CASES }, (_, index) => ({
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
+      agentId: AGENT_ID,
+      name: `启用样例 ${index + 1}`,
+      input: {},
+      expectations: [],
+    })));
+
+    expect(await setEvaluationCaseArchivedAction({
+      caseId: CASE_ID,
+      agentId: AGENT_ID,
+      archived: false,
+    })).toEqual({ ok: false, error: `每个助手最多保留 ${MAX_EVALUATION_CASES} 条启用中的验收样例` });
+    const [archived] = await db.select().from(evaluationCases).where(eq(evaluationCases.id, CASE_ID));
+    expect(archived.archivedAt).not.toBeNull();
   });
 
   it("同一助手同时发起两次时复用同一轮验收", async () => {
@@ -271,6 +300,35 @@ describe("自动验收并发启动", () => {
     expect(result).toMatchObject({ status: "passed", error: null, runId: RUN_ID });
   });
 
+  it("验收结果保留启动时样例名称与条件，不随样例后续修改", async () => {
+    await insertFixture();
+    await db.update(evaluationCases)
+      .set({ expectations: [{ path: "answer", operator: "equals", value: "通过" }] })
+      .where(eq(evaluationCases.id, CASE_ID));
+    const prepared = await prepareEvaluationRun(AGENT_ID);
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+    await db.update(evaluationCases).set({
+      name: "后来修改的名称",
+      expectations: [{ path: "answer", operator: "equals", value: "未通过" }],
+    }).where(eq(evaluationCases.id, CASE_ID));
+    await db.insert(runs).values({
+      id: RUN_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID,
+      agentId: AGENT_ID, versionId: VERSION_ID, status: "completed", input: {}, result: { answer: "通过" },
+      sourceType: "evaluation", sourceKey: `evaluation:${prepared.evaluationId}:${CASE_ID}`,
+    });
+
+    await completeEvaluationForRun(RUN_ID, { answer: "通过" });
+
+    const [result] = await db.select().from(evaluationCaseResults)
+      .where(eq(evaluationCaseResults.evaluationRunId, prepared.evaluationId));
+    expect(result).toMatchObject({ status: "passed", caseSnapshot: {
+      name: "基础样例", input: {}, expectations: [{ path: "answer", operator: "equals", value: "通过" }],
+    } });
+    const [history] = await listEvaluationRuns(AGENT_ID, DEMO_WORKSPACE_ID);
+    expect(history.results[0].caseName).toBe("基础样例");
+  });
+
   it("检查并继续时对账已经结束但尚未汇总的运行", async () => {
     await insertFixture();
     await db.update(evaluationCases)
@@ -298,6 +356,33 @@ describe("自动验收并发启动", () => {
     const [result] = await db.select().from(evaluationCaseResults).where(eq(evaluationCaseResults.evaluationRunId, prepared.evaluationId));
     expect(evaluation).toMatchObject({ status: "completed", passedCount: 1, failedCount: 0 });
     expect(result).toMatchObject({ status: "passed", runId: RUN_ID, error: null });
+  });
+
+  it("缺少一条预期结果时不能把候选版本误晋级", async () => {
+    await insertFixture();
+    await db.insert(evaluationCases).values({
+      id: CASE_ID_2,
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
+      agentId: AGENT_ID,
+      name: "另一条样例",
+      input: {},
+      expectations: [],
+    });
+    const prepared = await prepareEvaluationRun(AGENT_ID);
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+    await db.update(evaluationCaseResults).set({ status: "passed" })
+      .where(eq(evaluationCaseResults.evaluationCaseId, CASE_ID));
+    await db.delete(evaluationCaseResults).where(eq(evaluationCaseResults.evaluationCaseId, CASE_ID_2));
+
+    await reconcileEvaluationSummary(prepared.evaluationId);
+
+    const [evaluation] = await db.select().from(evaluationRuns).where(eq(evaluationRuns.id, prepared.evaluationId));
+    const [version] = await db.select().from(agentVersions).where(eq(agentVersions.id, VERSION_ID));
+    expect(evaluation).toMatchObject({ status: "running", totalCount: 2, passedCount: 1, failedCount: 0 });
+    expect(evaluation.finishedAt).toBeNull();
+    expect(version.status).toBe("candidate");
   });
 
   it("多个样例同时完成时汇总不会被较早的部分结果覆盖", async () => {

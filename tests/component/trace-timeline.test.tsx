@@ -201,6 +201,21 @@ describe("TraceTimeline", () => {
     expect(refreshMock).toHaveBeenCalledTimes(2);
   });
 
+  it("未知结束状态不误判为终态，保留重连和低频刷新", () => {
+    vi.useFakeTimers();
+    (globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
+    render(<TraceTimeline runId={RUN_ID} initialEvents={EVENTS} live />);
+    const source = FakeEventSource.instances[0];
+
+    act(() => {
+      source.emit("done", { status: "unexpected" });
+      vi.advanceTimersByTime(5_000);
+    });
+
+    expect(source.closed).toBe(false);
+    expect(refreshMock).toHaveBeenCalledTimes(2);
+  });
+
   it("浏览器没有事件流能力时降级为定时刷新", () => {
     vi.useFakeTimers();
     delete (globalThis as { EventSource?: unknown }).EventSource;

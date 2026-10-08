@@ -3,8 +3,9 @@
 // 事件协议：event: trace（data 为 TraceEventView）；:ping 注释行心跳；run 终态且轨迹追平后
 // 发 event: done 并关闭连接；run 行被删除后发 done(status:"gone") 关闭，避免订阅挂住。
 import { z } from "zod";
+import { RunStreamDone } from "@/contracts/run";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
-import { getRunRow } from "@/server/queries/runs";
+import { getRunStatus } from "@/server/queries/runs";
 import { hasRunTraceKind, listTraceSince } from "@/server/queries/trace";
 import { resolveSseCursor } from "@/server/domain/sse-cursor";
 import { terminalTraceKindForStatus } from "@/server/domain/trace-state";
@@ -23,14 +24,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
   if (!z.string().uuid().safeParse(runId).success) {
     return Response.json({ error: "运行标识不正确" }, { status: 400 });
   }
-  let run: Awaited<ReturnType<typeof getRunRow>>;
+  let status: Awaited<ReturnType<typeof getRunStatus>>;
   try {
-    run = await withSafeQueryError(() => getRunRow(runId, DEMO_WORKSPACE_ID), "run-events-open");
+    status = await withSafeQueryError(() => getRunStatus(runId, DEMO_WORKSPACE_ID), "run-events-open");
   } catch (error) {
     if (error instanceof SafeQueryError) return queryUnavailableResponse();
     throw error;
   }
-  if (!run) {
+  if (status === null) {
     return Response.json({ error: "找不到这次运行" }, { status: 404 });
   }
 
@@ -49,6 +50,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
       };
       const pushEvent = (event: string, data: unknown, id?: number) =>
         send(`${id === undefined ? "" : `id: ${id}\n`}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      const pushDone = (status: unknown) => pushEvent("done", RunStreamDone.parse({ status }));
       const onAbort = () => {
         closed = true;
       };
@@ -60,14 +62,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
         for (;;) {
           // 先追平轨迹，再判定终态：终态当轮没有新事件才发 done，保证不漏最后一批
           let batch: Awaited<ReturnType<typeof listTraceSince>>;
-          let current: Awaited<ReturnType<typeof getRunRow>>;
+          let currentStatus: Awaited<ReturnType<typeof getRunStatus>>;
           try {
             batch = await listTraceSince(runId, DEMO_WORKSPACE_ID, cursor);
-            current = await getRunRow(runId, DEMO_WORKSPACE_ID);
+            currentStatus = await getRunStatus(runId, DEMO_WORKSPACE_ID);
           } catch (error) {
             // 静默关流会让客户端收不到 done 而无限重连重放，必须先显式告知
             console.error(`[events] 轮询数据库异常，通知客户端后关流 run=${runId}`, safeErrorForLog(error));
-            pushEvent("done", { status: "error" });
+            pushDone("error");
             break;
           }
           for (const row of batch.events) {
@@ -75,12 +77,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
           }
           cursor = batch.nextCursor;
           if (closed) break;
-          if (!current) {
-            pushEvent("done", { status: "gone" });
+          if (currentStatus === null) {
+            pushDone("gone");
             break;
           }
-          if (TERMINAL_STATUSES.has(current.status)) {
-            const terminalKind = terminalTraceKindForStatus(current.status);
+          if (TERMINAL_STATUSES.has(currentStatus)) {
+            const terminalKind = terminalTraceKindForStatus(currentStatus);
             terminalTraceObserved = terminalTraceObserved
               || Boolean(terminalKind && batch.events.some((event) => event.kind === terminalKind));
             if (!terminalTraceObserved && terminalKind) {
@@ -94,7 +96,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
             if (batch.scannedCount === 0 && (
               terminalTraceObserved || Date.now() - terminalSince >= TERMINAL_TRACE_GRACE_MS
             )) {
-              pushEvent("done", { status: current.status });
+              pushDone(currentStatus);
               break;
             }
           } else {

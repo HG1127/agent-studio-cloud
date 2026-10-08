@@ -7,6 +7,9 @@ const mocks = vi.hoisted(() => ({
   get: vi.fn(),
   start: vi.fn(),
   revalidatePath: vi.fn(),
+  transactionError: null as Error | null,
+  commitResponseLost: false,
+  recoveryBase: null as Record<string, unknown> | null,
 }));
 
 vi.mock("@/lib/db", () => {
@@ -28,7 +31,15 @@ vi.mock("@/lib/db", () => {
       values: async (value: Record<string, unknown>) => { mocks.audits.push(value); },
     }),
   };
-  return { db: { ...client, transaction: async (run: (tx: typeof client) => unknown) => run(client) } };
+  return { db: { ...client, transaction: async (run: (tx: typeof client) => unknown) => {
+    if (mocks.transactionError) throw mocks.transactionError;
+    const result = await run(client);
+    if (mocks.commitResponseLost) {
+      mocks.rows.push([{ ...mocks.recoveryBase, ...mocks.updates.at(-1) }]);
+      throw new Error("commit response lost");
+    }
+    return result;
+  } } };
 });
 
 vi.mock("@vercel/blob", () => ({ get: mocks.get }));
@@ -57,6 +68,9 @@ beforeEach(() => {
   });
   mocks.start.mockReset().mockResolvedValue(undefined);
   mocks.revalidatePath.mockReset();
+  mocks.transactionError = null;
+  mocks.commitResponseLost = false;
+  mocks.recoveryBase = null;
 });
 
 afterEach(() => {
@@ -98,6 +112,16 @@ describe("重新解析知识资料", () => {
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/knowledge");
   });
 
+  it("重新解析已启动后缓存刷新失败仍返回成功", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.rows = [[source], [source]];
+    mocks.revalidatePath.mockImplementationOnce(() => { throw new Error("缓存暂时不可用"); });
+
+    await expect(retryKnowledgeSourceAction(SOURCE_ID)).resolves.toEqual({ ok: true });
+    expect(mocks.start).toHaveBeenCalledOnce();
+    expect(mocks.updates[0]).toMatchObject({ status: "parsing" });
+  });
+
   it("解析任务长时间没有更新时允许从原文件恢复", async () => {
     vi.spyOn(Date, "now").mockReturnValue(new Date("2026-09-25T12:10:01.000Z").getTime());
     const stalled = { ...source, status: "parsing", updatedAt: new Date("2026-09-25T12:05:00.000Z") };
@@ -122,6 +146,16 @@ describe("重新解析知识资料", () => {
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/knowledge");
   });
 
+  it("复用正常解析中的任务时缓存刷新失败也保持成功结果", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(Date, "now").mockReturnValue(new Date("2026-09-25T12:09:59.000Z").getTime());
+    mocks.rows = [[{ ...source, status: "parsing", updatedAt: new Date("2026-09-25T12:05:00.000Z") }]];
+    mocks.revalidatePath.mockImplementationOnce(() => { throw new Error("缓存暂时不可用"); });
+
+    await expect(retryKnowledgeSourceAction(SOURCE_ID)).resolves.toEqual({ ok: true });
+    expect(mocks.start).not.toHaveBeenCalled();
+  });
+
   it("锁内状态已变化时不重复启动解析", async () => {
     const stream = new ReadableStream({ start(controller) { controller.close(); } });
     const cancel = vi.spyOn(stream, "cancel");
@@ -138,7 +172,43 @@ describe("重新解析知识资料", () => {
     expect(cancel).toHaveBeenCalledOnce();
   });
 
-  it("工作流启动失败时把资料恢复成可重试失败状态", async () => {
+  it("领取解析任务的数据库事务失败时关闭已打开的原文件流", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const stream = new ReadableStream({ start(controller) { controller.close(); } });
+    const cancel = vi.spyOn(stream, "cancel");
+    mocks.get.mockResolvedValue({ stream });
+    mocks.rows = [[source]];
+    mocks.transactionError = new Error("数据库暂不可用");
+
+    await expect(retryKnowledgeSourceAction(SOURCE_ID)).resolves.toEqual({
+      ok: false,
+      error: "重新解析失败，请稍后重试",
+    });
+
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(mocks.start).not.toHaveBeenCalled();
+  });
+
+  it("领取事务已提交但回执丢失时对账并继续使用原文件流启动解析", async () => {
+    const stream = new ReadableStream({ start(controller) { controller.close(); } });
+    const cancel = vi.spyOn(stream, "cancel");
+    mocks.get.mockResolvedValue({ stream });
+    mocks.rows = [[source], [source]];
+    mocks.recoveryBase = { ...source, archivedAt: null };
+    mocks.commitResponseLost = true;
+
+    await expect(retryKnowledgeSourceAction(SOURCE_ID)).resolves.toEqual({ ok: true });
+
+    expect(cancel).not.toHaveBeenCalled();
+    expect(mocks.start).toHaveBeenCalledOnce();
+    expect(mocks.start.mock.calls[0]?.[1]?.[0]).toMatchObject({
+      sourceId: SOURCE_ID,
+      content: stream,
+      ingestToken: mocks.updates[0].parseEngine,
+    });
+  });
+
+  it("工作流启动回执丢失时保留解析令牌和原文件流", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const stream = new ReadableStream({ start(controller) { controller.close(); } });
     const cancel = vi.spyOn(stream, "cancel");
@@ -148,15 +218,13 @@ describe("重新解析知识资料", () => {
 
     await expect(retryKnowledgeSourceAction(SOURCE_ID)).resolves.toEqual({
       ok: false,
-      error: "解析任务启动失败，请稍后重试",
+      error: "解析任务启动状态未确认，资料已保存；请稍后刷新，若长时间未完成请重试",
     });
 
-    expect(mocks.updates.at(-1)).toMatchObject({
-      status: "failed",
-      error: "解析任务启动失败，请稍后重试",
-      parseEngine: null,
-    });
-    expect(cancel).toHaveBeenCalledOnce();
+    expect(mocks.updates).toHaveLength(1);
+    expect(mocks.updates[0]).toMatchObject({ status: "parsing", parseEngine: expect.stringMatching(/^pending:/) });
+    expect(cancel).not.toHaveBeenCalled();
+    expect(mocks.revalidatePath).toHaveBeenCalledWith("/knowledge");
   });
 
   it("原文件暂时无法读取时给出可行动提示", async () => {

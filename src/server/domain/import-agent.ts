@@ -6,6 +6,9 @@ import { validateWaitContracts } from "@/server/domain/runtime/wait-contract";
 import { validateWorkflowRoutes } from "@/server/domain/runtime/workflow-routes";
 import { validateInlineWorkflows } from "@/server/domain/runtime/inline-workflow";
 import { bindWorkflowRootAgent } from "@/server/domain/workflow-root-agent";
+import { agentIdentityMatches } from "@/server/domain/agent-identity";
+import { canonicalJson } from "@/server/domain/canonical-json";
+import { versionAgentName } from "@/server/domain/version-agent-name";
 
 export const MAX_AGENT_IMPORT_BYTES = 2 * 1024 * 1024;
 
@@ -33,6 +36,21 @@ export interface NormalizedAgentImport {
   description: string | null;
   intentText: string;
   workflow: WorkflowDraft;
+}
+
+export function importRequestMatches(
+  existing: Pick<NormalizedAgentImport, "name" | "description" | "intentText"> & {
+    id: string;
+    draft: WorkflowDraft;
+    importFingerprint: unknown;
+  },
+  imported: NormalizedAgentImport,
+  fingerprint: string,
+): boolean {
+  if (!agentIdentityMatches(existing, imported)) return false;
+  if (typeof existing.importFingerprint === "string") return existing.importFingerprint === fingerprint;
+  const expected = bindWorkflowRootAgent(imported.workflow, { id: existing.id, name: imported.name });
+  return canonicalJson({ ...existing.draft, versionId: null }) === canonicalJson({ ...expected, versionId: null });
 }
 
 function editableWorkflowFromVersion(
@@ -214,10 +232,11 @@ export function normalizeAgentImport(input: unknown): NormalizedAgentImport | nu
     };
   }
   const version = parsed.data.version.number;
+  const name = versionAgentName(parsed.data.manifest, parsed.data.agent.name);
   return {
-    name: parsed.data.agent.name,
+    name,
     description: `从冻结版本 ${version} 导入的可编辑副本`,
     intentText: `从冻结版本 ${version} 导入，保留当时的流程、运行输入和最终交付。`,
-    workflow: editableWorkflowFromVersion(parsed.data.manifest, parsed.data.agent.name),
+    workflow: editableWorkflowFromVersion(parsed.data.manifest, name),
   };
 }

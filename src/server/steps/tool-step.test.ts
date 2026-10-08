@@ -54,10 +54,13 @@ describe("真实工具步骤", () => {
     expect(JSON.stringify(mocks.appendTrace.mock.calls)).not.toContain("receipt-1");
   });
 
-  it("保留业务系统显式返回的不成功回执供门禁拦截", async () => {
+  it("不把业务系统显式失败的回执记录成成功步骤", async () => {
     mocks.invokeHttpTool.mockResolvedValue({ ok: true, output: { ok: false, receiptId: "receipt-rejected" } });
     await expect(runToolStep({ runId: "run-1", node, input: {}, outputs: {} }))
-      .resolves.toEqual({ receipt: { ok: false, receiptId: "receipt-rejected" } });
+      .rejects.toThrow("业务系统回执表明操作未完成");
+    expect(mocks.persistStep).toHaveBeenLastCalledWith(expect.objectContaining({ status: "failed" }));
+    expect(mocks.persistStep).not.toHaveBeenCalledWith(expect.objectContaining({ status: "succeeded" }));
+    expect(JSON.stringify(mocks.appendTrace.mock.calls)).not.toContain("receipt-rejected");
   });
 
   it("拒绝不符合冻结契约的业务回执", async () => {
@@ -85,6 +88,42 @@ describe("真实工具步骤", () => {
     await expect(runToolStep({ runId: "run-1", node: strictNode, input: {}, outputs: {} }))
       .rejects.toThrow("工具输入不符合字段契约");
     expect(mocks.invokeHttpTool).not.toHaveBeenCalled();
+  });
+
+  it("只把映射业务字段传给工具，数字与布尔值不变，不夹带整份输入或上游", async () => {
+    const mapped = WorkflowNode.parse({ ...node, inputMapping: { fields: [
+      { target: ["customer", "id"], source: { kind: "input", path: ["customerId"] } },
+      { target: ["amount"], source: { kind: "output", nodeId: "review", path: ["amount"] } },
+      { target: ["approved"], source: { kind: "literal", value: true } },
+    ] } });
+    mocks.invokeHttpTool.mockResolvedValue({ ok: true, output: { receiptId: "receipt-1" } });
+    await runToolStep({ runId: "run-1", node: mapped, input: { customerId: "c1", private: "not-for-tool" }, outputs: { review: { amount: 12.5 }, private: { note: "not-for-tool" } } });
+    expect(mocks.invokeHttpTool).toHaveBeenCalledWith(expect.objectContaining({
+      input: { customer: { id: "c1" }, amount: 12.5, approved: true }, outputs: {},
+    }));
+    expect(JSON.stringify(mocks.invokeHttpTool.mock.calls)).not.toContain("not-for-tool");
+  });
+
+  it("缺少必填映射来源时不调用外部系统", async () => {
+    const mapped = WorkflowNode.parse({ ...node, inputMapping: { fields: [
+      { target: ["customerId"], source: { kind: "input", path: ["missing"] } },
+    ] } });
+    await expect(runToolStep({ runId: "run-1", node: mapped, input: {}, outputs: {} })).rejects.toThrow("缺少映射字段");
+    expect(mocks.invokeHttpTool).not.toHaveBeenCalled();
+    expect(mocks.persistStep).toHaveBeenLastCalledWith(expect.objectContaining({ status: "failed" }));
+  });
+
+  it("映射后的字段仍通过冻结与当前服务端输入契约校验", async () => {
+    const inputSchema = { type: "object", required: ["input"], properties: {
+      input: { type: "object", required: ["amount"], properties: { amount: { type: "number" } } },
+    } };
+    const mapped = WorkflowNode.parse({ ...node, tool: { ...node.tool!, inputSchema }, inputMapping: { fields: [
+      { target: ["amount"], source: { kind: "output", nodeId: "review", path: ["amount"] } },
+    ] } });
+    mocks.getToolRegistration.mockReturnValue({ ...registration, inputSchema });
+    await expect(runToolStep({ runId: "run-1", node: mapped, input: {}, outputs: { review: { amount: "bad-value" } } })).rejects.toThrow("工具输入不符合字段契约");
+    expect(mocks.invokeHttpTool).not.toHaveBeenCalled();
+    expect(JSON.stringify(mocks.persistStep.mock.calls)).not.toContain("bad-value");
   });
 
   it("服务端工具权限或契约变化后拒绝旧冻结版本", async () => {

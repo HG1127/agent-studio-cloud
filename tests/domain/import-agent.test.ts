@@ -92,11 +92,11 @@ describe("助手导入格式归一化", () => {
       manifest,
     });
     expect(result).toMatchObject({
-      name: "合同助手",
+      name: "原名称",
       description: "从冻结版本 7 导入的可编辑副本",
       workflow: {
         versionId: null,
-        rootAgent: { name: "合同助手" },
+        rootAgent: { name: "原名称" },
         variables: [
           { name: "internal_note", label: "内部记录", type: "string", scope: "step", required: false },
           { name: "request", label: "业务需求", type: "string", scope: "run", required: true },

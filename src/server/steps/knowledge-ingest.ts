@@ -80,7 +80,7 @@ export async function parseKnowledgeFile(args: ParseArgs): Promise<{ text: strin
       safeKnowledgeParseError(error, "PDF 文件解析失败，请检查文件是否完整");
     } finally {
       // 文本已经解析完成时，底层清理失败不应覆盖原有业务结果或安全错误。
-      await Promise.resolve(pdf.cleanup()).catch(() => undefined);
+      await Promise.resolve().then(() => pdf.loadingTask.destroy()).catch(() => undefined);
     }
   } else if (ext === "docx") {
     const archiveError = validateDocxArchive(buffer);

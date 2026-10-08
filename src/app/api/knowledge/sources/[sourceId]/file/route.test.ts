@@ -52,6 +52,21 @@ describe("知识原文件下载", () => {
     expect(response.headers.has("content-length")).toBe(false);
   });
 
+  it("更正扩展名后下载时使用资料当前类型而非旧 Blob 类型", async () => {
+    process.env.BLOB_READ_WRITE_TOKEN = "test-token";
+    rows.value = [{ name: "退款规则.txt", mime: "text/plain", blobPathname: "knowledge/original.json" }];
+    getMock.mockResolvedValue({
+      stream: new ReadableStream({ start(controller) { controller.close(); } }),
+      blob: { contentType: "application/json" },
+    });
+
+    const response = await GET(new Request("http://localhost"), { params: Promise.resolve({ sourceId: SOURCE_ID }) });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/plain");
+    expect(response.headers.get("content-disposition")).toContain(encodeURIComponent("退款规则.txt"));
+  });
+
   it("没有存储配置时返回可行动错误", async () => {
     rows.value = [{ name: "售后手册.txt", mime: "text/plain", blobPathname: "knowledge/manual.txt" }];
     const response = await GET(new Request("http://localhost"), { params: Promise.resolve({ sourceId: SOURCE_ID }) });

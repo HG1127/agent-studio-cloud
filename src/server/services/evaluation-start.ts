@@ -1,10 +1,11 @@
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
-import { agentVersions, agents, auditEvents, evaluationCaseResults, evaluationCases, evaluationRuns } from "@/db/schema";
+import { agentVersions, agents, auditEvents, evaluationCaseResults, evaluationCases, evaluationRuns, runFeedback } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
-import { MAX_EVALUATION_CASES } from "@/contracts/evaluation";
+import { EvaluationCaseSnapshot, MAX_EVALUATION_CASES } from "@/contracts/evaluation";
 import { auditEventValues } from "@/server/audit/event-values";
 import { redactCredentialData } from "@/server/domain/security/redact-sensitive";
+import { REGRESSION_EXPECTATION_REQUIRED } from "@/server/domain/evaluation";
 
 function safeCases<T extends { input: unknown }>(cases: T[]): Array<Omit<T, "input"> & { input: Record<string, unknown> }> {
   return cases.map((testCase) => ({
@@ -28,7 +29,7 @@ export async function prepareEvaluationRun(agentId: string, requestId?: string) 
       }
       const cases = evaluation.status === "running"
         ? await tx
-            .select({ id: evaluationCases.id, input: evaluationCases.input })
+            .select({ id: evaluationCases.id, input: evaluationCases.input, caseSnapshot: evaluationCaseResults.caseSnapshot })
             .from(evaluationCaseResults)
             .innerJoin(evaluationCases, eq(evaluationCases.id, evaluationCaseResults.evaluationCaseId))
             .where(and(
@@ -46,7 +47,10 @@ export async function prepareEvaluationRun(agentId: string, requestId?: string) 
         ok: true as const,
         evaluationId: evaluation.id,
         versionId: evaluation.versionId,
-        cases: safeCases(cases),
+        cases: safeCases(cases.map(({ id, input, caseSnapshot }) => ({
+          id,
+          input: caseSnapshot == null ? input : EvaluationCaseSnapshot.parse(caseSnapshot).input,
+        }))),
         resumed: true as const,
       };
     };
@@ -102,7 +106,7 @@ export async function prepareEvaluationRun(agentId: string, requestId?: string) 
       .limit(1);
     if (!version) return { ok: false as const, error: "请先发布一个待验收版本" };
     const cases = await tx
-      .select({ id: evaluationCases.id, input: evaluationCases.input })
+      .select({ id: evaluationCases.id, name: evaluationCases.name, input: evaluationCases.input, expectations: evaluationCases.expectations })
       .from(evaluationCases)
       .where(and(
         eq(evaluationCases.agentId, agentId),
@@ -112,6 +116,19 @@ export async function prepareEvaluationRun(agentId: string, requestId?: string) 
       .limit(MAX_EVALUATION_CASES + 1);
     if (cases.length === 0) return { ok: false as const, error: "请先添加至少一条验收样例" };
     if (cases.length > MAX_EVALUATION_CASES) return { ok: false as const, error: `自动验收最多支持 ${MAX_EVALUATION_CASES} 条样例` };
+    const emptyCaseIds = cases.filter((testCase) => testCase.expectations.length === 0).map((testCase) => testCase.id);
+    if (emptyCaseIds.length > 0) {
+      const [linkedFeedback] = await tx.select({ id: runFeedback.id }).from(runFeedback).where(and(
+        eq(runFeedback.workspaceId, DEMO_WORKSPACE_ID),
+        eq(runFeedback.agentId, agentId),
+        inArray(runFeedback.evaluationCaseId, emptyCaseIds),
+      )).limit(1);
+      if (linkedFeedback) return { ok: false as const, error: REGRESSION_EXPECTATION_REQUIRED };
+    }
+    const snapshots = cases.map((testCase) => EvaluationCaseSnapshot.safeParse(testCase));
+    if (snapshots.some((snapshot) => !snapshot.success)) {
+      return { ok: false as const, error: "验收样例数据不完整，请编辑样例后重试" };
+    }
     const [evaluation] = await tx.insert(evaluationRuns).values({
       workspaceId: DEMO_WORKSPACE_ID,
       createdBy: DEMO_USER_ID,
@@ -121,11 +138,12 @@ export async function prepareEvaluationRun(agentId: string, requestId?: string) 
       status: "running",
       totalCount: cases.length,
     }).returning({ id: evaluationRuns.id });
-    await tx.insert(evaluationCaseResults).values(cases.map((testCase) => ({
+    await tx.insert(evaluationCaseResults).values(cases.map((testCase, index) => ({
       workspaceId: DEMO_WORKSPACE_ID,
       createdBy: DEMO_USER_ID,
       evaluationRunId: evaluation.id,
       evaluationCaseId: testCase.id,
+      caseSnapshot: snapshots[index].data!,
       status: "running",
     })));
     await tx.insert(auditEvents).values(auditEventValues({

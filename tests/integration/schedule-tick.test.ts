@@ -1,15 +1,20 @@
+import { createHash } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-const { startMock } = vi.hoisted(() => ({ startMock: vi.fn() }));
+const { startMock, revalidatePathMock } = vi.hoisted(() => ({ startMock: vi.fn(), revalidatePathMock: vi.fn() }));
 vi.mock("workflow/api", () => ({ start: startMock }));
-vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 import { AgentManifest } from "@/contracts/manifest";
-import { agentVersions, agents, runs, schedules } from "@/db/schema";
+import { agentVersions, agents, knowledgeSources, runs, schedules } from "@/db/schema";
 import { db } from "@/lib/db";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { POST as tick } from "@/app/api/schedules/tick/route";
-import { listScheduleableAgents } from "@/server/queries/schedules";
+import { listScheduleableAgents, listSchedules } from "@/server/queries/schedules";
+import { MAX_SCHEDULE_INTERVAL_MINUTES } from "@/contracts/schedule";
+import { createScheduleAction } from "@/server/actions/create-schedule";
+import { setKnowledgeSourceArchivedAction } from "@/server/actions/archive-knowledge-source";
+import { setAgentArchivedAction } from "@/server/actions/set-agent-archived";
 import { updateScheduleStatusAction } from "@/server/actions/update-schedule-status";
 
 const AGENT_ID = "00000000-0000-4000-8000-0000000000e9";
@@ -22,6 +27,13 @@ const DRAFT_AGENT_ID = "00000000-0000-4000-8000-0000000000ef";
 const RETIRED_VERSION_ID = "00000000-0000-4000-8000-0000000000f0";
 const RETIRED_SCHEDULE_ID = "00000000-0000-4000-8000-0000000000f1";
 const PAUSED_DURING_START_ID = "00000000-0000-4000-8000-0000000000f2";
+const OTHER_WORKSPACE_SCHEDULE_ID = "00000000-0000-4000-8000-0000000000f3";
+const OTHER_WORKSPACE_ID = "00000000-0000-4000-8000-0000000000f4";
+const RECOVERABLE_SCHEDULE_ID = "00000000-0000-4000-8000-0000000000f6";
+const IDEMPOTENT_STATUS_ID = "00000000-0000-4000-8000-0000000000f7";
+const LEGACY_INTERVAL_ID = "00000000-0000-4000-8000-0000000000f8";
+const INDETERMINATE_SCHEDULE_ID = "00000000-0000-4000-8000-0000000000f9";
+const createdScheduleIds: string[] = [];
 
 const manifest = AgentManifest.parse({
   schemaVersion: "4.0",
@@ -55,9 +67,11 @@ beforeAll(async () => {
   await db.insert(agentVersions).values({ id: RETIRED_VERSION_ID, agentId: DRAFT_AGENT_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, version: 1, status: "retired", manifest });
 });
 
+afterEach(() => revalidatePathMock.mockReset());
+
 afterAll(async () => {
   await db.delete(runs).where(eq(runs.agentId, AGENT_ID));
-  await db.delete(schedules).where(inArray(schedules.id, [SCHEDULE_DUE, SCHEDULE_ONCE, SCHEDULE_PAUSED, SCHEDULE_FAILING, RETIRED_SCHEDULE_ID, PAUSED_DURING_START_ID]));
+  await db.delete(schedules).where(inArray(schedules.id, [SCHEDULE_DUE, SCHEDULE_ONCE, SCHEDULE_PAUSED, SCHEDULE_FAILING, RETIRED_SCHEDULE_ID, PAUSED_DURING_START_ID, OTHER_WORKSPACE_SCHEDULE_ID, RECOVERABLE_SCHEDULE_ID, IDEMPOTENT_STATUS_ID, LEGACY_INTERVAL_ID, INDETERMINATE_SCHEDULE_ID, ...createdScheduleIds]));
   await db.delete(agentVersions).where(inArray(agentVersions.agentId, [AGENT_ID, DRAFT_AGENT_ID]));
   await db.delete(agents).where(inArray(agents.id, [AGENT_ID, DRAFT_AGENT_ID]));
 });
@@ -72,11 +86,80 @@ async function insertSchedule(overrides?: Partial<typeof schedules.$inferInsert>
 }
 
 describe("调度 tick 接口", () => {
+  it("重复恢复已启用任务不重算到期时间或清除领取租约，重复归档也视为成功", async () => {
+    const dueAt = new Date(Date.now() - 60_000);
+    const leaseUntil = new Date(Date.now() + 60_000);
+    await insertSchedule({
+      id: IDEMPOTENT_STATUS_ID,
+      spec: { kind: "once", at: dueAt.toISOString() },
+      nextRunAt: dueAt,
+      leaseUntil,
+      consecutiveFailures: 1,
+    });
+
+    expect(await updateScheduleStatusAction(IDEMPOTENT_STATUS_ID, "active")).toEqual({ ok: true });
+    const [unchanged] = await db.select().from(schedules).where(eq(schedules.id, IDEMPOTENT_STATUS_ID)).limit(1);
+    expect(unchanged?.nextRunAt).toEqual(dueAt);
+    expect(unchanged?.leaseUntil).toEqual(leaseUntil);
+    expect(unchanged?.consecutiveFailures).toBe(1);
+
+    expect(await updateScheduleStatusAction(IDEMPOTENT_STATUS_ID, "archived")).toEqual({ ok: true });
+    expect(await updateScheduleStatusAction(IDEMPOTENT_STATUS_ID, "archived")).toEqual({ ok: true });
+  });
+
   it("可定时助手只包含已有生产版本的助手", async () => {
     const options = await listScheduleableAgents();
 
     expect(options.some((option) => option.id === AGENT_ID)).toBe(true);
     expect(options.some((option) => option.id === DRAFT_AGENT_ID)).toBe(false);
+  });
+
+  it("创建或更新已提交后缓存刷新失败仍返回成功", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const before = await db.select({ id: schedules.id }).from(schedules).where(eq(schedules.agentId, AGENT_ID));
+      const beforeIds = new Set(before.map((row) => row.id));
+      revalidatePathMock.mockImplementationOnce(() => { throw new Error("缓存暂时不可用"); });
+      expect(await createScheduleAction({
+        agentId: AGENT_ID,
+        spec: { kind: "interval", minutes: 5 },
+        input: { testCase: "cache-failure" },
+      })).toEqual({ ok: true });
+      const after = await db.select({ id: schedules.id }).from(schedules).where(eq(schedules.agentId, AGENT_ID));
+      const createdId = after.find((row) => !beforeIds.has(row.id))?.id;
+      expect(createdId).toBeDefined();
+      createdScheduleIds.push(createdId!);
+      revalidatePathMock.mockImplementationOnce(() => { throw new Error("缓存暂时不可用"); });
+      expect(await updateScheduleStatusAction(createdId!, "paused")).toEqual({ ok: true });
+      const [schedule] = await db.select().from(schedules).where(eq(schedules.id, createdId!)).limit(1);
+      expect(schedule?.status).toBe("paused");
+      expect(revalidatePathMock).toHaveBeenCalledTimes(2);
+      expect(log).toHaveBeenCalledTimes(2);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("同一创建请求重复或并发提交只保留一条定时任务", async () => {
+    const requestId = "00000000-0000-4000-8000-0000000000d1";
+    const input = { agentId: AGENT_ID, requestId, spec: { kind: "interval" as const, minutes: 5 }, input: { marker: requestId } };
+
+    expect(await createScheduleAction(input)).toEqual({ ok: true });
+    expect(await createScheduleAction(input)).toEqual({ ok: true });
+    const first = await db.select().from(schedules).where(eq(schedules.requestId, requestId));
+    expect(first).toHaveLength(1);
+    createdScheduleIds.push(first[0].id);
+    expect(await createScheduleAction({ ...input, input: { marker: "不同输入" } })).toEqual({
+      ok: false, error: "这项请求标识已经用于另一条定时任务，请重新发起",
+    });
+
+    const concurrentId = "00000000-0000-4000-8000-0000000000d2";
+    const concurrent = { ...input, requestId: concurrentId };
+    expect(await Promise.all([createScheduleAction(concurrent), createScheduleAction(concurrent)]))
+      .toEqual([{ ok: true }, { ok: true }]);
+    const second = await db.select().from(schedules).where(eq(schedules.requestId, concurrentId));
+    expect(second).toHaveLength(1);
+    createdScheduleIds.push(second[0].id);
   });
 
   it("暂停任务可继续使用创建时冻结的历史生产版本", async () => {
@@ -93,6 +176,112 @@ describe("调度 tick 接口", () => {
     expect(schedule?.status).toBe("active");
     expect(schedule?.versionId).toBe(RETIRED_VERSION_ID);
     expect(schedule?.nextRunAt.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it("旧版定时协作仍启用时保护协作助手，停用后不允许恢复任务", async () => {
+    const helperId = "00000000-0000-4000-8000-0000000000ca";
+    const helperVersionId = "00000000-0000-4000-8000-0000000000cb";
+    const rootId = "00000000-0000-4000-8000-0000000000cc";
+    const rootVersionId = "00000000-0000-4000-8000-0000000000cd";
+    const scheduleId = "00000000-0000-4000-8000-0000000000ce";
+    const helperManifest = AgentManifest.parse({
+      ...manifest,
+      workflowSnapshot: {
+        ...manifest.workflowSnapshot,
+        rootAgent: { id: helperId, name: "历史协作助手", role: "处理" },
+      },
+    });
+    const rootManifest = AgentManifest.parse({
+      ...manifest,
+      workflowSnapshot: {
+        ...manifest.workflowSnapshot,
+        rootAgent: { id: rootId, name: "旧版定时助手", role: "处理" },
+        nodes: {
+          start: { id: "start", title: "开始", type: "trigger", next: "call" },
+          call: { id: "call", title: "协作", type: "agent_call", next: "done", agentCall: { targetAgentId: helperId, versionId: helperVersionId } },
+          done: { id: "done", title: "完成", type: "end", next: null },
+        },
+      },
+    });
+    await db.insert(agents).values([
+      { id: helperId, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, name: "历史协作助手", intentText: "协作处理定时任务" },
+      { id: rootId, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, name: "旧版定时助手", intentText: "按计划调用协作助手" },
+    ]);
+    try {
+      await db.insert(agentVersions).values([
+        { id: helperVersionId, agentId: helperId, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, version: 1, status: "retired", manifest: helperManifest },
+        { id: rootVersionId, agentId: rootId, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, version: 1, status: "retired", manifest: rootManifest },
+      ]);
+      await insertSchedule({ id: scheduleId, agentId: rootId, versionId: rootVersionId, status: "active" });
+
+      expect(await setAgentArchivedAction({ agentId: helperId, archived: true })).toEqual({
+        ok: false,
+        error: "助手「旧版定时助手」仍有启用中的定时任务需要这个协作助手，请先暂停相关定时任务",
+      });
+      expect(await updateScheduleStatusAction(scheduleId, "paused")).toEqual({ ok: true });
+      await db.update(agents).set({ archivedAt: new Date() }).where(eq(agents.id, helperId));
+      expect(await updateScheduleStatusAction(scheduleId, "active")).toEqual({
+        ok: false,
+        error: "协作链包含已停用、缺失或格式不完整的冻结版本，请检查协作助手后再启用定时任务",
+      });
+      const [paused] = await db.select().from(schedules).where(eq(schedules.id, scheduleId));
+      expect(paused?.status).toBe("paused");
+    } finally {
+      await db.delete(schedules).where(eq(schedules.id, scheduleId));
+      await db.delete(agentVersions).where(inArray(agentVersions.id, [helperVersionId, rootVersionId]));
+      await db.delete(agents).where(inArray(agents.id, [helperId, rootId]));
+    }
+  });
+
+  it("旧版定时任务仍启用时保护冻结资料，归档后不允许恢复任务", async () => {
+    const rootId = "00000000-0000-4000-8000-0000000000d3";
+    const rootVersionId = "00000000-0000-4000-8000-0000000000d4";
+    const sourceId = "00000000-0000-4000-8000-0000000000d5";
+    const scheduleId = "00000000-0000-4000-8000-0000000000d6";
+    const rootManifest = AgentManifest.parse({
+      ...manifest,
+      knowledgeSnapshot: [sourceId],
+      workflowSnapshot: {
+        ...manifest.workflowSnapshot,
+        rootAgent: { id: rootId, name: "旧版资料助手", role: "处理" },
+        nodes: {
+          start: { id: "start", title: "开始", type: "trigger", next: "read" },
+          read: { id: "read", title: "读取资料", type: "knowledge", next: "done", knowledge: { space: "业务资料", sourceIds: [sourceId] } },
+          done: { id: "done", title: "完成", type: "end", next: null },
+        },
+      },
+    });
+    await db.insert(agents).values({ id: rootId, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, name: "旧版资料助手", intentText: "定时读取冻结资料" });
+    try {
+      await db.insert(agentVersions).values({
+        id: rootVersionId, agentId: rootId, workspaceId: DEMO_WORKSPACE_ID,
+        createdBy: DEMO_USER_ID, version: 1, status: "retired", manifest: rootManifest,
+      });
+      await db.insert(knowledgeSources).values({
+        id: sourceId, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID,
+        name: "旧版定时资料.txt", mime: "text/plain", sizeBytes: 10,
+        sha256: createHash("sha256").update(sourceId).digest("hex"), status: "indexed", chunkCount: 1, charCount: 10,
+      });
+      await insertSchedule({ id: scheduleId, agentId: rootId, versionId: rootVersionId, status: "active" });
+
+      expect(await setKnowledgeSourceArchivedAction({ sourceId, archived: true })).toEqual({
+        ok: false,
+        error: "助手「旧版资料助手」仍有启用中的定时任务需要这份资料，请先暂停相关定时任务",
+      });
+      expect(await updateScheduleStatusAction(scheduleId, "paused")).toEqual({ ok: true });
+      await db.update(knowledgeSources).set({ archivedAt: new Date(), status: "archived" }).where(eq(knowledgeSources.id, sourceId));
+      expect(await updateScheduleStatusAction(scheduleId, "active")).toMatchObject({
+        ok: false,
+        error: expect.stringContaining("需要知识资料"),
+      });
+      const [paused] = await db.select().from(schedules).where(eq(schedules.id, scheduleId));
+      expect(paused?.status).toBe("paused");
+    } finally {
+      await db.delete(schedules).where(eq(schedules.id, scheduleId));
+      await db.delete(knowledgeSources).where(eq(knowledgeSources.id, sourceId));
+      await db.delete(agentVersions).where(eq(agentVersions.id, rootVersionId));
+      await db.delete(agents).where(eq(agents.id, rootId));
+    }
   });
 
   it("无密钥或未配密钥返回 401", async () => {
@@ -124,6 +313,62 @@ describe("调度 tick 接口", () => {
     expect(await runsFor(SCHEDULE_DUE)).toHaveLength(1);
   }, 240_000);
 
+  it("启动期间保留到期槽位，成功后才推进，供中断后的同一槽位重试", async () => {
+    const dueAt = new Date(Date.now() - 60_000);
+    await insertSchedule({ id: RECOVERABLE_SCHEDULE_ID, nextRunAt: dueAt });
+    startMock.mockImplementationOnce(async () => {
+      const [duringStart] = await db.select().from(schedules).where(eq(schedules.id, RECOVERABLE_SCHEDULE_ID)).limit(1);
+      expect(duringStart?.nextRunAt).toEqual(dueAt);
+      expect(duringStart?.status).toBe("active");
+      expect(duringStart?.leaseUntil).not.toBeNull();
+      return { runId: "schedule-workflow-recoverable", cancel: vi.fn() };
+    });
+
+    const response = await tick(authedRequest());
+
+    expect((await response.json()).started).toBe(1);
+    const [afterStart] = await db.select().from(schedules).where(eq(schedules.id, RECOVERABLE_SCHEDULE_ID)).limit(1);
+    expect(afterStart?.nextRunAt.getTime()).toBeGreaterThan(Date.now());
+    expect(afterStart?.leaseUntil).toBeNull();
+    const matchingRuns = await db.select().from(runs).where(eq(runs.sourceKey, `${RECOVERABLE_SCHEDULE_ID}:${dueAt.toISOString()}`));
+    expect(matchingRuns).toHaveLength(1);
+    const startsBeforeRetry = startMock.mock.calls.length;
+    // 模拟工作流已启动，但推进到期时间的数据库写入没有落盘。
+    await db.update(schedules).set({ nextRunAt: dueAt }).where(eq(schedules.id, RECOVERABLE_SCHEDULE_ID));
+    const retry = await tick(authedRequest());
+    expect((await retry.json()).started).toBe(1);
+    expect(startMock).toHaveBeenCalledTimes(startsBeforeRetry);
+    const afterRetry = await db.select().from(runs).where(eq(runs.sourceKey, `${RECOVERABLE_SCHEDULE_ID}:${dueAt.toISOString()}`));
+    expect(afterRetry).toHaveLength(1);
+    const [recoveredSchedule] = await db.select().from(schedules).where(eq(schedules.id, RECOVERABLE_SCHEDULE_ID)).limit(1);
+    expect(recoveredSchedule?.nextRunAt.getTime()).toBeGreaterThan(Date.now());
+    expect(recoveredSchedule?.lastRunId).toBe(matchingRuns[0].id);
+  }, 240_000);
+
+  it("运行写入状态不确定时保留原定时时间槽，下一轮沿用来源键重试", async () => {
+    const dueAt = new Date(Date.now() - 60_000);
+    await insertSchedule({ id: INDETERMINATE_SCHEDULE_ID, nextRunAt: dueAt });
+    const transaction = db.transaction.bind(db);
+    let calls = 0;
+    const transactionSpy = vi.spyOn(db, "transaction").mockImplementation((callback) => {
+      calls += 1;
+      return calls === 2 ? Promise.reject(new Error("模拟运行写入状态不确定")) : transaction(callback);
+    });
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const first = await tick(authedRequest());
+
+    expect(await first.json()).toMatchObject({ claimed: 1, started: 0, failed: 0 });
+    const [pending] = await db.select().from(schedules).where(eq(schedules.id, INDETERMINATE_SCHEDULE_ID));
+    expect(pending).toMatchObject({ status: "active", nextRunAt: dueAt, leaseUntil: null, consecutiveFailures: 0 });
+    transactionSpy.mockRestore();
+    const retry = await tick(authedRequest());
+    expect(await retry.json()).toMatchObject({ claimed: 1, started: 1, failed: 0 });
+    const rows = await db.select().from(runs).where(eq(runs.sourceKey, `${INDETERMINATE_SCHEDULE_ID}:${dueAt.toISOString()}`));
+    expect(rows).toHaveLength(1);
+    log.mockRestore();
+  }, 240_000);
+
   it("一次性任务到期：先开跑这一次再归档", async () => {
     await insertSchedule({ id: SCHEDULE_ONCE, spec: { kind: "once", at: new Date(Date.now() - 60_000).toISOString() } });
     const response = await tick(authedRequest());
@@ -135,11 +380,52 @@ describe("调度 tick 接口", () => {
     expect(rows.filter((row) => row.sourceKey?.startsWith(SCHEDULE_ONCE))).toHaveLength(1);
   }, 240_000);
 
+  it("历史超长间隔仍能在列表找到，到期后安全停用而不启动运行", async () => {
+    await insertSchedule({
+      id: LEGACY_INTERVAL_ID,
+      spec: { kind: "interval", minutes: MAX_SCHEDULE_INTERVAL_MINUTES + 1 },
+    });
+    expect((await listSchedules()).find((schedule) => schedule.id === LEGACY_INTERVAL_ID)?.spec)
+      .toEqual({ kind: "interval", minutes: MAX_SCHEDULE_INTERVAL_MINUTES + 1 });
+    const startsBefore = startMock.mock.calls.length;
+
+    const response = await tick(authedRequest());
+
+    expect(await response.json()).toMatchObject({ claimed: 1, started: 0, failed: 0 });
+    const [schedule] = await db.select().from(schedules).where(eq(schedules.id, LEGACY_INTERVAL_ID));
+    expect(schedule).toMatchObject({ status: "archived", lastError: "定时规格不完整，已停止" });
+    expect(startMock).toHaveBeenCalledTimes(startsBefore);
+  }, 240_000);
+
   it("暂停的调度不被领取", async () => {
     await insertSchedule({ id: SCHEDULE_PAUSED, status: "paused" });
     const response = await tick(authedRequest());
     const body = await response.json();
     expect(body.claimed).toBe(0);
+  }, 240_000);
+
+  it("只领取演示工作区任务，不推进其他工作区的到期任务", async () => {
+    const dueAt = new Date(Date.now() - 60_000);
+    await insertSchedule({
+      id: OTHER_WORKSPACE_SCHEDULE_ID,
+      workspaceId: OTHER_WORKSPACE_ID,
+      agentId: "00000000-0000-4000-8000-0000000000f5",
+      nextRunAt: dueAt,
+    });
+    const startsBefore = startMock.mock.calls.length;
+
+    const response = await tick(authedRequest());
+
+    expect(await response.json()).toEqual({ ok: true, claimed: 0, started: 0, failed: 0 });
+    const [schedule] = await db.select().from(schedules).where(eq(schedules.id, OTHER_WORKSPACE_SCHEDULE_ID)).limit(1);
+    expect(schedule).toMatchObject({
+      workspaceId: OTHER_WORKSPACE_ID,
+      status: "active",
+      nextRunAt: dueAt,
+      leaseUntil: null,
+      consecutiveFailures: 0,
+    });
+    expect(startMock).toHaveBeenCalledTimes(startsBefore);
   }, 240_000);
 
   it("连续失败 3 次后置 error 停跑", async () => {
@@ -158,7 +444,7 @@ describe("调度 tick 接口", () => {
     expect(schedule?.lastError).toBeTruthy();
   }, 240_000);
 
-  it("启动失败期间被暂停的任务不会被失败回写重新启用", async () => {
+  it("启动结果不确定期间被暂停的任务不会被后续回写重新启用", async () => {
     await insertSchedule({ id: PAUSED_DURING_START_ID });
     startMock.mockImplementationOnce(async () => {
       expect(await updateScheduleStatusAction(PAUSED_DURING_START_ID, "paused")).toEqual({ ok: true });
@@ -166,9 +452,12 @@ describe("调度 tick 接口", () => {
     });
 
     const response = await tick(authedRequest());
-    expect((await response.json()).failed).toBe(1);
+    expect(await response.json()).toMatchObject({ started: 1, failed: 0 });
     const [schedule] = await db.select().from(schedules).where(eq(schedules.id, PAUSED_DURING_START_ID)).limit(1);
     expect(schedule?.status).toBe("paused");
     expect(schedule?.leaseUntil).toBeNull();
+    const pending = await db.select().from(runs).where(eq(runs.sourceKey, `${PAUSED_DURING_START_ID}:${schedule?.nextRunAt.toISOString()}`));
+    expect(pending).toHaveLength(1);
+    expect(pending[0].status).toBe("queued");
   }, 240_000);
 });

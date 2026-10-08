@@ -128,6 +128,22 @@ export async function requestApproval(args: RequestApprovalInput): Promise<Appro
   return { approvalId: result.row.id, token: `approval:${result.row.id}`, recordedDecision };
 }
 
+export async function readRecordedApprovalDecision(args: { runId: string; approvalId: string }): Promise<ApprovalHandle["recordedDecision"] | null> {
+  "use step";
+  return withSafeWorkflowError(async () => {
+    const [row] = await db
+      .select({ status: approvals.status, note: approvals.note })
+      .from(approvals)
+      .innerJoin(runs, and(eq(approvals.runId, runs.id), eq(approvals.workspaceId, runs.workspaceId)))
+      .where(and(eq(approvals.id, args.approvalId), eq(runs.id, args.runId)))
+      .limit(1);
+    if (!row) throw new FatalError("确认记录不存在，无法继续运行");
+    if (row.status === "pending") return null;
+    if (row.status !== "approved" && row.status !== "rejected") throw new FatalError("确认记录状态不正确，无法继续运行");
+    return { decision: row.status, ...(row.note ? { note: redactCredentialText(row.note) } : {}) };
+  }, "确认决定暂时无法读取，请稍后重试");
+}
+
 export async function recordDecision(args: RecordDecisionInput): Promise<{
   approvalId: string;
   decision: "approved" | "rejected";

@@ -1,4 +1,4 @@
-import { index, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 export const schedules = pgTable(
   "schedules",
@@ -7,6 +7,7 @@ export const schedules = pgTable(
     workspaceId: uuid("workspace_id").notNull(),
     agentId: uuid("agent_id").notNull(),
     versionId: uuid("version_id").notNull(),
+    requestId: uuid("request_id"),
     status: text("status").notNull().default("active"),
     spec: jsonb("spec").$type<Record<string, unknown>>().notNull(),
     input: jsonb("input").$type<Record<string, unknown>>().notNull().default({}),
@@ -20,6 +21,9 @@ export const schedules = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
   },
-  (t) => [index("schedules_workspace_status_next_idx").on(t.workspaceId, t.status, t.nextRunAt)],
+  (t) => [
+    index("schedules_workspace_status_next_idx").on(t.workspaceId, t.status, t.nextRunAt),
+    uniqueIndex("schedules_workspace_request_idx").on(t.workspaceId, t.requestId),
+  ],
 );
 export type Schedule = typeof schedules.$inferSelect;

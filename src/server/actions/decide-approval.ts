@@ -1,7 +1,6 @@
 "use server";
 
 import { and, eq } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { resumeHook } from "workflow/api";
 import { ApprovalDecisionInput, type ApprovalDecisionResult } from "@/contracts/run";
@@ -10,6 +9,7 @@ import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { redactCredentialText } from "@/server/domain/security/redact-sensitive";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
 // 人工审批决定入口：原子条件更新抢占 pending 行（并发下只有一次提交生效），再恢复工作流；
 // 恢复结果不确定时保留确认决定，由页面提供显式继续入口。token 由确认记录 ID 按服务端约定重建，不经过前端。
@@ -56,35 +56,50 @@ export async function decideApprovalAction(
         console.error("继续已确认的工作流失败", safeErrorForLog(error));
         return { ok: false, error: "确认已保留，但运行暂时无法继续，请稍后重试", saved: true };
       }
-      revalidatePath(`/runs/${runId}`);
-      revalidatePath("/runs");
-      revalidatePath("/");
-      revalidatePath(`/agents/${run.agentId}`);
-      revalidatePath("/agents");
+      revalidatePathsAfterCommit([`/runs/${runId}`, "/runs", "/", `/agents/${run.agentId}`, "/agents"], "approval-resume");
       return { ok: true };
     }
     const approved = parsedInput.data.decision === "approved";
     const note = parsedInput.data.note?.trim() ? redactCredentialText(parsedInput.data.note.trim()) : null;
     const now = new Date();
-    const claimed = await db.transaction(async (tx) => {
-      const [lockedRun] = await tx
-        .select({ status: runs.status })
-        .from(runs)
-        .where(and(eq(runs.id, runId), eq(runs.workspaceId, DEMO_WORKSPACE_ID)))
-        .for("update")
-        .limit(1);
-      if (lockedRun?.status !== "waiting_approval") return null;
-      return tx
-        .update(approvals)
-        .set({ status: approved ? "approved" : "rejected", note, decidedAt: now, updatedAt: now })
-        .where(and(
-          eq(approvals.id, approvalId),
-          eq(approvals.runId, runId),
-          eq(approvals.workspaceId, DEMO_WORKSPACE_ID),
-          eq(approvals.status, "pending"),
-        ))
-        .returning({ id: approvals.id });
-    });
+    let decidedNote = note;
+    let claimed: { id: string }[] | null;
+    try {
+      claimed = await db.transaction(async (tx) => {
+        const [lockedRun] = await tx
+          .select({ status: runs.status })
+          .from(runs)
+          .where(and(eq(runs.id, runId), eq(runs.workspaceId, DEMO_WORKSPACE_ID)))
+          .for("update")
+          .limit(1);
+        if (lockedRun?.status !== "waiting_approval") return null;
+        return tx
+          .update(approvals)
+          .set({ status: approved ? "approved" : "rejected", note, decidedAt: now, updatedAt: now })
+          .where(and(
+            eq(approvals.id, approvalId),
+            eq(approvals.runId, runId),
+            eq(approvals.workspaceId, DEMO_WORKSPACE_ID),
+            eq(approvals.status, "pending"),
+          ))
+          .returning({ id: approvals.id });
+      });
+    } catch (transactionError) {
+      let saved: { status: string; note: string | null } | undefined;
+      try {
+        [saved] = await db
+          .select({ status: approvals.status, note: approvals.note })
+          .from(approvals)
+          .where(and(eq(approvals.id, approvalId), eq(approvals.runId, runId), eq(approvals.workspaceId, DEMO_WORKSPACE_ID)))
+          .limit(1);
+      } catch (recoveryError) {
+        console.error("核对确认提交结果失败", safeErrorForLog(recoveryError));
+        throw transactionError;
+      }
+      if (saved?.status !== parsedInput.data.decision) throw transactionError;
+      claimed = [{ id: approvalId }];
+      decidedNote = saved.note ? redactCredentialText(saved.note) : null;
+    }
     if (claimed === null) {
       return { ok: false, error: "这次运行已不再等待确认，请刷新页面查看最新状态" };
     }
@@ -94,20 +109,15 @@ export async function decideApprovalAction(
     try {
       await resumeHook(`approval:${row.id}`, {
         decision: parsedInput.data.decision,
-        note: note ?? undefined,
+        note: decidedNote ?? undefined,
       });
     } catch (error) {
       // resumeHook 可能已被执行引擎接收，只是响应在网络中丢失；回滚会让数据库与运行状态互相矛盾。
       console.error("恢复工作流失败，确认决定已保留", safeErrorForLog(error));
-      revalidatePath(`/runs/${runId}`);
-      revalidatePath("/runs");
+      revalidatePathsAfterCommit([`/runs/${runId}`, "/runs"], "approval-resume-failed");
       return { ok: false, error: "确认已保留，但运行暂时无法继续，请稍后重试", saved: true };
     }
-    revalidatePath(`/runs/${runId}`);
-    revalidatePath("/runs");
-    revalidatePath("/");
-    revalidatePath(`/agents/${run.agentId}`);
-    revalidatePath("/agents");
+    revalidatePathsAfterCommit([`/runs/${runId}`, "/runs", "/", `/agents/${run.agentId}`, "/agents"], "approval-decide");
     return { ok: true };
   } catch (error) {
     console.error("提交确认失败", safeErrorForLog(error));

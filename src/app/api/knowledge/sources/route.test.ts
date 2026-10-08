@@ -9,8 +9,14 @@ const dbState = vi.hoisted(() => ({
   insertRows: [] as unknown[],
   auditRows: [] as Array<Record<string, unknown>>,
   update: vi.fn(),
+  updateValues: [] as Array<Record<string, unknown>>,
   updateRows: [] as unknown[],
   selectError: null as Error | null,
+  selectCalls: 0,
+  failRecoveryLookup: false,
+  commitResponseLost: false,
+  reconcileResponseLost: false,
+  insertedValue: null as Record<string, unknown> | null,
 }));
 
 vi.mock("@vercel/blob", () => ({ del, put }));
@@ -21,6 +27,8 @@ vi.mock("@/lib/db", () => ({
       from: () => ({
         where: () => ({
           limit: async () => {
+            dbState.selectCalls += 1;
+            if (dbState.failRecoveryLookup && dbState.selectCalls > 1) throw new Error("recovery lookup unavailable");
             if (dbState.selectError) throw dbState.selectError;
             return dbState.selectQueue.shift() ?? dbState.rows;
           },
@@ -37,17 +45,32 @@ vi.mock("@/lib/db", () => ({
           dbState.auditRows.push(value);
           return Promise.resolve();
         }
+        dbState.insertedValue = value;
         return {
-          onConflictDoNothing: () => ({ returning: async () => dbState.insertRows }),
+          onConflictDoNothing: () => ({ returning: async () => dbState.commitResponseLost
+            ? [{ ...value, id: "00000000-0000-4000-8000-0000000000f5", chunkCount: 0, charCount: 0, error: null, archivedAt: null, createdAt: new Date() }]
+            : dbState.insertRows }),
         };
       },
     }),
-    update: () => ({ set: () => ({ where: (...args: unknown[]) => {
+    update: () => ({ set: (value: Record<string, unknown>) => ({ where: (...args: unknown[]) => {
+      dbState.updateValues.push(value);
       dbState.update(...args);
       return { returning: async () => dbState.updateRows };
     } }) }),
     };
-    return { ...client, transaction: async (run: (tx: typeof client) => unknown) => run(client) };
+    return { ...client, transaction: async (run: (tx: typeof client) => unknown) => {
+      const result = await run(client);
+      if (dbState.commitResponseLost) {
+        dbState.rows = [{ ...dbState.insertedValue, id: "00000000-0000-4000-8000-0000000000f5", chunkCount: 0, charCount: 0, error: null, archivedAt: null, createdAt: new Date() }];
+        throw new Error("commit response lost");
+      }
+      if (dbState.reconcileResponseLost) {
+        dbState.rows = [{ ...(dbState.rows[0] as Record<string, unknown>), ...dbState.updateValues.at(-1) }];
+        throw new Error("reconcile commit response lost");
+      }
+      return result;
+    } };
   })(),
 }));
 vi.mock("workflow/api", () => ({ start: startMock }));
@@ -64,8 +87,14 @@ afterEach(() => {
   dbState.insertRows = [];
   dbState.auditRows = [];
   dbState.update.mockReset();
+  dbState.updateValues = [];
   dbState.updateRows = [];
   dbState.selectError = null;
+  dbState.selectCalls = 0;
+  dbState.failRecoveryLookup = false;
+  dbState.commitResponseLost = false;
+  dbState.reconcileResponseLost = false;
+  dbState.insertedValue = null;
 });
 
 describe("知识原文件上传", () => {
@@ -216,6 +245,53 @@ describe("知识原文件上传", () => {
     expect(dbState.update).toHaveBeenCalledOnce();
   });
 
+  it("重新解析事务提交回执丢失时对账并保留采用的原文件", async () => {
+    process.env.BLOB_READ_WRITE_TOKEN = "test-token";
+    dbState.rows = [{
+      id: "00000000-0000-4000-8000-0000000000f3", name: "售后手册.txt", mime: "text/plain",
+      sizeBytes: 12, status: "failed", chunkCount: 0, charCount: 0, error: "上次解析失败",
+      createdAt: new Date("2026-09-24T00:00:00Z"), updatedAt: new Date("2026-09-24T00:00:00Z"),
+      blobPathname: null, archivedAt: null,
+    }];
+    put.mockResolvedValue({ pathname: "knowledge/reingested-original.txt" });
+    dbState.reconcileResponseLost = true;
+    const form = new FormData();
+    form.set("file", new File(["退货说明"], "售后手册.txt", { type: "text/plain" }));
+
+    const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, deduped: true, blobStored: true, source: { status: "parsing" } });
+    expect(del).not.toHaveBeenCalled();
+    expect(startMock).toHaveBeenCalledOnce();
+    expect(startMock.mock.calls[0]?.[1]?.[0]).toMatchObject({ ingestToken: dbState.updateValues[0].parseEngine });
+  });
+
+  it("仅补存原文件的事务回执丢失时不删除已被资料采用的文件", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    process.env.BLOB_READ_WRITE_TOKEN = "test-token";
+    dbState.rows = [{
+      id: "00000000-0000-4000-8000-0000000000f3", name: "售后手册.txt", mime: "text/plain",
+      sizeBytes: 12, status: "indexed", chunkCount: 1, charCount: 4, error: null,
+      createdAt: new Date("2026-09-24T00:00:00Z"), updatedAt: new Date("2026-09-24T00:00:00Z"),
+      blobPathname: null, archivedAt: null,
+    }];
+    put.mockResolvedValue({ pathname: "knowledge/adopted-original.txt" });
+    dbState.reconcileResponseLost = true;
+    const form = new FormData();
+    form.set("file", new File(["退货说明"], "售后手册.txt", { type: "text/plain" }));
+
+    try {
+      const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+      expect(response.status).toBe(503);
+      expect(del).not.toHaveBeenCalled();
+      expect(startMock).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it("重复上传已归档资料时直接恢复原记录", async () => {
     dbState.rows = [{
       id: "00000000-0000-4000-8000-0000000000f3", name: "售后手册.txt", mime: "text/plain",
@@ -279,6 +355,49 @@ describe("知识原文件上传", () => {
     }));
   });
 
+  it("重复上传时启动回执丢失不撤销已领取的解析任务", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    dbState.rows = [{
+      id: "00000000-0000-4000-8000-0000000000f3", name: "售后手册.txt", mime: "text/plain",
+      sizeBytes: 12, status: "failed", chunkCount: 0, charCount: 0, error: "上次解析超时",
+      createdAt: new Date("2026-09-24T00:00:00Z"), blobPathname: null, archivedAt: null,
+    }];
+    startMock.mockRejectedValue(new Error("启动响应丢失"));
+    const form = new FormData();
+    form.set("file", new File(["退货说明"], "售后手册.txt", { type: "text/plain" }));
+
+    const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      ok: false, error: "解析任务启动状态未确认，资料已保存；请稍后刷新，若长时间未完成请重试",
+    });
+    expect(dbState.updateValues).toHaveLength(1);
+    expect(dbState.updateValues[0]).toMatchObject({ status: "parsing", parseEngine: expect.stringMatching(/^pending:/) });
+  });
+
+  it("更正扩展名重传失败资料时同步保存解析所用的名称和类型", async () => {
+    dbState.rows = [{
+      id: "00000000-0000-4000-8000-0000000000f3", name: "退款规则.json", mime: "application/json",
+      sizeBytes: 12, status: "failed", chunkCount: 0, charCount: 0, error: "上次格式不正确",
+      createdAt: new Date("2026-09-24T00:00:00Z"), blobPathname: null, archivedAt: null,
+    }];
+    const form = new FormData();
+    form.set("file", new File(["退款规则内容"], "退款规则.txt", { type: "text/plain" }));
+
+    const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, deduped: true, source: {
+      name: "退款规则.txt", mime: "text/plain", status: "parsing",
+    } });
+    expect(dbState.updateValues[0]).toMatchObject({ name: "退款规则.txt", mime: "text/plain", status: "parsing" });
+    expect(startMock.mock.calls[0]?.[1]?.[0]).toMatchObject({ filename: "退款规则.txt", mime: "text/plain" });
+    expect(dbState.auditRows).toContainEqual(expect.objectContaining({
+      action: "knowledge.reingested", summary: "重新解析知识资料「退款规则.txt」",
+    }));
+  });
+
   it("重新上传长时间停在解析中的同一文件会恢复入库任务", async () => {
     dbState.rows = [{
       id: "00000000-0000-4000-8000-0000000000f3", name: "售后手册.txt", mime: "text/plain",
@@ -292,7 +411,9 @@ describe("知识原文件上传", () => {
     const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ ok: true, deduped: true, source: { status: "parsing" } });
+    expect(await response.json()).toMatchObject({
+      ok: true, deduped: true, source: { status: "parsing", parsingStalled: false },
+    });
     expect(startMock).toHaveBeenCalledOnce();
     expect(dbState.update).toHaveBeenCalledOnce();
   });
@@ -306,12 +427,14 @@ describe("知识原文件上传", () => {
     };
     dbState.selectQueue = [[failed], [{ ...failed, status: "parsing", error: null, updatedAt: new Date() }]];
     const form = new FormData();
-    form.set("file", new File(["退货说明"], "售后手册.txt", { type: "text/plain" }));
+    form.set("file", new File(["退货说明"], "后来改名.md", { type: "text/markdown" }));
 
     const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ ok: true, deduped: true, source: { status: "parsing" } });
+    expect(await response.json()).toMatchObject({ ok: true, deduped: true, source: {
+      name: "售后手册.txt", mime: "text/plain", status: "parsing",
+    } });
     expect(startMock).not.toHaveBeenCalled();
     expect(dbState.update).not.toHaveBeenCalled();
   });
@@ -322,7 +445,7 @@ describe("知识原文件上传", () => {
       sizeBytes: 12, status: "parsing", chunkCount: 0, charCount: 0, error: null,
       createdAt: new Date("2026-09-24T00:00:00Z"), blobPathname: null, archivedAt: null,
     };
-    dbState.selectQueue = [[], [concurrent]];
+    dbState.selectQueue = [[], [concurrent], [concurrent]];
     dbState.insertRows = [];
     const form = new FormData();
     form.set("file", new File(["退货说明"], "售后手册.txt", { type: "text/plain" }));
@@ -346,7 +469,7 @@ describe("知识原文件上传", () => {
       sizeBytes: 12, status: "parsing", chunkCount: 0, charCount: 0, error: null,
       createdAt: new Date("2026-09-24T00:00:00Z"), blobPathname: "knowledge/retained.txt", archivedAt: null,
     };
-    dbState.selectQueue = [[], [concurrent]];
+    dbState.selectQueue = [[], [concurrent], [concurrent]];
     dbState.insertRows = [];
     put.mockResolvedValue({ pathname: "knowledge/unused.txt" });
     const form = new FormData();
@@ -360,14 +483,14 @@ describe("知识原文件上传", () => {
     expect(startMock).not.toHaveBeenCalled();
   });
 
-  it("补写原文件地址竞争失败时保留胜出地址并清理本请求 Blob", async () => {
+  it("锁内发现另一请求已补存原文件时采用胜出地址并清理本请求 Blob", async () => {
     process.env.BLOB_READ_WRITE_TOKEN = "test-token";
     const concurrent = {
       id: "00000000-0000-4000-8000-0000000000f4", name: "售后手册.txt", mime: "text/plain",
       sizeBytes: 12, status: "parsing", chunkCount: 0, charCount: 0, error: null,
       createdAt: new Date("2026-09-24T00:00:00Z"), blobPathname: null, archivedAt: null,
     };
-    dbState.selectQueue = [[], [concurrent], [{ blobPathname: "knowledge/winner.txt" }]];
+    dbState.selectQueue = [[], [concurrent], [{ ...concurrent, blobPathname: "knowledge/winner.txt" }]];
     dbState.insertRows = [];
     dbState.updateRows = [];
     put.mockResolvedValue({ pathname: "knowledge/unused.txt" });
@@ -378,8 +501,50 @@ describe("知识原文件上传", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ ok: true, deduped: true, blobStored: true });
-    expect(dbState.update).toHaveBeenCalledOnce();
+    expect(dbState.update).not.toHaveBeenCalled();
     expect(del).toHaveBeenCalledWith("knowledge/unused.txt", { token: "test-token" });
+  });
+
+  it("并发创建记录已解析失败时重新领取同一来源的解析任务", async () => {
+    const failed = {
+      id: "00000000-0000-4000-8000-0000000000f4", name: "售后手册.txt", mime: "text/plain",
+      sizeBytes: 12, status: "failed", chunkCount: 0, charCount: 0, error: "首次解析启动失败",
+      createdAt: new Date("2026-09-24T00:00:00Z"), updatedAt: new Date("2026-09-24T00:00:00Z"),
+      blobPathname: null, archivedAt: null,
+    };
+    dbState.selectQueue = [[], [failed], [failed]];
+    dbState.insertRows = [];
+    const form = new FormData();
+    form.set("file", new File(["退货说明"], "售后手册.txt", { type: "text/plain" }));
+
+    const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, deduped: true, source: { status: "parsing", error: null } });
+    expect(startMock).toHaveBeenCalledOnce();
+    expect(dbState.auditRows).toContainEqual(expect.objectContaining({
+      action: "knowledge.reingested", data: { previousStatus: "failed" },
+    }));
+  });
+
+  it("并发创建记录已经归档时恢复来源并保留已有分片", async () => {
+    const archived = {
+      id: "00000000-0000-4000-8000-0000000000f4", name: "售后手册.txt", mime: "text/plain",
+      sizeBytes: 12, status: "archived", chunkCount: 2, charCount: 100, error: null,
+      createdAt: new Date("2026-09-24T00:00:00Z"), updatedAt: new Date("2026-09-24T00:00:00Z"),
+      blobPathname: null, archivedAt: new Date("2026-09-24T01:00:00Z"),
+    };
+    dbState.selectQueue = [[], [archived], [archived]];
+    dbState.insertRows = [];
+    const form = new FormData();
+    form.set("file", new File(["退货说明"], "售后手册.txt", { type: "text/plain" }));
+
+    const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, deduped: true, source: { status: "indexed", chunkCount: 2 } });
+    expect(startMock).not.toHaveBeenCalled();
+    expect(dbState.auditRows).toContainEqual(expect.objectContaining({ action: "knowledge.restored" }));
   });
 
   it("首次上传时原子记录上传操作并启动解析", async () => {
@@ -403,5 +568,63 @@ describe("知识原文件上传", () => {
       summary: "上传知识资料「退款规则.md」",
     }));
     expect(startMock).toHaveBeenCalledOnce();
+  });
+
+  it("首次上传的启动回执丢失时保留资料与解析令牌", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    dbState.insertRows = [{
+      id: "00000000-0000-4000-8000-0000000000f5", name: "退款规则.md", mime: "text/markdown",
+      sizeBytes: 12, status: "parsing", chunkCount: 0, charCount: 0, error: null,
+      createdAt: new Date("2026-09-25T00:00:00Z"), blobPathname: null, archivedAt: null,
+    }];
+    startMock.mockRejectedValue(new Error("启动响应丢失"));
+    const form = new FormData();
+    form.set("file", new File(["退款规则内容"], "退款规则.md", { type: "text/markdown" }));
+
+    const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      ok: false, error: "解析任务启动状态未确认，资料已保存；请稍后刷新，若长时间未完成请重试",
+    });
+    expect(dbState.update).not.toHaveBeenCalled();
+    expect(startMock.mock.calls[0]?.[1]?.[0]).toMatchObject({ ingestToken: expect.stringMatching(/^pending:/) });
+  });
+
+  it("创建事务已提交但回执丢失时保留被资料引用的原文件并启动解析", async () => {
+    process.env.BLOB_READ_WRITE_TOKEN = "test-token";
+    put.mockResolvedValue({ pathname: "knowledge/committed-original.txt" });
+    dbState.commitResponseLost = true;
+    const form = new FormData();
+    form.set("file", new File(["退款规则内容"], "退款规则.md", { type: "text/markdown" }));
+
+    const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, deduped: false, blobStored: true, source: { hasOriginal: true } });
+    expect(del).not.toHaveBeenCalled();
+    expect(startMock).toHaveBeenCalledOnce();
+    expect(startMock.mock.calls[0]?.[1]?.[0]).toMatchObject({ ingestToken: dbState.insertedValue?.parseEngine });
+  });
+
+  it("创建回执和对账都失败时不猜测原文件未被引用", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    process.env.BLOB_READ_WRITE_TOKEN = "test-token";
+    put.mockResolvedValue({ pathname: "knowledge/uncertain-original.txt" });
+    dbState.commitResponseLost = true;
+    dbState.failRecoveryLookup = true;
+    const form = new FormData();
+    form.set("file", new File(["退款规则内容"], "退款规则.md", { type: "text/markdown" }));
+
+    try {
+      const response = await POST(new Request("http://localhost/api/knowledge/sources", { method: "POST", body: form }));
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ ok: false, error: "资料上传暂时失败，请稍后重试" });
+      expect(del).not.toHaveBeenCalled();
+      expect(startMock).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
   });
 });

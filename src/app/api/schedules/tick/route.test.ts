@@ -4,11 +4,13 @@ const mocks = vi.hoisted(() => ({
   due: [] as Array<{ id: string }>,
   claimed: [] as Array<Record<string, unknown>>,
   startRunCore: vi.fn(),
+  recoverStaleQueuedRuns: vi.fn(),
   transaction: vi.fn(),
   lock: vi.fn(),
   limit: vi.fn(),
   updateSet: vi.fn(),
   rejectAdvance: false,
+  transactionError: null as Error | null,
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -44,6 +46,7 @@ vi.mock("@/lib/db", () => ({
       ...client,
       transaction: async (run: (tx: typeof client) => unknown) => {
         mocks.transaction();
+        if (mocks.transactionError) throw mocks.transactionError;
         return run(client);
       },
     };
@@ -51,6 +54,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("@/server/services/start-run-core", () => ({ startRunCore: mocks.startRunCore }));
+vi.mock("@/server/services/recover-stale-runs", () => ({ recoverStaleQueuedRuns: mocks.recoverStaleQueuedRuns }));
 
 import { MAX_SCHEDULES_PER_TICK, POST } from "./route";
 
@@ -70,11 +74,13 @@ beforeEach(() => {
   mocks.due = [];
   mocks.claimed = [];
   mocks.startRunCore.mockReset().mockResolvedValue({ ok: true, runId: "00000000-0000-4000-8000-000000000104" });
+  mocks.recoverStaleQueuedRuns.mockReset().mockResolvedValue(undefined);
   mocks.transaction.mockReset();
   mocks.lock.mockReset();
   mocks.limit.mockReset();
   mocks.updateSet.mockReset();
   mocks.rejectAdvance = false;
+  mocks.transactionError = null;
 });
 
 afterEach(() => {
@@ -90,6 +96,153 @@ describe("定时触发入口", () => {
     expect(mocks.transaction).not.toHaveBeenCalled();
     expect(mocks.updateSet).not.toHaveBeenCalled();
     expect(mocks.startRunCore).not.toHaveBeenCalled();
+    expect(mocks.recoverStaleQueuedRuns).not.toHaveBeenCalled();
+  });
+
+  it("没有到期定时任务时仍检查过期的排队运行", async () => {
+    const response = await POST(request());
+
+    expect(await response.json()).toEqual({ ok: true, claimed: 0, started: 0, failed: 0 });
+    expect(mocks.recoverStaleQueuedRuns).toHaveBeenCalledOnce();
+  });
+
+  it("领取失败时返回脱敏的可重试错误", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.transactionError = new Error("authorization: Bearer private-claim-token");
+
+    try {
+      const response = await POST(request());
+
+      expect(response.status).toBe(503);
+      expect(response.headers.get("retry-after")).toBe("60");
+      expect(await response.json()).toEqual({
+        ok: false,
+        error: "定时任务检查暂时失败，请稍后重试",
+        claimed: 0,
+        started: 0,
+        failed: 0,
+      });
+      expect(JSON.stringify(log.mock.calls)).not.toContain("private-claim-token");
+      expect(mocks.recoverStaleQueuedRuns).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("过期排队运行接管异常时返回可重试错误，不伪报调度成功", async () => {
+    mocks.recoverStaleQueuedRuns.mockRejectedValueOnce(new Error("database unavailable"));
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("60");
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "过期运行接管暂时失败，请稍后重试",
+      claimed: 0,
+      started: 0,
+      failed: 0,
+    });
+  });
+
+  it("已启动的定时运行不因后续接管失败而从回执中消失", async () => {
+    mocks.due = [{ id: SCHEDULE_ID }];
+    mocks.claimed = [{
+      id: SCHEDULE_ID,
+      workspaceId: "00000000-0000-4000-8000-000000000001",
+      agentId: AGENT_ID,
+      versionId: VERSION_ID,
+      spec: { kind: "interval", minutes: 5 },
+      input: {},
+      nextRunAt: new Date("2026-09-26T00:00:00.000Z"),
+      leaseUntil: new Date("2026-09-26T00:01:00.000Z"),
+      consecutiveFailures: 0,
+      status: "active",
+    }];
+    mocks.recoverStaleQueuedRuns.mockRejectedValueOnce(new Error("database unavailable"));
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "过期运行接管暂时失败，请稍后重试",
+      claimed: 1,
+      started: 1,
+      failed: 0,
+    });
+    expect(mocks.startRunCore).toHaveBeenCalledOnce();
+  });
+
+  it("可重试的定时运行启动故障返回 503 并释放租约", async () => {
+    mocks.due = [{ id: SCHEDULE_ID }];
+    mocks.claimed = [{
+      id: SCHEDULE_ID,
+      workspaceId: "00000000-0000-4000-8000-000000000001",
+      agentId: AGENT_ID,
+      versionId: VERSION_ID,
+      spec: { kind: "interval", minutes: 5 },
+      input: {},
+      nextRunAt: new Date("2026-09-26T00:00:00.000Z"),
+      leaseUntil: new Date("2026-09-26T00:01:00.000Z"),
+      consecutiveFailures: 0,
+      status: "active",
+    }];
+    mocks.startRunCore.mockResolvedValueOnce({ ok: false, error: "启动状态待确认", retryable: true });
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("60");
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "部分定时运行启动暂时失败，请稍后重试",
+      claimed: 1,
+      started: 0,
+      failed: 0,
+    });
+    expect(mocks.updateSet).toHaveBeenLastCalledWith(expect.objectContaining({ leaseUntil: null }));
+    expect(mocks.recoverStaleQueuedRuns).toHaveBeenCalledOnce();
+  });
+
+  it("单条定时任务异常不阻止同批其他任务，且不泄露错误细节", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const anotherId = "00000000-0000-4000-8000-000000000105";
+    mocks.due = [{ id: SCHEDULE_ID }, { id: anotherId }];
+    mocks.claimed = [SCHEDULE_ID, anotherId].map((id) => ({
+      id,
+      workspaceId: "00000000-0000-4000-8000-000000000001",
+      agentId: AGENT_ID,
+      versionId: VERSION_ID,
+      spec: { kind: "interval", minutes: 5 },
+      input: {},
+      nextRunAt: new Date("2026-09-26T00:00:00.000Z"),
+      leaseUntil: new Date("2026-09-26T00:01:00.000Z"),
+      consecutiveFailures: 0,
+      status: "active",
+    }));
+    mocks.startRunCore
+      .mockRejectedValueOnce(new Error("authorization: Bearer private-start-token"))
+      .mockResolvedValueOnce({ ok: true, runId: "00000000-0000-4000-8000-000000000104" });
+
+    try {
+      const response = await POST(request());
+
+      expect(response.status).toBe(503);
+      expect(response.headers.get("retry-after")).toBe("60");
+      expect(await response.json()).toEqual({
+        ok: false,
+        error: "部分定时运行启动暂时失败，请稍后重试",
+        claimed: 2,
+        started: 1,
+        failed: 0,
+      });
+      expect(mocks.startRunCore).toHaveBeenCalledTimes(2);
+      expect(mocks.recoverStaleQueuedRuns).toHaveBeenCalledOnce();
+      expect(JSON.stringify(log.mock.calls)).not.toContain("private-start-token");
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it("始终使用定时任务创建时冻结的版本", async () => {
@@ -122,6 +275,7 @@ describe("定时触发入口", () => {
       sourceType: "schedule",
       sourceKey: `${SCHEDULE_ID}:${dueAt.toISOString()}`,
     });
+    expect(mocks.recoverStaleQueuedRuns).toHaveBeenCalledOnce();
   });
 
   it("入口晚到时跳过旧时间槽，仍用本次到期时间作为幂等键", async () => {

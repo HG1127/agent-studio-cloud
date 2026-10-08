@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isPlainJsonObject } from "./json";
 import { AgentInputContract } from "./manifest";
 import { RunFeedbackView } from "./run-feedback";
 import { WorkflowDraft } from "./workflow";
@@ -22,15 +23,22 @@ function jsonObjectIssue(value: Record<string, unknown>, options: {
   const maxEntries = options.maxEntries ?? MAX_RUN_INPUT_ENTRIES;
   const maxKeys = options.maxKeys ?? MAX_RUN_INPUT_KEYS;
   const maxKeyLength = options.maxKeyLength ?? 100;
+  const sizeError = `${options.label}不能超过 ${options.maxBytes % 1024 === 0 ? `${options.maxBytes / 1024} KB` : `${options.maxBytes} 字节`}`;
   if (Object.keys(value).length > maxKeys) return `${options.label}最多包含 ${maxKeys} 个字段`;
   const stack: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
   const visited = new WeakSet<object>();
   let entries = 0;
+  let minimumContentChars = 0;
   while (stack.length > 0) {
     const current = stack.pop()!;
     if (current.depth > maxDepth) return `${options.label}最多嵌套 ${maxDepth} 层`;
     const item = current.value;
-    if (item === null || typeof item === "string" || typeof item === "boolean") continue;
+    if (typeof item === "string") {
+      minimumContentChars += item.length;
+      if (minimumContentChars > options.maxBytes) return sizeError;
+      continue;
+    }
+    if (item === null || typeof item === "boolean") continue;
     if (typeof item === "number") {
       if (!Number.isFinite(item)) return `${options.label}中的数字必须是有限值`;
       continue;
@@ -38,21 +46,31 @@ function jsonObjectIssue(value: Record<string, unknown>, options: {
     if (typeof item !== "object") return `${options.label}只能包含可序列化的 JSON 数据`;
     if (visited.has(item)) return `${options.label}不能包含循环引用`;
     visited.add(item);
-    if (!Array.isArray(item) && Object.getPrototypeOf(item) !== Object.prototype && Object.getPrototypeOf(item) !== null) {
+    if (!Array.isArray(item) && !isPlainJsonObject(item)) {
       return `${options.label}只能包含普通对象和数组`;
     }
-    const itemEntries = Array.isArray(item) ? item.map((child, index) => [String(index), child] as const) : Object.entries(item);
-    if (itemEntries.some(([key]) => key.length > maxKeyLength)) return `${options.label}的字段名不能超过 ${maxKeyLength} 个字符`;
-    if (itemEntries.some(([key]) => RESERVED_INPUT_KEYS.has(key))) return `${options.label}不能使用保留字段名`;
-    const children = itemEntries.map(([, child]) => child);
-    entries += children.length;
+    if (Array.isArray(item)) {
+      entries += item.length;
+      if (entries > maxEntries) return `${options.label}最多包含 ${maxEntries} 个数据项`;
+      for (let index = item.length - 1; index >= 0; index -= 1) {
+        stack.push({ value: item[index], depth: current.depth + 1 });
+      }
+      continue;
+    }
+    const keys = Object.keys(item);
+    entries += keys.length;
     if (entries > maxEntries) return `${options.label}最多包含 ${maxEntries} 个数据项`;
-    for (const child of children) stack.push({ value: child, depth: current.depth + 1 });
+    for (const key of keys) {
+      if (key.length > maxKeyLength) return `${options.label}的字段名不能超过 ${maxKeyLength} 个字符`;
+      if (RESERVED_INPUT_KEYS.has(key)) return `${options.label}不能使用保留字段名`;
+      minimumContentChars += key.length;
+      if (minimumContentChars > options.maxBytes) return sizeError;
+      stack.push({ value: (item as Record<string, unknown>)[key], depth: current.depth + 1 });
+    }
   }
   const bytes = new TextEncoder().encode(JSON.stringify(value)).byteLength;
   if (bytes <= options.maxBytes) return null;
-  const limit = options.maxBytes % 1024 === 0 ? `${options.maxBytes / 1024} KB` : `${options.maxBytes} 字节`;
-  return `${options.label}不能超过 ${limit}`;
+  return sizeError;
 }
 
 export const RunInputPayload = z.preprocess((value, ctx) => {
@@ -82,6 +100,11 @@ export const RunStatus = z.enum([
   "cancelled",
 ]);
 export type RunStatus = z.infer<typeof RunStatus>;
+
+export const RunStreamDone = z.object({
+  status: z.union([RunStatus.extract(["completed", "failed", "cancelled"]), z.enum(["gone", "error"])]),
+});
+export type RunStreamDone = z.infer<typeof RunStreamDone>;
 
 export const RunSourceType = z.enum(["manual", "schedule", "agent_call", "handoff", "evaluation"]);
 export type RunSourceType = z.infer<typeof RunSourceType>;
@@ -119,10 +142,10 @@ export const PendingWaitView = z.object({
 });
 export type PendingWaitView = z.infer<typeof PendingWaitView>;
 
-// 启动动作返回的判别联合唯一来源：失败时不创建 run，只返回中文错误
+// 启动动作返回的判别联合唯一来源：状态待确认时沿用原请求标识重试
 export const StartRunResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true), runId: z.string().uuid() }),
-  z.object({ ok: z.literal(false), error: z.string() }),
+  z.object({ ok: z.literal(false), error: z.string(), retryable: z.literal(true).optional() }),
 ]);
 export type StartRunResult = z.infer<typeof StartRunResult>;
 
@@ -252,6 +275,14 @@ export const RunStepView = z.object({
 });
 export type RunStepView = z.infer<typeof RunStepView>;
 
+export const RunReportIntegrity = z.object({
+  omittedSteps: z.number().int().nonnegative(),
+  omittedTraceEvents: z.number().int().nonnegative(),
+  omittedApprovals: z.number().int().nonnegative(),
+  omittedFeedback: z.number().int().nonnegative(),
+});
+export type RunReportIntegrity = z.infer<typeof RunReportIntegrity>;
+
 export const RunReportFile = z.object({
   format: z.literal("agent-studio-cloud-run"),
   formatVersion: z.literal(1),
@@ -262,7 +293,12 @@ export const RunReportFile = z.object({
   trace: z.array(TraceEventView),
   approvals: z.array(ApprovalView),
   feedback: RunFeedbackView.nullable().default(null),
+  integrity: RunReportIntegrity.optional(),
 });
 export type RunReportFile = z.infer<typeof RunReportFile>;
 
-export type SaveWorkflowResult = { ok: true; updatedAt: string } | { ok: false; error: string };
+export const SaveWorkflowResult = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), updatedAt: z.iso.datetime() }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+export type SaveWorkflowResult = z.infer<typeof SaveWorkflowResult>;

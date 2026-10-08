@@ -1,0 +1,2 @@
+CREATE INDEX "knowledge_chunks_content_trgm_idx" ON "knowledge_chunks" USING gin ("content" gin_trgm_ops);--> statement-breakpoint
+CREATE INDEX "agent_memories_content_trgm_idx" ON "agent_memories" USING gin ("content" gin_trgm_ops);

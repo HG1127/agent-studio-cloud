@@ -1,7 +1,6 @@
 "use server";
 
 import { and, eq, inArray } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { StartRunResult } from "@/contracts/run";
 import { runs } from "@/db/schema";
@@ -9,6 +8,9 @@ import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { startRunCore } from "@/server/services/start-run-core";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
+
+class RunStartPendingError extends Error {}
 
 export async function retryRunAction(runId: string, requestId?: string): Promise<StartRunResult> {
   if (!z.string().uuid().safeParse(runId).success || (requestId && !z.string().uuid().safeParse(requestId).success)) {
@@ -35,12 +37,13 @@ export async function retryRunAction(runId: string, requestId?: string): Promise
       sourceType: "manual",
       sourceKey: requestId ? `manual-retry:${runId}:${requestId}` : null,
     });
+    if (!result.ok && result.retryable) throw new RunStartPendingError("运行启动状态待确认，请用同一次请求重试");
     if (result.ok) {
-      revalidatePath("/runs");
-      revalidatePath(`/runs/${runId}`);
+      revalidatePathsAfterCommit(["/runs", `/runs/${runId}`], "run-retry");
     }
     return result;
   } catch (error) {
+    if (error instanceof RunStartPendingError) throw error;
     console.error("再次运行失败", safeErrorForLog(error));
     return { ok: false, error: "再次运行失败，请稍后重试" };
   }

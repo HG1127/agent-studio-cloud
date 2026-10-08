@@ -1,6 +1,7 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentManifest } from "@/contracts/manifest";
+import { MAX_EVALUATION_CASES } from "@/contracts/evaluation";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
@@ -36,6 +37,8 @@ afterEach(async () => {
   await db.delete(auditEvents).where(eq(auditEvents.targetId, RUN_ID));
   await db.delete(runFeedback).where(eq(runFeedback.runId, RUN_ID));
   await db.delete(evaluationRuns).where(eq(evaluationRuns.agentId, AGENT_ID));
+  const caseRows = await db.select({ id: evaluationCases.id }).from(evaluationCases).where(eq(evaluationCases.agentId, AGENT_ID));
+  if (caseRows.length > 0) await db.delete(auditEvents).where(inArray(auditEvents.targetId, caseRows.map((row) => row.id)));
   await db.delete(evaluationCases).where(eq(evaluationCases.agentId, AGENT_ID));
   await db.delete(runs).where(eq(runs.id, RUN_ID));
   await db.delete(agentVersions).where(eq(agentVersions.id, VERSION_ID));
@@ -113,6 +116,66 @@ describe("运行反馈闭环", () => {
       input: { request: "检查合同", apiKey: "[已隐藏敏感信息]" },
       expectations: [],
     });
+  });
+
+  it("归档关联样例后显示可重新加入，并恢复同一历史样例", async () => {
+    await insertFixture();
+    await saveRunFeedbackAction({ runId: RUN_ID, rating: "needs_improvement", note: "需要回归检查" });
+    const first = await createRegressionCaseFromRunFeedbackAction(RUN_ID);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    await db.update(evaluationCases).set({ archivedAt: new Date() }).where(eq(evaluationCases.id, first.evaluationCaseId));
+
+    expect(await getRunFeedback(RUN_ID, DEMO_WORKSPACE_ID)).toMatchObject({ evaluationCaseId: null });
+    expect(await listImprovementFeedback({ agentId: AGENT_ID })).toEqual([
+      expect.objectContaining({ runId: RUN_ID, evaluationCaseId: null }),
+    ]);
+    expect(await saveRunFeedbackAction({ runId: RUN_ID, rating: "needs_improvement", note: "需要回归检查" }))
+      .toMatchObject({ ok: true, feedback: { evaluationCaseId: null } });
+
+    await db.insert(evaluationRuns).values({
+      workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, agentId: AGENT_ID,
+      versionId: VERSION_ID, status: "running", totalCount: 1,
+    });
+    expect(await createRegressionCaseFromRunFeedbackAction(RUN_ID)).toEqual({
+      ok: false, error: "自动验收运行期间不能新增回归样例，请等待验收完成",
+    });
+    await db.delete(evaluationRuns).where(eq(evaluationRuns.agentId, AGENT_ID));
+
+    expect(await createRegressionCaseFromRunFeedbackAction(RUN_ID)).toEqual({
+      ok: true, evaluationCaseId: first.evaluationCaseId, created: true,
+    });
+    expect(await createRegressionCaseFromRunFeedbackAction(RUN_ID)).toEqual({
+      ok: true, evaluationCaseId: first.evaluationCaseId, created: false,
+    });
+    const cases = await db.select().from(evaluationCases).where(eq(evaluationCases.agentId, AGENT_ID));
+    expect(cases).toHaveLength(1);
+    expect(cases[0].archivedAt).toBeNull();
+    expect(await getRunFeedback(RUN_ID, DEMO_WORKSPACE_ID)).toMatchObject({ evaluationCaseId: first.evaluationCaseId });
+  });
+
+  it("关联样例已归档且启用数量达到上限时不偷偷恢复", async () => {
+    await insertFixture();
+    await saveRunFeedbackAction({ runId: RUN_ID, rating: "needs_improvement", note: "需要回归检查" });
+    const first = await createRegressionCaseFromRunFeedbackAction(RUN_ID);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    await db.update(evaluationCases).set({ archivedAt: new Date() }).where(eq(evaluationCases.id, first.evaluationCaseId));
+    await db.insert(evaluationCases).values(Array.from({ length: MAX_EVALUATION_CASES }, (_, index) => ({
+      workspaceId: DEMO_WORKSPACE_ID,
+      createdBy: DEMO_USER_ID,
+      agentId: AGENT_ID,
+      name: `其他验收样例 ${index + 1}`,
+      input: {},
+      expectations: [],
+    })));
+
+    expect(await createRegressionCaseFromRunFeedbackAction(RUN_ID)).toEqual({
+      ok: false, error: `启用中的验收样例已达到 ${MAX_EVALUATION_CASES} 条上限`,
+    });
+    const [linked] = await db.select({ archivedAt: evaluationCases.archivedAt })
+      .from(evaluationCases).where(eq(evaluationCases.id, first.evaluationCaseId));
+    expect(linked.archivedAt).not.toBeNull();
   });
 
   it("自动验收运行期间不能从差评新增未参与本轮的回归样例", async () => {

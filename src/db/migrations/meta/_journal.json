@@ -134,6 +134,41 @@
       "when": 1790404499866,
       "tag": "0018_windy_lord_hawal",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1790513849882,
+      "tag": "0019_enable-pg-trgm",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1790513897370,
+      "tag": "0020_content-trigram-indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1790520532628,
+      "tag": "0021_secret_the_executioner",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1790524952656,
+      "tag": "0022_same_mysterio",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1790555496347,
+      "tag": "0023_bumpy_bishop",
+      "breakpoints": true
     }
   ]
 }

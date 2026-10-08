@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, eq, gt, lt, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, lt, sql } from "drizzle-orm";
 import { traceEvents, waitEventSubmissions } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
@@ -109,7 +109,7 @@ export async function markWaitEventSubmissionAccepted(id: string, attemptToken: 
     ));
 }
 
-export async function waitEventWasResumed(runId: string, hookToken: string): Promise<boolean> {
+export async function waitEventOutcome(runId: string, hookToken: string): Promise<"resumed" | "timed_out" | null> {
   const [started] = await db
     .select({ seq: traceEvents.seq, nodeId: traceEvents.nodeId })
     .from(traceEvents)
@@ -120,17 +120,19 @@ export async function waitEventWasResumed(runId: string, hookToken: string): Pro
       sql`${traceEvents.data} ->> 'hookToken' = ${hookToken}`,
     ))
     .limit(1);
-  if (!started?.nodeId) return false;
-  const [resumed] = await db
-    .select({ id: traceEvents.id })
+  if (!started?.nodeId) return null;
+  const [outcome] = await db
+    .select({ kind: traceEvents.kind })
     .from(traceEvents)
     .where(and(
       eq(traceEvents.workspaceId, DEMO_WORKSPACE_ID),
       eq(traceEvents.runId, runId),
       eq(traceEvents.nodeId, started.nodeId),
-      eq(traceEvents.kind, "wait.resumed"),
+      inArray(traceEvents.kind, ["wait.resumed", "wait.timed_out"]),
       gt(traceEvents.seq, started.seq),
     ))
+    .orderBy(asc(traceEvents.seq))
     .limit(1);
-  return Boolean(resumed);
+  return outcome?.kind === "wait.resumed" ? "resumed"
+    : outcome?.kind === "wait.timed_out" ? "timed_out" : null;
 }

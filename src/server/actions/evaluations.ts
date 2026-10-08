@@ -1,7 +1,6 @@
 "use server";
 
 import { and, count, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import {
   EvaluationCaseArchiveInput,
@@ -12,7 +11,7 @@ import {
   type EvaluationGenerateResult,
 } from "@/contracts/evaluation";
 import { AgentManifest } from "@/contracts/manifest";
-import { agentVersions, agents, auditEvents, evaluationCaseResults, evaluationCases, evaluationRuns } from "@/db/schema";
+import { agentVersions, agents, auditEvents, evaluationCaseResults, evaluationCases, evaluationRuns, runs } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { markEvaluationStartFailure, reconcileEvaluationSummary, reconcileTerminalEvaluationRun } from "@/server/services/evaluation-state";
@@ -25,6 +24,7 @@ import { evaluationCaseSetsEqual, generateEvaluationCases } from "@/server/domai
 import { redactCredentialData } from "@/server/domain/security/redact-sensitive";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { jsonValuesEqual } from "@/server/domain/json-value";
+import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
 const EVALUATION_START_CONCURRENCY = 5;
 
@@ -84,7 +84,7 @@ export async function generateEvaluationCasesAction(agentId: string): Promise<Ev
       }));
       return { ok: true as const, createdCount: generated.length };
     });
-    if (result.ok) revalidatePath(`/agents/${agentId}`);
+    if (result.ok) revalidatePathsAfterCommit([`/agents/${agentId}`], "evaluation-generate");
     return result;
   } catch (error) {
     console.error("生成验收样例失败", safeErrorForLog(error));
@@ -151,7 +151,7 @@ export async function createEvaluationCaseAction(input: unknown): Promise<Evalua
       return { ok: true as const };
     });
     if (!result.ok) return result;
-    revalidatePath(`/agents/${parsed.data.agentId}`);
+    revalidatePathsAfterCommit([`/agents/${parsed.data.agentId}`], "evaluation-case-create");
     return result;
   } catch (error) {
     console.error("创建验收样例失败", safeErrorForLog(error));
@@ -221,11 +221,11 @@ export async function updateEvaluationCaseAction(input: unknown): Promise<Evalua
     if (rows === "running") return { ok: false, error: "自动验收运行期间不能修改验收样例" };
     if (!rows) return { ok: false, error: "找不到这个助手，请刷新页面后重试" };
     if (rows === "unchanged") {
-      revalidatePath(`/agents/${parsed.data.agentId}`);
+      revalidatePathsAfterCommit([`/agents/${parsed.data.agentId}`], "evaluation-case-update");
       return { ok: true };
     }
     if (rows.length === 0) return { ok: false, error: "验收样例已在其他页面发生变化；你的修改仍保留在本页，请刷新核对后再保存" };
-    revalidatePath(`/agents/${parsed.data.agentId}`);
+    revalidatePathsAfterCommit([`/agents/${parsed.data.agentId}`], "evaluation-case-update");
     return { ok: true };
   } catch (error) {
     console.error("更新验收样例失败", safeErrorForLog(error));
@@ -261,6 +261,14 @@ export async function setEvaluationCaseArchivedAction(input: unknown): Promise<E
       )).limit(1);
       if (!current) return [];
       if ((current.archivedAt !== null) === parsed.data.archived) return "unchanged" as const;
+      if (!parsed.data.archived) {
+        const [active] = await tx.select({ count: count() }).from(evaluationCases).where(and(
+          eq(evaluationCases.agentId, parsed.data.agentId),
+          eq(evaluationCases.workspaceId, DEMO_WORKSPACE_ID),
+          isNull(evaluationCases.archivedAt),
+        ));
+        if ((active?.count ?? 0) >= MAX_EVALUATION_CASES) return "limit" as const;
+      }
       const rows = await tx.update(evaluationCases)
         .set({ archivedAt: parsed.data.archived ? new Date() : null, updatedAt: new Date() })
         .where(and(
@@ -284,12 +292,13 @@ export async function setEvaluationCaseArchivedAction(input: unknown): Promise<E
     });
     if (updated === "running") return { ok: false, error: "自动验收运行期间不能修改验收样例" };
     if (!updated) return { ok: false, error: "找不到这个助手，请刷新页面后重试" };
+    if (updated === "limit") return { ok: false, error: `每个助手最多保留 ${MAX_EVALUATION_CASES} 条启用中的验收样例` };
     if (updated === "unchanged") {
-      revalidatePath(`/agents/${parsed.data.agentId}`);
+      revalidatePathsAfterCommit([`/agents/${parsed.data.agentId}`], "evaluation-case-archive");
       return { ok: true };
     }
     if (updated.length === 0) return { ok: false, error: "验收样例状态已经变化，请刷新页面后重试" };
-    revalidatePath(`/agents/${parsed.data.agentId}`);
+    revalidatePathsAfterCommit([`/agents/${parsed.data.agentId}`], "evaluation-case-archive");
     return { ok: true };
   } catch (error) {
     console.error("更新验收样例状态失败", safeErrorForLog(error));
@@ -304,43 +313,67 @@ export async function startEvaluationAction(agentId: string, requestId?: string)
   try {
     const prepared = await prepareEvaluationRun(agentId, requestId);
     if (!prepared.ok) return prepared;
+    let needsRetry = false;
     await runBounded(prepared.cases, EVALUATION_START_CONCURRENCY, async (testCase) => {
+      const sourceKey = `evaluation:${prepared.evaluationId}:${testCase.id}`;
+      let started: Awaited<ReturnType<typeof startRunCore>> | null = null;
       try {
-        const started = await startRunCore({
+        started = await startRunCore({
           agentId,
           versionId: prepared.versionId,
           input: testCase.input,
           sourceType: "evaluation",
-          sourceKey: `evaluation:${prepared.evaluationId}:${testCase.id}`,
+          sourceKey,
         });
-        if (started.ok) {
-          await db
-            .update(evaluationCaseResults)
-            .set({ runId: started.runId, updatedAt: new Date() })
-            .where(and(
-              eq(evaluationCaseResults.evaluationRunId, prepared.evaluationId),
-              eq(evaluationCaseResults.evaluationCaseId, testCase.id),
-              eq(evaluationCaseResults.workspaceId, DEMO_WORKSPACE_ID),
-            ));
-          await reconcileTerminalEvaluationRun(started.runId);
-          return;
-        }
-        await markEvaluationStartFailure(prepared.evaluationId, testCase.id, started.error, DEMO_WORKSPACE_ID);
       } catch (error) {
         console.error("启动单条验收运行失败", safeErrorForLog(error));
-        await markEvaluationStartFailure(
-          prepared.evaluationId,
-          testCase.id,
-          "验收运行启动失败，请稍后重新运行全部样例",
-          DEMO_WORKSPACE_ID,
-        );
+      }
+      let runId = started?.ok ? started.runId : null;
+      if (!runId) {
+        try {
+          const [existing] = await db
+            .select({ id: runs.id, status: runs.status })
+            .from(runs)
+            .where(and(eq(runs.workspaceId, DEMO_WORKSPACE_ID), eq(runs.sourceKey, sourceKey)))
+            .limit(1);
+          if (existing) {
+            runId = existing.id;
+            if (existing.status === "queued") needsRetry = true;
+          } else if (started && !started.ok && !started.retryable) {
+            await markEvaluationStartFailure(prepared.evaluationId, testCase.id, started.error, DEMO_WORKSPACE_ID);
+            return;
+          } else {
+            // 启动异常可能发生在提交运行之后；保留待处理状态供同一 sourceKey 补启。
+            needsRetry = true;
+            return;
+          }
+        } catch (error) {
+          console.error("核对验收启动状态时出错", safeErrorForLog(error));
+          needsRetry = true;
+          return;
+        }
+      }
+      try {
+        await db
+          .update(evaluationCaseResults)
+          .set({ runId, updatedAt: new Date() })
+          .where(and(
+            eq(evaluationCaseResults.evaluationRunId, prepared.evaluationId),
+            eq(evaluationCaseResults.evaluationCaseId, testCase.id),
+            eq(evaluationCaseResults.workspaceId, DEMO_WORKSPACE_ID),
+          ));
+        await reconcileTerminalEvaluationRun(runId);
+      } catch (error) {
+        console.error("验收运行已启动但结果尚未对账", safeErrorForLog(error));
+        needsRetry = true;
       }
     });
     // 进程可能在“最后一条结果已落库、整轮汇总未完成”之间中断；即使没有待补启样例也要重新对账。
     await reconcileEvaluationSummary(prepared.evaluationId);
-    revalidatePath(`/agents/${agentId}`);
-    revalidatePath("/runs");
-    return { ok: true };
+    revalidatePathsAfterCommit([`/agents/${agentId}`, "/runs"], "evaluation-start");
+    return needsRetry
+      ? { ok: false, error: "部分验收结果尚未对账，请点击“检查并继续”重试" }
+      : { ok: true };
   } catch (error) {
     console.error("启动自动验收失败", safeErrorForLog(error));
     return { ok: false, error: "启动自动验收失败，请稍后重试" };

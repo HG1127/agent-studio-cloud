@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
-import { EvaluationCaseView, EvaluationRunView, type EvaluationCaseView as EvaluationCaseViewType, type EvaluationRunView as EvaluationRunViewType } from "@/contracts/evaluation";
+import { EvaluationCaseSnapshot, EvaluationCaseView, EvaluationRunView, type EvaluationCaseView as EvaluationCaseViewType, type EvaluationRunView as EvaluationRunViewType } from "@/contracts/evaluation";
 import { agentVersions, evaluationCaseResults, evaluationCases, evaluationRuns } from "@/db/schema";
 import { db } from "@/lib/db";
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
@@ -21,7 +21,7 @@ export async function listEvaluationCases(
       eq(evaluationCases.workspaceId, workspaceId),
       archived ? isNotNull(evaluationCases.archivedAt) : isNull(evaluationCases.archivedAt),
     ))
-    .orderBy(desc(evaluationCases.createdAt))
+    .orderBy(desc(evaluationCases.createdAt), desc(evaluationCases.id))
     .limit(limit)
     .offset(offset);
   return parseQueryRows("验收样例列表", EvaluationCaseView, rows.map((row) => ({
@@ -50,18 +50,20 @@ export async function listEvaluationRuns(
       eq(agentVersions.agentId, agentId),
       eq(agentVersions.workspaceId, workspaceId),
     ))
-    .orderBy(desc(evaluationRuns.createdAt))
+    .orderBy(desc(evaluationRuns.createdAt), desc(evaluationRuns.id))
     .limit(limit)
     .offset(offset);
   if (rows.length === 0) return [];
   const resultRows = await db
     .select({ result: evaluationCaseResults, caseName: evaluationCases.name })
     .from(evaluationCaseResults)
-    .innerJoin(evaluationCases, eq(evaluationCases.id, evaluationCaseResults.evaluationCaseId))
+    .leftJoin(evaluationCases, and(
+      eq(evaluationCases.id, evaluationCaseResults.evaluationCaseId),
+      eq(evaluationCases.workspaceId, evaluationCaseResults.workspaceId),
+    ))
     .where(and(
       inArray(evaluationCaseResults.evaluationRunId, rows.map(({ evaluation }) => evaluation.id)),
       eq(evaluationCaseResults.workspaceId, workspaceId),
-      eq(evaluationCases.workspaceId, workspaceId),
     ));
   const resultsByRun = new Map<string, typeof resultRows>();
   for (const result of resultRows) {
@@ -74,13 +76,18 @@ export async function listEvaluationRuns(
     version,
     startedAt: evaluation.startedAt.toISOString(),
     finishedAt: evaluation.finishedAt?.toISOString() ?? null,
-    results: (resultsByRun.get(evaluation.id) ?? []).map(({ result, caseName }) => ({
-      caseId: result.evaluationCaseId,
-      caseName,
-      status: result.status,
-      error: result.error === null ? null : redactCredentialText(result.error),
-      runId: result.runId,
-    })),
+    results: (resultsByRun.get(evaluation.id) ?? []).map(({ result, caseName }) => {
+      const snapshot = result.caseSnapshot === null ? null : EvaluationCaseSnapshot.safeParse(result.caseSnapshot);
+      return {
+        caseId: result.evaluationCaseId,
+        caseName: snapshot === null
+          ? caseName ?? "已删除的验收样例"
+          : snapshot.success ? snapshot.data.name : "验收样例快照损坏",
+        status: result.status,
+        error: result.error === null ? null : redactCredentialText(result.error),
+        runId: result.runId,
+      };
+    }),
   })));
 }
 

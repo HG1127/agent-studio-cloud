@@ -86,6 +86,18 @@ describe("HTTP 工具调用", () => {
     })).resolves.toEqual({ ok: false, error: "业务系统返回中断，稍后自动重试", retryable: true });
   });
 
+  it("显式失败或非法成功标志不能冒充业务操作成功，且不回显外部正文", async () => {
+    for (const [body, error] of [
+      [{ ok: false, receiptId: "private-receipt" }, "业务系统回执表明操作未完成"],
+      [{ ok: "yes", receiptId: "private-receipt" }, "业务系统回执的 ok 字段必须是布尔值"],
+    ] as const) {
+      await expect(invokeHttpTool({
+        tool, idempotencyKey: "run:node", action: tool.action, input: {}, outputs: {},
+        fetchImpl: vi.fn(async () => Response.json(body)),
+      })).resolves.toEqual({ ok: false, error, retryable: false });
+    }
+  });
+
   it("工具回执中的保留字段不能通过宽松输出契约", async () => {
     const result = await invokeHttpTool({
       tool, idempotencyKey: "run:node", action: tool.action, input: {}, outputs: {},

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { scoreChunks, tokenize } from "@/server/domain/knowledge/search";
+import { hanTrigrams, knowledgeCandidateTerms, scoreChunks, tokenize } from "@/server/domain/knowledge/search";
 
 const docs = [
   { sourceId: "s1", sourceName: "售后手册", chunkIndex: 0, content: "开头即说明退货政策：签收后 7 天内可退。" },
@@ -74,5 +74,26 @@ describe("scoreChunks", () => {
 
     expect(tokens).toHaveLength(32);
     expect(longToken).toHaveLength(200);
+  });
+
+  it("候选词覆盖打分器可命中的完整词和中文三字片段", () => {
+    expect(knowledgeCandidateTerms("refund policy")).toEqual(["refund", "policy"]);
+    const terms = knowledgeCandidateTerms("检索海蓝灯塔二四资料");
+    expect(terms).toContain("检索海蓝灯塔二四资料");
+    expect(terms).toContain("海蓝灯");
+    expect(terms).toContain("灯塔二");
+    expect(terms).toHaveLength(new Set(terms).size);
+    expect(knowledgeCandidateTerms("  ，。  ")).toEqual([]);
+  });
+
+  it("长中文任务句的候选片段覆盖结尾主题，不只覆盖开头指令", () => {
+    const query = "请根据客户订单资料和售后服务政策梳理当前审批流程并评估相关人员反馈再确认退款期限";
+    const grams = hanTrigrams(query);
+    expect(grams.length).toBeLessThanOrEqual(32);
+    expect(grams).toContain("款期限");
+    expect(knowledgeCandidateTerms(query)).toContain("款期限");
+    expect(scoreChunks(query, [
+      { sourceId: "answer", sourceName: "退款规则", chunkIndex: 0, content: "退款期限是签收后七天。" },
+    ])).toHaveLength(1);
   });
 });

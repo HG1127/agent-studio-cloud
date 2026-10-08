@@ -31,6 +31,13 @@ export const EvaluationExpectation = z.object({
 });
 export type EvaluationExpectation = z.infer<typeof EvaluationExpectation>;
 
+export const EvaluationCaseSnapshot = z.object({
+  name: z.string().trim().min(1).max(80),
+  input: RunInputPayload,
+  expectations: z.array(EvaluationExpectation).max(MAX_EVALUATION_EXPECTATIONS),
+});
+export type EvaluationCaseSnapshot = z.infer<typeof EvaluationCaseSnapshot>;
+
 const EvaluationCaseFields = z.object({
   agentId: z.string().uuid(),
   name: z.string().trim().min(1).max(80),

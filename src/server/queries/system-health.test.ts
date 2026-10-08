@@ -18,11 +18,15 @@ describe("数据库就绪检查", () => {
       "public.run_feedback",
       "public.run_feedback_workspace_run_unique",
       "public.run_feedback_workspace_agent_updated_idx",
+      "public.run_feedback_workspace_case_idx",
       "public.runs_workspace_source_key_unique",
       "public.wait_event_submissions",
       "public.wait_event_submissions_token_unique",
       "public.wait_event_submissions_run_created_idx",
       "public.evaluation_runs_workspace_request_unique",
+      "public.schedules_workspace_request_idx",
+      "public.knowledge_chunks_content_trgm_idx",
+      "public.agent_memories_content_trgm_idx",
     ]));
     expect(REQUIRED_DATABASE_COLUMNS).toContainEqual({
       tableName: "evaluation_runs",
@@ -30,18 +34,35 @@ describe("数据库就绪检查", () => {
       requireNotNull: false,
       allowDefault: false,
     });
+    expect(REQUIRED_DATABASE_COLUMNS).toContainEqual({
+      tableName: "schedules",
+      columnName: "request_id",
+      requireNotNull: false,
+      allowDefault: false,
+    });
+    expect(REQUIRED_DATABASE_COLUMNS).toContainEqual({
+      tableName: "evaluation_case_results",
+      columnName: "case_snapshot",
+      requireNotNull: false,
+      allowDefault: false,
+    });
     expect(LATEST_MIGRATION_WHEN).toBe(migrationJournal.entries.at(-1)?.when);
   });
 
-  it("只在数据库结构和最新迁移都就绪时返回正常", async () => {
-    mocks.execute.mockResolvedValueOnce([{ ready: true }]).mockResolvedValueOnce([{ current: true }]);
+  it("只在数据库结构、最新迁移和演示租户都就绪时返回正常", async () => {
+    mocks.execute.mockResolvedValueOnce([{ ready: true }]).mockResolvedValueOnce([{ current: true }]).mockResolvedValueOnce([{ ready: true }]);
     await expect(isDatabaseReady()).resolves.toBe(true);
 
     mocks.execute.mockResolvedValueOnce([{ ready: false }]);
     await expect(isDatabaseReady()).resolves.toBe(false);
-    expect(mocks.execute).toHaveBeenCalledTimes(3);
+    expect(mocks.execute).toHaveBeenCalledTimes(4);
 
     mocks.execute.mockResolvedValueOnce([{ ready: true }]).mockResolvedValueOnce([{ current: false }]);
     await expect(isDatabaseReady()).resolves.toBe(false);
+    expect(mocks.execute).toHaveBeenCalledTimes(6);
+
+    mocks.execute.mockResolvedValueOnce([{ ready: true }]).mockResolvedValueOnce([{ current: true }]).mockResolvedValueOnce([{ ready: false }]);
+    await expect(isDatabaseReady()).resolves.toBe(false);
+    expect(mocks.execute).toHaveBeenCalledTimes(9);
   });
 });

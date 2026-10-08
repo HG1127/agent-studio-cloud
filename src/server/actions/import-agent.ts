@@ -1,20 +1,19 @@
 "use server";
 
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { ImportAgentResult } from "@/contracts/agent";
 import { agents, agentVersions, auditEvents, knowledgeSources, workflowDefinitions } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
-import { agentImportSizeIssue, importedCollaborationKeys, importedWorkflowIssue, normalizeAgentImport, rebindImportedWorkflow } from "@/server/domain/import-agent";
+import { agentImportSizeIssue, importedCollaborationKeys, importedWorkflowIssue, importRequestMatches, normalizeAgentImport, rebindImportedWorkflow } from "@/server/domain/import-agent";
 import { agentImportFingerprint } from "@/server/domain/import-agent-fingerprint";
 import { auditEventValues } from "@/server/audit/event-values";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
-import { agentIdentityMatches } from "@/server/domain/agent-identity";
 import { workflowKnowledgeSourceIds } from "@/server/domain/runtime/knowledge-snapshot";
 import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding";
 import { getToolRegistration } from "@/server/tools/tool-registry";
+import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
 async function findExistingImport(requestId: string) {
   const [existing] = await db.select({
@@ -22,6 +21,7 @@ async function findExistingImport(requestId: string) {
     name: agents.name,
     description: agents.description,
     intentText: agents.intentText,
+    draft: workflowDefinitions.draft,
     auditData: auditEvents.data,
   }).from(agents).innerJoin(workflowDefinitions, and(
     eq(workflowDefinitions.agentId, agents.id),
@@ -43,9 +43,10 @@ function existingImportMatches(
   imported: NonNullable<ReturnType<typeof normalizeAgentImport>>,
   fingerprint: string,
 ): boolean {
-  if (!agentIdentityMatches(existing, imported)) return false;
-  const storedFingerprint = existing.auditData?.importFingerprint;
-  return typeof storedFingerprint === "string" ? storedFingerprint === fingerprint : true;
+  return importRequestMatches({
+    ...existing,
+    importFingerprint: existing.auditData?.importFingerprint,
+  }, imported, fingerprint);
 }
 
 export async function importAgentAction(input: unknown, requestId: string): Promise<ImportAgentResult> {
@@ -131,13 +132,13 @@ export async function importAgentAction(input: unknown, requestId: string): Prom
       }));
       return created.id;
     });
-    revalidatePath("/agents");
+    revalidatePathsAfterCommit(["/agents"], "agent-import");
     return { ok: true, agentId };
   } catch (error) {
     try {
       const existing = await findExistingImport(requestId);
       if (existing && existingImportMatches(existing, imported, fingerprint)) {
-        revalidatePath("/agents");
+        revalidatePathsAfterCommit(["/agents"], "agent-import-recover");
         return { ok: true, agentId: existing.id };
       }
     } catch (recoveryError) {

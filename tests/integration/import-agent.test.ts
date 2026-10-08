@@ -56,6 +56,14 @@ describe("助手导入安全重试", () => {
 
     expect(await importAgentAction(payload, AGENT_ID)).toEqual({ ok: true, agentId: AGENT_ID });
     expect(await db.select().from(agents).where(eq(agents.id, AGENT_ID))).toHaveLength(1);
+    const changed = {
+      ...payload,
+      workflow: WorkflowDraft.parse({ ...workflow, memoryPolicy: { taskContext: true, longTerm: true } }),
+    };
+    expect(await importAgentAction(changed, AGENT_ID)).toEqual({
+      ok: false,
+      error: "导入请求信息已经失效，请重新选择文件",
+    });
   });
 
   it("同一请求标识不能被同名但不同流程的文件复用", async () => {

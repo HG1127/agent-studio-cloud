@@ -12,6 +12,25 @@ export function isCollaborationMemoryOutput(value: unknown): boolean {
     || record.mode === "write" && typeof record.saved === "boolean";
 }
 
+export function collaborationDataWithMemoryPolicy(value: Record<string, unknown>, team: boolean): Record<string, unknown> {
+  if (team) return value;
+  const visit = (current: unknown, depth: number): unknown => {
+    if (isCollaborationMemoryOutput(current)) return undefined;
+    if (depth > 12) return "[内容层级过深，已省略]";
+    // 保留数组位置：不能因移除经验回执让字段映射读到另一条记录。
+    if (Array.isArray(current)) return current.map((item) => visit(item, depth + 1) ?? null);
+    if (!current || typeof current !== "object") return current;
+    return Object.fromEntries(Object.entries(current).flatMap(([key, child]) => {
+      const filtered = visit(child, depth + 1);
+      return filtered === undefined ? [] : [[key, filtered]];
+    }));
+  };
+  return Object.fromEntries(Object.entries(value).flatMap(([key, child]) => {
+    const filtered = visit(child, 0);
+    return filtered === undefined ? [] : [[key, filtered]];
+  }));
+}
+
 export function buildBoundedCollaborationContext(value: unknown, copies = 1): string {
   const raw = JSON.stringify(value);
   const budget = Math.max(200, Math.floor(MAX_COLLABORATION_CONTEXT_CHARS / Math.max(1, copies)));

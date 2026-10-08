@@ -5,14 +5,41 @@ import { knowledgeChunks, knowledgeSources } from "@/db/schema";
 import { db } from "@/lib/db";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { knowledgeIngestWorkflow } from "@/server/workflows/knowledge-ingest";
+import { buildDocxArchive } from "../helpers/docx-archive";
 
 const SOURCE_ID = "00000000-0000-4000-8000-0000000000f1";
 const SOURCE_ID_FAIL = "00000000-0000-4000-8000-0000000000f2";
 const SOURCE_ID_ARCHIVED = "00000000-0000-4000-8000-0000000000f3";
 const SOURCE_ID_STALE = "00000000-0000-4000-8000-0000000000f4";
+const SOURCE_ID_DOCX = "00000000-0000-4000-8000-0000000000f5";
 const TOKEN = "pending:test-current-ingest";
 
 describe("知识入库工作流", () => {
+  it("伪造解压大小的 DOCX 落为失败且不产生知识分片", async () => {
+    const archive = buildDocxArchive([
+      { name: "word/document.xml", content: Buffer.alloc(65_536, 65), declaredSize: 1 },
+    ]);
+    const mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    await db.insert(knowledgeSources).values({
+      id: SOURCE_ID_DOCX, workspaceId: DEMO_WORKSPACE_ID, name: "异常资料.docx", mime,
+      sizeBytes: archive.byteLength, sha256: `m3-docx-${SOURCE_ID_DOCX}`, status: "parsing", parseEngine: TOKEN, createdBy: DEMO_USER_ID,
+    });
+    try {
+      const handle = await start(knowledgeIngestWorkflow, [{
+        sourceId: SOURCE_ID_DOCX, filename: "异常资料.docx", mime,
+        content: new Blob([new Uint8Array(archive)]).stream(), ingestToken: TOKEN,
+      }]);
+      await expect(handle.returnValue).rejects.toThrow();
+      const [source] = await db.select().from(knowledgeSources).where(eq(knowledgeSources.id, SOURCE_ID_DOCX)).limit(1);
+      expect(source).toMatchObject({ status: "failed", parseEngine: "builtin", chunkCount: 0 });
+      expect(source?.error).toContain("DOCX 实际解压大小与文件声明不一致");
+      expect(await db.select().from(knowledgeChunks).where(eq(knowledgeChunks.sourceId, SOURCE_ID_DOCX))).toHaveLength(0);
+    } finally {
+      await db.delete(knowledgeChunks).where(eq(knowledgeChunks.sourceId, SOURCE_ID_DOCX));
+      await db.delete(knowledgeSources).where(eq(knowledgeSources.id, SOURCE_ID_DOCX));
+    }
+  }, 240_000);
+
   it("归档期间完成的迟到解析不会重新启用资料", async () => {
     await db.insert(knowledgeSources).values({
       id: SOURCE_ID_ARCHIVED, workspaceId: DEMO_WORKSPACE_ID, name: "归档资料.txt", mime: "text/plain",

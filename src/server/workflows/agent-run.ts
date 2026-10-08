@@ -3,6 +3,7 @@ import { createHook, FatalError, sleep } from "workflow";
 import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { requestApproval, recordDecision } from "@/server/steps/approval-step";
+import { awaitApprovalDecision } from "@/server/workflows/approval-hook";
 import { MAX_COLLABORATION_DEPTH } from "@/server/domain/runtime/collaboration-chain";
 import { resolveLoopCollection, workflowExecutionLimit } from "@/server/domain/runtime/loop-runtime";
 import { prepareParallelBranches, resolveParallelOutcome, type PreparedParallelBranch } from "@/server/domain/runtime/parallel-runtime";
@@ -73,6 +74,7 @@ async function executeAutomaticNode(args: {
   input: Record<string, unknown>;
   outputs: Record<string, unknown>;
   depth: number;
+  currentItem?: unknown;
 }): Promise<unknown> {
   if (args.node.type === "ai") {
     return (await runModelStep(args)).output;
@@ -81,13 +83,13 @@ async function executeAutomaticNode(args: {
     return (await runToolStep({ runId: args.runId, node: args.node, input: args.input, outputs: args.outputs })).receipt;
   }
   if (args.node.type === "knowledge") {
-    return (await runKnowledgeStep({ runId: args.runId, node: args.node, manifest: args.manifest, input: args.input })).receipt;
+    return (await runKnowledgeStep({ runId: args.runId, node: args.node, manifest: args.manifest, input: args.input, currentItem: args.currentItem })).receipt;
   }
   if (args.node.type === "system") {
     return (await runInlineSystemStep({ runId: args.runId, node: args.node })).output;
   }
   if (args.node.type === "memory") {
-    return (await runMemoryStep({ runId: args.runId, node: args.node, input: args.input, outputs: args.outputs })).output;
+    return (await runMemoryStep({ runId: args.runId, node: args.node, input: args.input, outputs: args.outputs, currentItem: args.currentItem })).output;
   }
   if (args.node.type === "agent_call") {
     if (args.depth >= MAX_COLLABORATION_DEPTH) throw new FatalError(`步骤「${args.node.title}」超过助手协作层级上限`);
@@ -129,6 +131,7 @@ async function executeParallelBranch(args: {
   input: Record<string, unknown>;
   parentOutputs: Record<string, unknown>;
   depth: number;
+  currentItem?: unknown;
 }): Promise<ParallelBranchResult> {
   const branchOutputs: Record<string, unknown> = {};
   for (const node of args.branch.steps) {
@@ -139,6 +142,7 @@ async function executeParallelBranch(args: {
       input: args.input,
       outputs: { ...args.parentOutputs, ...branchOutputs },
       depth: args.depth,
+      currentItem: args.currentItem,
     });
   }
   return { id: args.branch.id, label: args.branch.label, status: "completed", outputs: branchOutputs };
@@ -151,6 +155,7 @@ async function executeSubflow(args: {
   input: Record<string, unknown>;
   parentOutputs: Record<string, unknown>;
   depth: number;
+  currentItem?: unknown;
 }): Promise<Array<{ title: string; output: unknown }>> {
   const childOutputs: Record<string, unknown> = {};
   const steps: Array<{ title: string; output: unknown }> = [];
@@ -162,6 +167,7 @@ async function executeSubflow(args: {
       input: args.input,
       outputs: { ...args.parentOutputs, ...childOutputs },
       depth: args.depth,
+      currentItem: args.currentItem,
     });
     childOutputs[node.id] = output;
     steps.push({ title: node.title, output });
@@ -179,7 +185,7 @@ export async function agentRunWorkflow(
   const draft = manifest.workflowSnapshot;
   await initializeRun(runId, draft, executionContext.startToken);
   let currentId: string | null = draft.startNodeId;
-  const outputs: Record<string, unknown> = {};
+  let outputs: Record<string, unknown> = {};
   const loopStates: Record<string, {
     items: unknown[];
     sourceCount: number;
@@ -187,12 +193,15 @@ export async function agentRunWorkflow(
     sourceMissing: boolean;
     index: number;
     iterations: Array<{ iteration: number; item: unknown; bodyOutput: unknown }>;
+    baselineOutputs: Record<string, unknown>;
+    baselineRepairAttempts: Record<string, number>;
   }> = {};
   const activeLoops: Array<{ loopId: string; iteration: number; total: number; item: unknown }> = [];
-  const qualityRepairAttempts: Record<string, number> = {};
+  let qualityRepairAttempts: Record<string, number> = {};
   let lastHumanDecision: unknown = null;
   const executionLimit = workflowExecutionLimit(draft.nodes);
   let guard = 0;
+  let lastVisitedNodeId: string | null = null;
   try {
     while (currentId && guard < executionLimit) {
       guard += 1;
@@ -201,6 +210,8 @@ export async function agentRunWorkflow(
         ? draft.nodes[currentId]
         : undefined;
       if (!node) break;
+      const incomingNodeId = lastVisitedNodeId;
+      lastVisitedNodeId = node.id;
       if (node.type === "trigger") {
         currentId = node.next;
         continue;
@@ -246,7 +257,7 @@ export async function agentRunWorkflow(
       }
       if (node.type === "knowledge") {
         try {
-          const r = await runKnowledgeStep({ runId, node, manifest, input });
+          const r = await runKnowledgeStep({ runId, node, manifest, input, currentItem: activeLoops.at(-1)?.item });
           outputs[node.id] = r.receipt;
           currentId = node.next;
         } catch (error) {
@@ -258,7 +269,7 @@ export async function agentRunWorkflow(
       }
       if (node.type === "memory") {
         try {
-          const result = await runMemoryStep({ runId, node, input, outputs });
+          const result = await runMemoryStep({ runId, node, input, outputs, currentItem: activeLoops.at(-1)?.item });
           outputs[node.id] = result.output;
           currentId = node.next;
         } catch (error) {
@@ -426,8 +437,9 @@ export async function agentRunWorkflow(
       }
       if (node.type === "human") {
         await persistContext(runId, outputs);
-        const { approvalId, token, recordedDecision: storedDecision } = await requestApproval({ runId, node, outputs, nodes: draft.nodes });
-        const decision = storedDecision ?? await createHook<{ decision: "approved" | "rejected"; note?: string }>({ token });
+        const approval = await requestApproval({ runId, node, outputs, nodes: draft.nodes });
+        const { approvalId } = approval;
+        const decision = await awaitApprovalDecision(runId, approval);
         const recordedDecision = await recordDecision({ runId, node, approvalId, decision });
         outputs[node.id] = recordedDecision;
         lastHumanDecision = decision.decision === "rejected" ? recordedDecision : null;
@@ -492,6 +504,10 @@ export async function agentRunWorkflow(
       if (node.type === "loop") {
         const loop = node.loop;
         if (!loop?.bodyNext || !loop.exitNext) throw new FatalError(`步骤「${node.title}」的逐项处理路径不完整`);
+        const ancestorIndex = activeLoops.findLastIndex((frame) => frame.loopId === node.id);
+        if (ancestorIndex >= 0 && ancestorIndex < activeLoops.length - 1) {
+          for (const abandoned of activeLoops.splice(ancestorIndex + 1)) delete loopStates[abandoned.loopId];
+        }
         let state = loopStates[node.id];
         if (!state) {
           const collection = resolveLoopCollection({
@@ -499,6 +515,7 @@ export async function agentRunWorkflow(
             maxIterations: loop.maxIterations,
             input,
             outputs,
+            currentItem: activeLoops.at(-1)?.item,
           });
           if (collection.sourceMissing) {
             const error = new FatalError(`步骤「${node.title}」没有在“${loop.collectionPath}”找到可逐项处理的列表`);
@@ -507,17 +524,28 @@ export async function agentRunWorkflow(
             currentId = handled.next;
             continue;
           }
-          state = loopStates[node.id] = { ...collection, index: 0, iterations: [] };
+          state = loopStates[node.id] = {
+            ...collection,
+            index: 0,
+            iterations: [],
+            baselineOutputs: { ...outputs },
+            baselineRepairAttempts: { ...qualityRepairAttempts },
+          };
         }
         const active = activeLoops.at(-1);
         if (active?.loopId === node.id && active.iteration > state.iterations.length) {
           state.iterations.push({
             iteration: active.iteration,
             item: active.item,
-            bodyOutput: outputs[loop.bodyNext],
+            bodyOutput: incomingNodeId ? outputs[incomingNodeId] : null,
           });
         }
         if (state.index < state.items.length) {
+          if (state.index > 0) {
+            // 下一项不能借用上一项的步骤产出或返工次数，保留入循环前的上游上下文。
+            outputs = { ...state.baselineOutputs };
+            qualityRepairAttempts = { ...state.baselineRepairAttempts };
+          }
           const item = state.items[state.index];
           state.index += 1;
           const frame = { loopId: node.id, iteration: state.index, total: state.items.length, item };
@@ -542,6 +570,7 @@ export async function agentRunWorkflow(
         };
         outputs[node.id] = output;
         await completeLoop({ runId, node, output });
+        delete loopStates[node.id];
         currentId = loop.exitNext;
         continue;
       }
@@ -556,6 +585,7 @@ export async function agentRunWorkflow(
           input,
           parentOutputs: outputs,
           depth: executionContext.depth,
+          currentItem: activeLoops.at(-1)?.item,
         })));
         const branchResults: ParallelBranchResult[] = settledBranches.map((result, index) => {
           if (result.status === "fulfilled") return result.value;
@@ -609,6 +639,7 @@ export async function agentRunWorkflow(
           input,
           parentOutputs: outputs,
           depth: executionContext.depth,
+          currentItem: activeLoops.at(-1)?.item,
         })]);
         if (settled.status === "fulfilled") {
           const output = {

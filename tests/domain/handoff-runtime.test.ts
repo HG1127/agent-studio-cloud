@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 import { AgentManifest } from "@/contracts/manifest";
 import { WorkflowNode } from "@/contracts/workflow";
 import { compileModelWorkflowPlan } from "@/server/domain/compile";
-import { buildHandoffInput, sanitizeHandoffValue, validateHandoffInput, validateHandoffNode, validateHandoffOutput } from "@/server/domain/runtime/handoff-runtime";
+import { buildHandoffInput as buildHandoffInputResult, sanitizeHandoffValue, validateHandoffInput, validateHandoffNode, validateHandoffOutput } from "@/server/domain/runtime/handoff-runtime";
+
+function buildHandoffInput(args: Parameters<typeof buildHandoffInputResult>[0]) {
+  const result = buildHandoffInputResult(args);
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error(result.error);
+  return result;
+}
 
 const targetManifest = AgentManifest.parse({
   schemaVersion: "4.0",
@@ -37,6 +44,40 @@ function handoffNode() {
 }
 
 describe("助手交接运行逻辑", () => {
+  it("显式映射保留金额和布尔值，不传额外全文上下文", () => {
+    const node = WorkflowNode.parse({ ...handoffNode(), inputMapping: { fields: [
+      { target: ["amount"], source: { kind: "output", nodeId: "extract", path: ["amount"] } },
+      { target: ["approved"], source: { kind: "literal", value: false } },
+    ] } });
+    expect(buildHandoffInput({ node, targetManifest, input: { other: "not-selected" }, outputs: { extract: { amount: 0 }, other: "not-selected" } }).input)
+      .toEqual({ amount: 0, approved: false });
+  });
+  it("禁止字段不能重命名跨过交接边界，映射缺失明确失败", () => {
+    const node = WorkflowNode.parse({ ...handoffNode(), inputMapping: { fields: [
+      { target: ["brief"], source: { kind: "input", path: ["内部备注"] } },
+    ] } });
+    expect(buildHandoffInputResult({ node, targetManifest, input: { 内部备注: "not-for-child" }, outputs: {} }))
+      .toMatchObject({ ok: false, error: expect.stringContaining("缺少映射字段") });
+  });
+  it("固定值及目标名称仍受交接契约和经验私有项清洗", () => {
+    const node = WorkflowNode.parse({ ...handoffNode(), inputMapping: { fields: [
+      { target: ["brief"], source: { kind: "literal", value: { safe: "业务结论", apiKey: "not-for-child", 内部备注: "not-for-child" } } },
+      { target: ["password"], source: { kind: "literal", value: "not-for-child" } },
+      { target: ["note"], source: { kind: "input", path: ["missing"] }, fallback: "Bearer abcdefghijklmnop" },
+    ] } });
+    const prepared = buildHandoffInput({ node, targetManifest, input: {}, outputs: {} });
+    expect(prepared.input).toEqual({ brief: { safe: "业务结论" }, note: "[已隐藏敏感信息]" });
+    expect(prepared.redactedPaths).toEqual(expect.arrayContaining(["brief.apiKey", "brief.内部备注", "password", "note"]));
+  });
+  it("嵌套经验只有团队模式可以显式映射，旧路径也不能漏传", () => {
+    const mapping = { fields: [{ target: ["brief"], source: { kind: "output", nodeId: "batch", path: ["branches", "0", "outputs", "memory", "memories", "0", "content"] } }] };
+    const outputs = { batch: { branches: [{ outputs: { memory: { mode: "read", memories: [{ content: "private-memory" }] } } }] } };
+    const node = WorkflowNode.parse({ ...handoffNode(), inputMapping: mapping });
+    expect(buildHandoffInputResult({ node, targetManifest, input: {}, outputs }).ok).toBe(false);
+    expect(JSON.stringify(buildHandoffInput({ node: handoffNode(), targetManifest, input: {}, outputs }))).not.toContain("private-memory");
+    const team = WorkflowNode.parse({ ...node, contract: { ...node.contract!, memoryPolicy: { mode: "team", shared: [], private: [] } } });
+    expect(buildHandoffInput({ node: team, targetManifest, input: {}, outputs }).input).toEqual({ brief: "private-memory" });
+  });
   it("递归移除密钥和契约禁止字段", () => {
     const sanitized = sanitizeHandoffValue({
       customer: "甲公司",

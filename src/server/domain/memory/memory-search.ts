@@ -1,5 +1,14 @@
 import { hanTrigrams, tokenize } from "@/server/domain/knowledge/search";
 
+export function memoryCandidateTerms(query: string): string[] {
+  const terms = new Set<string>();
+  for (const token of tokenize(query)) {
+    terms.add(token);
+    for (const gram of hanTrigrams(token)) terms.add(gram);
+  }
+  return [...terms];
+}
+
 export interface MemoryCandidate {
   content: string;
   createdAt: Date;

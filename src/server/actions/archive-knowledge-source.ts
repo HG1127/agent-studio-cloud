@@ -1,14 +1,14 @@
 "use server";
 import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { KnowledgeArchiveInput, type KnowledgeArchiveResult } from "@/contracts/knowledge";
-import { agentVersions, agents, auditEvents, knowledgeSources, runs } from "@/db/schema";
+import { agentVersions, agents, auditEvents, knowledgeSources, runs, schedules } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { auditEventValues } from "@/server/audit/event-values";
 import { restoredKnowledgeStatus } from "@/server/domain/knowledge/source-state";
 import { activeVersionDependingOnKnowledgeSource, liveRunDependingOnKnowledgeSource } from "@/server/domain/runtime/collaboration-dependencies";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
 export async function setKnowledgeSourceArchivedAction(input: unknown): Promise<KnowledgeArchiveResult> {
   const parsed = KnowledgeArchiveInput.safeParse(input);
@@ -67,6 +67,21 @@ export async function setKnowledgeSourceArchivedAction(input: unknown): Promise<
           source.id,
         );
         if (liveDependent) return { inUseBy: liveDependent.agentName, running: true };
+        // 退役版本仍可被启用中的定时任务冻结引用，归档前必须保护这些未来运行。
+        const activeSchedules = await tx
+          .select({ versionId: schedules.versionId })
+          .from(schedules)
+          .where(and(
+            eq(schedules.workspaceId, DEMO_WORKSPACE_ID),
+            eq(schedules.status, "active"),
+            isNull(schedules.archivedAt),
+          ));
+        const scheduledDependent = liveRunDependingOnKnowledgeSource(
+          dependencyVersions,
+          new Set(activeSchedules.map((schedule) => schedule.versionId)),
+          source.id,
+        );
+        if (scheduledDependent) return { inUseBy: scheduledDependent.agentName, scheduled: true };
       }
       const now = new Date();
       const rows = await tx
@@ -96,12 +111,15 @@ export async function setKnowledgeSourceArchivedAction(input: unknown): Promise<
       return rows.length > 0;
     });
     if (typeof updated === "object") {
+      if (updated.scheduled) {
+        return { ok: false, error: `助手「${updated.inUseBy}」仍有启用中的定时任务需要这份资料，请先暂停相关定时任务` };
+      }
       return updated.running
         ? { ok: false, error: `助手「${updated.inUseBy}」仍有运行中的任务需要这份资料，请等待运行结束后再归档` }
         : { ok: false, error: `助手「${updated.inUseBy}」的当前版本或待验收版本仍在使用这份资料，请先发布不再使用它的新版本` };
     }
     if (!updated) return { ok: false, error: "知识资料状态已经变化，请刷新页面后重试" };
-    revalidatePath("/knowledge");
+    revalidatePathsAfterCommit(["/knowledge"], "knowledge-archive");
     return { ok: true };
   } catch (error) {
     console.error("更新知识资料状态失败", safeErrorForLog(error));

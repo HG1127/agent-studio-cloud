@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { del, put } from "@vercel/blob";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { start } from "workflow/api";
 import { MAX_KNOWLEDGE_FILENAME_LENGTH } from "@/contracts/knowledge";
 import { auditEvents, knowledgeSources } from "@/db/schema";
@@ -12,7 +12,7 @@ import {
 } from "@/server/domain/knowledge/text-limits";
 import { knowledgeIngestWorkflow } from "@/server/workflows/knowledge-ingest";
 import { auditEventValues } from "@/server/audit/event-values";
-import { isKnowledgeParsingStalled } from "@/server/domain/knowledge/source-state";
+import { isKnowledgeParsingStalled, KNOWLEDGE_START_UNCONFIRMED_ERROR } from "@/server/domain/knowledge/source-state";
 import { hasCrossSiteOrigin } from "@/server/security/request-origin";
 import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
@@ -51,63 +51,108 @@ async function removeUnusedOriginal(pathname: string | null, retainedPathname: s
   }
 }
 
+async function removeUnreferencedOriginal(pathname: string | null, sha256: string, token: string): Promise<void> {
+  if (!pathname) return;
+  try {
+    const [source] = await db
+      .select({ blobPathname: knowledgeSources.blobPathname })
+      .from(knowledgeSources)
+      .where(and(eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID), eq(knowledgeSources.sha256, sha256)))
+      .limit(1);
+    await removeUnusedOriginal(pathname, source?.blobPathname ?? null, token);
+  } catch (error) {
+    console.error("[knowledge-upload] 无法核对原文件是否已被采用，保留文件待后续清理", safeErrorForLog(error));
+  }
+}
+
 function storageUnavailable() {
   console.error("[knowledge-upload] 私有文件存储写入失败");
   return Response.json({ ok: false, error: "私有文件存储暂不可用，请检查配置后重试" }, { status: 503 });
 }
 
-async function reconcileDuplicateSource(sourceId: string, suppliedBlobPathname: string | null) {
-  return db.transaction(async (tx) => {
-    // 重新锁定并读取，避免两个失败重传请求都基于锁外的旧状态启动解析任务。
-    const [current] = await tx
-      .select()
-      .from(knowledgeSources)
-      .where(and(eq(knowledgeSources.id, sourceId), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)))
-      .for("update")
-      .limit(1);
-    if (!current) return null;
-    const staleParsing = isKnowledgeParsingStalled(current);
-    const retrying = current.status === "failed" || staleParsing
-      || (current.status === "archived" && current.chunkCount === 0);
-    const status = retrying
-      ? "parsing"
-      : current.status === "archived"
-        ? (current.chunkCount > 0 ? "indexed" : "parsing")
-        : current.status;
-    const error = retrying ? null : current.error;
-    const ingestToken = retrying ? `pending:${randomUUID()}` : null;
-    const blobPathname = current.blobPathname ?? suppliedBlobPathname;
-    const shouldUpdate = Boolean(current.archivedAt) || retrying || blobPathname !== current.blobPathname;
-    if (shouldUpdate) {
-      await tx
-        .update(knowledgeSources)
-        .set({ archivedAt: null, status, error, blobPathname, parseEngine: ingestToken ?? current.parseEngine, updatedAt: new Date() })
-        .where(and(eq(knowledgeSources.id, current.id), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)));
-      if (current.archivedAt) {
-        await tx.insert(auditEvents).values(auditEventValues({
-          workspaceId: DEMO_WORKSPACE_ID,
-          createdBy: DEMO_USER_ID,
-          action: "knowledge.restored",
-          targetType: "knowledge",
-          targetId: current.id,
-          summary: `通过重新上传恢复知识资料「${current.name}」`,
-          data: {},
-        }));
+function startUnconfirmedResponse() {
+  return Response.json({ ok: false, error: KNOWLEDGE_START_UNCONFIRMED_ERROR }, { status: 503 });
+}
+
+async function reconcileDuplicateSource(
+  sourceId: string,
+  suppliedBlobPathname: string | null,
+  filename: string,
+  suppliedMime: string,
+) {
+  const pendingToken = `pending:${randomUUID()}`;
+  try {
+    return await db.transaction(async (tx) => {
+      // 重新锁定并读取，避免两个失败重传请求都基于锁外的旧状态启动解析任务。
+      const [current] = await tx
+        .select()
+        .from(knowledgeSources)
+        .where(and(eq(knowledgeSources.id, sourceId), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)))
+        .for("update")
+        .limit(1);
+      if (!current) return null;
+      const staleParsing = isKnowledgeParsingStalled(current);
+      const retrying = current.status === "failed" || staleParsing
+        || (current.status === "archived" && current.chunkCount === 0);
+      const status = retrying
+        ? "parsing"
+        : current.status === "archived"
+          ? (current.chunkCount > 0 ? "indexed" : "parsing")
+          : current.status;
+      const error = retrying ? null : current.error;
+      const ingestToken = retrying ? pendingToken : null;
+      const name = retrying ? filename : current.name;
+      const mime = retrying
+        ? suppliedMime || (filename === current.name ? current.mime : `application/${filename.split(".").pop()?.toLowerCase() ?? "octet-stream"}`)
+        : current.mime;
+      const blobPathname = current.blobPathname ?? suppliedBlobPathname;
+      const shouldUpdate = Boolean(current.archivedAt) || retrying || blobPathname !== current.blobPathname;
+      const updatedAt = shouldUpdate ? new Date() : current.updatedAt;
+      if (shouldUpdate) {
+        await tx
+          .update(knowledgeSources)
+          .set({ name, mime, archivedAt: null, status, error, blobPathname, parseEngine: ingestToken ?? current.parseEngine, updatedAt })
+          .where(and(eq(knowledgeSources.id, current.id), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)));
+        if (current.archivedAt) {
+          await tx.insert(auditEvents).values(auditEventValues({
+            workspaceId: DEMO_WORKSPACE_ID,
+            createdBy: DEMO_USER_ID,
+            action: "knowledge.restored",
+            targetType: "knowledge",
+            targetId: current.id,
+            summary: `通过重新上传恢复知识资料「${name}」`,
+            data: {},
+          }));
+        }
+        if (retrying) {
+          await tx.insert(auditEvents).values(auditEventValues({
+            workspaceId: DEMO_WORKSPACE_ID,
+            createdBy: DEMO_USER_ID,
+            action: "knowledge.reingested",
+            targetType: "knowledge",
+            targetId: current.id,
+            summary: `重新解析知识资料「${name}」`,
+            data: { previousStatus: current.status },
+          }));
+        }
       }
-      if (retrying) {
-        await tx.insert(auditEvents).values(auditEventValues({
-          workspaceId: DEMO_WORKSPACE_ID,
-          createdBy: DEMO_USER_ID,
-          action: "knowledge.reingested",
-          targetType: "knowledge",
-          targetId: current.id,
-          summary: `重新解析知识资料「${current.name}」`,
-          data: { previousStatus: current.status },
-        }));
+      return { row: { ...current, name, mime, archivedAt: null, status, error, blobPathname, parseEngine: ingestToken ?? current.parseEngine, updatedAt }, retrying, ingestToken };
+    });
+  } catch (error) {
+    try {
+      const [current] = await db
+        .select()
+        .from(knowledgeSources)
+        .where(and(eq(knowledgeSources.id, sourceId), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)))
+        .limit(1);
+      if (current?.parseEngine === pendingToken) {
+        return { row: current, retrying: true, ingestToken: pendingToken };
       }
+    } catch (recoveryError) {
+      console.error("[knowledge-upload] 无法核对重新解析结果", safeErrorForLog(recoveryError));
     }
-    return { row: { ...current, archivedAt: null, status, error, blobPathname, parseEngine: ingestToken ?? current.parseEngine }, retrying, ingestToken };
-  });
+    throw error;
+  }
 }
 
 async function handleUpload(req: Request) {
@@ -170,9 +215,9 @@ async function handleUpload(req: Request) {
     }
     let reconciled: Awaited<ReturnType<typeof reconcileDuplicateSource>>;
     try {
-      reconciled = await reconcileDuplicateSource(duplicate.id, blobPathname);
+      reconciled = await reconcileDuplicateSource(duplicate.id, blobPathname, file.name, file.type);
     } catch (error) {
-      await removeUnusedOriginal(uploadedBlobPathname, null, blobToken);
+      await removeUnreferencedOriginal(uploadedBlobPathname, sha256, blobToken);
       throw error;
     }
     if (!reconciled) {
@@ -184,17 +229,15 @@ async function handleUpload(req: Request) {
       try {
         await start(knowledgeIngestWorkflow, [{
           sourceId: duplicate.id,
-          filename: file.name,
-          mime: file.type || duplicate.mime,
+          filename: reconciled.row.name,
+          mime: reconciled.row.mime,
           content: new Blob([bytes]).stream(),
           ingestToken: reconciled.ingestToken!,
         }]);
       } catch (startError) {
-        console.error("知识重新入库工作流启动失败：", safeErrorForLog(startError));
-        await db.update(knowledgeSources).set({ status: "failed", error: "解析任务启动失败，请重新上传", parseEngine: null, updatedAt: new Date() }).where(and(
-          eq(knowledgeSources.id, duplicate.id), eq(knowledgeSources.parseEngine, reconciled.ingestToken!),
-        ));
-        return Response.json({ ok: false, error: "解析任务启动失败，请重新上传" }, { status: 500 });
+        console.error("知识重新入库工作流启动状态未确认：", safeErrorForLog(startError));
+        // 启动响应可能在任务已持久化后丢失；保留令牌，避免抹掉随后成功的入库结果。
+        return startUnconfirmedResponse();
       }
     }
     return Response.json({
@@ -245,8 +288,22 @@ async function handleUpload(req: Request) {
       return created;
     });
   } catch (error) {
-    await removeUnusedOriginal(blobPathname, null, blobToken);
-    throw error;
+    let recovered: typeof knowledgeSources.$inferSelect | undefined;
+    try {
+      [recovered] = await db
+        .select()
+        .from(knowledgeSources)
+        .where(and(eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID), eq(knowledgeSources.sha256, sha256)))
+        .limit(1);
+    } catch (recoveryError) {
+      console.error("[knowledge-upload] 无法核对资料创建结果，保留原文件待后续重试", safeErrorForLog(recoveryError));
+      throw error;
+    }
+    if (!recovered) {
+      await removeUnusedOriginal(blobPathname, null, blobToken);
+      throw error;
+    }
+    row = recovered.parseEngine === ingestToken && recovered.blobPathname === blobPathname ? recovered : null;
   }
   if (!row) {
     const [concurrent] = await db
@@ -258,44 +315,44 @@ async function handleUpload(req: Request) {
       await removeUnusedOriginal(blobPathname, null, blobToken);
       return Response.json({ ok: false, error: "资料记录创建失败，请稍后重试" }, { status: 500 });
     }
-    let effectiveBlobPathname = concurrent.blobPathname;
-    if (!effectiveBlobPathname && blobPathname) {
-      const [adopted] = await db
-        .update(knowledgeSources)
-        .set({ blobPathname, updatedAt: new Date() })
-        .where(and(
-          eq(knowledgeSources.id, concurrent.id),
-          eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID),
-          isNull(knowledgeSources.blobPathname),
-        ))
-        .returning({ blobPathname: knowledgeSources.blobPathname });
-      if (adopted?.blobPathname) {
-        effectiveBlobPathname = adopted.blobPathname;
-      } else {
-        const [latest] = await db
-          .select({ blobPathname: knowledgeSources.blobPathname })
-          .from(knowledgeSources)
-          .where(and(eq(knowledgeSources.id, concurrent.id), eq(knowledgeSources.workspaceId, DEMO_WORKSPACE_ID)))
-          .limit(1);
-        effectiveBlobPathname = latest?.blobPathname ?? null;
+    let reconciled: Awaited<ReturnType<typeof reconcileDuplicateSource>>;
+    try {
+      reconciled = await reconcileDuplicateSource(concurrent.id, blobPathname, file.name, file.type);
+    } catch (error) {
+      await removeUnreferencedOriginal(blobPathname, sha256, blobToken);
+      throw error;
+    }
+    if (!reconciled) {
+      await removeUnusedOriginal(blobPathname, null, blobToken);
+      return Response.json({ ok: false, error: "资料记录已经不存在，请重新上传" }, { status: 409 });
+    }
+    await removeUnusedOriginal(blobPathname, reconciled.row.blobPathname, blobToken);
+    if (reconciled.retrying) {
+      try {
+        await start(knowledgeIngestWorkflow, [{
+          sourceId: concurrent.id,
+          filename: reconciled.row.name,
+          mime: reconciled.row.mime,
+          content: new Blob([bytes]).stream(),
+          ingestToken: reconciled.ingestToken!,
+        }]);
+      } catch (startError) {
+        console.error("知识重新入库工作流启动状态未确认：", safeErrorForLog(startError));
+        return startUnconfirmedResponse();
       }
     }
-    await removeUnusedOriginal(blobPathname, effectiveBlobPathname, blobToken);
     return Response.json({
       ok: true,
       deduped: true,
-      blobStored: Boolean(effectiveBlobPathname),
-      source: toView({ ...concurrent, blobPathname: effectiveBlobPathname }),
+      blobStored: Boolean(reconciled.row.blobPathname),
+      source: toView(reconciled.row),
     });
   }
   try {
     await start(knowledgeIngestWorkflow, [{ sourceId: row.id, filename: file.name, mime: row.mime, content: new Blob([bytes]).stream(), ingestToken }]);
   } catch (error) {
-    console.error("知识入库工作流启动失败：", safeErrorForLog(error));
-    await db.update(knowledgeSources).set({ status: "failed", error: "解析任务启动失败，请重试上传", parseEngine: null, updatedAt: new Date() }).where(and(
-      eq(knowledgeSources.id, row.id), eq(knowledgeSources.parseEngine, ingestToken),
-    ));
-    return Response.json({ ok: false, error: "解析任务启动失败，请重试上传" }, { status: 500 });
+    console.error("知识入库工作流启动状态未确认：", safeErrorForLog(error));
+    return startUnconfirmedResponse();
   }
   return Response.json({ ok: true, deduped: false, blobStored: blobPathname !== null, source: toView(row) });
 }

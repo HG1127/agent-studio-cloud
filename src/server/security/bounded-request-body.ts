@@ -50,5 +50,9 @@ export async function readBoundedRequestText(
 ): Promise<BoundedRequestTextResult> {
   const result = await readBoundedRequestBytes(request, maxBytes);
   if (!result.ok) return result;
-  return { ok: true, text: new TextDecoder().decode(result.bytes) };
+  try {
+    return { ok: true, text: new TextDecoder("utf-8", { fatal: true }).decode(result.bytes) };
+  } catch {
+    return { ok: false, reason: "read_failed" };
+  }
 }
