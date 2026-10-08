@@ -53,3 +53,24 @@ export const ToolOperationGetResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(false), error: z.string() }),
 ]);
 export type ToolOperationGetResult = z.infer<typeof ToolOperationGetResult>;
+export const ToolOperationCursor = z.object({ createdAt: z.string().datetime(), id: z.string().uuid() });
+export type ToolOperationCursor = z.infer<typeof ToolOperationCursor>;
+export const ToolOperationListInput = z.object({
+  status: ToolOperationStatus.optional(), sourceRunId: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+  before: z.string().datetime().optional(), beforeId: z.string().uuid().optional(),
+}).strict().superRefine((input, context) => {
+  if ((input.before === undefined) !== (input.beforeId === undefined)) {
+    context.addIssue({ code: "custom", message: "翻页时间与标识必须同时提供" });
+  }
+});
+export type ToolOperationListInput = z.infer<typeof ToolOperationListInput>;
+export const ToolOperationSummary = ToolOperationView.omit({ receipt: true, resolutions: true }).extend({
+  resolutionCount: z.number().int().min(0).max(50),
+});
+export type ToolOperationSummary = z.infer<typeof ToolOperationSummary>;
+export const ToolOperationListResult = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), items: z.array(ToolOperationSummary).max(50), nextCursor: ToolOperationCursor.nullable() }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+export type ToolOperationListResult = z.infer<typeof ToolOperationListResult>;

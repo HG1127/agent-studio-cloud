@@ -1,9 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { ToolOperationConfig, ToolOperationPayload, ToolOperationReceipt, ToolOperationResolveInput } from "./tool-operation";
+import { ToolOperationConfig, ToolOperationListInput, ToolOperationPayload, ToolOperationReceipt, ToolOperationResolveInput, ToolOperationSummary } from "./tool-operation";
 import { WorkflowNode } from "./workflow";
 
 const config = { scope: "order-create", key: { kind: "input", path: ["orderId"] } };
 describe("业务操作防重共享契约", () => {
+  it("列表默认限额，微秒游标必须成对且不允许选择其他工作区", () => {
+    const id = "00000000-0000-4000-8000-000000000123";
+    expect(ToolOperationListInput.parse({})).toEqual({ limit: 20 });
+    expect(ToolOperationListInput.parse({ before: "2026-10-08T12:00:00.000123Z", beforeId: id, limit: "2" }).limit).toBe(2);
+    for (const input of [{ beforeId: id }, { before: "2026-10-08T12:00:00Z" }, { limit: 51 }, { workspaceId: id }]) {
+      expect(ToolOperationListInput.safeParse(input).success).toBe(false);
+    }
+  });
+  it("列表摘要不携带业务回执、核对正文或请求指纹", () => {
+    const id = "00000000-0000-4000-8000-000000000123", time = "2026-10-08T12:00:00Z";
+    const summary = ToolOperationSummary.parse({ id, sourceRunId: id, nodeTitle: "登记", toolId: "orders", status: "blocked", error: null,
+      retryDeadline: time, createdAt: time, updatedAt: time, resolutionCount: 1,
+      receipt: { secret: "private" }, resolutions: [{ reason: "private" }], requestHash: "private",
+    });
+    expect(summary).not.toHaveProperty("receipt");
+    expect(summary).not.toHaveProperty("resolutions");
+    expect(summary).not.toHaveProperty("requestHash");
+  });
   it("人工核对必须明确确认状态，不接受空原因或同意标记缺失", () => {
     const base = { operationId: "00000000-0000-4000-8000-000000000123", requestId: "00000000-0000-4000-8000-000000000124", reason: "业务系统已核对" };
     expect(ToolOperationResolveInput.safeParse({ ...base, kind: "retry" }).success).toBe(false);

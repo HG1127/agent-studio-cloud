@@ -24,6 +24,8 @@ describe("数据库就绪检查", () => {
       "public.tool_operations",
       "public.tool_operations_workspace_key_unique",
       "public.tool_operations_workspace_run_idx",
+      "public.tool_operations_workspace_created_id_idx",
+      "public.tool_operations_workspace_status_created_id_idx",
       "public.wait_event_submissions_token_unique",
       "public.wait_event_submissions_run_created_idx",
       "public.evaluation_runs_workspace_request_unique",

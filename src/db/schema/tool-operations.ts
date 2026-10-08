@@ -23,4 +23,6 @@ export const toolOperations = pgTable("tool_operations", {
 }, (t) => [
   uniqueIndex("tool_operations_workspace_key_unique").on(t.workspaceId, t.keyHash),
   index("tool_operations_workspace_run_idx").on(t.workspaceId, t.sourceRunId),
+  index("tool_operations_workspace_created_id_idx").on(t.workspaceId, t.createdAt, t.id),
+  index("tool_operations_workspace_status_created_id_idx").on(t.workspaceId, t.status, t.createdAt, t.id),
 ]);

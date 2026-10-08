@@ -32,6 +32,8 @@ export const REQUIRED_DATABASE_OBJECTS = [
   "public.tool_operations",
   "public.tool_operations_workspace_key_unique",
   "public.tool_operations_workspace_run_idx",
+  "public.tool_operations_workspace_created_id_idx",
+  "public.tool_operations_workspace_status_created_id_idx",
   "public.runs_workspace_status_created_idx",
   "public.runs_workspace_source_key_unique",
   "public.knowledge_sources_workspace_archived_created_idx",
