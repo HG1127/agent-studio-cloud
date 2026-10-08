@@ -198,6 +198,18 @@ describe("运行启动句柄恢复", () => {
     expect(stored[0].versionId).toBe(VERSION_ID);
   });
 
+  it("同一请求显式指定另一个版本时拒绝复用，省略版本仍找回原运行", async () => {
+    const sourceKey = "manual:00000000-0000-4000-8000-0000000007e1";
+    const first = await startRunCore({ agentId: AGENT_ID, versionId: VERSION_ID, input: {}, sourceKey });
+    expect(first.ok).toBe(true);
+    await db.insert(agentVersions).values({ id: CROSS_VERSION_ID, agentId: AGENT_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, version: 2, status: "production", manifest });
+    expect(await startRunCore({ agentId: AGENT_ID, versionId: CROSS_VERSION_ID, input: {}, sourceKey })).toEqual({ ok: false, error: "这项请求标识已用于另一个版本，请重新发起" });
+    expect(await startRunCore({ agentId: AGENT_ID, versionId: VERSION_ID, input: {}, sourceKey })).toEqual(first);
+    expect(await startRunCore({ agentId: AGENT_ID, input: {}, sourceKey })).toEqual(first);
+    expect(startMock).toHaveBeenCalledOnce();
+    expect(await db.select().from(runs).where(eq(runs.sourceKey, sourceKey))).toHaveLength(1);
+  });
+
   it("已创建运行在助手归档后仍可按原请求标识找回", async () => {
     const sourceKey = "manual:00000000-0000-4000-8000-0000000007b6";
     const first = await startRunCore({ agentId: AGENT_ID, input: {}, sourceKey });

@@ -558,6 +558,7 @@ async function validateRuntimePreflight(args: {
 
 async function reuseExistingRun(args: {
   agentId: string;
+  versionId?: string;
   input: Record<string, unknown>;
   sourceType: "manual" | "schedule" | "evaluation";
   sourceKey: string;
@@ -566,6 +567,7 @@ async function reuseExistingRun(args: {
     .select({
       id: runs.id,
       agentId: runs.agentId,
+      versionId: runs.versionId,
       sourceType: runs.sourceType,
       input: runs.input,
       status: runs.status,
@@ -583,6 +585,9 @@ async function reuseExistingRun(args: {
   }
   if (args.sourceType === "manual" && !jsonValuesEqual(existing.input, args.input)) {
     return { ok: false, error: "运行输入已改变，请重新发起" };
+  }
+  if (args.versionId && existing.versionId !== args.versionId) {
+    return { ok: false, error: "这项请求标识已用于另一个版本，请重新发起" };
   }
   if (existing.status === "failed" && !existing.workflowRunId) {
     return { ok: false, error: existing.error ?? "运行启动失败，请稍后重试" };
@@ -610,7 +615,7 @@ export async function startRunCore(args: {
   const runInput = parsedRunInput.data;
   try {
     if (args.sourceKey) {
-      const existing = await reuseExistingRun({ agentId, input: runInput, sourceType, sourceKey: args.sourceKey });
+      const existing = await reuseExistingRun({ agentId, versionId: args.versionId, input: runInput, sourceType, sourceKey: args.sourceKey });
       if (existing) return existing;
     }
     const [agent] = await db
@@ -663,7 +668,7 @@ export async function startRunCore(args: {
     });
     if (created.error) return { ok: false, error: created.error };
     if (!created.runId && args.sourceKey) {
-      return await reuseExistingRun({ agentId, input: runInput, sourceType, sourceKey: args.sourceKey })
+      return await reuseExistingRun({ agentId, versionId: args.versionId, input: runInput, sourceType, sourceKey: args.sourceKey })
         ?? { ok: false, error: "运行启动冲突，请稍后重试" };
     }
     if (!created.runId) return { ok: false, error: "运行启动冲突，请稍后重试" };
@@ -672,7 +677,7 @@ export async function startRunCore(args: {
     console.error("运行启动失败：", safeErrorForLog(error));
     if (args.sourceKey) {
       try {
-        const existing = await reuseExistingRun({ agentId, input: runInput, sourceType, sourceKey: args.sourceKey });
+        const existing = await reuseExistingRun({ agentId, versionId: args.versionId, input: runInput, sourceType, sourceKey: args.sourceKey });
         if (existing) return existing;
       } catch (lookupError) {
         console.error("核对运行启动状态失败：", safeErrorForLog(lookupError));
