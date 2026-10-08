@@ -4,13 +4,17 @@ import { FatalError } from "workflow";
 const scope = vi.hoisted(() => ({ workspace: crypto.randomUUID(), start: vi.fn() }));
 vi.mock("@/lib/constants", async (original) => ({ ...await original<typeof import("@/lib/constants")>(), DEMO_WORKSPACE_ID: scope.workspace }));
 vi.mock("workflow/api", () => ({ start: scope.start }));
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 import { GET, POST } from "@/app/api/execution/resources/route";
 import { AgentManifest } from "@/contracts/manifest";
 import { DEFAULT_EXECUTION_RESOURCE_LIMITS, ExecutionPolicyHistoryResult, ExecutionPolicyReadResult, ExecutionPolicyWriteResult, type ExecutionResourceLimits } from "@/contracts/execution-resources";
-import { agents, agentVersions, executionPolicies, executionPolicyChanges, modelCalls, runDeliveries, runSteps, runs, traceEvents } from "@/db/schema";
+import { agents, agentVersions, auditEvents, evaluationCaseResults, evaluationCases, evaluationRuns, executionPolicies, executionPolicyChanges, modelCalls, runDeliveries, runSteps, runs, traceEvents } from "@/db/schema";
 import { DEMO_USER_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { recordExecutionPolicyAction } from "@/server/actions/record-execution-policy";
+import { startEvaluationAction } from "@/server/actions/evaluations";
+import { retryRunAction } from "@/server/actions/retry-run";
+import { startRunAction } from "@/server/actions/start-run";
 import { freezeExecutionResources, presentExecutionPolicy } from "@/server/domain/execution-resources";
 import { getExecutionResourcePolicy, listExecutionPolicyHistory } from "@/server/queries/execution-resources";
 import { beginRunModelCall, settleRunModelCall } from "@/server/services/model-call";
@@ -32,6 +36,10 @@ afterEach(async () => {
     await db.delete(runDeliveries).where(inArray(runDeliveries.runId, owned)); await db.delete(runs).where(inArray(runs.id, owned));
   }
   owned.length = 0;
+  await db.delete(evaluationCaseResults).where(eq(evaluationCaseResults.workspaceId, scope.workspace));
+  await db.delete(evaluationRuns).where(eq(evaluationRuns.workspaceId, scope.workspace));
+  await db.delete(evaluationCases).where(eq(evaluationCases.workspaceId, scope.workspace));
+  await db.delete(auditEvents).where(eq(auditEvents.workspaceId, scope.workspace));
   await db.delete(executionPolicyChanges).where(eq(executionPolicyChanges.workspaceId, scope.workspace)); await db.delete(executionPolicies).where(eq(executionPolicies.workspaceId, scope.workspace));
   await db.delete(agentVersions).where(eq(agentVersions.id, versionId)); await db.delete(agents).where(eq(agents.id, agentId));
 });
@@ -48,6 +56,62 @@ async function fixture(parentId: string | null = null, overrides: Partial<typeof
 const call = (runId: string) => beginRunModelCall({ runId, nodeId: "work", nodeTitle: "测试处理", modelId: "test-model", connectionId: null });
 const change = (expectedRevision: number, value = limits, requestId = crypto.randomUUID()) => ({ requestId, expectedRevision, confirmed: true as const, limits: value, reason: "试点限制 password=private-value" });
 describe("资源控制真实数据库并发验收", () => {
+  it.each(["start", "retry"] as const)("%s 用户入口明确返回容量原因，释放后原请求只接收一次", async (kind) => {
+    await configure();
+    const occupying = await fixture(), source = kind === "retry" ? await fixture(null, { status: "failed" }) : null;
+    const requestId = crypto.randomUUID();
+    const submit = () => kind === "retry" ? retryRunAction(source!, requestId) : startRunAction({ agentId, input: {}, requestId });
+
+    await expect(submit()).resolves.toMatchObject({ ok: false, retryable: true, resourceLimit: { kind: "concurrent-chains", current: 1, maximum: 1 } });
+    expect(scope.start).not.toHaveBeenCalled();
+    expect(await db.select().from(runs).where(eq(runs.workspaceId, scope.workspace))).toHaveLength(kind === "retry" ? 2 : 1);
+
+    await db.update(runs).set({ status: "completed" }).where(eq(runs.id, occupying));
+    const accepted = await submit(); expect(accepted.ok).toBe(true);
+    await expect(submit()).resolves.toEqual(accepted);
+    expect(scope.start).toHaveBeenCalledTimes(1);
+    expect(await db.select().from(runs).where(eq(runs.workspaceId, scope.workspace))).toHaveLength(kind === "retry" ? 3 : 2);
+    expect((await getExecutionResourcePolicy(scope.workspace)).capacity.reservedChains).toBe(1);
+  });
+
+  it("批量验收在满额度下保留原轮样例，逐次释放后继续且全部通过前不上线", async () => {
+    await configure(); const occupying = await fixture(), requestId = crypto.randomUUID();
+    await db.update(agentVersions).set({ status: "candidate" }).where(eq(agentVersions.id, versionId));
+    await db.insert(evaluationCases).values([1, 2].map((index) => ({ workspaceId: scope.workspace, createdBy: DEMO_USER_ID, agentId,
+      name: `待启动样例${index}`, input: {}, expectations: [{ path: "first", operator: "exists" as const }] })));
+
+    await expect(startEvaluationAction(agentId, requestId)).resolves.toMatchObject({ ok: false, error: expect.stringContaining("名额释放") });
+    const [evaluation] = await db.select().from(evaluationRuns).where(eq(evaluationRuns.workspaceId, scope.workspace));
+    expect(evaluation).toMatchObject({ requestId, status: "running", totalCount: 2, passedCount: 0, failedCount: 0 });
+    let cases = await db.select().from(evaluationCaseResults).where(eq(evaluationCaseResults.evaluationRunId, evaluation.id));
+    expect(cases).toHaveLength(2); expect(cases.every((row) => row.status === "running" && row.runId === null)).toBe(true);
+    expect(scope.start).not.toHaveBeenCalled();
+
+    await db.update(runs).set({ status: "completed" }).where(eq(runs.id, occupying));
+    await expect(startEvaluationAction(agentId, requestId)).resolves.toMatchObject({ ok: false, error: expect.stringContaining("名额释放") });
+    cases = await db.select().from(evaluationCaseResults).where(eq(evaluationCaseResults.evaluationRunId, evaluation.id));
+    const first = cases.find((row) => row.runId !== null)!;
+    expect(cases.filter((row) => row.runId !== null)).toHaveLength(1); expect(scope.start).toHaveBeenCalledTimes(1);
+    expect((await db.select().from(agentVersions).where(eq(agentVersions.id, versionId)))[0].status).toBe("candidate");
+
+    await db.update(runs).set({ status: "completed", result: { first: "验收完成" } }).where(eq(runs.id, first.runId!));
+    await expect(startEvaluationAction(agentId, requestId)).resolves.toEqual({ ok: true });
+    cases = await db.select().from(evaluationCaseResults).where(eq(evaluationCaseResults.evaluationRunId, evaluation.id));
+    expect(cases.filter((row) => row.status === "passed")).toHaveLength(1);
+    const second = cases.find((row) => row.status === "running")!;
+    expect(second.runId).not.toBeNull(); expect(second.runId).not.toBe(first.runId); expect(scope.start).toHaveBeenCalledTimes(2);
+    expect((await db.select().from(agentVersions).where(eq(agentVersions.id, versionId)))[0].status).toBe("candidate");
+
+    await db.update(runs).set({ status: "completed", result: { first: "验收完成" } }).where(eq(runs.id, second.runId!));
+    await expect(startEvaluationAction(agentId, requestId)).resolves.toEqual({ ok: true });
+    await expect(startEvaluationAction(agentId, requestId)).resolves.toEqual({ ok: true });
+    expect(await db.select().from(evaluationRuns).where(eq(evaluationRuns.workspaceId, scope.workspace))).toHaveLength(1);
+    expect((await db.select().from(evaluationRuns).where(eq(evaluationRuns.id, evaluation.id)))[0]).toMatchObject({ status: "completed", totalCount: 2, passedCount: 2, failedCount: 0 });
+    expect((await db.select().from(agentVersions).where(eq(agentVersions.id, versionId)))[0].status).toBe("production");
+    expect(scope.start).toHaveBeenCalledTimes(2);
+    expect(await db.select().from(runs).where(and(eq(runs.workspaceId, scope.workspace), eq(runs.sourceType, "evaluation")))).toHaveLength(2);
+  });
+
   it.each(["manual", "schedule", "evaluation"] as const)("%s 并发新任务只能占一个名额，拒绝请求不建任务、不启动引擎", async (sourceType) => {
     await configure(); const results = await Promise.all([startRunCore({ agentId, input: {}, sourceType, sourceKey: "resource:a" }), startRunCore({ agentId, input: {}, sourceType, sourceKey: "resource:b" })]);
     expect(results.filter((result) => result.ok)).toHaveLength(1); expect(results.find((result) => !result.ok)).toMatchObject({ ok: false, retryable: true, resourceLimit: { kind: "concurrent-chains", current: 1, maximum: 1 } });

@@ -59,6 +59,33 @@ beforeEach(() => {
 });
 
 describe("批量启动自动验收", () => {
+  it("名额不足的样例保留待启动，明确限额原因且不阻止已接收样例对账", async () => {
+    const cases = [{ id: "00000000-0000-4000-8000-0000000000d1", input: {} }, { id: "00000000-0000-4000-8000-0000000000d2", input: {} }];
+    const reason = "当前执行链并发名额已满，请等待已有任务结束后重试";
+    mocks.prepare.mockResolvedValue({ ok: true, evaluationId: EVALUATION_ID, versionId: VERSION_ID, cases, resumed: false });
+    mocks.startRun.mockResolvedValueOnce({ ok: false, error: reason, retryable: true, resourceLimit: { kind: "concurrent-chains", current: 1, maximum: 1 } })
+      .mockResolvedValueOnce({ ok: true, runId: cases[1].id });
+
+    await expect(startEvaluationAction(AGENT_ID, REQUEST_ID)).resolves.toEqual({ ok: false,
+      error: `部分验收尚未启动：${reason}。请等待名额释放后点击“检查并继续”；已启动任务的结果仍需对账` });
+    expect(mocks.markFailure).not.toHaveBeenCalled();
+    expect(mocks.updates).toBe(1);
+    expect(mocks.reconcile).toHaveBeenCalledWith(cases[1].id);
+    expect(mocks.reconcileSummary).toHaveBeenCalledWith(EVALUATION_ID);
+  });
+
+  it("收到容量拒绝但并发请求已登记运行时仍按真实任务对账", async () => {
+    const testCase = { id: "00000000-0000-4000-8000-0000000000d3", input: {} }, runId = "00000000-0000-4000-8000-0000000000d4";
+    mocks.prepare.mockResolvedValue({ ok: true, evaluationId: EVALUATION_ID, versionId: VERSION_ID, cases: [testCase], resumed: true });
+    mocks.startRun.mockResolvedValue({ ok: false, error: "当前执行链并发名额已满", retryable: true, resourceLimit: { kind: "concurrent-chains", current: 1, maximum: 1 } });
+    mocks.existingRun = { id: runId, status: "completed" };
+
+    await expect(startEvaluationAction(AGENT_ID, REQUEST_ID)).resolves.toEqual({ ok: true });
+    expect(mocks.markFailure).not.toHaveBeenCalled();
+    expect(mocks.reconcile).toHaveBeenCalledWith(runId);
+    expect(mocks.updates).toBe(1);
+  });
+
   it("最多并发启动五条，单条异常不阻断其余样例", async () => {
     const cases = Array.from({ length: 8 }, (_, index) => ({
       id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,

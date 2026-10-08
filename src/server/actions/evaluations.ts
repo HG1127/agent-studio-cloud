@@ -314,6 +314,7 @@ export async function startEvaluationAction(agentId: string, requestId?: string)
     const prepared = await prepareEvaluationRun(agentId, requestId);
     if (!prepared.ok) return prepared;
     let needsRetry = false;
+    let resourceRefusal: string | null = null;
     await runBounded(prepared.cases, EVALUATION_START_CONCURRENCY, async (testCase) => {
       const sourceKey = `evaluation:${prepared.evaluationId}:${testCase.id}`;
       let started: Awaited<ReturnType<typeof startRunCore>> | null = null;
@@ -339,6 +340,10 @@ export async function startEvaluationAction(agentId: string, requestId?: string)
           if (existing) {
             runId = existing.id;
             if (existing.status === "queued") needsRetry = true;
+          } else if (started && !started.ok && started.resourceLimit) {
+            needsRetry = true;
+            resourceRefusal ??= started.error;
+            return;
           } else if (started && !started.ok && !started.retryable) {
             await markEvaluationStartFailure(prepared.evaluationId, testCase.id, started.error, DEMO_WORKSPACE_ID);
             return;
@@ -372,7 +377,9 @@ export async function startEvaluationAction(agentId: string, requestId?: string)
     await reconcileEvaluationSummary(prepared.evaluationId);
     revalidatePathsAfterCommit([`/agents/${agentId}`, "/runs"], "evaluation-start");
     return needsRetry
-      ? { ok: false, error: "部分验收结果尚未对账，请点击“检查并继续”重试" }
+      ? { ok: false, error: resourceRefusal
+          ? `部分验收尚未启动：${resourceRefusal}。请等待名额释放后点击“检查并继续”；已启动任务的结果仍需对账`
+          : "部分验收结果尚未对账，请点击“检查并继续”重试" }
       : { ok: true };
   } catch (error) {
     console.error("启动自动验收失败", safeErrorForLog(error));

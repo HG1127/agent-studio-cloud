@@ -25,6 +25,17 @@ beforeEach(() => {
 });
 
 describe("手动启动运行", () => {
+  it("容量拒绝保留明确原因和重试标记，不伪装成网络或启动待确认", async () => {
+    const refused = { ok: false as const, error: "当前执行链并发名额已满，请等待已有任务结束后重试", retryable: true as const,
+      resourceLimit: { kind: "concurrent-chains" as const, current: 1, maximum: 1 } };
+    mocks.startRunCore.mockResolvedValueOnce(refused);
+
+    await expect(startRunAction({ agentId: AGENT_ID, input: {}, requestId: RUN_ID })).resolves.toEqual(refused);
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
+    await expect(startRunAction({ agentId: AGENT_ID, input: {}, requestId: RUN_ID })).resolves.toEqual({ ok: true, runId: RUN_ID });
+    expect(mocks.startRunCore.mock.calls[0]).toEqual(mocks.startRunCore.mock.calls[1]);
+  });
+
   it("启动状态待确认时抛出可重试错误，让客户端保留原请求标识", async () => {
     mocks.startRunCore.mockResolvedValueOnce({ ok: false, error: "运行启动状态待确认", retryable: true });
 
