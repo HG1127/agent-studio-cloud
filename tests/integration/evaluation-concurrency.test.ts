@@ -1,11 +1,11 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentManifest } from "@/contracts/manifest";
-import { MAX_EVALUATION_CASES } from "@/contracts/evaluation";
+import { EvaluationExpectation, MAX_EVALUATION_CASES } from "@/contracts/evaluation";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-import { agentVersions, agents, evaluationCaseResults, evaluationCases, evaluationRuns, runs } from "@/db/schema";
+import { agentVersions, agents, auditEvents, evaluationCaseResults, evaluationCases, evaluationRuns, runs } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { createEvaluationCaseAction, generateEvaluationCasesAction, setEvaluationCaseArchivedAction, startEvaluationAction, updateEvaluationCaseAction } from "@/server/actions/evaluations";
@@ -45,6 +45,7 @@ afterEach(async () => {
   await db.delete(runs).where(eq(runs.id, RUN_ID));
   await db.delete(runs).where(eq(runs.id, RUN_ID_2));
   const evaluations = await db.select({ id: evaluationRuns.id }).from(evaluationRuns).where(eq(evaluationRuns.agentId, AGENT_ID));
+  await db.delete(auditEvents).where(inArray(auditEvents.targetId, [AGENT_ID, VERSION_ID, CASE_ID, CASE_ID_2, CROSS_VERSION_ID, ...evaluations.map((evaluation) => evaluation.id)]));
   for (const evaluation of evaluations) {
     await db.delete(evaluationCaseResults).where(eq(evaluationCaseResults.evaluationRunId, evaluation.id));
   }
@@ -70,6 +71,47 @@ async function insertFixture() {
 }
 
 describe("自动验收并发启动", () => {
+  it.each([
+    { label: "零金额与否定值匹配", result: { items: [{ amount: 0, approved: false }] }, passed: true },
+    { label: "金额与决定不匹配", result: { items: [{ amount: 10, approved: true }] }, passed: false },
+    { label: "没有对应明细", result: { items: [] }, passed: false },
+  ])("数组业务验收使用启动快照，$label 时按真实结果决定上线", async ({ result, passed }) => {
+    await insertFixture();
+    const expectations = [
+      EvaluationExpectation.parse({ path: "items.0.amount", operator: "equals", value: 0 }),
+      EvaluationExpectation.parse({ path: "items.0.approved", operator: "equals", value: false }),
+    ];
+    expect(await updateEvaluationCaseAction({
+      agentId: AGENT_ID, caseId: CASE_ID, name: "订单明细验收", input: {}, expectations,
+      expectedUpdatedAt: CASE_UPDATED_AT.toISOString(),
+    })).toEqual({ ok: true });
+    const prepared = await prepareEvaluationRun(AGENT_ID, REQUEST_ID);
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) throw new Error(prepared.error);
+    const [frozen] = await db.select().from(evaluationCaseResults).where(eq(evaluationCaseResults.evaluationRunId, prepared.evaluationId));
+    expect(frozen.caseSnapshot).toMatchObject({ name: "订单明细验收", expectations });
+    await db.update(evaluationCases).set({ expectations: [
+      EvaluationExpectation.parse({ path: "items.0.amount", operator: "equals", value: 10 }),
+      EvaluationExpectation.parse({ path: "items.0.approved", operator: "equals", value: true }),
+    ] }).where(eq(evaluationCases.id, CASE_ID));
+    await db.insert(runs).values({
+      id: RUN_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID,
+      agentId: AGENT_ID, versionId: VERSION_ID, status: "completed", input: {}, result,
+      sourceType: "evaluation", sourceKey: `evaluation:${prepared.evaluationId}:${CASE_ID}`,
+    });
+    await completeEvaluationForRun(RUN_ID, result);
+    const [outcome] = await db.select().from(evaluationCaseResults).where(eq(evaluationCaseResults.id, frozen.id));
+    expect(outcome).toMatchObject({ status: passed ? "passed" : "failed", runId: RUN_ID, caseSnapshot: frozen.caseSnapshot });
+    if (passed) expect(outcome.error).toBeNull();
+    else expect(outcome.error).toContain("items.0.");
+    await completeEvaluationForRun(RUN_ID, { items: [{ amount: 10, approved: true }] });
+    const [summary] = await db.select().from(evaluationRuns).where(eq(evaluationRuns.id, prepared.evaluationId));
+    expect(summary).toMatchObject({ status: "completed", totalCount: 1, passedCount: Number(passed), failedCount: Number(!passed) });
+    const [version] = await db.select().from(agentVersions).where(eq(agentVersions.id, VERSION_ID));
+    expect(version.status).toBe(passed ? "production" : "candidate");
+    expect(await db.select().from(evaluationCaseResults).where(eq(evaluationCaseResults.evaluationRunId, prepared.evaluationId))).toHaveLength(1);
+  });
+
   it("响应丢失后重复生成相同验收样例时复用已有集合", async () => {
     await insertFixture();
     await db.update(evaluationCases).set({ name: "基础流程检查" }).where(eq(evaluationCases.id, CASE_ID));

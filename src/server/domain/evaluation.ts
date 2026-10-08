@@ -9,8 +9,14 @@ function readPath(value: unknown, path: string): unknown {
   const segments = safeDataPathSegments(path);
   if (!segments) return undefined;
   return segments.reduce<unknown>((current, key) => {
-    if (!current || typeof current !== "object" || Array.isArray(current) || !Object.prototype.hasOwnProperty.call(current, key)) return undefined;
-    return (current as Record<string, unknown>)[key];
+    if (!current || typeof current !== "object") return undefined;
+    if (Array.isArray(current)) {
+      if (!/^(?:0|[1-9]\d*)$/.test(key)) return undefined;
+      const index = Number(key);
+      if (!Number.isSafeInteger(index) || index >= current.length) return undefined;
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(current, key);
+    return descriptor && "value" in descriptor ? descriptor.value : undefined;
   }, value);
 }
 

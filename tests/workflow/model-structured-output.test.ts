@@ -1,8 +1,9 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { start } from "workflow/api";
 import { AgentManifest } from "@/contracts/manifest";
-import { modelCalls, runSteps, runs, traceEvents } from "@/db/schema";
+import { EvaluationCaseSnapshot } from "@/contracts/evaluation";
+import { agentVersions, agents, auditEvents, evaluationCaseResults, evaluationCases, evaluationRuns, modelCalls, runSteps, runs, traceEvents } from "@/db/schema";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
@@ -11,6 +12,7 @@ import { startModelJsonServer } from "../helpers/model-json-server";
 
 let service: Awaited<ReturnType<typeof startModelJsonServer>> | undefined;
 let runId: string | undefined;
+let evaluationFixture: { agentId: string; versionId: string; caseId: string; evaluationId: string } | undefined;
 const schema = {
   type: "object", required: ["amount", "approved"], additionalProperties: false,
   properties: { amount: { type: "number" }, approved: { type: "boolean" } },
@@ -19,6 +21,16 @@ afterEach(async () => {
   await service?.close();
   service = undefined;
   vi.unstubAllEnvs();
+  if (evaluationFixture) {
+    const { agentId, versionId, caseId, evaluationId } = evaluationFixture;
+    await db.delete(evaluationCaseResults).where(eq(evaluationCaseResults.evaluationRunId, evaluationId));
+    await db.delete(evaluationRuns).where(eq(evaluationRuns.id, evaluationId));
+    await db.delete(evaluationCases).where(eq(evaluationCases.id, caseId));
+    await db.delete(agentVersions).where(eq(agentVersions.id, versionId));
+    await db.delete(agents).where(eq(agents.id, agentId));
+    await db.delete(auditEvents).where(inArray(auditEvents.targetId, [agentId, versionId, caseId, evaluationId]));
+  }
+  evaluationFixture = undefined;
   if (runId) {
     await db.delete(traceEvents).where(eq(traceEvents.runId, runId));
     await db.delete(runSteps).where(eq(runSteps.runId, runId));
@@ -79,6 +91,60 @@ async function prepare(replies: string[], mock = false) {
 }
 
 describe("持久工作流的结构化业务结果", () => {
+  it.each([
+    { label: "零金额和否定值符合业务预期", amount: 0, approved: false, passed: true },
+    { label: "格式正确但业务值不符", amount: 10, approved: true, passed: false },
+  ])("实际模型返回订单数组，$label 时正确执行验收上线门禁", async ({ amount, approved, passed }) => {
+    const output = { items: [{ amount, approved, labels: ["到货确认"] }] };
+    const base = await prepare([JSON.stringify(output)]);
+    const manifest = AgentManifest.parse({
+      ...base, workflowFingerprint: "array-evaluation-test",
+      workflowSnapshot: { ...base.workflowSnapshot, nodes: {
+        start: base.workflowSnapshot.nodes.start,
+        extract: { ...base.workflowSnapshot.nodes.extract, next: "done", modelOutput: {
+          format: "json", providerMode: "json-schema", maxRepairAttempts: 0,
+          schema: {
+            type: "object", required: ["items"], additionalProperties: false,
+            properties: { items: { type: "array", minItems: 1, items: {
+              type: "object", required: ["amount", "approved", "labels"], additionalProperties: false,
+              properties: { amount: { type: "number" }, approved: { type: "boolean" }, labels: { type: "array", items: { type: "string" } } },
+            } } },
+          },
+        } },
+        done: base.workflowSnapshot.nodes.done,
+      } },
+    });
+    const [run] = await db.select({ agentId: runs.agentId, versionId: runs.versionId }).from(runs).where(eq(runs.id, runId!));
+    const caseId = crypto.randomUUID(), evaluationId = crypto.randomUUID();
+    evaluationFixture = { agentId: run.agentId, versionId: run.versionId, caseId, evaluationId };
+    const snapshot = EvaluationCaseSnapshot.parse({ name: "订单数组验收", input: {}, expectations: [
+      { path: "extract.items.0.amount", operator: "equals", value: 0 },
+      { path: "extract.items.0.approved", operator: "equals", value: false },
+      { path: "extract.items.0.labels.0", operator: "contains", value: "到货" },
+    ] });
+    const owner = { workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID };
+    await db.insert(agents).values({ ...owner, id: run.agentId, name: "订单数组验收助手", intentText: "按业务字段验收订单明细" });
+    await db.insert(agentVersions).values({ ...owner, id: run.versionId, agentId: run.agentId, version: 1, status: "candidate", manifest });
+    await db.insert(evaluationCases).values({ ...owner, id: caseId, agentId: run.agentId, ...snapshot });
+    await db.insert(evaluationRuns).values({ ...owner, id: evaluationId, agentId: run.agentId, versionId: run.versionId, requestId: crypto.randomUUID(), totalCount: 1 });
+    await db.insert(evaluationCaseResults).values({ ...owner, evaluationRunId: evaluationId, evaluationCaseId: caseId, runId, caseSnapshot: snapshot });
+    await db.update(runs).set({ sourceType: "evaluation", sourceKey: `evaluation:${evaluationId}:${caseId}` }).where(eq(runs.id, runId!));
+    const handle = await start(agentRunWorkflow, [runId!, manifest, {}]);
+    await expect(handle.returnValue).resolves.toEqual({ status: "completed" });
+    expect(service!.modelRequests).toHaveLength(1);
+    expect(service!.toolRequests).toHaveLength(0);
+    const [completed] = await db.select().from(runs).where(eq(runs.id, runId!));
+    expect(completed).toMatchObject({ status: "completed", result: { extract: output } });
+    const [outcome] = await db.select().from(evaluationCaseResults).where(eq(evaluationCaseResults.evaluationRunId, evaluationId));
+    expect(outcome).toMatchObject({ status: passed ? "passed" : "failed", caseSnapshot: snapshot, runId });
+    if (passed) expect(outcome.error).toBeNull();
+    else expect(outcome.error).toContain("extract.items.0.");
+    const [summary] = await db.select().from(evaluationRuns).where(eq(evaluationRuns.id, evaluationId));
+    expect(summary).toMatchObject({ status: "completed", totalCount: 1, passedCount: Number(passed), failedCount: Number(!passed) });
+    const [version] = await db.select().from(agentVersions).where(eq(agentVersions.id, run.versionId));
+    expect(version.status).toBe(passed ? "production" : "candidate");
+  }, 240_000);
+
   it("实际 SDK 修正字段后，以数字驱动分支并把对象传给真实 HTTP 工具", async () => {
     const manifest = await prepare(['{"amount":123.5,"approved":true,"sk-private-field-name":"private-field-value"}', '{"amount":123.5,"approved":true}']);
     const handle = await start(agentRunWorkflow, [runId!, manifest, {}]);
