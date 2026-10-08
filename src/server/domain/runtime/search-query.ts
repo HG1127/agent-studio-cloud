@@ -1,7 +1,8 @@
+import { MAX_KNOWLEDGE_QUERY_CHARS } from "@/contracts/knowledge";
+
 const PREFERRED_SEARCH_FIELDS = ["question", "query", "input", "task", "brief", "description"] as const;
 const MAX_SEARCH_VALUES = 32;
 const MAX_SEARCH_VALUE_CHARS = 200;
-const MAX_SEARCH_QUERY_CHARS = 1_000;
 
 function nonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -10,7 +11,7 @@ function nonEmptyString(value: unknown): string | null {
 export function searchQueryFromInput(input: Record<string, unknown>): string {
   for (const field of PREFERRED_SEARCH_FIELDS) {
     const preferred = nonEmptyString(input[field]);
-    if (preferred) return preferred.slice(0, MAX_SEARCH_QUERY_CHARS);
+    if (preferred) return preferred.slice(0, MAX_KNOWLEDGE_QUERY_CHARS);
   }
 
   const values: string[] = [];
@@ -32,7 +33,7 @@ export function searchQueryFromInput(input: Record<string, unknown>): string {
     seen.add(text);
     values.push(text.slice(0, MAX_SEARCH_VALUE_CHARS));
   }
-  return values.join(" ").slice(0, MAX_SEARCH_QUERY_CHARS).trim();
+  return values.join(" ").slice(0, MAX_KNOWLEDGE_QUERY_CHARS).trim();
 }
 
 export function searchQueryFromContext(input: Record<string, unknown>, currentItem?: unknown): string {

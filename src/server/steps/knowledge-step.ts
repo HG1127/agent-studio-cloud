@@ -5,11 +5,12 @@ import { FatalError } from "workflow";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
+import { KnowledgeReceipt, type KnowledgeReceipt as KnowledgeReceiptType } from "@/contracts/knowledge";
 import { knowledgeChunks, knowledgeSources, runs } from "@/db/schema";
 import { db } from "@/lib/db";
 import { MAX_KNOWLEDGE_SCAN_CHUNKS, scoreChunks } from "@/server/domain/knowledge/search";
 import { knowledgeSourceIdsForStep } from "@/server/domain/runtime/knowledge-snapshot";
-import { searchQueryFromContext } from "@/server/domain/runtime/search-query";
+import { resolveKnowledgeQuery } from "@/server/domain/runtime/knowledge-query";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 import { withSafeWorkflowError } from "@/server/security/workflow-error";
@@ -20,20 +21,13 @@ export interface RunKnowledgeStepInput {
   node: WorkflowNode;
   manifest: AgentManifest;
   input: Record<string, unknown>;
+  outputs?: Record<string, unknown>;
   currentItem?: unknown;
 }
 
-export type KnowledgeReceipt = {
-  ok: true;
-  space: string;
-  query: string;
-  scannedCount: number;
-  truncated: boolean;
-  hitCount: number;
-  hits: Array<{ source: string; chunkIndex: number; excerpt: string; score: number }>;
-};
+export type { KnowledgeReceipt } from "@/contracts/knowledge";
 
-export async function runKnowledgeStep(args: RunKnowledgeStepInput): Promise<{ receipt: KnowledgeReceipt }> {
+export async function runKnowledgeStep(args: RunKnowledgeStepInput): Promise<{ receipt: KnowledgeReceiptType }> {
   "use step";
   const { node, manifest, input } = args;
   const reject = async (reason: string): Promise<never> => {
@@ -46,8 +40,9 @@ export async function runKnowledgeStep(args: RunKnowledgeStepInput): Promise<{ r
 
   const space = node.knowledge?.space?.trim() ?? "";
   if (!space) return reject(`步骤「${node.title}」知识来源未绑定`);
-  const fromNode = node.knowledge?.query?.trim() ?? "";
-  const query = (fromNode || searchQueryFromContext(input, args.currentItem)).trim();
+  const resolvedQuery = resolveKnowledgeQuery({ node, input, outputs: args.outputs, currentItem: args.currentItem });
+  if (!resolvedQuery.ok) return reject(resolvedQuery.error);
+  const query = resolvedQuery.query;
   const snapshot = manifest.knowledgeSnapshot ?? [];
   if (snapshot.length === 0) {
     return reject(`步骤「${node.title}」发布时没有可用知识来源，请先在知识库上传文档并重新发布`);
@@ -86,7 +81,7 @@ export async function runKnowledgeStep(args: RunKnowledgeStepInput): Promise<{ r
       ? `步骤「${node.title}」仅检查了最近 ${MAX_KNOWLEDGE_SCAN_CHUNKS} 个匹配查询词的资料分片，没有找到与任务相关的内容；请缩小已发布资料范围后重试`
       : `步骤「${node.title}」在知识库中没有找到与任务相关的内容`);
   }
-  const receipt: KnowledgeReceipt = {
+  const receipt = KnowledgeReceipt.parse({
     ok: true,
     space,
     query,
@@ -94,7 +89,7 @@ export async function runKnowledgeStep(args: RunKnowledgeStepInput): Promise<{ r
     truncated,
     hitCount: hits.length,
     hits: hits.map((hit) => ({ source: hit.sourceName, chunkIndex: hit.chunkIndex, excerpt: hit.excerpt, score: hit.score })),
-  };
+  });
   await persistStep({ runId: args.runId, nodeId: node.id, nodeTitle: node.title, nodeType: node.type, status: "succeeded", output: receipt });
   await appendTrace({
     runId: args.runId,

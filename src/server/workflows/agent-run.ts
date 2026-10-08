@@ -83,7 +83,7 @@ async function executeAutomaticNode(args: {
     return (await runToolStep({ runId: args.runId, node: args.node, input: args.input, outputs: args.outputs })).receipt;
   }
   if (args.node.type === "knowledge") {
-    return (await runKnowledgeStep({ runId: args.runId, node: args.node, manifest: args.manifest, input: args.input, currentItem: args.currentItem })).receipt;
+    return (await runKnowledgeStep({ runId: args.runId, node: args.node, manifest: args.manifest, input: args.input, outputs: args.outputs, currentItem: args.currentItem })).receipt;
   }
   if (args.node.type === "system") {
     return (await runInlineSystemStep({ runId: args.runId, node: args.node })).output;
@@ -261,7 +261,7 @@ export async function agentRunWorkflow(
       }
       if (node.type === "knowledge") {
         try {
-          const r = await runKnowledgeStep({ runId, node, manifest, input, currentItem: activeLoops.at(-1)?.item });
+          const r = await runKnowledgeStep({ runId, node, manifest, input, outputs, currentItem: activeLoops.at(-1)?.item });
           outputs[node.id] = r.receipt;
           currentId = node.next;
         } catch (error) {

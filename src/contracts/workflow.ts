@@ -160,11 +160,11 @@ export const WorkflowNode = z.object({
   if (node.toolOperation && (node.type !== "tool" || node.tool?.registryToolId === "demo" || node.tool?.protocol === "demo")) {
     context.addIssue({ code: "custom", path: ["toolOperation"], message: "只有真实业务工具步骤可以配置跨运行操作防重" });
   }
-  if (node.inputMapping && !["tool", "ai", "agent_call", "handoff"].includes(node.type) && !(node.type === "rule" && node.rule?.kind === "business_rule" && !node.quality)) {
-    context.addIssue({ code: "custom", path: ["inputMapping"], message: "只有智能处理、业务判断、工具和助手协作步骤可以配置输入映射" });
+  if (node.inputMapping && !["tool", "ai", "knowledge", "agent_call", "handoff"].includes(node.type) && !(node.type === "rule" && node.rule?.kind === "business_rule" && !node.quality)) {
+    context.addIssue({ code: "custom", path: ["inputMapping"], message: "只有智能处理、业务判断、知识检索、工具和助手协作步骤可以配置输入映射" });
   }
-  if (node.inputMapping?.includeUpstreamOutputs && ["agent_call", "handoff"].includes(node.type)) {
-    context.addIssue({ code: "custom", path: ["inputMapping", "includeUpstreamOutputs"], message: "助手协作请逐项映射需要的上游字段，不能额外携带全部成果" });
+  if (node.inputMapping?.includeUpstreamOutputs && ["knowledge", "agent_call", "handoff"].includes(node.type)) {
+    context.addIssue({ code: "custom", path: ["inputMapping", "includeUpstreamOutputs"], message: "知识检索与助手协作请逐项映射需要的上游字段，不能额外携带全部成果" });
   }
   if (node.modelOutput && node.type !== "ai" && !(node.type === "rule" && node.rule?.kind === "business_rule" && !node.quality)) {
     context.addIssue({ code: "custom", path: ["modelOutput"], message: "只有智能处理和业务判断步骤可以配置模型结果字段" });

@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { start } from "workflow/api";
 import { AgentManifest } from "@/contracts/manifest";
 import { EvaluationCaseSnapshot } from "@/contracts/evaluation";
-import { agentVersions, agents, auditEvents, evaluationCaseResults, evaluationCases, evaluationRuns, modelCalls, runSteps, runs, traceEvents } from "@/db/schema";
+import { agentVersions, agents, auditEvents, evaluationCaseResults, evaluationCases, evaluationRuns, knowledgeChunks, knowledgeSources, modelCalls, runSteps, runs, traceEvents } from "@/db/schema";
+import { KnowledgeReceipt } from "@/contracts/knowledge";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
@@ -13,6 +14,7 @@ import { startModelJsonServer } from "../helpers/model-json-server";
 let service: Awaited<ReturnType<typeof startModelJsonServer>> | undefined;
 let runId: string | undefined;
 let evaluationFixture: { agentId: string; versionId: string; caseId: string; evaluationId: string } | undefined;
+let knowledgeFixtureIds: string[] = [];
 const schema = {
   type: "object", required: ["amount", "approved"], additionalProperties: false,
   properties: { amount: { type: "number" }, approved: { type: "boolean" } },
@@ -21,6 +23,11 @@ afterEach(async () => {
   await service?.close();
   service = undefined;
   vi.unstubAllEnvs();
+  if (knowledgeFixtureIds.length) {
+    await db.delete(knowledgeChunks).where(inArray(knowledgeChunks.sourceId, knowledgeFixtureIds));
+    await db.delete(knowledgeSources).where(inArray(knowledgeSources.id, knowledgeFixtureIds));
+  }
+  knowledgeFixtureIds = [];
   if (evaluationFixture) {
     const { agentId, versionId, caseId, evaluationId } = evaluationFixture;
     await db.delete(evaluationCaseResults).where(eq(evaluationCaseResults.evaluationRunId, evaluationId));
@@ -91,6 +98,66 @@ async function prepare(replies: string[], mock = false) {
 }
 
 describe("持久工作流的结构化业务结果", () => {
+  it.each([
+    { mode: "main", missing: false }, { mode: "subflow", missing: false },
+    { mode: "parallel", missing: false }, { mode: "loop", missing: false },
+    { mode: "main", missing: true },
+  ])("实际模型提取主题后，$mode 知识映射保留冻结范围，缺失=$missing 时不回退原任务", async ({ mode, missing }) => {
+    const output = missing ? { rows: [{ other: "未提供检索主题" }] } : { rows: [{ topic: "退货政策" }] };
+    const base = await prepare([JSON.stringify(output)]);
+    const sourceId = crypto.randomUUID(), outsideId = crypto.randomUUID();
+    knowledgeFixtureIds = [sourceId, outsideId];
+    for (const [id, name, content] of [
+      [sourceId, "已发布售后手册", "退货政策：签收后七天内可退。"],
+      [outsideId, "未发布私有手册", "退货政策：这段未发布资料不应被读取。"],
+    ]) {
+      await db.insert(knowledgeSources).values({ id, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, name, mime: "text/plain", sizeBytes: content.length, sha256: `mapped-knowledge-${id}`, status: "indexed", chunkCount: 1 });
+      await db.insert(knowledgeChunks).values({ sourceId: id, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, chunkIndex: 0, content, charStart: 0, charEnd: content.length });
+    }
+    const extractId = mode === "subflow" ? "group.extract" : mode === "parallel" ? "batch.research.extract" : "extract";
+    const lookupId = mode === "subflow" ? "group.lookup" : mode === "parallel" ? "batch.research.lookup" : "lookup";
+    const extract = { id: "extract", title: "提取业务主题", type: "ai", modelOutput: { format: "json", providerMode: "json", maxRepairAttempts: 0, schema: { type: "object" } } };
+    const lookup = { id: "lookup", title: "按业务主题查阅", type: "knowledge", knowledge: { space: "售后资料", query: "不应采用的固定主题", sourceIds: [sourceId] }, inputMapping: { fields: [
+      { target: ["query"], source: { kind: "output", nodeId: mode === "loop" ? "for_rows" : extractId, path: mode === "loop" ? ["currentItem", "topic"] : ["rows", "0", "topic"] } },
+      { target: ["sourceIds"], source: { kind: "literal", value: [outsideId] } },
+    ] } };
+    const nodes: Record<string, unknown> = { done: base.workflowSnapshot.nodes.done };
+    if (mode === "subflow") {
+      nodes.start = { ...base.workflowSnapshot.nodes.start, next: "group" };
+      nodes.group = { id: "group", title: "顺序检索", type: "subflow", next: "done", subflow: { name: "提取并检索", steps: [extract, lookup] } };
+    } else if (mode === "parallel") {
+      nodes.start = { ...base.workflowSnapshot.nodes.start, next: "batch" };
+      nodes.batch = { id: "batch", title: "并行处理", type: "parallel", next: "done", parallel: { strategy: "all", failurePolicy: "fail_fast", branches: [
+        { id: "research", label: "提取并检索", steps: [extract, lookup] },
+        { id: "record", label: "独立记录", steps: [{ id: "record", title: "记录处理", type: "system" }] },
+      ] } };
+    } else {
+      nodes.start = { ...base.workflowSnapshot.nodes.start, next: "extract" };
+      nodes.extract = { ...extract, next: mode === "loop" ? "for_rows" : "lookup" };
+      nodes.lookup = { ...lookup, next: mode === "loop" ? "for_rows" : "done" };
+      if (mode === "loop") nodes.for_rows = { id: "for_rows", title: "逐项查阅", type: "loop", loop: { collectionPath: "context.outputs.extract.rows", itemKey: "row", maxIterations: 1, bodyNext: "lookup", exitNext: "done" } };
+    }
+    const manifest = AgentManifest.parse({ ...base, workflowFingerprint: "mapped-knowledge-test", knowledgeSnapshot: [sourceId], workflowSnapshot: { ...base.workflowSnapshot, nodes } });
+    const input = { query: "退货政策" };
+    await db.update(runs).set({ input }).where(eq(runs.id, runId!));
+    const handle = await start(agentRunWorkflow, [runId!, manifest, input]);
+    await expect(handle.returnValue).resolves.toEqual({ status: missing ? "failed" : "completed" });
+    expect(service!.modelRequests).toHaveLength(1);
+    expect(service!.toolRequests).toHaveLength(0);
+    const steps = await db.select().from(runSteps).where(eq(runSteps.runId, runId!));
+    const step = steps.find((entry) => entry.nodeId === lookupId);
+    expect(step?.status).toBe(missing ? "failed" : "succeeded");
+    if (missing) expect(step?.error).toContain("缺少映射字段");
+    else {
+      const receipt = KnowledgeReceipt.parse(step?.output);
+      expect(receipt).toMatchObject({ query: "退货政策", scannedCount: 1, hitCount: 1 });
+      expect(receipt.hits.map((hit) => hit.source)).toEqual(["已发布售后手册"]);
+      expect(JSON.stringify(receipt)).not.toContain("未发布私有手册");
+    }
+    const traces = await db.select().from(traceEvents).where(eq(traceEvents.runId, runId!));
+    expect(traces.filter((trace) => trace.nodeId === lookupId && trace.kind === "knowledge.receipt")).toHaveLength(Number(!missing));
+  }, 240_000);
+
   it.each([
     { label: "肯定值不是金额", amount: true, threshold: 1, writes: false },
     { label: "否定值不能冒充零金额", amount: false, threshold: 0, writes: false },
