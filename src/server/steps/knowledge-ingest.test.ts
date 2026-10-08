@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FatalError, RetryableError } from "workflow";
 import { MAX_KNOWLEDGE_FILE_BYTES, MAX_KNOWLEDGE_PDF_PAGES } from "@/server/domain/knowledge/text-limits";
 import { buildDocxArchive } from "../../../tests/helpers/docx-archive";
+import { buildTextPdf } from "../../../tests/helpers/pdf-document";
 
 const mocks = vi.hoisted(() => ({
   extractText: vi.fn(),
@@ -55,8 +56,8 @@ describe("知识文件解析防线", () => {
   });
 
   it("在抽取文字前拒绝页数过多的 PDF", async () => {
-    const cleanup = vi.fn();
-    mocks.getDocumentProxy.mockResolvedValue({ numPages: MAX_KNOWLEDGE_PDF_PAGES + 1, cleanup });
+    const destroy = vi.fn();
+    mocks.getDocumentProxy.mockResolvedValue({ numPages: MAX_KNOWLEDGE_PDF_PAGES + 1, loadingTask: { destroy } });
 
     await expect(parseKnowledgeFile({
       sourceId: "source-1",
@@ -65,7 +66,66 @@ describe("知识文件解析防线", () => {
       content: new Blob(["fake-pdf"]).stream(),
     })).rejects.toThrow(`PDF 超过 ${MAX_KNOWLEDGE_PDF_PAGES} 页限制`);
     expect(mocks.extractText).not.toHaveBeenCalled();
+    expect(destroy).toHaveBeenCalledOnce();
+  });
+
+  it.each(["同步", "异步"])("文档销毁%s失败不覆盖已经解析的 PDF 正文", async (mode) => {
+    const cleanup = vi.fn();
+    const destroy = vi.fn(() => {
+      if (mode === "同步") throw new Error("destroy customer-secret-value");
+      return Promise.reject(new Error("destroy customer-secret-value"));
+    });
+    mocks.getDocumentProxy.mockResolvedValue({
+      numPages: 1, loadingTask: { destroy },
+      getPage: async () => ({ getTextContent: async () => ({ items: [{ str: "退款说明" }] }), cleanup }),
+    });
+    await expect(parseKnowledgeFile({
+      sourceId: "source-1", filename: "退款说明.pdf", mime: "application/pdf",
+      content: new Blob(["fake-pdf"]).stream(),
+    })).resolves.toEqual({ text: "退款说明" });
     expect(cleanup).toHaveBeenCalledOnce();
+    expect(destroy).toHaveBeenCalledOnce();
+  });
+
+  it("文档销毁同步失败不覆盖页数超限的安全错误", async () => {
+    const destroy = vi.fn(() => { throw new Error("destroy customer-secret-value"); });
+    mocks.getDocumentProxy.mockResolvedValue({ numPages: MAX_KNOWLEDGE_PDF_PAGES + 1, loadingTask: { destroy } });
+    await expect(parseKnowledgeFile({
+      sourceId: "source-1", filename: "超长资料.pdf", mime: "application/pdf",
+      content: new Blob(["fake-pdf"]).stream(),
+    })).rejects.toThrow(`PDF 超过 ${MAX_KNOWLEDGE_PDF_PAGES} 页限制`);
+    expect(destroy).toHaveBeenCalledOnce();
+  });
+
+  it("正文读取失败时仍销毁文档且不泄漏底层异常", async () => {
+    const destroy = vi.fn();
+    mocks.getDocumentProxy.mockResolvedValue({
+      numPages: 1, loadingTask: { destroy },
+      getPage: async () => { throw new Error("invalid page customer-secret-value"); },
+    });
+    await expect(parseKnowledgeFile({
+      sourceId: "source-1", filename: "损坏资料.pdf", mime: "application/pdf",
+      content: new Blob(["fake-pdf"]).stream(),
+    })).rejects.toMatchObject({ message: "PDF 文件解析失败，请检查文件是否完整" });
+    expect(destroy).toHaveBeenCalledOnce();
+  });
+
+  it("真实 PDF 解析完成后销毁加载任务", async () => {
+    const actualUnpdf = await vi.importActual<typeof import("unpdf")>("unpdf");
+    const bytes = buildTextPdf("Refund policy");
+    const document = await actualUnpdf.getDocumentProxy(new Uint8Array(bytes));
+    const destroy = vi.spyOn(document.loadingTask, "destroy");
+    mocks.getDocumentProxy.mockResolvedValue(document);
+    try {
+      await expect(parseKnowledgeFile({
+        sourceId: "source-1", filename: "退款说明.pdf", mime: "application/pdf",
+        content: new Blob([bytes]).stream(),
+      })).resolves.toEqual({ text: "Refund policy" });
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(document.loadingTask.destroyed).toBe(true);
+    } finally {
+      await document.loadingTask.destroy();
+    }
   });
 
   it("不把 PDF 解析器的原始异常带入工作流日志", async () => {

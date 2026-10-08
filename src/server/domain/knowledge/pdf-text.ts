@@ -30,7 +30,7 @@ export async function extractBoundedPdfText(pdf: PdfTextDocument): Promise<strin
       if (totalChars > MAX_KNOWLEDGE_TEXT_CHARS) throw new KnowledgePdfLimitError();
       pages.push(pageText);
     } finally {
-      await Promise.resolve(page.cleanup?.()).catch(() => undefined);
+      await Promise.resolve().then(() => page.cleanup?.()).catch(() => undefined);
     }
   }
   return pages.join("\n")
