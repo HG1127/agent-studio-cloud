@@ -13,6 +13,7 @@ function transport(listResult: unknown = { tools: [{ name: "lookup", inputSchema
     expect(new Headers(options?.headers).get("cookie")).toBeNull();
     const rpc = JSON.parse(String(options?.body)) as { method: string; id?: number };
     methods.push(rpc.method);
+    if (rpc.method === "server/discover") return Response.json({ jsonrpc: "2.0", id: rpc.id, error: { code: -32601, message: "unsupported" } });
     if (rpc.method === "notifications/initialized") return new Response(null, { status: 202 });
     const result = rpc.method === "initialize" ? { protocolVersion: "2025-11-25", capabilities: { tools: {} }, serverInfo: { name: "fake", version: "1" } } : listResult;
     return Response.json({ jsonrpc: "2.0", id: rpc.id, result });
@@ -23,7 +24,7 @@ describe("官方 SDK 只读连接检查（模拟传输，无外部请求）", ()
   it("只握手和读取目录，绝不调用工具", async () => {
     const { fetchImpl, methods } = transport();
     expect((await checkMcpConnection(registration, fetchImpl)).status).toBe("available");
-    expect(methods).toEqual(["initialize", "notifications/initialized", "tools/list"]);
+    expect(methods).toEqual(["server/discover", "initialize", "notifications/initialized", "tools/list"]);
     expect(methods).not.toContain("tools/call");
   });
   it.each([401, 403])("凭据拒绝 %i 不触发 OAuth 或泄露响应", async (status) => {
@@ -33,7 +34,7 @@ describe("官方 SDK 只读连接检查（模拟传输，无外部请求）", ()
     expect(JSON.stringify(result)).not.toContain("server-secret");
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
-  it.each([429, 503])("临时错误 %i 不自动重试", async (status) => {
+  it.each([408, 409, 425, 429, 503])("临时错误 %i 不自动重试", async (status) => {
     const fetchImpl = vi.fn(async () => new Response("secret", { status }));
     expect((await checkMcpConnection(registration, fetchImpl)).status).toBe("unavailable");
     expect(fetchImpl).toHaveBeenCalledTimes(1);
@@ -113,6 +114,11 @@ it("本机真实 HTTP 假服务经登记查询和 API 检查入口，只握手�
     for await (const chunk of request) body += chunk;
     const rpc = JSON.parse(body) as { method: string; id?: number };
     methods.push(rpc.method);
+    if (rpc.method === "server/discover") {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, error: { code: -32601, message: "unsupported" } }));
+      return;
+    }
     if (rpc.method === "notifications/initialized") { response.writeHead(202); response.end(); return; }
     if (rpc.method !== "initialize" && rpc.method !== "tools/list") unexpected = true;
     const result = rpc.method === "initialize"
@@ -137,7 +143,7 @@ it("本机真实 HTTP 假服务经登记查询和 API 检查入口，只握手�
     const data = await response.json(); expect(data.status).toBe("available");
     expect(JSON.stringify(data)).not.toContain("local-test-secret"); expect(JSON.stringify(data)).not.toContain(endpoint);
     expect(JSON.stringify(data)).not.toContain("untrusted-remote-text");
-    expect(methods).toEqual(["initialize", "notifications/initialized", "tools/list", "initialize", "notifications/initialized", "tools/list"]);
+    expect(methods).toEqual(["server/discover", "initialize", "notifications/initialized", "tools/list", "server/discover", "initialize", "notifications/initialized", "tools/list"]);
     expect(methods).not.toContain("tools/call"); expect(unexpected).toBe(false);
     const count = httpRequests;
     expect((await inspectMcpConnection("unknown")).status).toBe("not-found"); expect(httpRequests).toBe(count);

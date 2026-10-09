@@ -6,6 +6,16 @@ describe("MCP 回执与参数规则", () => {
     expect(mcpToolDefinitionIssue({ required: ["id"], type: "object" }, { type: "object", required: ["id"] })).toBeNull();
     expect(mcpToolDefinitionIssue({ type: "object" }, { type: "object", required: ["id"] })).not.toBeNull();
   });
+  it("参数定义按 UTF-8 字节和 JSON 实际长度限制，不按字符数冒充容量", () => {
+    for (const description of ["汉".repeat(12_000), "x".repeat(32 * 1024 - 20)]) {
+      const definition = { type: "object", description };
+      expect(description.length).toBeLessThan(32 * 1024);
+      expect(new TextEncoder().encode(JSON.stringify(definition)).byteLength).toBeGreaterThan(32 * 1024);
+      expect(mcpToolDefinitionIssue(definition, definition)).not.toBeNull();
+    }
+    const definition = { type: "object", description: "汉".repeat(10_000) };
+    expect(mcpToolDefinitionIssue(definition, definition)).toBeNull();
+  });
   it.each([null, [], { content: [] }, { content: [{ type: "image", data: "secret" }] }, { content: [{ type: "text", text: "[]" }] }, { structuredContent: { ok: 1 }, content: [] }])("无效回执不放行 %j", (value) => {
     expect(normalizeMcpToolResult(value, { type: "object" })).toMatchObject({ ok: false, retryable: false });
   });

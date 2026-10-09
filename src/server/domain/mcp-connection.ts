@@ -2,6 +2,9 @@ import { z } from "zod";
 import { McpConnectionRegistration, McpToolDirectory, type McpConnectionStatus, type McpConnectionCheckResult } from "@/contracts/mcp-connection";
 import { canonicalJson } from "@/server/domain/canonical-json";
 import { validateJsonSchemaDefinition } from "@/server/domain/json-schema";
+import { isPassiveJsonData } from "@/contracts/json";
+import { MAX_MCP_SESSION_BYTES } from "@/contracts/mcp-tool";
+import { mcpToolDefinitionIssue } from "@/server/domain/runtime/mcp-tool";
 const forbiddenHeaders = new Set(["connection", "content-length", "host", "cookie", "set-cookie", "proxy-authorization", "proxy-authenticate", "keep-alive", "te", "trailer", "transfer-encoding", "upgrade"]);
 
 export function parseMcpConnections(raw: string | undefined): McpConnectionRegistration[] | null {
@@ -41,6 +44,7 @@ export function mcpCheckFailure(status: McpConnectionStatus): McpConnectionCheck
 }
 
 export function compareMcpDirectory(registration: McpConnectionRegistration, directory: unknown): McpConnectionCheckResult {
+  if (!isPassiveJsonData(directory, MAX_MCP_SESSION_BYTES)) return mcpCheckFailure("protocol-error");
   const parsed = McpToolDirectory.safeParse(directory);
   if (!parsed.success) return mcpCheckFailure("protocol-error");
   const byName = new Map(parsed.data.map((tool) => [tool.name, tool]));
@@ -48,7 +52,7 @@ export function compareMcpDirectory(registration: McpConnectionRegistration, dir
   const tools = registration.tools.map((expected) => {
     const actual = byName.get(expected.action);
     const status = !actual ? "missing" as const
-      : canonicalJson(actual.inputSchema) !== canonicalJson(expected.inputSchema) || expected.outputSchema !== undefined && canonicalJson(actual.outputSchema ?? null) !== canonicalJson(expected.outputSchema)
+      : mcpToolDefinitionIssue(actual.inputSchema, expected.inputSchema) || expected.outputSchema !== undefined && canonicalJson(actual.outputSchema ?? null) !== canonicalJson(expected.outputSchema)
         ? "definition-changed" as const : "available" as const;
     return { registryToolId: expected.registryToolId, name: expected.name, status };
   });

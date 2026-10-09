@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { McpConnectionCheckInput, McpConnectionRegistration } from "@/contracts/mcp-connection";
 import { compareMcpDirectory, parseMcpConnections } from "./mcp-connection";
+import { mcpToolDefinitionIssue } from "@/server/domain/runtime/mcp-tool";
 const registration = McpConnectionRegistration.parse({
   id: "service", name: "查询服务", workspaceId: "00000000-0000-4000-8000-000000000001", endpoint: "https://service.example/mcp",
   headers: { Authorization: "Bearer secret" }, tools: [{ registryToolId: "lookup", name: "查询记录", action: "lookup", inputSchema: { type: "object", properties: { term: { type: "string" } } } }],
@@ -42,6 +43,25 @@ describe("目录核对", () => {
   it("拒绝跨页重复工具与非法定义", () => {
     expect(compareMcpDirectory(registration, [definition, definition]).status).toBe("protocol-error");
     expect(compareMcpDirectory(registration, [{ ...definition, inputSchema: null }]).status).toBe("protocol-error");
+  });
+  it("已登记定义超过执行边界时不能报可用", () => {
+    const inputSchema = { type: "object", description: "x".repeat(33 * 1024) };
+    const oversized = { ...registration, tools: [{ ...registration.tools[0], inputSchema }] };
+    expect(mcpToolDefinitionIssue(inputSchema, inputSchema)).not.toBeNull();
+    expect(compareMcpDirectory(oversized, [{ name: "lookup", inputSchema }]).status).toBe("definition-changed");
+    expect(parseMcpConnections(JSON.stringify([oversized]))).toBeNull();
+  });
+  it("远端名称区分大小写，拒绝非法名称，普通未登记名称不改变选择", () => {
+    expect(compareMcpDirectory(registration, [definition, { ...definition, name: "Lookup" }]).status).toBe("available");
+    for (const name of ["", "has space", "x".repeat(129)]) expect(compareMcpDirectory(registration, [definition, { ...definition, name }]).status).toBe("protocol-error");
+  });
+  it("目录访问器和循环对象在读取或序列化前拒绝", () => {
+    const getter = vi.fn(() => "lookup");
+    expect(compareMcpDirectory(registration, [{ get name() { return getter(); }, inputSchema: { type: "object" } }]).status).toBe("protocol-error");
+    expect(getter).not.toHaveBeenCalled();
+    const cyclic: Record<string, unknown> = { name: "lookup", inputSchema: { type: "object" } };
+    cyclic.self = cyclic;
+    expect(compareMcpDirectory(registration, [cyclic]).status).toBe("protocol-error");
   });
 });
 

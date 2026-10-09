@@ -1,10 +1,10 @@
-import { McpToolOutput, MAX_MCP_RESPONSE_BYTES } from "@/contracts/mcp-tool";
+import { McpToolInputDefinition, McpToolOutput, MAX_MCP_DEFINITION_BYTES, MAX_MCP_RESPONSE_BYTES } from "@/contracts/mcp-tool";
 import { isPassiveJsonData } from "@/contracts/json";
 import { canonicalJson } from "@/server/domain/canonical-json";
 import { validateJsonObjectSchema, validateJsonSchemaDefinition } from "@/server/domain/json-schema";
 
 export function mcpToolDefinitionIssue(actual: Record<string, unknown>, expected: Record<string, unknown>): string | null {
-  if (!isPassiveJsonData(actual, 32 * 1024) || validateJsonSchemaDefinition(actual)
+  if (!isPassiveJsonData(actual, MAX_MCP_DEFINITION_BYTES) || !McpToolInputDefinition.safeParse(actual).success || validateJsonSchemaDefinition(actual)
     || canonicalJson(actual) !== canonicalJson(expected)) return "远端工具参数规则已变化，请核对并重新发布助手";
   return null;
 }

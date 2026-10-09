@@ -1,5 +1,5 @@
 import { createMCPClient, MCPClientError, type MCPClient } from "@ai-sdk/mcp";
-import { McpToolArguments, MAX_MCP_ARGUMENT_BYTES, MAX_MCP_RESPONSE_BYTES } from "@/contracts/mcp-tool";
+import { McpToolArguments, MAX_MCP_ARGUMENT_BYTES, MAX_MCP_DIRECTORY_PAGES, MAX_MCP_DIRECTORY_PAGE_TOOLS, MAX_MCP_RESPONSE_BYTES, MAX_MCP_SESSION_BYTES } from "@/contracts/mcp-tool";
 import { isPassiveJsonData } from "@/contracts/json";
 import { validateJsonObjectSchema } from "@/server/domain/json-schema";
 import { mcpToolDefinitionIssue, normalizeMcpToolResult } from "@/server/domain/runtime/mcp-tool";
@@ -63,7 +63,7 @@ export async function invokeMcpTool(args: {
           const { done, value } = await reader.read();
           if (done) { decoder.decode(); reader.releaseLock(); destination.close(); return; }
           bytes += value.byteLength; totalBytes += value.byteLength;
-          if (bytes > MAX_MCP_RESPONSE_BYTES || totalBytes > 4 * MAX_MCP_RESPONSE_BYTES) { boundaryFailure = true; throw new McpBoundaryError(); }
+          if (bytes > MAX_MCP_RESPONSE_BYTES || totalBytes > MAX_MCP_SESSION_BYTES) { boundaryFailure = true; throw new McpBoundaryError(); }
           try { decoder.decode(value, { stream: true }); } catch { boundaryFailure = true; throw new McpBoundaryError(); }
           destination.enqueue(value);
         } catch (error) {
@@ -83,15 +83,15 @@ export async function invokeMcpTool(args: {
     let cursor: string | undefined;
     let matched: Record<string, unknown> | undefined;
     const cursors = new Set<string>();
-    for (let page = 0; page < 5; page += 1) {
+    for (let page = 0; page < MAX_MCP_DIRECTORY_PAGES; page += 1) {
       const list = await client.listTools({ params: cursor ? { cursor } : undefined, options: { signal: controller.signal, timeout: MCP_TIMEOUT_MS } });
-      if (list.tools.length > 100) return fail("远端工具目录超过允许范围");
+      if (list.tools.length > MAX_MCP_DIRECTORY_PAGE_TOOLS) return fail("远端工具目录超过允许范围");
       const matches = list.tools.filter((definition) => definition.name === tool.action);
       if (matches.length > 1 || matched && matches.length > 0) return fail("远端工具名称重复，已停止调用");
       if (matches[0]) matched = matches[0].inputSchema;
       cursor = list.nextCursor;
       if (!cursor) break;
-      if (cursors.has(cursor) || page === 4) return fail("远端工具目录分页无效或超过允许范围");
+      if (cursors.has(cursor) || page === MAX_MCP_DIRECTORY_PAGES - 1) return fail("远端工具目录分页无效或超过允许范围");
       cursors.add(cursor);
     }
     if (!matched) return fail("已登记的工具未在远端目录中找到");

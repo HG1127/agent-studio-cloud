@@ -38,3 +38,12 @@ it("单项额外安全限制不隐藏其他合法登记，失败检查零网络"
   expect(mocks.check).not.toHaveBeenCalled();
   await inspectMcpConnection("lookup"); expect(mocks.check).toHaveBeenCalledTimes(1);
 });
+
+it("超出执行定义字节边界的配置不报可用，也不触发网络或隐藏其他连接", async () => {
+  mocks.load.mockReturnValue([tool, { ...tool, id: "oversized", inputSchema: { type: "object", description: "汉".repeat(12_000) } }]);
+  expect(listMcpConnections()).toHaveLength(2);
+  expect((await inspectMcpConnection("oversized")).status).toBe("configuration-error");
+  expect(mocks.check).not.toHaveBeenCalled();
+  expect((await inspectMcpConnection("lookup")).status).toBe("available");
+  expect(mocks.check).toHaveBeenCalledTimes(1);
+});
