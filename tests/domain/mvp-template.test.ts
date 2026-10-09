@@ -122,4 +122,41 @@ describe("最小真实业务模板", () => {
     expect(projectWorkflowResult({ execute: { ok: true } }, built.draft.outputContract!.fields)).toEqual({ ok: true, result: { ok: true } });
     expect(filterPublishBlockers(auditWorkflow(built.draft).issues, built.draft).blocking).toEqual([]);
   });
+  it.each([
+    ["number", "number"], ["number", "integer"], ["number", ["integer", "null"]],
+    ["number", ["string", "number"]], ["number", ["integer", "number"]],
+    ["string", ["integer", "string"]], ["boolean", ["boolean", "null"]],
+    ["object", ["null", "object"]], ["array", ["array", "null"]],
+  ])("业务输入 %s 兼容登记的显式类型 %j，保持字段契约", (inputType, declared) => {
+    const inputSchema = { type: "object", required: ["customer_id"], additionalProperties: false,
+      properties: { customer_id: { type: declared } } };
+    const built = buildMvpTemplate({ ...input, inputs: input.inputs.map((field) => field.name === "customerId" ? { ...field, type: inputType } : field) },
+      [{ ...registry[0], inputSchema }, registry[1]]);
+    if (!built.ok) throw new Error(built.error);
+    expect(built.draft.nodes.read.tool!.inputSchema).toEqual(inputSchema);
+    expect(built.draft.nodes.execute.tool).toEqual(build().nodes.execute.tool);
+    expect(built.draft.nodes.execute.toolOperation).toEqual(build().nodes.execute.toolOperation);
+    expect(built.draft.nodes.approve).toEqual(build().nodes.approve);
+  });
+  it.each([
+    ["number", "string"], ["number", ["boolean", "null"]], ["string", ["integer", "null"]],
+    ["boolean", "number"], ["object", ["array", "null"]], ["array", ["object", "null"]],
+    ["number", undefined], ["number", []], ["number", ["number", "unknown"]],
+  ])("业务输入 %s 不猜测未声明或不匹配的类型 %j", (inputType, declared) => {
+    const inputSchema = { type: "object", required: ["customer_id"], additionalProperties: false,
+      properties: { customer_id: declared === undefined ? { enum: [0] } : { type: declared } } };
+    expect(buildMvpTemplate({ ...input, inputs: input.inputs.map((field) => field.name === "customerId" ? { ...field, type: inputType } : field) },
+      [{ ...registry[0], inputSchema }, registry[1]]).ok).toBe(false);
+  });
+  it.each([0, 0.5, "0", false])("整数登记不转换实际业务值 %j，继续由字段规则裁决", (value) => {
+    const inputSchema = { type: "object", required: ["customer_id"], additionalProperties: false,
+      properties: { customer_id: { type: ["integer", "null"], minimum: 0, maximum: 10 } } };
+    const built = buildMvpTemplate({ ...input, inputs: input.inputs.map((field) => field.name === "customerId" ? { ...field, type: "number" } : field) },
+      [{ ...registry[0], inputSchema }, registry[1]]);
+    if (!built.ok) throw new Error(built.error);
+    const mapped = resolveNodeInput({ node: built.draft.nodes.read, input: { customerId: value }, outputs: {} });
+    if (!mapped.ok) throw new Error(mapped.error);
+    expect(mapped.input.customer_id).toBe(value);
+    expect(validateJsonObjectSchema(mapped.input, built.draft.nodes.read.tool!.inputSchema) === null).toBe(value === 0);
+  });
 });

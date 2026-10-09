@@ -5,6 +5,11 @@ import { validateJsonObjectSchema, validateJsonSchemaDefinition } from "@/server
 import { importedWorkflowIssue } from "@/server/domain/import-agent";
 
 type Schema = Record<string, unknown>;
+function readInputTypeMatches(declared: unknown, inputType: MvpTemplateInput["inputs"][number]["type"]): boolean {
+  const types = Array.isArray(declared) ? declared : [declared];
+  return types.includes(inputType) || inputType === "number" && types.includes("integer");
+}
+
 function objectFields(schema: Schema): Record<string, Schema> | null {
   if (validateJsonSchemaDefinition(schema) || schema.type !== "object" || !schema.properties
     || typeof schema.properties !== "object" || Array.isArray(schema.properties)) return null;
@@ -57,7 +62,7 @@ export function buildMvpTemplate(input: unknown, registry: unknown):
     const businessInput = source.kind === "input" && source.path.length === 1
       ? spec.inputs.find((field) => field.name === source.path[0]) : undefined;
     if (binding.target.length !== 1 || !businessInput || !binding.required || binding.fallback !== undefined
-      || !Object.hasOwn(readFields, target) || readFields[target].type !== businessInput.type) {
+      || !Object.hasOwn(readFields, target) || !readInputTypeMatches(readFields[target].type, businessInput.type)) {
       return { ok: false, error: "取数参数必须逐项绑定类型一致的必填业务输入，不允许猜测或固定值" };
     }
     mappedRead.add(target);
