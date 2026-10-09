@@ -55,7 +55,7 @@ describe("完整隔离验收的执行预算", () => {
     expect(integration).not.toContain("continue-on-error");
   });
 
-  it.each(["runtime", "integration-name", "workflow-name"].flatMap((target) =>
+  it.each(["runtime", "integration-name", "workflow-name", "zero-argument-read"].flatMap((target) =>
     (["passed", "skipped", "failed", "missing"] as const).map((status) => ({ target, status })),
   ))("真实数量守卫对 $target 的 $status 使用实际 JSON 报告而非日志占位", ({ target, status }) => {
     const guard = step("核对 MVP 真实断言未缺失或跳过")!;
@@ -80,9 +80,13 @@ describe("完整隔离验收的执行预算", () => {
         assertionResults: Array.from({ length: 3 }, () => ({ status: "passed" })),
       });
     }
+    reports["workflow-results.json"].testResults.push({
+      name: "/repo/tests/workflow/mvp-acceptance-zero-argument-read.test.ts",
+      assertionResults: Array.from({ length: 2 }, () => ({ status: "passed" })),
+    });
     const assertions = target === "integration-name"
       ? reports["integration-results.json"].testResults[1].assertionResults
-      : reports["workflow-results.json"].testResults[target === "workflow-name" ? 3 : 0].assertionResults;
+      : reports["workflow-results.json"].testResults[target === "zero-argument-read" ? 4 : target === "workflow-name" ? 3 : 0].assertionResults;
     if (status === "missing") assertions.pop();
     else assertions[0].status = status;
     const evaluate = () => runInNewContext(code, {
