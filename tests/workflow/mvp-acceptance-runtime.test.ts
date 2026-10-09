@@ -80,7 +80,7 @@ async function pendingApproval(run: StartedRun) {
 }
 async function approve(run: StartedRun) {
   const approval = await pendingApproval(run);
-  expect(await decideRunApprovalAction({ runId: run.runId, approvalId: approval.id, decision: "approved", confirmed: true })).toMatchObject({ ok: true });
+  expect(await decideRunApprovalAction({ runId: run.runId, approvalId: approval.id, decision: "approved", confirmed: true })).toEqual({ ok: true, runId: run.runId, approvalId: approval.id, decision: "approved", recorded: true });
 }
 async function expectCompleted(run: StartedRun) {
   expect(await run.settled).toEqual({ ok: true, value: { status: "completed" } });
@@ -145,7 +145,7 @@ describe("MVP 完整 MCP/模型/审批/业务账本链路（仅 CI 隔离库）"
 
   it("人工拒绝带防重配置的写任务，不领取账本也不发送写请求", async () => {
     await prepare(); const run = await startRun(); const approval = await pendingApproval(run);
-    expect(await decideRunApprovalAction({ runId: run.runId, approvalId: approval.id, decision: "rejected", confirmed: true })).toMatchObject({ ok: true });
+    expect(await decideRunApprovalAction({ runId: run.runId, approvalId: approval.id, decision: "rejected", confirmed: true })).toEqual({ ok: true, runId: run.runId, approvalId: approval.id, decision: "rejected", recorded: true });
     expect(await run.settled).toEqual({ ok: true, value: { status: "completed" } });
     expect(await getRunTaskResult(run.runId, DEMO_WORKSPACE_ID)).toMatchObject({ status: "completed", ready: true,
       result: { 处理状态: "未获确认" } });

@@ -84,7 +84,7 @@ async function pendingApproval(run: TrackedRun) {
 }
 async function approve(run: TrackedRun) {
   const approval = await pendingApproval(run);
-  expect(await decideRunApprovalAction({ runId: run.runId, approvalId: approval.id, confirmed: true, decision: "approved" })).toEqual({ ok: true });
+  expect(await decideRunApprovalAction({ runId: run.runId, approvalId: approval.id, confirmed: true, decision: "approved" })).toEqual({ ok: true, runId: run.runId, approvalId: approval.id, decision: "approved", recorded: true });
 }
 async function completed(run: TrackedRun) {
   expect(await run.settled).toEqual({ ok: true, value: { status: "completed" } });
@@ -174,7 +174,7 @@ describe("MVP 生产模板通过合法入口执行真实 SDK/审批/结果（仅
     await createAndPublish();
     const run = await startProductionRun();
     const approval = await pendingApproval(run);
-    expect(await decideRunApprovalAction({ runId: run.runId, approvalId: approval.id, confirmed: true, decision: "rejected" })).toEqual({ ok: true });
+    expect(await decideRunApprovalAction({ runId: run.runId, approvalId: approval.id, confirmed: true, decision: "rejected" })).toEqual({ ok: true, runId: run.runId, approvalId: approval.id, decision: "rejected", recorded: true });
     expect(await run.settled).toEqual({ ok: true, value: { status: "completed" } });
     expect(await getRunTaskResult(run.runId, DEMO_WORKSPACE_ID)).toMatchObject({ status: "completed", ready: true, result: { 处理状态: "未获确认" } });
     expect(await ownOperations()).toHaveLength(0);

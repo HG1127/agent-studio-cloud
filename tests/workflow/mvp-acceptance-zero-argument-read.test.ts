@@ -152,7 +152,7 @@ describe("零参数 MCP 读取经生产创建、发布、运行和审批交付�
     expect(context.tools.writes).toHaveLength(0);
     expect(context.tools.effectCount()).toBe(0);
 
-    expect(await decideRunApprovalAction({ runId: started.runId, approvalId: approval.id, confirmed: true, decision: "approved" })).toEqual({ ok: true });
+    expect(await decideRunApprovalAction({ runId: started.runId, approvalId: approval.id, confirmed: true, decision: "approved" })).toEqual({ ok: true, runId: started.runId, approvalId: approval.id, decision: "approved", recorded: true });
     expect(await settled).toEqual({ ok: true, value: { status: "completed" } });
     expect(await getRunTaskResult(started.runId, DEMO_WORKSPACE_ID)).toMatchObject({ status: "completed", ready: true, error: null, result: { receiptId: "receipt-1", amount: 0, approved: false } });
     expect((await getRunTaskResult(started.runId, DEMO_WORKSPACE_ID))?.result).toEqual({ receiptId: "receipt-1", amount: 0, approved: false });

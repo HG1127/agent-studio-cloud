@@ -83,7 +83,7 @@ async function pending(run: TemplateRun, customerId = "c1") {
 }
 async function approve(run: TemplateRun, customerId = "c1") {
   const approval = await pending(run, customerId);
-  expect(await decideRunApprovalAction({ runId: run.runId, approvalId: approval.id, decision: "approved", confirmed: true })).toEqual({ ok: true });
+  expect(await decideRunApprovalAction({ runId: run.runId, approvalId: approval.id, decision: "approved", confirmed: true })).toEqual({ ok: true, runId: run.runId, approvalId: approval.id, decision: "approved", recorded: true });
 }
 async function completed(run: TemplateRun) {
   expect(await run.settled).toEqual({ ok: true, value: { status: "completed" } });
@@ -234,7 +234,7 @@ describe("MVP 生产模板的失败恢复与业务冲突（仅 CI 临时隔离�
     expect(await onlyOperation()).toEqual(original);
     expectSameKeyAndEffect(1, original.keyHash);
     const discoveries = context!.tools.messages.filter((message) => message.path === "/mcp-write").length;
-    expect(await decideRunApprovalAction({ runId: second.runId, approvalId: approval.id, decision: "approved", confirmed: true })).toEqual({ ok: true });
+    expect(await decideRunApprovalAction({ runId: second.runId, approvalId: approval.id, decision: "approved", confirmed: true })).toEqual({ ok: true, runId: second.runId, approvalId: approval.id, decision: "approved", recorded: true });
     await failed(second, "请求内容已变化");
     expect(await onlyOperation()).toEqual(original);
     expectSameKeyAndEffect(1, original.keyHash);

@@ -148,3 +148,11 @@ pnpm exec vitest run --config vitest.workflow.config.mts tests/workflow/mvp-acce
 新增 `tests/domain/mvp-acceptance-zero-argument-cleanup.test.ts` 的 5 项仅用模拟句柄、模拟归属删除和模拟关闭函数，检查停止确认在删库之前、未确认启动及取消失败保留记录、其他句柄继续停止、服务关闭和删库异常时仍关闭全部服务且恢复环境、原异常仍可见。不启动假网络服务，不加载实际数据库、生产创建动作或 Workflow 插件；这些纯模拟断言不能代替 CI 中的两项真实运行。
 
 2026-10-09 清理机制本机验证：默认 Vitest 配置、512MB 堆上限、单 worker 串行执行既有共享清理 8 项与新增纯模拟 5 项，真实 exit0、2 文件 13 项通过。没有运行真实数据库、Workflow、两项零参数实际验收、迁移、构建或远端 CI；全仓 `tsc --noEmit`（1536MB、串行）和三份新增/修改代码 ESLint（512MB、串行）通过，差异检查通过。
+
+## 审批接收回执验收修正
+
+2026-10-09：冻结候选 `d09212e252969bb4a01dabc139a19e1586ce6ae6` 的实际 CI [37897580469](https://github.com/HG1127/agent-studio-cloud/actions/runs/37897580469) 失败。数据库 321 项通过；Workflow 147 项通过、11 项失败，失败位置均把公开审批动作返回值精确比较为旧的 `{ok:true}`。41 项数量守卫及 E2E 跳过，不能认定完整链路或后续业务断言已通过。
+
+正式 `RunApprovalDecisionResult` 成功契约严格要求 `{ok:true,runId,approvalId,decision,recorded:true}`，公开动作与既有模拟动作单测均按该结构实现；`recorded` 仅证明决定已记录，不代表业务完成。本次仅将四份 MVP Workflow 验收中 7 处成功审批断言升级为与实际请求逐字段一致的完整精确比较，包括原 runtime 的两处部分匹配。取消失败、其他动作返回值、原 41 项数量、Hook、回执来源、金额 `0`/否定值 `false`、只写一次、账本、防重/恢复和最终成果断言均保留，生产契约和行为不改。
+
+修正候选尚未执行真实数据库、Workflow 或 E2E，不能沿用旧提交的结果。只使用默认 Vitest 配置、512MB 堆上限和单 worker 串行验证纯审批契约与模拟审批动作，实际 exit0、2 文件 25 项通过；未在本地执行真实 DB/Workflow/E2E、构建、迁移或远端 CI。全仓 `tsc --noEmit`（1536MB、串行）、四份变更代码 ESLint（768MB、串行）及差异检查通过；联合后的新精确提交须交 CI/CD 完整复验。
