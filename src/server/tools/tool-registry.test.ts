@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { parseToolRegistry } from "@/server/tools/tool-registry";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { listToolCompilerCapabilities, listToolRegistryOptions, parseToolRegistry } from "@/server/tools/tool-registry";
+import { ToolRegistryOption } from "@/contracts/tool-registry";
 
 const tool = {
   id: "crm.update",
@@ -36,5 +37,55 @@ describe("业务工具注册表", () => {
   it("注册时拒绝非法请求头，避免运行时抛错", () => {
     expect(parseToolRegistry(JSON.stringify([{ ...tool, headers: { "bad name": "value" } }]))).toEqual([]);
     expect(parseToolRegistry(JSON.stringify([{ ...tool, headers: { "X-Test": "bad\u0000value" } }]))).toEqual([]);
+  });
+});
+
+describe("工具公开元数据的凭据边界", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("清理展示名称和说明，不把服务端请求头或文本凭据带到目录和编排能力", () => {
+    const registration = { ...tool, name: "客户 Bearer abcdefghijklmnop", description: "联系 person@example.com；password=private-fake-password", headers: { Authorization: "Bearer server-only-test-value" } };
+    vi.stubEnv("TOOL_REGISTRY_JSON", JSON.stringify([registration]));
+    for (const list of [listToolRegistryOptions(), listToolCompilerCapabilities()]) {
+      expect(list).toHaveLength(1);
+      const visible = JSON.stringify(list);
+      expect(visible).not.toMatch(/abcdefghijklmnop|private-fake-password|server-only-test-value/);
+      expect(visible).toContain("person@example.com");
+      expect(visible).toContain("已隐藏敏感信息");
+    }
+    expect(parseToolRegistry(JSON.stringify([registration]))[0].headers).toEqual(registration.headers);
+  });
+
+  it.each([
+    { type: "object", description: "Bearer abcdefghijklmnop" },
+    { type: "object", examples: [{ apiKey: "private-fake-example" }] },
+    { type: "object", default: { authorization: "private-fake-default" } },
+    { type: "object", properties: { password: { type: "string", default: "private-fake-password" } } },
+    { type: "object", properties: { apiKey: { type: "string", const: "private-fake-constant" } } },
+    { type: "object", properties: { accessToken: { type: "string", enum: ["private-fake-enum"] } } },
+  ])("包含凭据文字或固定凭据值的定义关闭登记，不能悄悄改写字段规则 %#", (schema) => {
+    const original = JSON.stringify(schema);
+    for (const field of ["inputSchema", "outputSchema"]) expect(parseToolRegistry(JSON.stringify([{ ...tool, [field]: schema }]))).toEqual([]);
+    expect(JSON.stringify(schema)).toBe(original);
+  });
+
+  it("保留空凭据字段声明、正常用量、邮箱及零值否定值，不按字段名删除定义", () => {
+    const schema = { type: "object", properties: { apiKey: { type: "string" }, email: { type: "string", const: "person@example.com" }, amount: { type: "number", default: 0 }, active: { type: "boolean", enum: [false] }, inputTokens: { type: "integer", examples: [0] } }, additionalProperties: false };
+    const parsed = parseToolRegistry(JSON.stringify([{ ...tool, inputSchema: schema, outputSchema: schema }]));
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].inputSchema).toEqual(schema);
+    expect(parsed[0].outputSchema).toEqual(schema);
+  });
+  it("清理后的展示文本仍满足原长度契约，操作标识和服务端请求头不变", () => {
+    const registration = { ...tool, name: `${"甲".repeat(45)}password=abcdef`, description: `${"乙".repeat(185)}token=abcdef`, headers: { Authorization: "Bearer server-only-test-value" } };
+    vi.stubEnv("TOOL_REGISTRY_JSON", JSON.stringify([registration]));
+    const options = listToolRegistryOptions();
+    expect(options).toHaveLength(1);
+    expect(ToolRegistryOption.safeParse(options[0]).success).toBe(true);
+    expect(options[0].name.length).toBeLessThanOrEqual(60);
+    expect(options[0].description.length).toBeLessThanOrEqual(200);
+    expect(options[0].action).toBe(registration.action);
+    expect(parseToolRegistry(JSON.stringify([registration]))[0].headers).toEqual(registration.headers);
+    expect(JSON.stringify(options)).not.toContain("abcdef");
   });
 });

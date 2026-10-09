@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ToolRegistryOption, type ToolRegistryOption as ToolRegistryOptionType } from "@/contracts/tool-registry";
-import { validateJsonSchemaDefinition } from "@/server/domain/json-schema";
+import { isToolSchemaSafeToExpose } from "@/server/domain/tool-schema-visibility";
+import { redactCredentialText } from "@/server/domain/security/redact-sensitive";
 
 const ToolRegistration = ToolRegistryOption.safeExtend({
   endpoint: z.string().url().refine((value) => {
@@ -54,7 +55,9 @@ export function parseToolRegistry(raw: string | undefined): ToolRegistration[] {
       )) return [];
       if (tool.businessIdempotency === true && tool.businessIdempotencyRetentionMs === undefined) return [];
       if (ids.has(tool.id) || !safeHeaders(tool.headers)) return [];
-      if (validateJsonSchemaDefinition(tool.inputSchema) || validateJsonSchemaDefinition(tool.outputSchema)) return [];
+      if (!isToolSchemaSafeToExpose(tool.inputSchema) || !isToolSchemaSafeToExpose(tool.outputSchema)) return [];
+      tool.name = redactCredentialText(tool.name).slice(0, 60);
+      tool.description = redactCredentialText(tool.description).slice(0, 200);
       ids.add(tool.id);
     }
     return parsed.data;
