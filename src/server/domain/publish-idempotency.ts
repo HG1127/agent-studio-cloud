@@ -5,5 +5,9 @@ export function isDuplicatePublishedVersion(
   release: "candidate" | "production",
   manifest: unknown,
 ): boolean {
-  return Boolean(latest && latest.status === release && jsonValuesEqual(latest.manifest, manifest));
+  if (!latest || latest.status !== release) return false;
+  try {
+    // JSONB 会丢弃对象的 undefined 字段，比较须使用同一持久表示。
+    return jsonValuesEqual(latest.manifest, JSON.parse(JSON.stringify(manifest)));
+  } catch { return false; }
 }
