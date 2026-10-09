@@ -37,6 +37,49 @@ async function prepare(customerType: string | string[]) {
   return built.draft.nodes.read;
 }
 
+async function prepareZeroArguments(inputSchema: Record<string, unknown>) {
+  server = await startMcpTestServer({ inputSchema, output: { customer_name: "已读取客户" } });
+  const registry = parseToolRegistry(JSON.stringify([
+    { ...mvpTemplateRegistry[0], action: "lookup_customer", endpoint: server.endpoint, inputSchema },
+    { ...mvpTemplateRegistry[1], endpoint: server.endpoint },
+  ]));
+  const built = buildMvpTemplate({ ...mvpTemplateInput, readMapping: { fields: [], includeUpstreamOutputs: false } }, registry);
+  if (!built.ok) throw new Error(built.error);
+  vi.stubEnv("TOOL_REGISTRY_JSON", JSON.stringify(registry));
+  vi.stubEnv("HARNESS_POLICY_JSON", "");
+  return { node: built.draft.nodes.read, registry };
+}
+
+describe("模板零参数读取经过真实本机MCP SDK（无数据库）", () => {
+  it.each([
+    { type: "object", properties: {}, additionalProperties: false }, { type: "object" },
+    { type: "object", properties: {}, minProperties: 0, maxProperties: 0, const: {}, enum: [{}] },
+  ])("零参数读取只发送空对象，不携带任务或上游内容 %j", async (inputSchema) => {
+    const { node } = await prepareZeroArguments(inputSchema);
+    expect(node.tool!.inputSchema).toEqual(inputSchema);
+    expect(await runToolStep({ runId: crypto.randomUUID(), node,
+      input: { customerId: "任务敏感标记", requestKey: "业务编号敏感标记" }, outputs: { upstream: { secret: "上游敏感标记" } },
+    })).toEqual({ receipt: { ok: true, customer_name: "已读取客户" } });
+    expect(server!.messages.filter((message) => message.method === "tools/call"))
+      .toEqual([{ method: "tools/call", key: expect.any(String), params: { name: "lookup_customer", arguments: {} } }]);
+    expect(JSON.stringify(server!.messages)).not.toContain("敏感标记");
+    expect(mocks.persistStep).toHaveBeenCalledWith(expect.objectContaining({ status: "succeeded", output: { ok: true, customer_name: "已读取客户" } }));
+  });
+  it("零参数冻结后当前登记变化仍在网络前拒绝", async () => {
+    const { node, registry } = await prepareZeroArguments({ type: "object", properties: {}, additionalProperties: false });
+    vi.stubEnv("TOOL_REGISTRY_JSON", JSON.stringify([{ ...registry[0], inputSchema: { type: "object", minProperties: 1 } }, registry[1]]));
+    const originalFetch = fetch;
+    const network = vi.fn((...args: Parameters<typeof fetch>) => originalFetch(...args));
+    vi.stubGlobal("fetch", network);
+    try {
+      await expect(runToolStep({ runId: crypto.randomUUID(), node, input: { customerId: "不泄漏" }, outputs: {} }))
+        .rejects.toMatchObject({ name: "FatalError" });
+      expect(network).not.toHaveBeenCalled();
+      expect(server!.messages).toHaveLength(0);
+    } finally { vi.unstubAllGlobals(); }
+  });
+});
+
 describe("模板数字输入经过真实本机MCP SDK（无数据库）", () => {
   it.each([{ declared: "integer" }, { declared: ["integer", "null"] }])("整数零和否值按登记类型 $declared 原样传参", async ({ declared }) => {
     const node = await prepare(declared);
