@@ -19,7 +19,110 @@ function build() {
   return result.draft;
 }
 
+function actionWithSchema(protocol: string, schema: Record<string, unknown>) {
+  return protocol === "MCP" ? { ...registry[1], inputSchema: schema }
+    : { ...mvpHttpAction, inputSchema: { ...mvpHttpAction.inputSchema, properties: { input: schema } } };
+}
+
 describe("最小真实业务模板", () => {
+  it.each(["MCP", "HTTP"])("%s 两字段方案与最多一个字段冲突时拒绝创建", (protocol) => {
+    const schema = { ...registry[1].inputSchema, required: ["customer_id"], maxProperties: 1 };
+    expect(validateJsonObjectSchema({ customer_id: "客户1" }, schema)).toBeNull();
+    const action = actionWithSchema(protocol, schema);
+    expect(buildMvpTemplate(input, [registry[0], action]).ok).toBe(false);
+  });
+  describe.each(["MCP", "HTTP"])("%s 方案派生规则", (protocol) => {
+    it.each([{ minProperties: 3 }, { maxProperties: 0 }])("拒绝与完整方案数量冲突的规则 %j", (limits) => {
+      const schema = { ...registry[1].inputSchema, required: ["customer_id"], ...limits };
+      expect(buildMvpTemplate(input, [registry[0], actionWithSchema(protocol, schema)]).ok).toBe(false);
+    });
+    it("原必填字段没有可映射声明时拒绝，不覆盖该要求", () => {
+      const schema = { ...registry[1].inputSchema, required: ["customer_id", "missing"], additionalProperties: true };
+      expect(validateJsonObjectSchema({ customer_id: "客户1", missing: "登记之外" }, schema)).toBeNull();
+      expect(buildMvpTemplate(input, [registry[0], actionWithSchema(protocol, schema)])).toEqual({
+        ok: false, error: "业务操作要求了未登记的参数字段，暂时无法创建",
+      });
+    });
+    it.each([
+      { const: { customer_id: "客户1" } },
+      { const: { customer_id: "客户1", message: "请联系客户", extra: "不允许" } },
+      { const: { customer_id: "客户1", message: 0 } },
+      { const: null },
+      { enum: [null, { customer_id: "客户1" }, { customer_id: "客户1", message: "请联系客户", extra: "不允许" }] },
+    ])("固定对象选择不能满足完整方案时拒绝 %j", (choices) => {
+      const schema = { ...registry[1].inputSchema, required: ["customer_id"], additionalProperties: true, ...choices };
+      expect(buildMvpTemplate(input, [registry[0], actionWithSchema(protocol, schema)])).toEqual({
+        ok: false, error: "工具允许的固定方案无法包含完整操作参数，暂时无法创建",
+      });
+    });
+    it.each([
+      {}, { const: { customer_id: "客户1", message: "请联系客户" } },
+      { enum: [{ customer_id: "客户1" }, { customer_id: "客户1", message: "请联系客户" }] },
+      { const: { customer_id: "客户1", message: "请联系客户" }, enum: [{ customer_id: "客户1", message: "请联系客户" }] },
+    ])("可满足的两字段规则保留原可选声明与工具快照 %j", (choices) => {
+      const schema = { ...registry[1].inputSchema, required: ["customer_id"], additionalProperties: true,
+        minProperties: 1, maxProperties: 2, ...choices };
+      const action = actionWithSchema(protocol, schema), before = structuredClone(action);
+      const built = buildMvpTemplate(input, [registry[0], action]);
+      const baseline = buildMvpTemplate(input, [registry[0], actionWithSchema(protocol, registry[1].inputSchema)]);
+      if (!built.ok) throw new Error(built.error);
+      if (!baseline.ok) throw new Error(baseline.error);
+      expect(action).toEqual(before);
+      expect(built.draft.nodes.execute.tool).toEqual({ ...baseline.draft.nodes.execute.tool, inputSchema: action.inputSchema });
+      expect(built.draft.nodes.read.tool).toEqual(baseline.draft.nodes.read.tool);
+      expect(built.draft.nodes.plan.modelOutput!.schema).toEqual({ ...schema,
+        required: ["customer_id", "message"], additionalProperties: false });
+      expect(validateJsonObjectSchema({ customer_id: "客户1", message: "请联系客户" }, built.draft.nodes.plan.modelOutput!.schema)).toBeNull();
+      expect(built.draft.nodes.execute.inputMapping).toEqual(baseline.draft.nodes.execute.inputMapping);
+      expect(built.draft.nodes.approve).toEqual(baseline.draft.nodes.approve);
+      expect(built.draft.nodes.execute.toolOperation).toEqual(baseline.draft.nodes.execute.toolOperation);
+    });
+    it("固定对象中的零和否值通过原字段规则并原样映射", () => {
+      const plan = { amount: 0, approved: false };
+      const schema = { type: "object", properties: { amount: { type: "number", minimum: 0 }, approved: { type: "boolean" } },
+        required: ["amount"], minProperties: 2, maxProperties: 2, const: plan, enum: [plan] };
+      const action = actionWithSchema(protocol, schema);
+      const built = buildMvpTemplate({ ...input, actionMapping: { fields: Object.keys(plan).map((field) => ({
+        target: [field], source: { kind: "output", nodeId: "plan", path: [field] }, required: true,
+      })) } }, [registry[0], action]);
+      if (!built.ok) throw new Error(built.error);
+      expect(built.draft.nodes.execute.tool!.inputSchema).toEqual(action.inputSchema);
+      expect(validateJsonObjectSchema(plan, built.draft.nodes.plan.modelOutput!.schema)).toBeNull();
+      expect(resolveNodeInput({ node: built.draft.nodes.execute, input: {}, outputs: { plan } })).toEqual({ ok: true, input: plan, outputs: {} });
+    });
+  });
+  it("固定三字段 HTTP 信封允许至少三个字段，保留完整冻结规则", () => {
+    const schema = { type: "object", required: ["action", "input", "outputs"], additionalProperties: false,
+      minProperties: 3, maxProperties: 3, properties: {
+        action: { const: mvpHttpAction.action }, input: registry[1].inputSchema,
+        outputs: { type: "object", maxProperties: 0 },
+      } };
+    const built = buildMvpTemplate(input, [registry[0], { ...mvpHttpAction, inputSchema: schema }]);
+    if (!built.ok) throw new Error(built.error);
+    expect(built.draft.nodes.execute.tool!.inputSchema).toEqual(schema);
+    expect(validateJsonObjectSchema({ action: mvpHttpAction.action,
+      input: { customer_id: "客户1", message: "请联系客户" }, outputs: {} }, schema)).toBeNull();
+  });
+  it.each([{ maxProperties: 2 }, { minProperties: 4 }, { maxProperties: 0 }])("固定三字段 HTTP 信封拒绝不可能的数量规则 %j", (limits) => {
+    const schema = { ...mvpHttpAction.inputSchema, ...limits };
+    expect(buildMvpTemplate(input, [registry[0], { ...mvpHttpAction, inputSchema: schema }]).ok).toBe(false);
+  });
+  it("信封数量检查保留固定动作和上游成果约束", () => {
+    const schema = { type: "object", minProperties: 3, maxProperties: 3, properties: {
+      input: registry[1].inputSchema, action: { const: mvpHttpAction.action }, outputs: { type: "object", maxProperties: 0 },
+    }, required: ["input"], additionalProperties: false };
+    for (const properties of [
+      { ...schema.properties, action: { const: "wrong_action" } },
+      { ...schema.properties, outputs: { type: "object", minProperties: 1 } },
+    ]) {
+      expect(buildMvpTemplate(input, [registry[0], { ...mvpHttpAction, inputSchema: { ...schema, properties } }]).ok).toBe(false);
+    }
+  });
+  it("合法三字段信封不能掩盖业务 input 的数量冲突", () => {
+    const schema = { ...mvpHttpAction.inputSchema, minProperties: 3, maxProperties: 3,
+      properties: { input: { ...registry[1].inputSchema, required: ["customer_id"], maxProperties: 1 } } };
+    expect(buildMvpTemplate(input, [registry[0], { ...mvpHttpAction, inputSchema: schema }]).ok).toBe(false);
+  });
   it("构造取数、结构化方案、人工确认、业务操作和精确交付的顺序", () => {
     const draft = build();
     expect(draft.nodes.start.next).toBe("read");

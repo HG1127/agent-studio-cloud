@@ -17,15 +17,40 @@ function objectFields(schema: Schema): Record<string, Schema> | null {
   return Object.keys(properties).length > 0 ? properties : null;
 }
 
+function propertyCountMatches(schema: Schema, count: number): boolean {
+  return !(typeof schema.minProperties === "number" && count < schema.minProperties)
+    && !(typeof schema.maxProperties === "number" && count > schema.maxProperties);
+}
+
+function derivedPlanIssue(actionSchema: Schema, planSchema: Schema, fields: string[]): string | null {
+  if (Array.isArray(actionSchema.required) && actionSchema.required.some((field) => !fields.includes(String(field)))) {
+    return "业务操作要求了未登记的参数字段，暂时无法创建";
+  }
+  if (!propertyCountMatches(planSchema, fields.length)) {
+    return "完整业务方案的字段数量与工具规则冲突，暂时无法创建";
+  }
+  const choices = Object.hasOwn(planSchema, "const") ? [planSchema.const]
+    : Array.isArray(planSchema.enum) ? planSchema.enum : null;
+  if (choices && !choices.some((value) => value !== null && typeof value === "object" && !Array.isArray(value)
+    && validateJsonObjectSchema(value as Schema, planSchema) === null)) {
+    return "工具允许的固定方案无法包含完整操作参数，暂时无法创建";
+  }
+  return null;
+}
+
 function actionParameterSchema(tool: ToolRegistryOption): Schema | null {
   if (tool.protocol === "mcp-streamable-http") return tool.inputSchema;
   const envelopeFields = objectFields(tool.inputSchema);
-  if (!envelopeFields?.input || !objectFields(envelopeFields.input)) return null;
+  if (!envelopeFields?.input || !objectFields(envelopeFields.input) || !propertyCountMatches(tool.inputSchema, 3)) return null;
   const properties = Object.fromEntries(Object.entries(envelopeFields).filter(([key]) => key !== "input"));
   const required = Array.isArray(tool.inputSchema.required)
     ? tool.inputSchema.required.filter((field) => field !== "input") : [];
-  // HTTP 运行时固定发送 action/input/outputs，只有 input 是业务参数。
-  const issue = validateJsonObjectSchema({ action: tool.action, outputs: {} }, { ...tool.inputSchema, properties, required });
+  // 部分信封检查不猜业务值；数量规则计入运行时必有的 input。
+  const fixedEnvelopeSchema = { ...tool.inputSchema, properties, required,
+    ...(typeof tool.inputSchema.minProperties === "number" ? { minProperties: Math.max(0, tool.inputSchema.minProperties - 1) } : {}),
+    ...(typeof tool.inputSchema.maxProperties === "number" ? { maxProperties: tool.inputSchema.maxProperties - 1 } : {}),
+  };
+  const issue = validateJsonObjectSchema({ action: tool.action, outputs: {} }, fixedEnvelopeSchema);
   return issue ? null : envelopeFields.input;
 }
 
@@ -49,9 +74,12 @@ export function buildMvpTemplate(input: unknown, registry: unknown):
   const actionSchema = actionParameterSchema(action);
   const readFields = objectFields(read.inputSchema), actionFields = actionSchema && objectFields(actionSchema);
   const receiptFields = objectFields(action.outputSchema);
-  if (!readFields || !actionFields || !receiptFields || !objectFields(read.outputSchema)) {
+  if (!actionSchema || !readFields || !actionFields || !receiptFields || !objectFields(read.outputSchema)) {
     return { ok: false, error: "工具必须登记明确的输入和回执字段，暂时无法创建" };
   }
+  const planSchema = { ...actionSchema, required: Object.keys(actionFields), additionalProperties: false };
+  const planIssue = derivedPlanIssue(actionSchema, planSchema, Object.keys(actionFields));
+  if (planIssue) return { ok: false, error: planIssue };
   if (spec.readMapping.includeUpstreamOutputs || spec.actionMapping.includeUpstreamOutputs) {
     return { ok: false, error: "工具只能接收逐项声明的字段" };
   }
@@ -113,7 +141,7 @@ export function buildMvpTemplate(input: unknown, registry: unknown):
         inputMapping: { fields: [
           ...spec.inputs.map((field) => ({ target: [field.name], source: { kind: "input", path: [field.name] }, required: true })),
         ], includeUpstreamOutputs: true },
-        modelOutput: { format: "json", schema: { ...actionSchema, required: Object.keys(actionFields), additionalProperties: false }, providerMode: "json-schema", maxRepairAttempts: 1 },
+        modelOutput: { format: "json", schema: planSchema, providerMode: "json-schema", maxRepairAttempts: 1 },
         businessSpec: businessSpec(spec.businessGoal,
           [{ name: "业务事实", source: "outputs.read" }, ...spec.inputs.map((field) => ({ name: field.name, source: `input.${field.name}` }))],
           Object.keys(actionFields), ["方案包含全部登记操作参数且通过结构化结果校验"]),
