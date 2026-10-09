@@ -45,6 +45,8 @@ MCP 的 inputSchema 校验映射后的参数对象，并直接作为 tools/call 
 
 回执优先使用 structuredContent，缺失时只兼容单段包含 JSON 对象的文本；不把普通文字、多个内容块、图像或资源自动猜成业务对象。isError、ok 非真、字段错误或超限都明确失败，不回显远端错误正文。参数最大 512KB，单请求响应最大 1MB，单连接总响应最大 4MB；整个连接/发现/调用限时 30 秒，目录最多五页、每页一百项。拒绝 HTTP 重定向，凭据不会跟随到另一个地址。
 
+连接检查和实际调用共用 32 次输送请求预算，包含 SDK 协商、GET 尝试、分页、心跳回复；实际调用还计入业务调用和会话关闭，检查关闭另有一次限时清理。真实 SDK 对本机假服务验证了五页目录每页一次心跳仍能调用工具，过量心跳则停止，不调用业务工具；连接检查只允许 SDK 的严格空心跳回复，不开放业务调用或额外输入交互。原时限、字节、分页和重试边界保持不变。
+
 ## 写操作和重试
 
 operationKind 必须由管理员明确确认是 read 或 action，不信任远端 readOnlyHint/idempotentHint。action 必须同时登记 businessIdempotency=true 与 businessIdempotencyRetentionMs（5 分钟到 365 天），且真实服务器要保证相同 Idempotency-Key 的 tools/call 只产生一次副作用并复用回执；这不是 MCP 标准自动保证，不能只设置开关而未核对供应商行为。

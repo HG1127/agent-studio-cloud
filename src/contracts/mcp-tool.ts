@@ -7,6 +7,7 @@ export const MAX_MCP_DEFINITION_BYTES = 32 * 1024;
 export const MAX_MCP_SESSION_BYTES = 4 * MAX_MCP_RESPONSE_BYTES;
 export const MAX_MCP_DIRECTORY_PAGES = 5;
 export const MAX_MCP_DIRECTORY_PAGE_TOOLS = 100;
+export const MAX_MCP_TRANSPORT_REQUESTS = 32;
 export const McpToolInputDefinition = boundedJsonStorageValue(MAX_MCP_DEFINITION_BYTES, "工具参数定义").pipe(JsonStorageRecord);
 export type McpToolInputDefinition = z.infer<typeof McpToolInputDefinition>;
 export const McpToolArguments = boundedJsonStorageValue(MAX_MCP_ARGUMENT_BYTES, "工具参数").pipe(JsonStorageRecord);

@@ -1,7 +1,7 @@
 import { createMCPClient, type MCPClient } from "@ai-sdk/mcp";
-import { McpToolDirectory, type McpConnectionRegistration, type McpConnectionCheckResult } from "@/contracts/mcp-connection";
+import { McpPingResponse, McpToolDirectory, type McpConnectionRegistration, type McpConnectionCheckResult } from "@/contracts/mcp-connection";
 import { compareMcpDirectory, mcpCheckFailure } from "@/server/domain/mcp-connection";
-import { MAX_MCP_DIRECTORY_PAGES, MAX_MCP_DIRECTORY_PAGE_TOOLS, MAX_MCP_RESPONSE_BYTES, MAX_MCP_SESSION_BYTES } from "@/contracts/mcp-tool";
+import { MAX_MCP_DIRECTORY_PAGES, MAX_MCP_DIRECTORY_PAGE_TOOLS, MAX_MCP_RESPONSE_BYTES, MAX_MCP_SESSION_BYTES, MAX_MCP_TRANSPORT_REQUESTS } from "@/contracts/mcp-tool";
 
 const TIMEOUT_MS = 10_000;
 const allowedMethods = new Set(["server/discover", "initialize", "notifications/initialized", "tools/list"]);
@@ -24,14 +24,14 @@ export async function checkMcpConnection(registration: McpConnectionRegistration
       await response.body?.cancel().catch(() => undefined);
       return new Response(null, { status: 204 });
     }
-    if (terminalFailure || controller.signal.aborted || String(url) !== endpoint || ++requests > 12) throw new CheckBoundaryError();
+    if (terminalFailure || controller.signal.aborted || String(url) !== endpoint || ++requests > MAX_MCP_TRANSPORT_REQUESTS) throw new CheckBoundaryError();
     // 检查不订阅服务端事件；SDK 将 405 视为未提供独立事件流。
     if (method === "GET") return new Response(null, { status: 405 });
     let discoveryRequest = false;
     if (method === "POST") {
       if (typeof options?.body !== "string" || new TextEncoder().encode(options.body).byteLength > 16 * 1024) throw new CheckBoundaryError();
       const rpc = JSON.parse(options.body) as { method?: string };
-      if (!rpc.method || !allowedMethods.has(rpc.method)) throw new CheckBoundaryError();
+      if ((!rpc.method || !allowedMethods.has(rpc.method)) && !McpPingResponse.safeParse(rpc).success) throw new CheckBoundaryError();
       discoveryRequest = rpc.method === "server/discover";
     } else if (method !== "GET" && method !== "DELETE") throw new CheckBoundaryError();
     const headers = new Headers(options?.headers);

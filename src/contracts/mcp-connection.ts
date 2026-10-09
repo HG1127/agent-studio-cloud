@@ -5,6 +5,8 @@ import { McpToolInputDefinition, MAX_MCP_DIRECTORY_PAGES, MAX_MCP_DIRECTORY_PAGE
 export const McpConnectionId = z.string().min(1).max(100).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
 export const McpConnectionCheckInput = z.object({ connectionId: McpConnectionId }).strict();
 export type McpConnectionCheckInput = z.infer<typeof McpConnectionCheckInput>;
+export const McpPingResponse = z.object({ jsonrpc: z.literal("2.0"), id: z.union([z.string(), z.number().int()]), result: z.object({}).strict() }).strict();
+export type McpPingResponse = z.infer<typeof McpPingResponse>;
 export const McpConnectionStatus = z.enum(["available", "credentials-rejected", "protocol-error", "unavailable", "definition-changed", "not-found", "configuration-error"]);
 export type McpConnectionStatus = z.infer<typeof McpConnectionStatus>;
 export const McpConnectionView = z.object({ id: McpConnectionId, name: z.string().min(1).max(60) }).strict();
