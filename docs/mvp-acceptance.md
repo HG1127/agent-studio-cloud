@@ -120,3 +120,23 @@ pnpm exec vitest run --config vitest.workflow.config.mts tests/workflow/mvp-acce
 2026-10-09：新增恢复代码的全仓 `tsc --noEmit` 和4份新增/修改代码文件 ESLint 通过。本机2项 helper 单测尝试在 Vitest worker 的 started 阶段因 `Zone Allocation failed` 内存分配失败退出（exit134，`Tests no tests`），没有执行断言，当时这2项未验证；没有把启动失败视作通过。收到资源约束后不再并发启动重型校验，不杀其他应用或修改系统设置。新增4项真实 Workflow/数据库断言尚未执行，必须由 CI 在精确新提交上验证；原18的进展由CI独立负责。本线未执行本地真实数据库、Workflow、E2E、迁移、构建或远端 CI，没有修改生产代码、模型连接、配置或资源策略。
 
 2026-10-09 后续：确认其他校验会话结束、内存余量恢复后，按 `NODE_OPTIONS=--max-old-space-size=256`、`--maxWorkers=1 --no-file-parallelism` 单项串行重跑上述 helper 专用配置，真实 `exit0`、1文件2项通过。该结果仅验证本机故障服务；4项真实恢复 Workflow/数据库仍未执行，不能把 helper 通过扩展成链路通过。
+
+## 第四批：生产模板零参数 MCP 取数验收
+
+基底：`4ec51996984dfeed05b5104d6670d2703bb40573`；分支：`codex/mvp-zero-argument-read-acceptance`。原 39 项实际验收的文件、数量和断言保持不变，当前基底 CI 不取消或修改；新增套件的 2 项应由 CI/CD 另加计数守卫，并在模板线零参数修复及主线发布防重修复合入后的精确候选上执行。
+
+`tests/helpers/mvp-acceptance-zero-argument-read.ts` 提供本套件私有零参数 MCP 读取服务；两项分别原样登记并返回 `{type:"object",properties:{},additionalProperties:false}` 和 `{type:"object",additionalProperties:false}`。复用既有真实模板准备、写服务、模型服务和归属清理，旧共用 helper 无任何更改。准备时只替换本套件读取登记的地址/输入规则和显式空映射，再调用生产工厂；不拼接草稿、冻结版本、运行或终态。仍保留任务必填输入、防重编号、真实需求证据、写参数映射、审批与回执规则，不虚造取数参数或业务输入来源。
+
+`tests/workflow/mvp-acceptance-zero-argument-read.test.ts` 的每项均检查生产工厂和真实创建保存的读节点 `businessSpec.inputs=[]`；实际发布通过既有审计并保持原始输入规则、空映射、必填防重编号、审批及 `sourcePath`；再次调用真实发布入口返回同一结果，只留版本 1 条、发布审计 1 条，不调用内部防重函数替代该动作。原启动入口缺少防重编号时不得产生运行或协议请求；合法原启动经真实 MCP SDK 发送 `tools/call.params.arguments={}`，原始任务及上游信封不得出现在读取请求中。实际模型 SDK 生成结构化方案，审批 Hook 挂起时零写入/零账本/无成功交付；真实批准后副作用与账本均为 1，账本回执取实际假业务服务记录，最终按执行节点字段来源交付，保留金额 `0` 和否定值 `false`。
+
+真实模板起点直接进入读取节点，不生成非空上游输出。上游隔离的额外断言仅将工厂原读节点与非空输出探针传给生产纯函数 `resolveNodeInput`，核对输入和输出都变为 `{}`；该探针不注入真实运行，不计作实际 Workflow 上游传播证据。真实 SDK 请求断言与纯函数证据分别成立，不用探针声称生产上游已被实际传递。
+
+只模拟 `next/cache`。生产工厂、导入/创建/发布/启动/审批 action、审计、模型计量、数据库、账本、Workflow Hook 和结果查询均不模拟。外部传输使用本机假服务，不证明真实供应商配置或模型业务质量。当前 `4ec` 工厂尚拒绝零参数 schema，必须保留该失败直至模板线真实修复合入，不在本线绕过门禁。
+
+CI/CD 确认临时隔离库、迁移就绪并设置 `MVP_ACCEPTANCE_ISOLATED_DB=1` 后，在新精确候选执行：
+
+```text
+pnpm exec vitest run --config vitest.workflow.config.mts tests/workflow/mvp-acceptance-zero-argument-read.test.ts
+```
+
+2026-10-09：新增 2 项真实验收仅已编写，尚未执行；本线没有运行本地实际数据库、Workflow、E2E、迁移、构建或远端 CI。全仓 `tsc --noEmit`（1536MB 堆上限、串行）与两份新增代码 ESLint（512MB 堆上限、串行）通过，差异检查通过；不把书写或静态通过称为链路通过。
