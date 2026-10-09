@@ -15,7 +15,7 @@ export const MvpAcceptanceReceiptSchema = {
 };
 
 type RpcMessage = { id?: string | number; method: string; params?: Record<string, unknown> };
-type WriteFault = "none" | "response-lost" | "invalid-receipt" | "forbidden";
+type WriteFault = "none" | "response-lost" | "response-lost-always" | "invalid-receipt" | "forbidden";
 
 export async function startMvpAcceptanceTools() {
   const readSchema = { type: "object", required: ["customerId"], additionalProperties: false, properties: { customerId: { type: "string" } } };
@@ -65,7 +65,7 @@ export async function startMvpAcceptanceTools() {
             effects += 1;
             receipts.set(key, { ok: true, receiptId: `receipt-${effects}`, ...input });
           }
-          if (controls.writeFault === "response-lost" && writes.length === 1) {
+          if (controls.writeFault === "response-lost-always" || controls.writeFault === "response-lost" && writes.length === 1) {
             response.writeHead(503); response.end(); return;
           }
           result = { content: [], structuredContent: controls.writeFault === "invalid-receipt"
