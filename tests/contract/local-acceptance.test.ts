@@ -9,6 +9,52 @@ const script = readFileSync(new URL("../../acceptance.ps1", import.meta.url), "u
 const guard = readFileSync(new URL("../../scripts/check-local-acceptance.mjs", import.meta.url), "utf8");
 
 describe("完整本地验收入口", () => {
+  it.runIf(process.platform === "win32").each(["success", "audit-failure", "dirty", "env-file"])("实际基础入口%s不需要Neon且绝不进入库路径", (scenario) => {
+    const directory = mkdtempSync(path.join(tmpdir(), "basic-entry-test-"));
+    try {
+      const entry = path.join(directory, "acceptance.ps1");
+      const calls = path.join(directory, "calls.txt");
+      writeFileSync(entry, script);
+      if (scenario === "env-file") writeFileSync(path.join(directory, ".env.local"), "DUMMY=1");
+      const command = `
+$ErrorActionPreference = 'Stop'
+function git {
+  $global:LASTEXITCODE = 0
+  if ($args[0] -eq 'rev-parse') { Write-Output 'mock-frozen-head' }
+  if ($args[0] -eq 'status' -and '${scenario}' -eq 'dirty') { Write-Output ' M fixture' }
+}
+function pnpm {
+  Add-Content -LiteralPath '${calls.replaceAll("'", "''")}' -Value ('pnpm:' + ($args -join ' '))
+  if ($env:DATABASE_URL -ne 'postgresql://ci:ci@127.0.0.1:1/unavailable' -or $env:MODEL_MOCK -ne '1' -or $env:MVP_ACCEPTANCE_ISOLATED_DB -ne '0') { throw '基础环境不安全' }
+  $global:LASTEXITCODE = if ('${scenario}' -eq 'audit-failure' -and $args[0] -eq 'audit') { 9 } else { 0 }
+}
+function npx { Add-Content -LiteralPath '${calls.replaceAll("'", "''")}' -Value 'FORBIDDEN:neon'; throw '禁止Neon' }
+function node { Add-Content -LiteralPath '${calls.replaceAll("'", "''")}' -Value 'FORBIDDEN:guard'; throw '禁止实际守卫' }
+$env:NEON_API_KEY = ''; $env:NEON_PROJECT_ID = ''
+$env:DATABASE_URL = 'original-unconfirmed-value'
+try { & '${entry.replaceAll("'", "''")}' -BasicsOnly } catch { Write-Output 'ENTRY-FAILED' }
+Write-Output ('ENV-RESTORED:' + ($env:DATABASE_URL -eq 'original-unconfirmed-value'))
+`;
+      const result = spawnSync("pwsh", ["-NoProfile", "-Command", command], { encoding: "utf8", timeout: 10_000 });
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("ENV-RESTORED:True");
+      let recorded = "";
+      try { recorded = readFileSync(calls, "utf8"); } catch { /* preflight must not invoke commands */ }
+      expect(recorded).not.toMatch(/FORBIDDEN|db:migrate|integration|workflow.config|playwright/);
+      if (scenario === "success") {
+        for (const expected of ["install --frozen-lockfile", "audit --prod --audit-level high", "next typegen", "tsc --noEmit", "eslint .", "vitest run", "mvp-acceptance-recovery.config.mts", "pnpm:build"]) expect(recorded).toContain(expected);
+        expect(result.stdout).toContain("仅基础门禁通过；完整验收未执行");
+        expect(result.stdout).not.toContain("本地完整门禁通过");
+      } else {
+        expect(result.stdout).toContain("ENTRY-FAILED");
+        expect(result.stdout).not.toContain("仅基础门禁通过");
+        expect(recorded).not.toContain("pnpm:build");
+        if (scenario === "audit-failure") expect(result.stdout).toContain("阶段=生产依赖审计；分类=external-command；退出码=9");
+        else expect(recorded).toBe("");
+      }
+    } finally { rmSync(directory, { recursive: true }); }
+  });
   it.runIf(process.platform === "win32").each([
     { command: "Invoke-NeonQuiet", label: "创建临时分支", code: 7 },
     { command: "Invoke-NeonQuiet", label: "严格删除本次临时分支", code: 9 },
@@ -30,15 +76,16 @@ foreach ($name in @('Set-Stage','Invoke-NeonQuiet','Invoke-Checked')) {
 function npx { $global:LASTEXITCODE = ${code}; Write-Output 'local-ci-dummy-secret' }
 function pnpm { $global:LASTEXITCODE = ${code}; Write-Output 'local-ci-dummy-secret' }
 $env:NEON_API_KEY = 'local-ci-dummy-secret'
-try { ${invocation}; throw '未拒绝' } catch {
-  Write-Output ('RESULT:' + (@{ stage=$stage; category=$failureCategory; exitCode=$failureExitCode } | ConvertTo-Json -Compress))
-}
+$rejected = $false
+try { ${invocation} } catch { $rejected = $true }
+Write-Output ('RESULT:' + (@{ rejected=$rejected; stage=$stage; category=$failureCategory; exitCode=$failureExitCode } | ConvertTo-Json -Compress))
 `;
     const result = spawnSync("pwsh", ["-NoProfile", "-Command", codeText], { encoding: "utf8", timeout: 10_000 });
     expect(result.error).toBeUndefined();
     expect(result.status).toBe(0);
     expect(result.stdout + result.stderr).not.toContain("local-ci-dummy-secret");
     const record = JSON.parse(result.stdout.split("RESULT:")[1].trim());
+    expect(record.rejected).toBe(true);
     expect(record.stage).toBe(label);
     expect(record.exitCode).toBe(code);
   });
@@ -90,6 +137,7 @@ try { ${invocation}; throw '未拒绝' } catch {
   it("公开实际存在的唯一完整入口，不提供跳过测试选项", () => {
     const manifest = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
     expect(manifest.scripts.acceptance).toBe("pwsh -NoProfile -File ./acceptance.ps1");
+    expect(manifest.scripts["acceptance:basic"]).toBe("pwsh -NoProfile -File ./acceptance.ps1 -BasicsOnly");
     expect(script).not.toMatch(/skipTests|skipDatabase|passWithNoTests|testNamePattern/);
   });
   it("配置缺失时在任何执行前失败，拒绝加载共享环境文件", () => {
@@ -127,6 +175,11 @@ try { ${invocation}; throw '未拒绝' } catch {
     expect(script).not.toContain('"--api-key"');
     expect(script).toContain('neonctl@5.0.1');
     expect(script).toContain('$env:NEON_PROFILE = $null');
-    expect(script).not.toMatch(/Write-Host\s+\$_|\$failure\s*=\s*\$_/);
+    const rawExceptionOutput = /Write-Host\s+\$_|\$failure\s*=\s*\$_/;
+    expect("Write-Host $_").toMatch(rawExceptionOutput);
+    expect("$failure = $_").toMatch(rawExceptionOutput);
+    expect("Write-Host $failure").not.toMatch(rawExceptionOutput);
+    expect("$failure = 'safe stage'").not.toMatch(rawExceptionOutput);
+    expect(script).not.toMatch(rawExceptionOutput);
   });
 });

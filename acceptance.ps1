@@ -1,4 +1,4 @@
-param()
+param([switch]$BasicsOnly)
 
 $ErrorActionPreference = "Stop"
 Set-Location -LiteralPath $PSScriptRoot
@@ -27,7 +27,9 @@ function Invoke-Checked {
   Set-Stage $Label
   & $Command @Arguments 2>&1 | ForEach-Object {
     $line = [string]$_
-    foreach ($name in @("NEON_API_KEY", "DATABASE_URL", "DATABASE_URL_POOLED", "MODEL_ENCRYPTION_KEY", "CRON_SECRET")) {
+    $sensitiveNames = @("DATABASE_URL", "DATABASE_URL_POOLED", "MODEL_ENCRYPTION_KEY", "CRON_SECRET")
+    if (-not $BasicsOnly) { $sensitiveNames += "NEON_API_KEY" }
+    foreach ($name in $sensitiveNames) {
       $secret = [Environment]::GetEnvironmentVariable($name, "Process")
       if ($secret) { $line = $line.Replace($secret, "[已隐藏]") }
     }
@@ -37,10 +39,12 @@ function Invoke-Checked {
   if ($LASTEXITCODE -ne 0) { throw "$Label 失败（退出码 $LASTEXITCODE）" }
 }
 
+if (-not $BasicsOnly) {
 foreach ($name in @("NEON_PROJECT_ID", "NEON_API_KEY")) {
   if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name, "Process"))) {
     throw "缺少 $name；完整验收未执行。请配置专用测试项目，不使用共享数据库。"
   }
+}
 }
 foreach ($file in @(".env", ".env.local", ".env.test", ".env.test.local", ".env.production", ".env.production.local", ".env.development", ".env.development.local")) {
   if (Test-Path -LiteralPath $file) { throw "验收工作区含 $file；请使用不加载共享配置的独立工作区。" }
@@ -56,7 +60,8 @@ $null = New-Item -ItemType Directory -Path $reports
 $creationAttempted = $false
 $failure = $null
 $cleanupFailed = $false
-$neonArgs = @("--project-id", $env:NEON_PROJECT_ID, "--config-dir", (Join-Path $reports "neon-config"), "--no-analytics")
+$neonArgs = @()
+if (-not $BasicsOnly) { $neonArgs = @("--project-id", $env:NEON_PROJECT_ID, "--config-dir", (Join-Path $reports "neon-config"), "--no-analytics") }
 $head = (& git rev-parse HEAD) -join ""
 if ($LASTEXITCODE -ne 0) { throw "不能确认验收提交。" }
 Write-Host "验收提交：$head；报告目录：$reports"
@@ -84,6 +89,7 @@ try {
   $env:NODE_OPTIONS = "--max-old-space-size=1536"
   Invoke-Checked "完整生产构建" "pnpm" @("build")
 
+  if (-not $BasicsOnly) {
   $creationAttempted = $true
   Invoke-NeonQuiet "创建临时分支（失败可能已创建，仍严格清理）" (@("branches", "create", "--name", $branchName) + $neonArgs + @("--output", "json"))
   Invoke-NeonQuiet "创建临时空库ci_test" (@("databases", "create", "--name", "ci_test", "--branch", $branchName, "--owner-name", "neondb_owner") + $neonArgs + @("--output", "json"))
@@ -112,6 +118,7 @@ try {
   try { $env:PLAYWRIGHT_PORT = [string]$listener.LocalEndpoint.Port } finally { $listener.Stop() }
   Invoke-Checked "安装浏览器" "pnpm" @("exec", "playwright", "install", "chromium")
   Invoke-Checked "完整浏览器验收" "pnpm" @("exec", "playwright", "test", "--workers=1")
+  }
 } catch {
   $exitDescription = if ($null -eq $failureExitCode) { "未返回" } else { [string]$failureExitCode }
   $failure = "验收失败：阶段=$stage；分类=$failureCategory；退出码=$exitDescription。后续未执行项不算通过。"
@@ -138,4 +145,8 @@ try {
 }
 if ($cleanupFailed) { throw "原失败=$failure；临时分支 $branchName 清理未确认：$cleanupDiagnostic；验收不算通过，请人工核对。" }
 if ($failure) { throw $failure }
-Write-Host "本地完整门禁通过；Vercel保护预览访问和真实供应商仍需独立验收。"
+if ($BasicsOnly) {
+  Write-Host "仅基础门禁通过；完整验收未执行：真实数据库、Workflow、41项实际数量守卫、E2E和预览访问均未验证。"
+} else {
+  Write-Host "本地完整门禁通过；Vercel保护预览访问和真实供应商仍需独立验收。"
+}
