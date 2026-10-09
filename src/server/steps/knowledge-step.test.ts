@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PgDialect } from "drizzle-orm/pg-core";
+import { FatalError } from "workflow";
 import { WorkflowNode } from "@/contracts/workflow";
 import { AgentManifest } from "@/contracts/manifest";
 
@@ -41,7 +42,9 @@ describe("知识步骤输入映射", () => {
   });
 
   it.each([{}, { topic: null }, { topic: "Bearer mapped-query-secret" }])("映射无效时不查询知识库，也不改用原任务 %#", async (extract) => {
-    await expect(runKnowledgeStep({ runId: "run", node, manifest: base, input: { query: "退货政策" }, outputs: { extract } })).rejects.toThrow();
+    const execution = runKnowledgeStep({ runId: "run", node, manifest: base, input: { query: "退货政策" }, outputs: { extract } });
+    await expect(execution).rejects.toBeInstanceOf(FatalError);
+    await expect(execution).rejects.toThrow();
     expect(mocks.select).not.toHaveBeenCalled();
     expect(mocks.candidate).not.toHaveBeenCalled();
     expect(mocks.persist).toHaveBeenLastCalledWith(expect.objectContaining({ status: "failed" }));

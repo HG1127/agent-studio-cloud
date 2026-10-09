@@ -141,7 +141,11 @@ describe("持久工作流的结构化业务结果", () => {
     const input = { query: "退货政策" };
     await db.update(runs).set({ input }).where(eq(runs.id, runId!));
     const handle = await start(agentRunWorkflow, [runId!, manifest, input]);
-    await expect(handle.returnValue).resolves.toEqual({ status: missing ? "failed" : "completed" });
+    if (missing) await expect(handle.returnValue).rejects.toThrow("缺少映射字段");
+    else await expect(handle.returnValue).resolves.toEqual({ status: "completed" });
+    const [storedRun] = await db.select({ status: runs.status, result: runs.result }).from(runs).where(eq(runs.id, runId!));
+    expect(storedRun?.status).toBe(missing ? "failed" : "completed");
+    if (missing) expect(storedRun?.result).toBeNull();
     expect(service!.modelRequests).toHaveLength(1);
     expect(service!.toolRequests).toHaveLength(0);
     const steps = await db.select().from(runSteps).where(eq(runSteps.runId, runId!));
