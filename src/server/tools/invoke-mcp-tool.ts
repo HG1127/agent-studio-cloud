@@ -1,5 +1,5 @@
 import { createMCPClient, MCPClientError, type MCPClient } from "@ai-sdk/mcp";
-import { McpToolArguments, MAX_MCP_ARGUMENT_BYTES, MAX_MCP_DIRECTORY_PAGES, MAX_MCP_DIRECTORY_PAGE_TOOLS, MAX_MCP_RESPONSE_BYTES, MAX_MCP_SESSION_BYTES } from "@/contracts/mcp-tool";
+import { McpToolArguments, MAX_MCP_ARGUMENT_BYTES, MAX_MCP_DIRECTORY_PAGES, MAX_MCP_DIRECTORY_PAGE_TOOLS, MAX_MCP_RESPONSE_BYTES, MAX_MCP_SESSION_BYTES, MAX_MCP_TRANSPORT_REQUESTS } from "@/contracts/mcp-tool";
 import { isPassiveJsonData } from "@/contracts/json";
 import { validateJsonObjectSchema } from "@/server/domain/json-schema";
 import { mcpToolDefinitionIssue, normalizeMcpToolResult } from "@/server/domain/runtime/mcp-tool";
@@ -35,7 +35,7 @@ export async function invokeMcpTool(args: {
   let client: MCPClient | undefined;
   let networkFailure = false, boundaryFailure = false, requestCount = 0, totalBytes = 0;
   const boundedFetch: typeof fetch = async (url, options) => {
-    if (String(url) !== endpoint || ++requestCount > 20) { boundaryFailure = true; throw new McpBoundaryError(); }
+    if (String(url) !== endpoint || ++requestCount > MAX_MCP_TRANSPORT_REQUESTS) { boundaryFailure = true; throw new McpBoundaryError(); }
     const headers = new Headers(options?.headers);
     headers.delete("idempotency-key");
     if (typeof options?.body === "string") {
