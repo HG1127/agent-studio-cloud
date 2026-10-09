@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { McpRemoteToolName } from "./mcp-tool";
 
+export const ToolRegistryConfigurationStatus = z.enum(["not-configured", "configured", "configuration-error"]);
+export type ToolRegistryConfigurationStatus = z.infer<typeof ToolRegistryConfigurationStatus>;
+
 export const ToolRegistryOption = z.object({
   id: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
   name: z.string().trim().min(1).max(60),

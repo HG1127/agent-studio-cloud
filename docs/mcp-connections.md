@@ -8,6 +8,17 @@
 
 `GET /api/mcp/connections` 返回 `{ connections: [{ id, name }] }`。只投影管理员名称与内部选择标识；UI 应展示中文名称，内部标识不应显示给用户。响应禁止缓存。
 
+`GET /api/mcp/connections/configuration` 是新增的零网络配置诊断入口，返回 `{ status, message, connections: [{ id, name, status, message }] }`，共享契约是 `McpConnectionConfigurationResult`。旧列表的严格响应结构不变，不在旧接口追加字段。响应禁止缓存，错误配置也是 200 的诊断结果，不冒充在线连接检查。
+
+- `not-configured`：没有连接登记；缺失、空白、合法空数组或只有其他协议的合法工具都属于此状态。
+- `configured`：所有连接登记通过本地配置校验；中文说明明确尚未检查远端服务，不代表地址可达、凭据有效、目录匹配或业务成功。
+- `partially-configured`：至少一项配置有效和一项因额外连接限制无效，逐项保留安全名称与状态，不隐藏其他合法连接。
+- `configuration-error`：核心工具注册表整体无效时返回空登记及固定中文说明；若核心合法但全部连接因额外限制无效，则保留这些诊断项。
+
+状态与私有登记来自同一份缓存解析快照，不再用“原始配置非空且目录为空”推测错误。合法 `[]` 不输出错误日志，按标识检查返回未找到；非法 JSON、重复标识、安全边界失败仍整份拒绝，不泄露原始错误、地址、凭据、字段定义或配置正文。其他工作区在读取全局快照前隔离；单项状态只是本地登记校验，实际远端核对仍需下面的检查接口。此接口没有新增浏览器配置写入或页面，人工服务端配置要求不变。
+
+2026-10-09 配置状态补丁基于 `103d358be283e67ac1092571cf40316f6b0f967a`，独立分支 `codex/mvp-mcp-configuration-state`。先用纯测试复现合法空数组的错误日志与检查误判，再补静态诊断契约、真实注册解析的虚构配置查询、纯投影及新旧接口回归。联合原有 MCP 协议、安全元数据、完整名称、检查和调用回归，共 16 个文件 180 项通过；全仓类型检查、13 份改动代码的严格 lint 和差异检查通过，均串行限制内存。只使用虚构配置及本机假 MCP 服务，未运行真实数据库、Workflow、E2E、构建、完整 CI 或真实供应商验收；局部结果不能累加或代替新的最终组合提交完整门禁。
+
 `POST /api/mcp/connections/check` 只接受严格 JSON `{ connectionId }`（最多 1KB），必须带与请求地址一致的 Origin。地址、凭据、工作区、任意附加字段均被拒绝。未知标识返回 404 且零网络。当前 MVP 无新增登录权限；后续 Auth.js 接入需将演示工作区改成服务端认证上下文，不接受浏览器工作区覆盖。
 
 检查结果是 `{ status, message, tools: [{ registryToolId, name, status }] }`，定义见 `src/contracts/mcp-connection.ts`。总体状态区分 `available`、`credentials-rejected`、`protocol-error`、`unavailable`、`definition-changed`、`not-found`、`configuration-error`。目录缺失、输入定义漂移均标记不可用；可用只表示握手与登记定义核对通过，不代表执行成功、写入防重或业务授权已经验证。

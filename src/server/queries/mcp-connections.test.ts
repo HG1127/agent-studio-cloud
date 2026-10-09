@@ -1,12 +1,22 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 const mocks = vi.hoisted(() => ({ load: vi.fn(), check: vi.fn() }));
-vi.mock("@/server/tools/tool-registry", () => ({ loadToolRegistry: mocks.load }));
+vi.mock("@/server/tools/tool-registry", () => ({ loadToolRegistrySnapshot: () => {
+  const registry = mocks.load();
+  return { status: registry.length === 0 ? "not-configured" : "configured", registry };
+} }));
 vi.mock("@/server/tools/mcp-connection-check", () => ({ checkMcpConnection: mocks.check }));
 import { listMcpConnections, inspectMcpConnection } from "./mcp-connections";
 const tool = { id: "lookup", name: "查询记录", action: "lookup", endpoint: "https://service.example/mcp", protocol: "mcp-streamable-http", headers: { Authorization: "Bearer secret" }, inputSchema: { type: "object" } };
 beforeEach(() => { vi.clearAllMocks(); mocks.load.mockReturnValue([tool]); mocks.check.mockResolvedValue({ status: "available", message: "连接可用", tools: [] }); });
+afterEach(() => vi.unstubAllEnvs());
 describe("已登记连接查询", () => {
+  it("合法空数组检查未知登记返回未找到，而不是配置错误", async () => {
+    vi.stubEnv("TOOL_REGISTRY_JSON", "[]");
+    mocks.load.mockReturnValue([]);
+    expect((await inspectMcpConnection("lookup")).status).toBe("not-found");
+    expect(mocks.check).not.toHaveBeenCalled();
+  });
   it("不返回地址凭据或原始定义", () => { expect(listMcpConnections()).toEqual([{ id: "lookup", name: "查询记录" }]); });
   it("隔离工作区，未知连接不发起网络访问", async () => {
     expect(listMcpConnections("another-workspace")).toEqual([]);

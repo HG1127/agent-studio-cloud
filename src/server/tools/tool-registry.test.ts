@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { listToolCompilerCapabilities, listToolRegistryOptions, parseToolRegistry } from "@/server/tools/tool-registry";
+import { listToolCompilerCapabilities, listToolRegistryOptions, loadToolRegistry, loadToolRegistrySnapshot, parseToolRegistry } from "@/server/tools/tool-registry";
 import { ToolRegistryOption } from "@/contracts/tool-registry";
 
 const tool = {
@@ -9,6 +9,48 @@ const tool = {
   scope: "customer.write",
   endpoint: "https://tools.example.com/update",
 };
+
+describe("注册表配置快照", () => {
+  afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
+
+  it.each([undefined, "", "  ", "[]"])("缺失或合法空数组不误报无效配置 %s", (raw) => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubEnv("TOOL_REGISTRY_JSON", raw);
+    expect(loadToolRegistry()).toEqual([]);
+    expect(error).not.toHaveBeenCalled();
+    expect(loadToolRegistrySnapshot()).toEqual({ status: "not-configured", registry: [] });
+  });
+
+  it.each([
+    "{", "null", "{}", JSON.stringify([tool, tool]), JSON.stringify([{ ...tool, headers: { Host: "bad.example" } }]),
+    JSON.stringify([{ ...tool, protocol: "mcp-streamable-http" }]),
+    JSON.stringify([{ ...tool, protocol: "mcp-streamable-http", operationKind: "read", method: "PUT" }]),
+    JSON.stringify([{ ...tool, protocol: "mcp-streamable-http", operationKind: "action" }]),
+    JSON.stringify([{ ...tool, businessIdempotency: true }]),
+    JSON.stringify([{ ...tool, inputSchema: { type: "object", default: { apiKey: "private-fake-value" } } }]),
+  ])("非法配置与合法空目录分开且不回显原文 %#", (raw) => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubEnv("TOOL_REGISTRY_JSON", raw);
+    expect(loadToolRegistrySnapshot()).toEqual({ status: "configuration-error", registry: [] });
+    expect(error.mock.calls).toEqual([["[tool-registry] 工具注册表配置无效"]]);
+    expect(loadToolRegistry()).toEqual([]);
+    expect(error).toHaveBeenCalledTimes(1);
+  });
+
+  it("状态和私有登记来自同一次解析，配置变化不沿用旧状态", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubEnv("TOOL_REGISTRY_JSON", JSON.stringify([tool]));
+    const first = loadToolRegistrySnapshot();
+    expect(first.status).toBe("configured");
+    expect(loadToolRegistry()).toBe(first.registry);
+    vi.stubEnv("TOOL_REGISTRY_JSON", "{");
+    expect(loadToolRegistrySnapshot()).toEqual({ status: "configuration-error", registry: [] });
+    vi.stubEnv("TOOL_REGISTRY_JSON", "[]");
+    expect(loadToolRegistrySnapshot()).toEqual({ status: "not-configured", registry: [] });
+    vi.stubEnv("TOOL_REGISTRY_JSON", JSON.stringify([tool]));
+    expect(loadToolRegistrySnapshot().registry).toEqual(first.registry);
+  });
+});
 
 describe("业务工具注册表", () => {
   it("跨运行防重必须显式声明服务端保证的键有效期", () => {

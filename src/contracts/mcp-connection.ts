@@ -13,6 +13,27 @@ export const McpConnectionView = z.object({ id: McpConnectionId, name: z.string(
 export type McpConnectionView = z.infer<typeof McpConnectionView>;
 export const McpConnectionListResult = z.object({ connections: z.array(McpConnectionView).max(50) }).strict();
 export type McpConnectionListResult = z.infer<typeof McpConnectionListResult>;
+export const McpConnectionConfiguration = McpConnectionView.extend({
+  status: z.enum(["configured", "configuration-error"]),
+  message: z.string().min(1).max(200),
+}).strict();
+export type McpConnectionConfiguration = z.infer<typeof McpConnectionConfiguration>;
+export const McpConnectionConfigurationResult = z.object({
+  status: z.enum(["not-configured", "configured", "partially-configured", "configuration-error"]),
+  message: z.string().min(1).max(200),
+  connections: z.array(McpConnectionConfiguration).max(50),
+}).strict().superRefine((result, context) => {
+  const count = result.connections.length;
+  const configured = result.connections.filter((connection) => connection.status === "configured").length;
+  const consistent = result.status === "not-configured" ? count === 0
+    : result.status === "configured" ? count > 0 && configured === count
+      : result.status === "partially-configured" ? configured > 0 && configured < count
+        : configured === 0;
+  if (!consistent || new Set(result.connections.map((connection) => connection.id)).size !== count) {
+    context.addIssue({ code: "custom", message: "连接配置状态与登记项不一致" });
+  }
+});
+export type McpConnectionConfigurationResult = z.infer<typeof McpConnectionConfigurationResult>;
 export const McpConnectionRequestError = z.object({ error: z.string() }).strict();
 export type McpConnectionRequestError = z.infer<typeof McpConnectionRequestError>;
 export const McpBindableTool = z.object({ registryToolId: McpConnectionId, name: z.string().min(1).max(60), status: z.enum(["available", "definition-changed", "missing"]) }).strict();
