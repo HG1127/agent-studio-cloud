@@ -9,11 +9,19 @@ import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
 import { assertMvpAcceptanceIsolatedDb } from "../helpers/mvp-acceptance-template";
 import { startRegisteredNameMcpServer } from "../fixtures/mcp-registered-tool-name-server";
+import { stopRegisteredNameTestRuns } from "../helpers/mcp-registered-tool-name-cleanup";
 beforeAll(assertMvpAcceptanceIsolatedDb);
 let service: Awaited<ReturnType<typeof startRegisteredNameMcpServer>> | undefined;
 let runIds: string[] = [];
+const workflowHandles: Array<Awaited<ReturnType<typeof start>>> = [];
+const pendingStartRunIds = new Set<string>();
 afterEach(async () => {
-  await service?.close(); service = undefined; vi.unstubAllEnvs();
+  try {
+    await stopRegisteredNameTestRuns(workflowHandles, [...pendingStartRunIds]);
+    workflowHandles.length = 0;
+  } finally {
+    try { await service?.close(); } finally { service = undefined; vi.unstubAllEnvs(); }
+  }
   if (runIds.length) {
     await db.delete(toolOperations).where(inArray(toolOperations.sourceRunId, runIds));
     await db.delete(traceEvents).where(inArray(traceEvents.runId, runIds));
@@ -21,7 +29,7 @@ afterEach(async () => {
     await db.delete(runs).where(inArray(runs.id, runIds));
   }
   runIds = [];
-});
+}, 60_000);
 describe("远端名称真实持久Workflow验收（仅CI）", () => {
   it.each(["_helper", "a".repeat(101), "a".repeat(128)])("步骤完整调用名称并复用业务回执 %s", async (action) => {
     service = await startRegisteredNameMcpServer(action);
@@ -38,7 +46,11 @@ describe("远端名称真实持久Workflow验收（仅CI）", () => {
     async function run() {
       const [row] = await db.insert(runs).values({ workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, agentId: manifest.workflowSnapshot.rootAgent.id, versionId: randomUUID(), status: "queued", input }).returning({ id: runs.id });
       runIds.push(row.id);
-      return start(agentRunWorkflow, [row.id, manifest, input]);
+      pendingStartRunIds.add(row.id);
+      const handle = await start(agentRunWorkflow, [row.id, manifest, input]);
+      workflowHandles.push(handle);
+      pendingStartRunIds.delete(row.id);
+      return handle;
     }
     await expect((await run()).returnValue).resolves.toEqual({ status: "completed" });
     await expect((await run()).returnValue).resolves.toEqual({ status: "completed" });
