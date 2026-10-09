@@ -1,3 +1,4 @@
+import { createServer } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import { startMcpTestServer } from "../../../tests/fixtures/mcp-server";
 import { invokeMcpTool } from "./invoke-mcp-tool";
@@ -18,6 +19,59 @@ async function fixture(options: Parameters<typeof startMcpTestServer>[0] = {}) {
 }
 
 describe("真实 MCP SDK 对本地 Streamable HTTP 服务", () => {
+  it.each([
+    { name: "根地址不带尾斜线", endpoint: (value: string) => new URL(value).origin },
+    { name: "协议大小写等价", endpoint: (value: string) => value.replace("http:", "HTTP:") },
+    { name: "规范化相对路径段", endpoint: (value: string) => `${new URL(value).origin}/unused/../mcp` },
+    { name: "根地址保留查询参数", endpoint: (value: string) => `${new URL(value).origin}?mode=fixture` },
+  ])("规范化登记地址并保持唯一传输目标：$name", async ({ endpoint }) => {
+    const { server, tool } = await fixture();
+    tool.endpoint = endpoint(server.endpoint);
+    const requests: string[] = [];
+    const result = await invokeMcpTool({
+      tool, action: tool.action, idempotencyKey: "normalized-key", input: { customerId: "c1" }, outputs: {},
+      fetchImpl: async (url, options) => { requests.push(String(url)); return fetch(url, options); },
+    });
+    expect(result).toMatchObject({ ok: true });
+    expect(requests.length).toBeGreaterThan(0);
+    expect(requests.every((url) => url === new URL(tool.endpoint).href)).toBe(true);
+    expect(server.messages.filter((message) => message.method === "tools/call")).toHaveLength(1);
+    expect(server.wasClosed()).toBe(true);
+  });
+  it.each(["invalid-endpoint", "file:///fixture", "https://fixture:fixture@example.test/mcp"])("非法登记地址在网络调用前永久拒绝：%s", async (endpoint) => {
+    const { server, tool } = await fixture();
+    tool.endpoint = endpoint;
+    const requests: string[] = [];
+    const result = await invokeMcpTool({
+      tool, action: tool.action, idempotencyKey: "invalid-key", input: { customerId: "c1" }, outputs: {},
+      fetchImpl: async (url, options) => { requests.push(String(url)); return fetch(url, options); },
+    });
+    expect(result).toMatchObject({ ok: false, retryable: false });
+    expect(requests).toHaveLength(0);
+    expect(server.messages).toHaveLength(0);
+    expect(JSON.stringify(result)).not.toContain(endpoint);
+  });
+  it("规范化根地址后仍拒绝跟随重定向", async () => {
+    const { server, tool } = await fixture();
+    let redirectRequests = 0;
+    const redirectServer = createServer((_request, response) => {
+      redirectRequests += 1;
+      response.writeHead(307, { location: server.endpoint }); response.end();
+    });
+    await new Promise<void>((resolve, reject) => redirectServer.listen(0, "127.0.0.1", resolve).once("error", reject));
+    try {
+      const address = redirectServer.address();
+      if (!address || typeof address === "string") throw new Error("本地服务未启动");
+      tool.endpoint = `http://127.0.0.1:${address.port}`;
+      const result = await invokeMcpTool({ tool, action: tool.action, idempotencyKey: "redirect-key", input: { customerId: "c1" }, outputs: {} });
+      expect(result).toMatchObject({ ok: false });
+      expect(redirectRequests).toBeGreaterThan(0);
+      expect(server.messages).toHaveLength(0);
+    } finally {
+      redirectServer.closeAllConnections();
+      await new Promise<void>((resolve, reject) => redirectServer.close((error) => error ? reject(error) : resolve()));
+    }
+  });
   it.each([false, true])("发现指定工具、调用并关闭连接，支持事件流回执 %s", async (sse) => {
     const { server, invoke } = await fixture({ sse });
     await expect(invoke()).resolves.toEqual({ ok: true, output: { customerId: "c1", amount: 0, active: false } });

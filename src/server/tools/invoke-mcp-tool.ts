@@ -21,12 +21,21 @@ export async function invokeMcpTool(args: {
   if (!isPassiveJsonData(args.input, MAX_MCP_ARGUMENT_BYTES)) return fail("工具参数无效或超过容量限制");
   const input = McpToolArguments.safeParse(args.input);
   if (!input.success || validateJsonObjectSchema(input.data, tool.inputSchema)) return fail("工具参数不符合字段契约");
+  let endpoint: string;
+  try {
+    const registeredUrl = new URL(tool.endpoint);
+    if (!["http:", "https:"].includes(registeredUrl.protocol) || registeredUrl.username || registeredUrl.password) {
+      return fail("远端工具连接配置无效，请检查服务端登记");
+    }
+    // SDK 会规范化地址，传输边界必须比较同一个唯一目标。
+    endpoint = registeredUrl.href;
+  } catch { return fail("远端工具连接配置无效，请检查服务端登记"); }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), MCP_TIMEOUT_MS);
   let client: MCPClient | undefined;
   let networkFailure = false, boundaryFailure = false, requestCount = 0, totalBytes = 0;
   const boundedFetch: typeof fetch = async (url, options) => {
-    if (String(url) !== tool.endpoint || ++requestCount > 20) { boundaryFailure = true; throw new McpBoundaryError(); }
+    if (String(url) !== endpoint || ++requestCount > 20) { boundaryFailure = true; throw new McpBoundaryError(); }
     const headers = new Headers(options?.headers);
     headers.delete("idempotency-key");
     if (typeof options?.body === "string") {
@@ -69,7 +78,7 @@ export async function invokeMcpTool(args: {
     client = await createMCPClient({
       clientName: "agent-studio", maxRetries: 0,
       initializationOptions: { signal: controller.signal, timeout: MCP_TIMEOUT_MS },
-      transport: { type: "http", url: tool.endpoint, headers: tool.headers, redirect: "error", fetch: boundedFetch },
+      transport: { type: "http", url: endpoint, headers: tool.headers, redirect: "error", fetch: boundedFetch },
     });
     let cursor: string | undefined;
     let matched: Record<string, unknown> | undefined;
