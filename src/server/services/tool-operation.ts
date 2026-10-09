@@ -8,7 +8,7 @@ import { canonicalJson } from "@/server/domain/canonical-json";
 import { validateJsonObjectSchema } from "@/server/domain/json-schema";
 import { toolOperationDecision, toolOperationKeyMaterial, TOOL_OPERATION_LEASE_MS, validateToolOperationReceipt } from "@/server/domain/runtime/tool-operation";
 import { withSafeWorkflowError } from "@/server/security/workflow-error";
-import { invokeHttpTool } from "@/server/tools/invoke-http-tool";
+import { invokeRegisteredTool } from "@/server/tools/invoke-tool";
 import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding";
 import type { ToolRegistration } from "@/server/tools/tool-registry";
 import type { InlineOutputReferences } from "@/contracts/inline-output-reference";
@@ -31,12 +31,14 @@ export async function invokeToolOperation(args: {
   if (bindingIssue) return failure(bindingIssue);
   const payload = ToolOperationPayload.safeParse(args.payload);
   if (!payload.success) return failure("业务操作请求无法安全保存或超过容量限制");
+  const schemaPayload = args.tool.protocol === "mcp-streamable-http" ? payload.data.input : payload.data;
   if (payload.data.action !== args.tool.action
-    || validateJsonObjectSchema(payload.data, args.node.tool.inputSchema)
-    || validateJsonObjectSchema(payload.data, args.tool.inputSchema)) return failure("业务操作请求不符合字段契约");
+    || validateJsonObjectSchema(schemaPayload, args.node.tool.inputSchema)
+    || validateJsonObjectSchema(schemaPayload, args.tool.inputSchema)) return failure("业务操作请求不符合字段契约");
   return withSafeWorkflowError(async () => {
     const owner = randomUUID();
     const requestHash = hash(canonicalJson([
+      ...(args.tool.protocol === "mcp-streamable-http" ? [args.tool.protocol, args.tool.operationKind] : []),
       args.tool.endpoint, args.tool.method, [...new Headers(args.tool.headers).entries()],
       args.tool.businessIdempotencyRetentionMs, payload.data,
     ]));
@@ -96,7 +98,7 @@ export async function invokeToolOperation(args: {
       }).where(and(eq(toolOperations.id, claim.row.id), eq(toolOperations.leaseOwner, owner), eq(toolOperations.status, "pending")));
       return failure("业务工具防重有效期已过，必须先核对业务系统结果");
     }
-    const invoked = await invokeHttpTool({
+    const invoked = await invokeRegisteredTool({
       tool: args.tool, idempotencyKey: `studio-operation:v1:${claim.row.keyHash}`, ...payload.data,
     });
     const validated = invoked.ok

@@ -22,6 +22,8 @@ import { resolveNodeInput } from "@/server/domain/runtime/input-mapping";
 import { recordRunModel } from "@/server/model/recorded-run-model";
 import { runModelControlError } from "@/server/model/run-model-control-error";
 import { ExecutionResourceLimitError } from "@/server/services/execution-resources";
+import { enforceHarnessPolicy } from "@/server/steps/harness-policy-step";
+import { assessHarnessContext, parseHarnessPromptLimit } from "@/server/domain/harness/context-budget";
 
 export interface RunModelStepInput {
   runId: string;
@@ -63,6 +65,7 @@ export async function runModelStep(args: RunModelStepInput): Promise<ModelStepRe
     nodeType: node.type,
     status: "running",
   });
+  await enforceHarnessPolicy({ runId: args.runId, node, executionType: "ai" });
   const configurationIssue = validateModelOutputConfiguration(node);
   if (configurationIssue) {
     await persistStep({ runId: args.runId, nodeId: node.id, nodeTitle: node.title, nodeType: node.type, status: "failed", error: configurationIssue });
@@ -74,6 +77,17 @@ export async function runModelStep(args: RunModelStepInput): Promise<ModelStepRe
     throw new FatalError(resolvedInput.error);
   }
   const outputConfig = node.modelOutput;
+  const assertContext = async (qualityFeedback: string | null | undefined) => {
+    const limit = parseHarnessPromptLimit(process.env.HARNESS_MAX_PROMPT_CHARS);
+    const assessed = limit === null ? { ok: false as const, error: "运行上下文容量配置无效，已停止调用" }
+      : assessHarnessContext({ node, upstreamOutputs: resolvedInput.outputs, input: resolvedInput.input, qualityFeedback }, limit);
+    if (!assessed.ok) {
+      await persistStep({ runId: args.runId, nodeId: node.id, nodeTitle: node.title, nodeType: node.type, status: "failed", error: assessed.error });
+      await appendTrace({ runId: args.runId, nodeId: node.id, kind: "harness.context", level: "warn", title: `「${node.title}」超出运行边界`, detail: assessed.error });
+      throw new FatalError(assessed.error);
+    }
+  };
+  await assertContext(args.qualityFeedback);
   const prompt = buildStepPrompt({ node, upstreamOutputs: resolvedInput.outputs, input: resolvedInput.input, qualityFeedback: args.qualityFeedback });
   const manifestModel = args.manifest.resourceSelection.model;
   if (manifestModel.mock) {
@@ -157,9 +171,11 @@ export async function runModelStep(args: RunModelStepInput): Promise<ModelStepRe
     });
     const maxRepairs = outputConfig?.maxRepairAttempts ?? 0;
     for (let attempt = 0; attempt <= maxRepairs; attempt += 1) {
+      const feedback = attempt === 0 ? args.qualityFeedback : [args.qualityFeedback, "上次结果格式或字段不符合要求，请重新核对完整字段契约并输出合法 JSON 对象。"].filter(Boolean).join("\n");
+      if (attempt > 0) await assertContext(feedback);
       const currentPrompt = attempt === 0 ? prompt : buildStepPrompt({
         node, upstreamOutputs: resolvedInput.outputs, input: resolvedInput.input,
-        qualityFeedback: [args.qualityFeedback, "上次结果格式或字段不符合要求，请重新核对完整字段契约并输出合法 JSON 对象。"].filter(Boolean).join("\n"),
+        qualityFeedback: feedback,
       });
       try {
         const generated = await generateText({

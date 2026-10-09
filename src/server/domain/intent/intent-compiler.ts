@@ -118,6 +118,7 @@ interface CapabilityRecord {
   risk?: string;
   registryToolId?: string | null;
   protocol?: string;
+  operationKind?: "read" | "action";
   inputSchema?: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;
   availableTools?: CapTool[];
@@ -162,6 +163,10 @@ function toolFor(text: string, caps: CapabilityRecord[]): CapabilityRecord | nul
 function actionType(text: string, caps: CapabilityRecord[]): string {
   const source = String(text || "");
   if (/确认|审批|批准|复核|人工决定/.test(source) && !/自动确认/.test(source)) return "human";
+  const matchedTool = toolFor(source, caps);
+  if (matchedTool?.source === "connected-registry" && matchedTool.protocol === "mcp-streamable-http"
+    && [matchedTool.label, matchedTool.id].some((name) => name && name.length >= 2 && source.toLowerCase().includes(name.toLowerCase()))
+    && /读取|查询|搜索|检索|获取|创建|新增|发送|外发|通知|提醒|更新|修改|写回|回写|同步|记录|删除|付款|支付|执行/.test(source)) return "tool";
   if (/读取|查询|搜索|检索|参考|查阅/.test(source) && /知识库|文档|制度|sop|合同|资料|规范|标准|指南|手册|政策|规则/.test(source)) {
     return "knowledge";
   }
@@ -172,7 +177,6 @@ function actionType(text: string, caps: CapabilityRecord[]): string {
   ) {
     return "system";
   }
-  const matchedTool = toolFor(source, caps);
   if (
     matchedTool?.source === "connected-registry" &&
     /(读取|查询|搜索|检索|获取|创建|新增|发送|外发|通知|提醒|更新|修改|写回|回写|同步|记录|删除|付款|支付|执行)/.test(source)
@@ -224,6 +228,7 @@ interface BuildToolSpec {
   risk: string;
   registryToolId?: string | null;
   protocol?: string;
+  operationKind?: "read" | "action";
   inputSchema: Record<string, unknown>;
   outputSchema: Record<string, unknown>;
   argumentsMode?: string;
@@ -253,6 +258,7 @@ function toolSpec(text: string, cap: CapabilityRecord | null): BuildToolSpec | n
       risk: cap.risk || "high",
       registryToolId: cap.registryToolId,
       protocol: cap.protocol,
+      ...(cap.operationKind !== undefined ? { operationKind: cap.operationKind } : {}),
       inputSchema: cap.inputSchema || { type: "object" },
       outputSchema: cap.outputSchema || {},
       argumentsMode: "auto",
