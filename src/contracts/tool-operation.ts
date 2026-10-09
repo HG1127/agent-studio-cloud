@@ -8,7 +8,7 @@ export const ToolOperationConfig = z.object({
 }).strict();
 export type ToolOperationConfig = z.infer<typeof ToolOperationConfig>;
 export const ToolOperationPayload = boundedJsonStorageValue(512 * 1024, "业务操作请求").pipe(z.object({
-  action: z.string().min(1).max(100), input: JsonStorageRecord, outputs: JsonStorageRecord,
+  action: z.string().min(1).max(128), input: JsonStorageRecord, outputs: JsonStorageRecord,
 }).strict());
 export type ToolOperationPayload = z.infer<typeof ToolOperationPayload>;
 export const MAX_TOOL_OPERATION_RECEIPT_BYTES = 1024 * 1024;

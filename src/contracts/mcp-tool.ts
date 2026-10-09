@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { boundedJsonStorageValue, JsonStorageRecord } from "./json";
 
+export const McpRemoteToolName = z.string().min(1).max(128).regex(/^[A-Za-z0-9._-]+$/);
+export type McpRemoteToolName = z.infer<typeof McpRemoteToolName>;
+
 export const MAX_MCP_ARGUMENT_BYTES = 512 * 1024;
 export const MAX_MCP_RESPONSE_BYTES = 1024 * 1024;
 export const MAX_MCP_DEFINITION_BYTES = 32 * 1024;
