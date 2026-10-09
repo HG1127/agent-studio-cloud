@@ -2,7 +2,7 @@ import { z } from "zod";
 import { ToolRegistryOption, type ToolRegistryOption as ToolRegistryOptionType } from "@/contracts/tool-registry";
 import { validateJsonSchemaDefinition } from "@/server/domain/json-schema";
 
-const ToolRegistration = ToolRegistryOption.extend({
+const ToolRegistration = ToolRegistryOption.safeExtend({
   endpoint: z.string().url().refine((value) => {
     const url = new URL(value);
     return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password;
@@ -50,7 +50,6 @@ export function parseToolRegistry(raw: string | undefined): ToolRegistration[] {
     for (const tool of parsed.data) {
       if (tool.protocol === "mcp-streamable-http" && (
         tool.method !== "POST" || !tool.operationKind
-        || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(tool.action)
         || tool.operationKind === "action" && tool.businessIdempotency !== true
       )) return [];
       if (tool.businessIdempotency === true && tool.businessIdempotencyRetentionMs === undefined) return [];
