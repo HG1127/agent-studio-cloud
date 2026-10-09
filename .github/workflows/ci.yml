@@ -106,6 +106,8 @@ jobs:
             ['workflow-results.json', 'tests/workflow/mvp-acceptance-runtime.test.ts', 11],
             ['workflow-results.json', 'tests/workflow/mvp-acceptance-production-template.test.ts', 13],
             ['workflow-results.json', 'tests/workflow/mvp-acceptance-template-recovery.test.ts', 4],
+            ['integration-results.json', 'tests/integration/mcp-registered-tool-names.test.ts', 3],
+            ['workflow-results.json', 'tests/workflow/mcp-registered-tool-names.test.ts', 3],
           ];
           for (const [report, file, count] of expected) {
             const results = JSON.parse(fs.readFileSync(report, 'utf8'));

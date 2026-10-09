@@ -55,7 +55,9 @@ describe("完整隔离验收的执行预算", () => {
     expect(integration).not.toContain("continue-on-error");
   });
 
-  it.each(["passed", "skipped", "failed", "missing"] as const)("真实数量守卫对 %s 使用实际 JSON 报告而非日志占位", (status) => {
+  it.each(["runtime", "integration-name", "workflow-name"].flatMap((target) =>
+    (["passed", "skipped", "failed", "missing"] as const).map((status) => ({ target, status })),
+  ))("真实数量守卫对 $target 的 $status 使用实际 JSON 报告而非日志占位", ({ target, status }) => {
     const guard = step("核对 MVP 真实断言未缺失或跳过")!;
     const code = guard.split("node <<'NODE'")[1].split(/\r?\n\s*NODE\s*$/)[0];
     const reports = {
@@ -71,7 +73,16 @@ describe("完整隔离验收的执行预算", () => {
         })),
       },
     };
-    const assertions = reports["workflow-results.json"].testResults[0].assertionResults;
+    for (const report of ["integration-results.json", "workflow-results.json"] as const) {
+      const directory = report === "integration-results.json" ? "integration" : "workflow";
+      reports[report].testResults.push({
+        name: `/repo/tests/${directory}/mcp-registered-tool-names.test.ts`,
+        assertionResults: Array.from({ length: 3 }, () => ({ status: "passed" })),
+      });
+    }
+    const assertions = target === "integration-name"
+      ? reports["integration-results.json"].testResults[1].assertionResults
+      : reports["workflow-results.json"].testResults[target === "workflow-name" ? 3 : 0].assertionResults;
     if (status === "missing") assertions.pop();
     else assertions[0].status = status;
     const evaluate = () => runInNewContext(code, {
