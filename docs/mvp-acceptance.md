@@ -89,3 +89,34 @@ pnpm exec vitest run --config vitest.workflow.config.mts tests/workflow/mvp-acce
 2026-10-09：新增三份代码文件的 ESLint 和全项目 `tsc --noEmit` 通过。第二批 5 项保存/发布与 13 项 Workflow 断言已经编写，**尚未执行，不代表 18 项通过**；工厂层也没有额外运行本地测试。两批真实数据库/Workflow 的执行结果应由 CI/CD 后续填写。未执行本地数据库查询、测试、迁移、build、Playwright 或远端 CI。没有修改生产逻辑、依赖、UI、模型连接、日程或配置迁移。
 
 发布或启动若暴露真实缺口，必须保留失败，并按具体入口、门禁、返回错误及实际持久化记录交接；本线不得降低门禁或改写预期让失败成为成功。
+
+## 第三批：生产模板恢复与冲突验收
+
+基底：`303b545b97c3b6104bf96f8a984d63326c445d4b`；分支：`codex/mvp-template-recovery-acceptance`。原 PR54 分支、提交和两份 18 项实际验收测试不修改；CI 应继续验证原 18 项，不等待本批书写完成。
+
+新增 `tests/workflow/mvp-acceptance-template-recovery.test.ts` 的 4 项真实链路断言均通过继承 helper 调用生产工厂、原创建/发布/启动 action、真实审批 Hook/决定 action、数据库账本和最终结果查询。只模拟 `next/cache`。每项均检查真实发布冻结的写节点：`tool.maxRetries=3`、无节点 `retry` 覆盖，生产 `resolveToolRetryPolicy` 为最大尝试 3 次、间隔 5000 毫秒；不使用第一批手工快照或两次尝试配置。
+
+| 场景 | 待 CI 验证的实际断言 |
+| --- | --- |
+| 写入已生效后第一次503 | 审批前零账本/零写入；默认策略真实尝试2次，用同一 `studio-operation:v1:<账本键>`；外部副作用1、账本1且保存实际回执、最终字段完成；不是只凭键相同声称防重 |
+| 非法回执阻断后人工恢复 | 真实首次写入产生有效业务回执但传输非法结果，账本真实 blocked；新启动仍失败，不再次连接写服务；`resolveToolOperationAction` 只录入假业务系统实际保存的回执，相同核验请求重复调用只留一条历史；第三次原启动/审批后复用回执，副作用和请求均不增加、防重截止不延长，原失败运行仍为失败 |
+| 连续503耗尽后未知操作过期 | 默认真实尝试3次且停止，外部副作用1、账本 pending/无回执；仅将本套件这一行的截止时间设为已过期，新原启动/审批由生产过期分支变为 blocked，自动重发和人工重试均被拒绝；实际回执核验后再原启动复用，截止仍已过期、历史1条、总写请求3且不新增连接 |
+| 同一业务编号下的不同合法方案 | 两次必填输入保留同一业务编号，客户分别为 c1/c2；真实取数和模型方案与各自客户匹配，字段契约均合法并经真实审批。第二次账本请求内容冲突，结果失败而非复用旧交付；写请求和副作用仍1、账本全部字段与原回执保持不变、无复用轨迹 |
+
+过期模拟只在显式隔离标记下、真实首次运行结束后，按本套件账本 UUID、原运行 UUID 和归属限定 `retryDeadline` 一个时间字段。真实未知状态、租约释放、重试次数、阻断/完成状态都由生产逻辑产生；不改引擎时钟，不修改版本、运行、终态或晋升记录。该控制避免等待一天，不证明真实经过一天或生产记录被修改。人工重试的负例故意提交错误的“未执行”声明以确认过期门禁无法被该声明绕过，并断言未保存核验历史；成功人工核验的回执只能取假业务系统已经发生副作用的记录。
+
+假服务 `tests/helpers/mvp-acceptance-tools.ts` 只增加可选 `response-lost-always` 故障模式，原有默认和首次503模式不变。`tests/helpers/mvp-acceptance-recovery-tools.test.ts` 的2项本机 helper 单测及独立 `mvp-acceptance-recovery.config.mts` 只验证该测试服务的首次/连续丢回执、实际回执来源与副作用计数；不加载数据库或 Workflow 插件，不能算账本或真实运行证据。
+
+```text
+pnpm exec vitest run --config tests/helpers/mvp-acceptance-recovery.config.mts
+```
+
+真实恢复套件仍只交 CI/CD，在确认临时 Neon 空库、迁移就绪并设置 `MVP_ACCEPTANCE_ISOLATED_DB=1` 后执行：
+
+```text
+pnpm exec vitest run --config vitest.workflow.config.mts tests/workflow/mvp-acceptance-template-recovery.test.ts
+```
+
+2026-10-09：新增恢复代码的全仓 `tsc --noEmit` 和4份新增/修改代码文件 ESLint 通过。本机2项 helper 单测尝试在 Vitest worker 的 started 阶段因 `Zone Allocation failed` 内存分配失败退出（exit134，`Tests no tests`），没有执行断言，当时这2项未验证；没有把启动失败视作通过。收到资源约束后不再并发启动重型校验，不杀其他应用或修改系统设置。新增4项真实 Workflow/数据库断言尚未执行，必须由 CI 在精确新提交上验证；原18的进展由CI独立负责。本线未执行本地真实数据库、Workflow、E2E、迁移、构建或远端 CI，没有修改生产代码、模型连接、配置或资源策略。
+
+2026-10-09 后续：确认其他校验会话结束、内存余量恢复后，按 `NODE_OPTIONS=--max-old-space-size=256`、`--maxWorkers=1 --no-file-parallelism` 单项串行重跑上述 helper 专用配置，真实 `exit0`、1文件2项通过。该结果仅验证本机故障服务；4项真实恢复 Workflow/数据库仍未执行，不能把 helper 通过扩展成链路通过。
