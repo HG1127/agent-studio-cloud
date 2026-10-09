@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { MvpTemplateInput } from "@/contracts/mvp-template";
+import { MvpTemplateBusinessSpec, MvpTemplateInput } from "@/contracts/mvp-template";
 import { buildMvpTemplate } from "@/server/domain/mvp-template";
 import { resolveNodeInput } from "@/server/domain/runtime/input-mapping";
 import { projectWorkflowResult } from "@/server/domain/runtime/output-contract";
 import { selectApprovalReview } from "@/server/domain/approval/select-review";
 import { validateJsonObjectSchema } from "@/server/domain/json-schema";
 import { auditWorkflow } from "@/server/domain/audit";
-import { filterPublishBlockers } from "@/server/domain/pipeline";
+import { buildManifest, filterPublishBlockers } from "@/server/domain/pipeline";
+import { importedWorkflowIssue } from "@/server/domain/import-agent";
 import { parseToolRegistry } from "@/server/tools/tool-registry";
 import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding";
 import { mvpTemplateInput as input, mvpTemplateRegistry as registry, mvpHttpAction } from "../fixtures/mvp-template";
@@ -25,6 +26,88 @@ function actionWithSchema(protocol: string, schema: Record<string, unknown>) {
 }
 
 describe("最小真实业务模板", () => {
+  it.each([
+    { type: "object", properties: {}, additionalProperties: false }, { type: "object" },
+    { type: "object", properties: {}, required: [], minProperties: 0, maxProperties: 0, const: {}, enum: [{}] },
+    { type: "object", additionalProperties: false, minProperties: 0, maxProperties: 0, enum: [{}, { ignored: "不选择" }] },
+  ])("零参数只读取数可创建且无需虚造业务来源 %j", (inputSchema) => {
+    const tools = [{ ...registry[0], inputSchema }, registry[1]];
+    const built = buildMvpTemplate({ ...input, readMapping: { fields: [], includeUpstreamOutputs: false } }, tools);
+    if (!built.ok) throw new Error(built.error);
+    const read = built.draft.nodes.read;
+    expect(read.tool).toEqual({ ...build().nodes.read.tool, inputSchema });
+    expect(read.inputMapping).toEqual({ fields: [], includeUpstreamOutputs: false });
+    expect(MvpTemplateBusinessSpec.parse(read.businessSpec).inputs).toEqual([]);
+    expect(resolveNodeInput({ node: read, input: { customerId: "不传递", requestKey: "不传递" }, outputs: { upstream: { secret: "不传递" } } }))
+      .toEqual({ ok: true, input: {}, outputs: {} });
+    expect(importedWorkflowIssue(built.draft)).toBeNull();
+    expect(filterPublishBlockers(auditWorkflow(built.draft).issues, built.draft).blocking).toEqual([]);
+    const manifest = buildManifest(built.draft, { modelId: "test-model", mock: true, connectionId: null, knowledgeSnapshot: [] });
+    expect(manifest.designAudit.criticalCount).toBe(0);
+    expect(manifest.workflowSnapshot.nodes.read.inputMapping).toEqual(read.inputMapping);
+    expect(manifest.inputContract.fields).toEqual(buildManifest(build(), { modelId: "test-model", mock: true, connectionId: null, knowledgeSnapshot: [] }).inputContract.fields);
+    for (const id of ["plan", "approve", "execute", "deliver", "end"]) expect(built.draft.nodes[id]).toEqual(build().nodes[id]);
+  });
+  it.each([
+    { type: "object", properties: {}, required: ["missing"] }, { type: "object", required: ["missing"] },
+    { type: "object", properties: {}, minProperties: 1 }, { type: "object", minProperties: 1 },
+    { type: "object", properties: {}, const: { customer_id: "不猜参数" } },
+    { type: "object", enum: [{ customer_id: "不猜参数" }, null] },
+    { type: "object", const: null }, { type: "object", maxProperties: -1 },
+    { type: "object", properties: [] }, { type: "object", properties: null },
+  ])("空参数取数原规则拒绝空对象时不能创建 %j", (inputSchema) => {
+    expect(validateJsonObjectSchema({}, inputSchema)).not.toBeNull();
+    expect(buildMvpTemplate({ ...input, readMapping: { fields: [] } }, [{ ...registry[0], inputSchema }, registry[1]]).ok).toBe(false);
+  });
+  it.each([{}, { properties: {} }, { type: "array" }, { type: ["object", "null"] }])("不猜测取数对象类型 %j", (inputSchema) => {
+    expect(buildMvpTemplate({ ...input, readMapping: { fields: [] } }, [{ ...registry[0], inputSchema }, registry[1]]).ok).toBe(false);
+  });
+  it.each([{ minProperties: 1 }, { const: { customer_id: "客户1" } }, { enum: [{ customer_id: "客户1" }] }])(
+    "有声明的可选取数字段也不能绕过空映射的原规则 %j", (constraints) => {
+      const inputSchema = { ...registry[0].inputSchema, required: [], ...constraints };
+      const tools = [{ ...registry[0], inputSchema }, registry[1]];
+      expect(validateJsonObjectSchema({}, inputSchema)).not.toBeNull();
+      expect(buildMvpTemplate({ ...input, readMapping: { fields: [] } }, tools).ok).toBe(false);
+      const built = buildMvpTemplate(input, tools);
+      if (!built.ok) throw new Error(built.error);
+      expect(built.draft.nodes.read.tool!.inputSchema).toEqual(inputSchema);
+      expect(resolveNodeInput({ node: built.draft.nodes.read, input: { customerId: "客户1" }, outputs: {} }))
+        .toEqual({ ok: true, input: { customer_id: "客户1" }, outputs: {} });
+    },
+  );
+  it("可选取数字段允许空对象时仍保留原声明", () => {
+    const inputSchema = { ...registry[0].inputSchema, required: [] };
+    expect(validateJsonObjectSchema({}, inputSchema)).toBeNull();
+    const built = buildMvpTemplate({ ...input, readMapping: { fields: [] } }, [{ ...registry[0], inputSchema }, registry[1]]);
+    if (!built.ok) throw new Error(built.error);
+    expect(built.draft.nodes.read.tool!.inputSchema).toEqual(inputSchema);
+    expect(built.draft.nodes.read.inputMapping).toEqual({ fields: [], includeUpstreamOutputs: false });
+  });
+  it("零参数取数仍拒绝上游内容、虚造映射、缺防重输入和写操作缺口", () => {
+    const tools = [{ ...registry[0], inputSchema: { type: "object", properties: {} } }, registry[1]];
+    const zeroInput = { ...input, readMapping: { fields: [] } };
+    expect(buildMvpTemplate({ ...zeroInput, readMapping: { fields: [], includeUpstreamOutputs: true } }, tools).ok).toBe(false);
+    expect(buildMvpTemplate(input, tools).ok).toBe(false);
+    expect(buildMvpTemplate({ ...zeroInput, inputs: [input.inputs[0]] }, tools).ok).toBe(false);
+    expect(buildMvpTemplate({ ...zeroInput, actionMapping: { fields: [] } }, tools).ok).toBe(false);
+    expect(buildMvpTemplate({ ...zeroInput, readMapping: undefined }, tools).ok).toBe(false);
+  });
+  it.each([
+    [{ ...registry[0], inputSchema: { type: "object" }, outputSchema: { type: "object", properties: {} } }, registry[1]],
+    [{ ...registry[0], inputSchema: { type: "object" } }, { ...registry[1], inputSchema: { type: "object", properties: {} } }],
+    [{ ...registry[0], inputSchema: { type: "object" } }, { ...mvpHttpAction, inputSchema: { type: "object", properties: { input: { type: "object" } } } }],
+    [{ ...registry[0], inputSchema: { type: "object" } }, { ...registry[1], outputSchema: { type: "object", properties: {} } }],
+  ])("放开空取数不会放开操作或回执空字段", (...tools) => {
+    expect(buildMvpTemplate({ ...input, readMapping: { fields: [] } }, tools).ok).toBe(false);
+  });
+  it("零参数取数兼容原HTTP写操作，审批防重和写操作映射保持", () => {
+    const built = buildMvpTemplate({ ...input, readMapping: { fields: [] } }, [{ ...registry[0], inputSchema: { type: "object" } }, mvpHttpAction]);
+    const baseline = buildMvpTemplate(input, [registry[0], mvpHttpAction]);
+    if (!built.ok) throw new Error(built.error);
+    if (!baseline.ok) throw new Error(baseline.error);
+    for (const id of ["plan", "approve", "execute", "deliver", "end"]) expect(built.draft.nodes[id]).toEqual(baseline.draft.nodes[id]);
+    expect(filterPublishBlockers(auditWorkflow(built.draft).issues, built.draft).blocking).toEqual([]);
+  });
   it.each(["MCP", "HTTP"])("%s 两字段方案与最多一个字段冲突时拒绝创建", (protocol) => {
     const schema = { ...registry[1].inputSchema, required: ["customer_id"], maxProperties: 1 };
     expect(validateJsonObjectSchema({ customer_id: "客户1" }, schema)).toBeNull();

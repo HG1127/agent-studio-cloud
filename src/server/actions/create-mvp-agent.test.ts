@@ -26,6 +26,33 @@ describe("从模板创建真实业务草稿", () => {
       vi.restoreAllMocks();
     }
   });
+  it.each([
+    { type: "object", properties: {}, additionalProperties: false }, { type: "object" },
+  ])("零参数只读取数通过原子保存入口保留完整快照 %j", async (inputSchema) => {
+    mocks.listTools.mockReturnValue([{ ...mvpTemplateRegistry[0], inputSchema }, mvpTemplateRegistry[1]]);
+    expect(await createMvpAgentAction({ ...mvpTemplateInput, readMapping: { fields: [], includeUpstreamOutputs: false } }, requestId))
+      .toEqual({ ok: true, agentId: requestId });
+    expect(mocks.importAgent).toHaveBeenCalledTimes(1);
+    const exported = AgentExportFile.parse(mocks.importAgent.mock.calls[0][0]);
+    expect(exported.workflow.nodes.read.tool!.inputSchema).toEqual(inputSchema);
+    expect(exported.workflow.nodes.read.inputMapping).toEqual({ fields: [], includeUpstreamOutputs: false });
+    expect(exported.workflow.nodes.read.businessSpec?.inputs).toEqual([]);
+  });
+  it.each([
+    { type: "object", properties: {}, required: ["missing"] }, { type: "object", required: ["missing"] },
+    { type: "object", properties: {}, minProperties: 1 }, { type: "object", minProperties: 1 },
+    { type: "object", const: { customer_id: "不猜参数" } }, { type: "object", enum: [{ customer_id: "不猜参数" }] },
+  ])("空取数规则矛盾时不保存助手 %j", async (inputSchema) => {
+    mocks.listTools.mockReturnValue([{ ...mvpTemplateRegistry[0], inputSchema }, mvpTemplateRegistry[1]]);
+    expect((await createMvpAgentAction({ ...mvpTemplateInput, readMapping: { fields: [] } }, requestId)).ok).toBe(false);
+    expect(mocks.importAgent).not.toHaveBeenCalled();
+  });
+  it("空取数不允许隐含上游内容或补造映射来源", async () => {
+    mocks.listTools.mockReturnValue([{ ...mvpTemplateRegistry[0], inputSchema: { type: "object" } }, mvpTemplateRegistry[1]]);
+    expect((await createMvpAgentAction({ ...mvpTemplateInput, readMapping: { fields: [], includeUpstreamOutputs: true } }, requestId)).ok).toBe(false);
+    expect((await createMvpAgentAction(mvpTemplateInput, requestId)).ok).toBe(false);
+    expect(mocks.importAgent).not.toHaveBeenCalled();
+  });
   it.each(["MCP", "HTTP"])("%s 两字段方案与最多一个字段冲突时拒绝保存", async (protocol) => {
     const schema = { ...mvpTemplateRegistry[1].inputSchema, required: ["customer_id"], maxProperties: 1 };
     const action = protocol === "MCP" ? { ...mvpTemplateRegistry[1], inputSchema: schema }

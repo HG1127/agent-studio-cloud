@@ -17,6 +17,12 @@ function objectFields(schema: Schema): Record<string, Schema> | null {
   return Object.keys(properties).length > 0 ? properties : null;
 }
 
+function readInputFields(schema: Schema): Record<string, Schema> | null {
+  const fields = objectFields(schema);
+  if (fields) return fields;
+  return schema.type === "object" && validateJsonObjectSchema({}, schema) === null ? {} : null;
+}
+
 function propertyCountMatches(schema: Schema, count: number): boolean {
   return !(typeof schema.minProperties === "number" && count < schema.minProperties)
     && !(typeof schema.maxProperties === "number" && count > schema.maxProperties);
@@ -72,7 +78,7 @@ export function buildMvpTemplate(input: unknown, registry: unknown):
     return { ok: false, error: "工具必须明确登记为只读取数和具备防重保证的业务操作，暂时无法创建" };
   }
   const actionSchema = actionParameterSchema(action);
-  const readFields = objectFields(read.inputSchema), actionFields = actionSchema && objectFields(actionSchema);
+  const readFields = readInputFields(read.inputSchema), actionFields = actionSchema && objectFields(actionSchema);
   const receiptFields = objectFields(action.outputSchema);
   if (!actionSchema || !readFields || !actionFields || !receiptFields || !objectFields(read.outputSchema)) {
     return { ok: false, error: "工具必须登记明确的输入和回执字段，暂时无法创建" };
@@ -96,6 +102,9 @@ export function buildMvpTemplate(input: unknown, registry: unknown):
     mappedRead.add(target);
   }
   if (requiredRead.some((field) => !mappedRead.has(String(field)))) return { ok: false, error: "取数工具的必填参数尚未完整映射" };
+  if (spec.readMapping.fields.length === 0 && validateJsonObjectSchema({}, read.inputSchema)) {
+    return { ok: false, error: "取数工具的参数规则不接受空输入，暂时无法创建" };
+  }
   const mappedAction = new Set<string>();
   for (const binding of spec.actionMapping.fields) {
     const source = binding.source, target = binding.target[0];
