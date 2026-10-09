@@ -72,6 +72,10 @@ export function redactCredentialData(value: unknown): unknown {
   return redactData(value, CREDENTIAL_KEY, redactCredentialText);
 }
 
+export function isCredentialFieldName(name: string): boolean {
+  return CREDENTIAL_KEY.test(name) && !TOKEN_USAGE_KEY.test(name);
+}
+
 // 结构化成果先经过有界 JSON 校验，不能按旧上下文的 12 层限制悄悄省略待确认字段。
 export function redactStructuredCredentialData(value: unknown): unknown {
   return redactData(value, CREDENTIAL_KEY, redactCredentialText, 0, 32);

@@ -36,7 +36,8 @@ vi.mock("@/server/services/evaluation-state", () => ({
 }));
 
 import type { WorkflowDraft } from "@/contracts/workflow";
-import { failRun, finalizeRun, initializeRun, markRunRunning, persistContext } from "@/server/steps/run-state";
+import { failRun, finalizeRun, finalizeWorkflowResult, initializeRun, markRunRunning, persistContext } from "@/server/steps/run-state";
+import { FatalError } from "workflow";
 
 const draft = {
   startNodeId: "start",
@@ -44,6 +45,31 @@ const draft = {
 } as WorkflowDraft;
 
 describe("运行终态步骤", () => {
+  it("收尾步骤只写最终选中成果并保留完整过程上下文", async () => {
+    mocks.returning.mockResolvedValue([{ id: "run-1" }]);
+    const outputs = { extract: { rows: [{ amount: 0, approved: false }], other: "未交付内容" } };
+    const fields = ["amount", "approved"].map((name) => ({ path: `交付.${name}`, required: true, sourceNodeId: "extract", sourcePath: ["rows", "0", name] }));
+    await finalizeWorkflowResult({ runId: "run-1", outputs, fields });
+    const result = { 交付: { amount: 0, approved: false } };
+    expect(mocks.setValues).toHaveBeenCalledWith(expect.objectContaining({ status: "completed", result, context: { outputs } }));
+    expect(mocks.completeEvaluationForRun).toHaveBeenCalledWith("run-1", result);
+  });
+  it.each([
+    { label: "必填缺失", outputs: { extract: {} }, sourcePath: ["amount"] },
+    { label: "凭据字段", outputs: { extract: { password: "不应交付" } }, sourcePath: ["password"] },
+    { label: "超限字段", outputs: { extract: { amount: "x".repeat(2 * 1024 * 1024 + 1) } }, sourcePath: ["amount"] },
+  ])("$label 是永久失败且不写完成状态或触发验收", async ({ outputs, sourcePath }) => {
+    await expect(finalizeWorkflowResult({ runId: "run-1", outputs, fields: [{ path: "交付", required: true, sourceNodeId: "extract", sourcePath }] })).rejects.toBeInstanceOf(FatalError);
+    expect(mocks.setValues).not.toHaveBeenCalled(); expect(mocks.appendTrace).not.toHaveBeenCalled();
+    expect(mocks.completeEvaluationForRun).not.toHaveBeenCalled(); expect(mocks.reconcileTerminalEvaluationRun).not.toHaveBeenCalled();
+  });
+  it.each(["completed", "cancelled"])("字段收尾重入 %s 保留原终态对账语义", async (status) => {
+    mocks.returning.mockResolvedValue([]); mocks.selectRows.mockResolvedValue([{ status }]);
+    await finalizeWorkflowResult({ runId: "run-1", outputs: { extract: { amount: 0 } }, fields: [{ path: "金额", required: true, sourceNodeId: "extract", sourcePath: ["amount"] }] });
+    expect(mocks.reconcileTerminalEvaluationRun).toHaveBeenCalledTimes(Number(status === "completed"));
+    expect(mocks.appendTrace).toHaveBeenCalledTimes(Number(status === "completed"));
+    expect(mocks.completeEvaluationForRun).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.selectRows.mockResolvedValue([]);

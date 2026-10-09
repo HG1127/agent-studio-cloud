@@ -9,12 +9,14 @@ import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
 import { getRunModelUsage } from "@/server/queries/model-usage";
+import { getRunTaskResult } from "@/server/queries/run-tasks";
 import { startModelJsonServer } from "../helpers/model-json-server";
 
 let service: Awaited<ReturnType<typeof startModelJsonServer>> | undefined;
 let runId: string | undefined;
 let evaluationFixture: { agentId: string; versionId: string; caseId: string; evaluationId: string } | undefined;
 let knowledgeFixtureIds: string[] = [];
+let outputSelectionFixture: { agentId: string; versionId: string } | undefined;
 const schema = {
   type: "object", required: ["amount", "approved"], additionalProperties: false,
   properties: { amount: { type: "number" }, approved: { type: "boolean" } },
@@ -44,6 +46,11 @@ afterEach(async () => {
     await db.delete(runs).where(eq(runs.id, runId));
   }
   runId = undefined;
+  if (outputSelectionFixture) {
+    await db.delete(agentVersions).where(eq(agentVersions.id, outputSelectionFixture.versionId));
+    await db.delete(agents).where(eq(agents.id, outputSelectionFixture.agentId));
+  }
+  outputSelectionFixture = undefined;
 });
 
 async function prepare(replies: string[], mock = false) {
@@ -98,6 +105,59 @@ async function prepare(replies: string[], mock = false) {
 }
 
 describe("持久工作流的结构化业务结果", () => {
+  it.each([
+    { mode: "root", missing: false }, { mode: "subflow", missing: false },
+    { mode: "parallel", missing: false }, { mode: "parallel-issues", missing: false },
+    { mode: "root", missing: true },
+  ])("$mode 成果按冻结字段交付并由任务接口读取，缺失=$missing 不交付半成品", async ({ mode, missing }) => {
+    const output = { rows: [{ ...(missing ? {} : { amount: 0 }), approved: false, email: "business@example.com" }], password: "test-credential-not-for-delivery", other: "未选择的中间业务内容" };
+    const base = await prepare([JSON.stringify(output)]);
+    const extract = { id: "extract", title: "提取业务对象", type: "ai", modelOutput: { format: "json", providerMode: "json", maxRepairAttempts: 0, schema: { type: "object" } } };
+    const isParallel = mode.startsWith("parallel");
+    const sourceNodeId = mode === "subflow" ? "group.extract" : isParallel ? "batch.work.extract" : "extract";
+    const fields = [
+      { path: "交付.金额", label: "订单金额", required: true, sourceNodeId, sourcePath: ["rows", "0", "amount"] },
+      { path: "交付.批准", label: "业务决定", required: true, sourceNodeId, sourcePath: ["rows", "0", "approved"] },
+      { path: "交付.邮箱", label: "业务邮箱", required: true, sourceNodeId, sourcePath: ["rows", "0", "email"] },
+    ];
+    const nodes: Record<string, unknown> = { done: base.workflowSnapshot.nodes.done };
+    if (mode === "subflow") {
+      nodes.start = { ...base.workflowSnapshot.nodes.start, next: "group" };
+      nodes.group = { id: "group", title: "顺序提取", type: "subflow", next: "done", subflow: { name: "业务处理", steps: [extract] } };
+    } else if (isParallel) {
+      nodes.start = { ...base.workflowSnapshot.nodes.start, next: "batch" };
+      nodes.batch = { id: "batch", title: "并行提取", type: "parallel", next: "done", parallel: { strategy: "all", failurePolicy: mode === "parallel-issues" ? "continue" : "fail_fast", branches: [
+        { id: "work", label: "业务提取", steps: [extract] },
+        { id: "other", label: "独立处理", steps: [{ id: "record", title: "独立记录", type: mode === "parallel-issues" ? "tool" : "system" }] },
+      ] } };
+    } else {
+      nodes.start = { ...base.workflowSnapshot.nodes.start, next: "extract" };
+      nodes.extract = { ...extract, next: "done" };
+    }
+    const manifest = AgentManifest.parse({ ...base, outputContract: { fields }, workflowSnapshot: { ...base.workflowSnapshot, nodes, outputContract: { fields } } });
+    const agentId = crypto.randomUUID(), versionId = crypto.randomUUID();
+    outputSelectionFixture = { agentId, versionId };
+    await db.insert(agents).values({ id: agentId, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, name: "字段交付助手", intentText: "提取订单金额并交付" });
+    await db.insert(agentVersions).values({ id: versionId, agentId, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, version: 1, manifest });
+    await db.update(runs).set({ agentId, versionId }).where(eq(runs.id, runId!));
+    const handle = await start(agentRunWorkflow, [runId!, manifest, {}]);
+    if (missing) await expect(handle.returnValue).rejects.toThrow("缺少必需交付内容：订单金额");
+    else await expect(handle.returnValue).resolves.toEqual({ status: "completed" });
+    const [stored] = await db.select({ status: runs.status, result: runs.result, context: runs.context }).from(runs).where(eq(runs.id, runId!));
+    const expected = { 交付: { 金额: 0, 批准: false, 邮箱: "business@example.com" } };
+    expect(stored.status).toBe(missing ? "failed" : "completed");
+    expect(stored.result).toEqual(missing ? null : expected);
+    const presented = await getRunTaskResult(runId!, DEMO_WORKSPACE_ID);
+    expect(presented).toMatchObject({ ready: true, status: missing ? "failed" : "completed", result: missing ? null : expected });
+    expect(presented?.outputContract.fields).toEqual(fields);
+    if (!missing) expect(JSON.stringify(stored.context)).toContain("未选择的中间业务内容");
+    expect(JSON.stringify(presented)).not.toContain("test-credential-not-for-delivery");
+    expect(JSON.stringify(presented)).not.toContain("未选择的中间业务内容");
+    expect(service!.modelRequests).toHaveLength(1); expect(service!.toolRequests).toHaveLength(0);
+    const steps = await db.select().from(runSteps).where(eq(runSteps.runId, runId!));
+    expect(steps.find((step) => step.nodeId === sourceNodeId)?.status).toBe("succeeded");
+  }, 240_000);
+
   it.each([
     { mode: "main", missing: false }, { mode: "subflow", missing: false },
     { mode: "parallel", missing: false }, { mode: "loop", missing: false },

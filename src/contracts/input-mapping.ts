@@ -5,7 +5,9 @@ export const MAX_INPUT_BINDINGS = 100;
 export const MAX_INPUT_MAPPING_LITERAL_BYTES = 64 * 1024;
 const RESERVED = new Set(["__proto__", "prototype", "constructor"]);
 const MappingPathSegment = z.string().min(1).refine((segment) => !RESERVED.has(segment), "字段路径不能使用保留名称");
-const MappingSourcePath = z.array(MappingPathSegment.max(200)).max(32).default([]);
+export const InputSourcePath = z.array(MappingPathSegment.max(200)).max(32);
+export type InputSourcePath = z.infer<typeof InputSourcePath>;
+const MappingSourcePath = InputSourcePath.default([]);
 const MappingLiteral = boundedJsonStorageValue(MAX_INPUT_MAPPING_LITERAL_BYTES, "字段映射固定值");
 
 export const InputValueSource = z.discriminatedUnion("kind", [

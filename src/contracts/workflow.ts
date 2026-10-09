@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { JsonStorageValue } from "./json";
 import { ModelOutputConfig } from "./model-output";
-import { InputMapping } from "./input-mapping";
+import { InputMapping, InputSourcePath } from "./input-mapping";
 import { ToolOperationConfig } from "./tool-operation";
 import { RUN_DELIVERY_INTENT_KEY } from "./run-delivery-config";
 
@@ -170,6 +170,17 @@ export const WorkflowNode = z.object({
     context.addIssue({ code: "custom", path: ["modelOutput"], message: "只有智能处理和业务判断步骤可以配置模型结果字段" });
   }
 }).transform(omitUndefined);
+export const WorkflowOutputField = z.object({
+  path: z.string().min(1).max(200),
+  label: z.string().max(200).optional(),
+  required: z.boolean().default(true),
+  sourceNodeId: z.string().min(1).max(200).optional(),
+  sourcePath: InputSourcePath.optional(),
+}).superRefine((field, context) => {
+  if (field.sourcePath !== undefined && !field.sourceNodeId) context.addIssue({ code: "custom", path: ["sourcePath"], message: "选择交付来源字段时必须明确业务步骤" });
+});
+export type WorkflowOutputField = z.infer<typeof WorkflowOutputField>;
+
 export const WorkflowDraft = z.object({
   id: z.string(), versionId: z.string().nullable().default(null),
   startNodeId: z.string().default("start"),
@@ -187,12 +198,7 @@ export const WorkflowDraft = z.object({
   complexityProfile: z.record(z.string(), z.unknown()).optional(),
   runtimePolicy: z.record(z.string(), z.unknown()).optional(),
   outputContract: z.object({
-    fields: z.array(z.object({
-      path: z.string().min(1).max(200),
-      label: z.string().max(200).optional(),
-      required: z.boolean().default(true),
-      sourceNodeId: z.string().min(1).max(200).optional(),
-    })).max(MAX_WORKFLOW_OUTPUT_FIELDS).default([]),
+    fields: z.array(WorkflowOutputField).max(MAX_WORKFLOW_OUTPUT_FIELDS).default([]),
   }).optional(),
   ui: z.object({ positions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })).default({}) }).default({ positions: {} }),
 }).superRefine((draft, ctx) => {

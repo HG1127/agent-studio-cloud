@@ -1,6 +1,7 @@
 import { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
 import { auditWorkflow, type AuditIssue } from "./design-auditor";
 import { isHiddenControlNode } from "@/lib/workflow-node-visibility";
+import { workflowOutputSourceNodes } from "@/server/domain/runtime/output-contract";
 
 export interface SafeAuditFixResult {
   draft: WorkflowDraft;
@@ -80,16 +81,24 @@ function safeFixIssue(draft: WorkflowDraft, issue: AuditIssue, applied: string[]
     return;
   }
   if (issue.code === "output_contract_missing" || issue.code === "output_contract_source_invalid") {
+    const sources = workflowOutputSourceNodes(nodes);
+    const fields = draft.outputContract?.fields ?? [];
+    const validSource = (field: (typeof fields)[number]) => {
+      const id = field.sourceNodeId ?? field.path.split(".")[0];
+      return Object.hasOwn(sources, id) && isBusinessOutputSource(sources[id]);
+    };
+    if (fields.some((field) => !validSource(field) && field.sourcePath?.length)) {
+      skipped.push("最终交付需重新选择业务来源及字段，不能自动猜测替代来源");
+      return;
+    }
     const candidates = Object.values(nodes).filter(isBusinessOutputSource);
     const source = candidates.find((item) => item.next === end?.id) ?? candidates.at(-1);
     if (source) {
-      const fields = draft.outputContract?.fields ?? [];
       draft.outputContract = {
         fields: fields.length === 0
           ? [{ path: source.id, label: source.title, required: true, sourceNodeId: source.id }]
           : fields.map((field) => {
-              const current = field.sourceNodeId ? nodes[field.sourceNodeId] : undefined;
-              return current && isBusinessOutputSource(current) ? field : { ...field, sourceNodeId: source.id };
+              return validSource(field) ? field : { ...field, sourceNodeId: source.id };
             }),
       };
       applied.push(issue.code === "output_contract_missing"

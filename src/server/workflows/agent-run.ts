@@ -3,14 +3,14 @@ import { createHook, FatalError, sleep } from "workflow";
 import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
 import type { InlineOutputReferences } from "@/contracts/inline-output-reference";
-import { buildInlineOutputCatalog, selectInlineOutputReferences } from "@/server/domain/runtime/inline-output-references";
+import { buildInlineOutputCatalog, selectInlineOutputReferences, selectWorkflowOutputReferences } from "@/server/domain/runtime/inline-output-references";
 import { requestApproval, recordDecision } from "@/server/steps/approval-step";
 import { awaitApprovalDecision } from "@/server/workflows/approval-hook";
 import { MAX_COLLABORATION_DEPTH } from "@/server/domain/runtime/collaboration-chain";
 import { resolveLoopCollection, workflowExecutionLimit } from "@/server/domain/runtime/loop-runtime";
 import { prepareParallelBranches, resolveParallelOutcome, type PreparedParallelBranch } from "@/server/domain/runtime/parallel-runtime";
 import { prepareSubflow, type PreparedSubflow } from "@/server/domain/runtime/subflow-runtime";
-import { projectWorkflowResult, rejectedWorkflowResult } from "@/server/domain/runtime/output-contract";
+import { rejectedWorkflowResult } from "@/server/domain/runtime/output-contract";
 import { evaluateCondition } from "@/server/steps/condition-step";
 import { beginAgentCall, finishAgentCall } from "@/server/steps/agent-call-step";
 import { beginHandoff, finishHandoff } from "@/server/steps/handoff-step";
@@ -20,7 +20,7 @@ import { beginLoopIteration, completeLoop } from "@/server/steps/loop-step";
 import { runMemoryStep } from "@/server/steps/memory-step";
 import { runModelStep } from "@/server/steps/model-step";
 import { beginParallel, finishParallel } from "@/server/steps/parallel-step";
-import { failRun, finalizeRun, initializeRun, markRunRunning, persistContext, persistStep } from "@/server/steps/run-state";
+import { failRun, finalizeRun, finalizeWorkflowResult, initializeRun, markRunRunning, persistContext, persistStep } from "@/server/steps/run-state";
 import { beginSubflow, finishSubflow } from "@/server/steps/subflow-step";
 import { runQualityGate } from "@/server/steps/quality-step";
 import { appendTrace } from "@/server/steps/trace-step";
@@ -235,9 +235,8 @@ export async function agentRunWorkflow(
           await finalizeRun(runId, rejected, outputs);
           return { status: "completed" };
         }
-        const projected = projectWorkflowResult(outputs, manifest.outputContract?.fields ?? []);
-        if (!projected.ok) throw new FatalError(`缺少必需交付内容：${projected.missing.join("、")}`);
-        await finalizeRun(runId, projected.result, outputs);
+        const fields = manifest.outputContract?.fields ?? [];
+        await finalizeWorkflowResult({ runId, outputs, fields, inlineReferences: selectWorkflowOutputReferences(inlineCatalog, fields) });
         return { status: "completed" };
       }
       if (node.type === "ai") {

@@ -1,5 +1,5 @@
 import { InlineOutputReference, type InlineOutputReferences } from "@/contracts/inline-output-reference";
-import type { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
+import type { WorkflowDraft, WorkflowNode, WorkflowOutputField } from "@/contracts/workflow";
 import { prepareParallelBranches } from "./parallel-runtime";
 import { prepareSubflow } from "./subflow-runtime";
 
@@ -34,8 +34,18 @@ export function selectInlineOutputReferences(catalog: InlineOutputReferences, no
   return selected;
 }
 
+export function selectWorkflowOutputReferences(catalog: InlineOutputReferences, fields: WorkflowOutputField[]): InlineOutputReferences {
+  const selected: InlineOutputReferences = {};
+  for (const field of fields) {
+    if (field.sourceNodeId && Object.hasOwn(catalog, field.sourceNodeId)) selected[field.sourceNodeId] = catalog[field.sourceNodeId];
+  }
+  return selected;
+}
+
 function own(value: unknown, key: string): unknown {
-  return value && typeof value === "object" && Object.hasOwn(value, key) ? (value as Record<string, unknown>)[key] : undefined;
+  if (!value || typeof value !== "object") return undefined;
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  return descriptor && "value" in descriptor ? descriptor.value : undefined;
 }
 
 export function readInlineOutput(nodeId: string, outputs: Record<string, unknown>, references?: InlineOutputReferences): unknown {
