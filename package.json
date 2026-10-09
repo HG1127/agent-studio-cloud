@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "acceptance": "pwsh -NoProfile -File ./acceptance.ps1",
+    "acceptance:basic": "pwsh -NoProfile -File ./acceptance.ps1 -BasicsOnly",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
