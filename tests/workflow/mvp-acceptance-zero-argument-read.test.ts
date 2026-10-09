@@ -25,12 +25,24 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 beforeAll(assertMvpAcceptanceIsolatedDb);
 let context: ZeroArgumentReadContext | undefined;
 afterEach(async () => {
-  if (context) await cleanupZeroArgumentReadTemplate(context);
-  context = undefined;
+  try { if (context) await cleanupZeroArgumentReadTemplate(context); }
+  finally { context = undefined; }
 }, 60_000);
 
 async function ownRuns() {
   return db.select().from(runs).where(and(eq(runs.agentId, context!.agentId), eq(runs.workspaceId, DEMO_WORKSPACE_ID)));
+}
+
+async function startOwnedRun(input: Record<string, unknown>) {
+  const requestId = randomUUID();
+  const pendingId = `request:${requestId}`;
+  context!.pendingStartRunIds.add(pendingId);
+  const started = await startRunAction({ agentId: context!.agentId, input, requestId });
+  if (started.ok) {
+    context!.pendingStartRunIds.delete(pendingId);
+    context!.pendingStartRunIds.add(started.runId);
+  }
+  return { started, pendingId };
 }
 
 const cases: Array<{ name: string; schema: Record<string, unknown> }> = [
@@ -90,14 +102,16 @@ describe("零参数 MCP 读取经生产创建、发布、运行和审批交付�
     expect(context.tools.messages).toHaveLength(0);
     expect(context.model.modelRequests).toHaveLength(0);
 
-    expect(await startRunAction({ agentId: context.agentId, input: { customerId: context.input.customerId }, requestId: randomUUID() }))
+    const rejected = await startOwnedRun({ customerId: context.input.customerId });
+    expect(rejected.started)
       .toMatchObject({ ok: false, error: expect.stringContaining("不能为空") });
     expect(await ownRuns()).toHaveLength(0);
     expect(context.read.messages).toHaveLength(0);
     expect(context.tools.messages).toHaveLength(0);
     expect(context.model.modelRequests).toHaveLength(0);
 
-    const started = await startRunAction({ agentId: context.agentId, input: context.input, requestId: randomUUID() });
+    context.pendingStartRunIds.delete(rejected.pendingId);
+    const { started } = await startOwnedRun(context.input);
     expect(started).toMatchObject({ ok: true });
     if (!started.ok) throw new Error(`零参数真实运行拒绝：${started.error}`);
     const row = await vi.waitFor(async () => {
@@ -105,9 +119,11 @@ describe("零参数 MCP 读取经生产创建、发布、运行和审批交付�
       expect(run?.workflowRunId).toBeTruthy();
       return run;
     }, { timeout: 30_000, interval: 200 });
+    const handle = getRun(row.workflowRunId!);
+    context.workflowHandles.push(handle);
+    context.pendingStartRunIds.delete(started.runId);
     expect(row).toMatchObject({ versionId: published.version.id, input: context.input, createdBy: DEMO_USER_ID, sourceType: "manual", executionRootRunId: started.runId });
     expect(ExecutionResourceSnapshot.parse(row.executionResources).version).toBe("v1");
-    const handle = getRun(row.workflowRunId!);
     const settled = handle.returnValue.then((value) => ({ ok: true as const, value }), (error: unknown) => ({ ok: false as const, error }));
     await waitForPendingApprovalHook(handle, started.runId, "approve");
     const [approval] = await db.select().from(approvals).where(and(eq(approvals.runId, started.runId), eq(approvals.nodeId, "approve"), eq(approvals.workspaceId, DEMO_WORKSPACE_ID)));

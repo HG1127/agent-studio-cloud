@@ -1,9 +1,12 @@
 import { createServer } from "node:http";
 import { vi } from "vitest";
+import type { Run } from "workflow/api";
 import { MvpTemplateInput } from "@/contracts/mvp-template";
 import { buildMvpTemplate } from "@/server/domain/mvp-template";
 import { listToolRegistryOptions, parseToolRegistry } from "@/server/tools/tool-registry";
 import { assertMvpAcceptanceIsolatedDb, cleanupMvpAcceptanceTemplate, prepareMvpAcceptanceTemplate, type MvpAcceptanceTemplateContext } from "./mvp-acceptance-template";
+
+import { stopRegisteredNameTestRuns } from "./mcp-registered-tool-name-cleanup";
 
 type RpcMessage = { id?: string | number; method: string; params?: Record<string, unknown> };
 
@@ -54,12 +57,26 @@ async function startZeroArgumentRead(inputSchema: Record<string, unknown>) {
   };
 }
 
+function closeOnce(close: () => Promise<void>) {
+  let closing: Promise<void> | undefined;
+  return () => closing ??= Promise.resolve().then(close);
+}
+
+async function closeServices(closes: Array<() => Promise<void> | undefined>) {
+  try {
+    const results = await Promise.allSettled(closes.map((close) => Promise.resolve().then(close)));
+    const errors = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+    if (errors.length) throw new AggregateError(errors, "零参数验收假服务关闭失败");
+  } finally { vi.unstubAllEnvs(); }
+}
+
 export async function prepareZeroArgumentReadTemplate(inputSchema: Record<string, unknown>) {
   assertMvpAcceptanceIsolatedDb();
   const read = await startZeroArgumentRead(inputSchema);
   let base: MvpAcceptanceTemplateContext | undefined;
   try {
-    base = await prepareMvpAcceptanceTemplate();
+    const prepared = await prepareMvpAcceptanceTemplate();
+    base = { ...prepared, tools: { ...prepared.tools, close: closeOnce(prepared.tools.close) }, model: { ...prepared.model, close: closeOnce(prepared.model.close) } };
     const registry = parseToolRegistry(JSON.stringify(base.registry.map((tool) => tool.id === base!.spec.readToolId
       ? { ...tool, endpoint: read.endpoint, inputSchema } : tool)));
     if (registry.length !== 2) throw new Error("零参数取数工具登记无效");
@@ -67,21 +84,25 @@ export async function prepareZeroArgumentReadTemplate(inputSchema: Record<string
     const spec = MvpTemplateInput.parse({ ...base.spec, readMapping: { fields: [], includeUpstreamOutputs: false } });
     const built = buildMvpTemplate(spec, listToolRegistryOptions());
     if (!built.ok) throw new Error(`零参数生产模板工厂拒绝：${built.error}`);
-    return { ...base, registry, spec, built, read };
+    return { ...base, registry, spec, built, read: { ...read, close: closeOnce(read.close) },
+      workflowHandles: [] as Array<Run<unknown>>, pendingStartRunIds: new Set<string>() };
   } catch (error) {
-    try {
-      await base?.tools.close();
-      await base?.model.close();
-    } finally {
-      await read.close();
-      vi.unstubAllEnvs();
-    }
+    try { await closeServices([() => base?.tools.close(), () => base?.model.close(), read.close]); }
+    catch (cleanupError) { throw new AggregateError([error, cleanupError], "零参数验收准备和关闭失败"); }
     throw error;
   }
 }
 export type ZeroArgumentReadContext = Awaited<ReturnType<typeof prepareZeroArgumentReadTemplate>>;
 
 export async function cleanupZeroArgumentReadTemplate(context: ZeroArgumentReadContext) {
-  try { await cleanupMvpAcceptanceTemplate(context); }
-  finally { await context.read.close(); }
+  const errors: unknown[] = [];
+  try {
+    await stopRegisteredNameTestRuns(context.workflowHandles, [...context.pendingStartRunIds]);
+    await cleanupMvpAcceptanceTemplate(context);
+  } catch (error) { errors.push(error); }
+  finally {
+    try { await closeServices([context.tools.close, context.model.close, context.read.close]); }
+    catch (error) { errors.push(error); }
+  }
+  if (errors.length) throw new AggregateError(errors, "零参数验收清理失败，未确认停止时保留数据库记录");
 }
