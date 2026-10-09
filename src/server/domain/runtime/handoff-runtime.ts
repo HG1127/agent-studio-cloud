@@ -1,5 +1,6 @@
 import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
+import type { InlineOutputReferences } from "@/contracts/inline-output-reference";
 import { buildBoundedCollaborationContext, collaborationDataWithMemoryPolicy } from "@/server/domain/runtime/collaboration-input";
 import { resolveNodeInput } from "./input-mapping";
 import { isSafeDataPathSegment, safeDataPathSegments } from "@/server/domain/runtime/data-path";
@@ -65,6 +66,7 @@ export function buildHandoffInput(args: {
   targetManifest: AgentManifest;
   input: Record<string, unknown>;
   outputs: Record<string, unknown>;
+  inlineReferences?: InlineOutputReferences;
 }): { ok: true; input: Record<string, unknown>; redactedPaths: string[] } | { ok: false; error: string } {
   const memoryPolicy = args.node.contract?.memoryPolicy;
   const terms = [
@@ -79,7 +81,7 @@ export function buildHandoffInput(args: {
   const sourceOutputs = sanitizedOutputs.value as Record<string, unknown>;
   if (args.node.inputMapping) {
     if (args.node.inputMapping.includeUpstreamOutputs) return { ok: false, error: "助手交接请逐项映射需要的上游字段，不能额外携带全部成果" };
-    const mapped = resolveNodeInput({ node: args.node, input: sourceInput, outputs: sourceOutputs });
+    const mapped = resolveNodeInput({ node: args.node, input: sourceInput, outputs: sourceOutputs, inlineReferences: args.inlineReferences });
     if (!mapped.ok) return mapped;
     const filtered = collaborationDataWithMemoryPolicy(mapped.input, team);
     const sanitized = sanitizeHandoffValue(filtered, terms);

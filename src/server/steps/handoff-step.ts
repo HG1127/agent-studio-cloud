@@ -3,6 +3,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { FatalError, getStepMetadata, RetryableError } from "workflow";
 import { AgentManifest, type AgentManifest as AgentManifestType } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
+import type { InlineOutputReferences } from "@/contracts/inline-output-reference";
 import { agents, agentVersions, runs } from "@/db/schema";
 import { db } from "@/lib/db";
 import { buildHandoffInput, validateHandoffInput, validateHandoffOutput } from "@/server/domain/runtime/handoff-runtime";
@@ -20,6 +21,7 @@ export async function beginHandoff(args: {
   node: WorkflowNode;
   parentInput: Record<string, unknown>;
   outputs: Record<string, unknown>;
+  inlineReferences?: InlineOutputReferences;
 }): Promise<{ childRunId: string; targetName: string; manifest: AgentManifestType; input: Record<string, unknown> }> {
   "use step";
   const targetRef = args.node.toAgent;
@@ -54,7 +56,7 @@ export async function beginHandoff(args: {
     .limit(1), "接收助手暂时无法读取，请稍后重试");
   const parsedManifest = target ? AgentManifest.safeParse(target.manifest) : null;
   if (!target || !parsedManifest?.success) throw new FatalError(`步骤「${args.node.title}」绑定的接收助手版本不可用`);
-  const prepared = buildHandoffInput({ node: args.node, targetManifest: parsedManifest.data, input: args.parentInput, outputs: args.outputs });
+  const prepared = buildHandoffInput({ node: args.node, targetManifest: parsedManifest.data, input: args.parentInput, outputs: args.outputs, inlineReferences: args.inlineReferences });
   if (!prepared.ok) throw new FatalError(prepared.error);
   const handoffInputError = validateHandoffInput(args.node, prepared.input);
   if (handoffInputError) throw new FatalError(`步骤「${args.node.title}」${handoffInputError}`);

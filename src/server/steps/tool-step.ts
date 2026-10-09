@@ -2,6 +2,7 @@
 // 工具步骤：演示工具保持确定性回执；真实工具只从服务端注册表取地址和凭据，草稿不保存秘密。
 import { FatalError, getStepMetadata, RetryableError } from "workflow";
 import type { WorkflowNode } from "@/contracts/workflow";
+import type { InlineOutputReferences } from "@/contracts/inline-output-reference";
 import { validateJsonObjectSchema } from "@/server/domain/json-schema";
 import { canRetryStep, MAX_STEP_ATTEMPTS, resolveToolRetryPolicy } from "@/server/domain/runtime/retry-policy";
 import { persistStep } from "@/server/steps/run-state";
@@ -18,6 +19,7 @@ export interface RunToolStepInput {
   node: WorkflowNode;
   input: Record<string, unknown>;
   outputs: Record<string, unknown>;
+  inlineReferences?: InlineOutputReferences;
 }
 
 export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Record<string, unknown> }> {
@@ -68,7 +70,7 @@ export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Re
     return reject(`步骤「${node.title}」的工具未绑定，无法执行`);
   }
   const demo = tool.registryToolId === "demo" || tool.protocol === "demo";
-  const resolvedInput = resolveNodeInput({ node, input: args.input, outputs: args.outputs });
+  const resolvedInput = resolveNodeInput({ node, input: args.input, outputs: args.outputs, inlineReferences: args.inlineReferences });
   if (!resolvedInput.ok) return reject(resolvedInput.error);
   let receipt: Record<string, unknown>;
   if (demo) {
@@ -86,7 +88,7 @@ export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Re
     const currentInputSchemaError = validateJsonObjectSchema(requestPayload, registration.inputSchema);
     if (currentInputSchemaError) return reject(`工具输入不符合当前服务端字段契约：${currentInputSchemaError}`);
     const operationResult = node.toolOperation ? await invokeToolOperation({
-      runId: args.runId, node, tool: registration, input: args.input, outputs: args.outputs, payload: requestPayload,
+      runId: args.runId, node, tool: registration, input: args.input, outputs: args.outputs, payload: requestPayload, inlineReferences: args.inlineReferences,
     }) : undefined;
     const invoked = operationResult ?? await invokeHttpTool({
       tool: registration,

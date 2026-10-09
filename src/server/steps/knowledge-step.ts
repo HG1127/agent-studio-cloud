@@ -5,6 +5,7 @@ import { FatalError } from "workflow";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
+import type { InlineOutputReferences } from "@/contracts/inline-output-reference";
 import { KnowledgeReceipt, type KnowledgeReceipt as KnowledgeReceiptType } from "@/contracts/knowledge";
 import { knowledgeChunks, knowledgeSources, runs } from "@/db/schema";
 import { db } from "@/lib/db";
@@ -22,6 +23,7 @@ export interface RunKnowledgeStepInput {
   manifest: AgentManifest;
   input: Record<string, unknown>;
   outputs?: Record<string, unknown>;
+  inlineReferences?: InlineOutputReferences;
   currentItem?: unknown;
 }
 
@@ -40,7 +42,7 @@ export async function runKnowledgeStep(args: RunKnowledgeStepInput): Promise<{ r
 
   const space = node.knowledge?.space?.trim() ?? "";
   if (!space) return reject(`步骤「${node.title}」知识来源未绑定`);
-  const resolvedQuery = resolveKnowledgeQuery({ node, input, outputs: args.outputs, currentItem: args.currentItem });
+  const resolvedQuery = resolveKnowledgeQuery({ node, input, outputs: args.outputs, currentItem: args.currentItem, inlineReferences: args.inlineReferences });
   if (!resolvedQuery.ok) return reject(resolvedQuery.error);
   const query = resolvedQuery.query;
   const snapshot = manifest.knowledgeSnapshot ?? [];

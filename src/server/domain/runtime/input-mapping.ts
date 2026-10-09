@@ -1,8 +1,10 @@
 import { InputMapping, type InputValueSource } from "@/contracts/input-mapping";
+import { InlineOutputReferences } from "@/contracts/inline-output-reference";
 import { RunInputPayload } from "@/contracts/run";
 import type { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
 import { prepareParallelBranches } from "./parallel-runtime";
 import { prepareSubflow } from "./subflow-runtime";
+import { readInlineOutput } from "./inline-output-references";
 
 function readOwnPath(value: unknown, path: string[]): unknown {
   let current = value;
@@ -13,26 +15,29 @@ function readOwnPath(value: unknown, path: string[]): unknown {
   return current;
 }
 
-export function resolveInputValue(source: InputValueSource, input: Record<string, unknown>, outputs: Record<string, unknown>): unknown {
+export function resolveInputValue(source: InputValueSource, input: Record<string, unknown>, outputs: Record<string, unknown>, inlineReferences?: InlineOutputReferences): unknown {
   return source.kind === "literal" ? source.value
     : source.kind === "input" ? readOwnPath(input, source.path)
-    : readOwnPath(Object.hasOwn(outputs, source.nodeId) ? outputs[source.nodeId] : undefined, source.path);
+    : readOwnPath(Object.hasOwn(outputs, source.nodeId) ? outputs[source.nodeId] : readInlineOutput(source.nodeId, outputs, inlineReferences), source.path);
 }
 
 export function resolveNodeInput(args: {
   node: Pick<WorkflowNode, "title" | "inputMapping">;
   input: Record<string, unknown>;
   outputs: Record<string, unknown>;
+  inlineReferences?: InlineOutputReferences;
 }):
   | { ok: true; input: Record<string, unknown>; outputs: Record<string, unknown> }
   | { ok: false; error: string } {
   if (!args.node.inputMapping) return { ok: true, input: args.input, outputs: args.outputs };
   const parsed = InputMapping.safeParse(args.node.inputMapping);
   if (!parsed.success) return { ok: false, error: `步骤「${args.node.title}」的字段映射配置无效` };
+  const references = InlineOutputReferences.safeParse(args.inlineReferences ?? {});
+  if (!references.success) return { ok: false, error: `步骤「${args.node.title}」的内部来源定位无效` };
   const input: Record<string, unknown> = {};
   for (const binding of parsed.data.fields) {
     const source = binding.source;
-    let value = resolveInputValue(source, args.input, args.outputs);
+    let value = resolveInputValue(source, args.input, args.outputs, references.data);
     if (value === undefined) value = binding.fallback;
     if (value === undefined) {
       if (binding.required) return { ok: false, error: `步骤「${args.node.title}」缺少映射字段“${binding.target.join(".")}”的来源数据` };

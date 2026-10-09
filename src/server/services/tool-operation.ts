@@ -11,6 +11,7 @@ import { withSafeWorkflowError } from "@/server/security/workflow-error";
 import { invokeHttpTool } from "@/server/tools/invoke-http-tool";
 import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding";
 import type { ToolRegistration } from "@/server/tools/tool-registry";
+import type { InlineOutputReferences } from "@/contracts/inline-output-reference";
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const failure = (error: string, retryable = false, retryAfterMs?: number): ToolOperationInvocation => ({
@@ -20,6 +21,7 @@ const failure = (error: string, retryable = false, retryAfterMs?: number): ToolO
 export async function invokeToolOperation(args: {
   runId: string; node: WorkflowNode; tool: ToolRegistration;
   input: Record<string, unknown>; outputs: Record<string, unknown>;
+  inlineReferences?: InlineOutputReferences;
   payload: { action: string; input: Record<string, unknown>; outputs: Record<string, unknown> };
 }): Promise<ToolOperationInvocation> {
   if (!args.node.tool || !args.node.toolOperation || args.tool.businessIdempotency !== true || !args.tool.businessIdempotencyRetentionMs) {
@@ -46,7 +48,7 @@ export async function invokeToolOperation(args: {
       }
       const key = toolOperationKeyMaterial({
         node: args.node, workspaceId: run.workspaceId, toolId: args.tool.id, action: args.tool.action,
-        input: args.input, outputs: args.outputs,
+        input: args.input, outputs: args.outputs, inlineReferences: args.inlineReferences,
       });
       if (!key.ok) return { kind: "rejected" as const, error: key.error };
       const keyHash = hash(key.material);

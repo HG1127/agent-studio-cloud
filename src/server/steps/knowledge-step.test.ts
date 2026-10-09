@@ -31,6 +31,15 @@ beforeEach(() => {
 });
 
 describe("知识步骤输入映射", () => {
+  it("容器完成后的知识主题映射保留冻结资料和工作区", async () => {
+    const mapped = WorkflowNode.parse({ ...node, inputMapping: { fields: [{ target: ["query"], source: { kind: "output", nodeId: "group.extract", path: ["topic"] } }] } });
+    const result = await runKnowledgeStep({ runId: "run", node: mapped, manifest: base, input: {}, outputs: { group: { status: "completed", steps: [{ output: { topic: "退货政策" } }] } },
+      inlineReferences: { "group.extract": { kind: "subflow", ownerNodeId: "group", stepIndex: 0 } },
+    });
+    expect(result.receipt).toMatchObject({ query: "退货政策", hitCount: 1 });
+    const params = new PgDialect().sqlToQuery(mocks.where.mock.calls[1][0]).params;
+    expect(params).toContain(sourceId); expect(params).toContain(workspaceId); expect(params).not.toContain(outsideId);
+  });
   it("检索只使用显式主题，映射字段不能改变冻结来源和工作区", async () => {
     const { receipt } = await runKnowledgeStep({ runId: "run", node, manifest: base, input: { query: "原任务" }, outputs: { extract: { topic: "退货政策" }, private: { secret: "unselected-secret" } }, currentItem: "其他循环主题" });
     expect(receipt).toMatchObject({ query: "退货政策", hitCount: 1, scannedCount: 1 });

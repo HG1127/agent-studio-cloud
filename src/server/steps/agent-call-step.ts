@@ -3,6 +3,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { FatalError, getStepMetadata, RetryableError } from "workflow";
 import { AgentManifest, type AgentManifest as AgentManifestType } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
+import type { InlineOutputReferences } from "@/contracts/inline-output-reference";
 import { agents, agentVersions, runs } from "@/db/schema";
 import { db } from "@/lib/db";
 import { buildAgentCallInput, validateAgentCallOutput } from "@/server/domain/runtime/agent-call-runtime";
@@ -20,6 +21,7 @@ export async function beginAgentCall(args: {
   node: WorkflowNode;
   parentInput: Record<string, unknown>;
   outputs: Record<string, unknown>;
+  inlineReferences?: InlineOutputReferences;
 }): Promise<{ childRunId: string; targetName: string; manifest: AgentManifestType; input: Record<string, unknown> }> {
   "use step";
   const call = args.node.agentCall;
@@ -53,7 +55,7 @@ export async function beginAgentCall(args: {
     .limit(1), "协作助手暂时无法读取，请稍后重试");
   const parsedManifest = target ? AgentManifest.safeParse(target.manifest) : null;
   if (!target || !parsedManifest?.success) throw new FatalError(`步骤「${args.node.title}」绑定的协作助手版本不可用`);
-  const derivedInput = buildAgentCallInput({ node: args.node, targetManifest: parsedManifest.data, input: args.parentInput, outputs: args.outputs });
+  const derivedInput = buildAgentCallInput({ node: args.node, targetManifest: parsedManifest.data, input: args.parentInput, outputs: args.outputs, inlineReferences: args.inlineReferences });
   if (!derivedInput.ok) throw new FatalError(derivedInput.error);
   const validatedInput = validateCollaborationInput(derivedInput.input, parsedManifest.data.inputContract.fields);
   if (!validatedInput.ok) throw new FatalError(`步骤「${args.node.title}」生成的协作输入无效：${validatedInput.error}`);

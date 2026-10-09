@@ -42,6 +42,21 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 describe("结构化模型执行", () => {
+  it("下游模型使用冻结内部来源，保留零与否定值，不发送定位或其他成果", async () => {
+    const node = WorkflowNode.parse({ ...nodeFor(), inputMapping: { fields: [
+      { target: ["amount"], source: { kind: "output", nodeId: "group.extract", path: ["amount"] } },
+      { target: ["approved"], source: { kind: "output", nodeId: "group.extract", path: ["approved"] } },
+    ] } });
+    mocks.generateText.mockResolvedValue({ output: { amount: 0 }, text: '{"amount":0}', usage: {} });
+    await expect(runModelStep({ runId: "00000000-0000-4000-8000-000000000001", node, manifest: manifestFor(node), input: { other: "not-selected" },
+      outputs: { group: { status: "completed", steps: [{ output: { amount: 0, approved: false, other: "not-selected" } }] } },
+      inlineReferences: { "group.extract": { kind: "subflow", ownerNodeId: "group", stepIndex: 0 } },
+    })).resolves.toEqual({ output: { amount: 0 } });
+    const prompt = mocks.generateText.mock.calls[0][0].prompt;
+    expect(prompt).toContain(JSON.stringify({ amount: 0, approved: false }, null, 2));
+    expect(prompt).not.toContain("not-selected"); expect(prompt).not.toContain("ownerNodeId");
+    expect(mocks.generateText).toHaveBeenCalledTimes(1);
+  });
   it("按字段契约校验对象，保存用量并返回可供条件和工具读取的对象", async () => {
     mocks.generateText.mockResolvedValue({ output: { amount: 100 }, text: '{"amount":100}', usage: { inputTokens: 12, outputTokens: 6 } });
     await expect(execute(nodeFor())).resolves.toEqual({ output: { amount: 100 } });

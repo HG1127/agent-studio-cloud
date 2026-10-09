@@ -1,4 +1,5 @@
 import type { WorkflowNode } from "@/contracts/workflow";
+import type { InlineOutputReferences } from "@/contracts/inline-output-reference";
 import { KnowledgeQuery } from "@/contracts/knowledge";
 import { jsonValuesEqual } from "@/server/domain/json-value";
 import { redactCredentialText, redactStructuredCredentialData } from "@/server/domain/security/redact-sensitive";
@@ -9,6 +10,7 @@ export function resolveKnowledgeQuery(args: {
   node: Pick<WorkflowNode, "title" | "knowledge" | "inputMapping">;
   input: Record<string, unknown>;
   outputs?: Record<string, unknown>;
+  inlineReferences?: InlineOutputReferences;
   currentItem?: unknown;
 }): { ok: true; query: string } | { ok: false; error: string } {
   if (!args.node.inputMapping) {
@@ -17,7 +19,7 @@ export function resolveKnowledgeQuery(args: {
   if (args.node.inputMapping.includeUpstreamOutputs) {
     return { ok: false, error: `步骤「${args.node.title}」请只映射检索需要的字段，不能附带全部成果` };
   }
-  const mapped = resolveNodeInput({ node: args.node, input: args.input, outputs: args.outputs ?? {} });
+  const mapped = resolveNodeInput({ node: args.node, input: args.input, outputs: args.outputs ?? {}, inlineReferences: args.inlineReferences });
   if (!mapped.ok) return { ok: false, error: redactCredentialText(mapped.error) };
   if (!jsonValuesEqual(mapped.input, redactStructuredCredentialData(mapped.input))) {
     return { ok: false, error: `步骤「${args.node.title}」的检索字段包含凭据，请移除后重试` };

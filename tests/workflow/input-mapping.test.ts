@@ -22,7 +22,10 @@ afterEach(async () => {
   runId = undefined;
 });
 
-async function prepare(input: Record<string, unknown>, mode: "normal" | "loop" | "subflow" | "parallel" = "normal") {
+async function prepare(input: Record<string, unknown>, mode: "normal" | "loop" | "subflow" | "parallel" | "after-subflow" | "after-parallel" = "normal") {
+  const isSubflow = mode === "subflow" || mode === "after-subflow";
+  const isParallel = mode === "parallel" || mode === "after-parallel";
+  const after = mode.startsWith("after-");
   service = await startModelJsonServer([]);
   const inputSchema = { type: "object", required: ["action", "input", "outputs"], additionalProperties: false, properties: {
     action: { type: "string", const: "record" },
@@ -47,8 +50,8 @@ async function prepare(input: Record<string, unknown>, mode: "normal" | "loop" |
     tool: { connector: "test", action: "record", scope: "test.record", risk: "low", registryToolId: tool.id, protocol: "http-json", inputSchema, outputSchema: tool.outputSchema },
     inputMapping: { fields: [
       { target: ["customerId"], source: mode === "loop" ? { kind: "output", nodeId: "items", path: ["currentItem", "id"] } : { kind: "input", path: ["customer", "id"] } },
-      { target: ["amount"], source: { kind: "output", nodeId: mode === "subflow" ? "group.extract" : mode === "parallel" ? "group.main.extract" : "extract", path: ["amount"] } },
-      { target: ["approved"], source: { kind: "output", nodeId: mode === "subflow" ? "group.extract" : mode === "parallel" ? "group.main.extract" : "extract", path: ["approved"] } },
+      { target: ["amount"], source: { kind: "output", nodeId: isSubflow ? "group.extract" : isParallel ? "group.main.extract" : "extract", path: ["amount"] } },
+      { target: ["approved"], source: { kind: "output", nodeId: isSubflow ? "group.extract" : isParallel ? "group.main.extract" : "extract", path: ["approved"] } },
     ] },
   };
   const manifest = AgentManifest.parse({
@@ -59,15 +62,16 @@ async function prepare(input: Record<string, unknown>, mode: "normal" | "loop" |
       id: "input-mapping-test", startNodeId: "start",
       rootAgent: { id: "test", name: "字段映射助手", role: "测试" }, memoryPolicy: { taskContext: true, longTerm: false },
       nodes: {
-        start: { id: "start", title: "收到任务", type: "trigger", next: mode === "loop" ? "items" : mode === "subflow" || mode === "parallel" ? "group" : "extract" },
-        ...(mode === "subflow" ? {
-          group: { id: "group", title: "处理订单", type: "subflow", next: "done", subflow: { name: "处理订单", steps: [extract, record] } },
-        } : mode === "parallel" ? {
-          group: { id: "group", title: "并行核对订单", type: "parallel", next: "done", parallel: { strategy: "all", failurePolicy: "fail_fast", branches: [
-            { id: "main", label: "记录订单", steps: [extract, record] },
+        start: { id: "start", title: "收到任务", type: "trigger", next: mode === "loop" ? "items" : isSubflow || isParallel ? "group" : "extract" },
+        ...(isSubflow ? {
+          group: { id: "group", title: "处理订单", type: "subflow", next: after ? "record" : "done", subflow: { name: "处理订单", steps: after ? [extract] : [extract, record] } },
+        } : isParallel ? {
+          group: { id: "group", title: "并行核对订单", type: "parallel", next: after ? "record" : "done", parallel: { strategy: "all", failurePolicy: "fail_fast", branches: [
+            { id: "main", label: "记录订单", steps: after ? [extract] : [extract, record] },
             { id: "audit", label: "记录核对轨迹", steps: [{ id: "note", title: "记录核对", type: "system" }] },
           ] } },
         } : { extract, record }),
+        ...(after ? { record } : {}),
         ...(mode === "loop" ? {
           items: { id: "items", title: "逐项处理", type: "loop", loop: { collectionPath: "input.customers", itemKey: "currentItem", maxIterations: 10, bodyNext: "extract", exitNext: "done" } },
         } : {}),
@@ -84,6 +88,18 @@ async function prepare(input: Record<string, unknown>, mode: "normal" | "loop" |
 }
 
 describe("真实持久工作流字段映射", () => {
+  it.each(["after-subflow", "after-parallel"] as const)("%s 完成后可映射内部成果给根流程 HTTP 工具", async (mode) => {
+    const handle = await prepare({ customer: { id: "001", other: "not-selected" } }, mode);
+    await expect(handle.returnValue).resolves.toEqual({ status: "completed" });
+    expect(service!.toolRequests).toEqual([{ action: "record", input: { customerId: "001", amount: 123.5, approved: true }, outputs: {} }]);
+    const [stored] = await db.select({ status: runs.status, result: runs.result }).from(runs).where(eq(runs.id, runId!));
+    expect(stored?.status).toBe("completed");
+    expect(Object.keys(stored?.result ?? {})).not.toContain("group.extract");
+    expect(Object.keys(stored?.result ?? {})).not.toContain("group.main.extract");
+    expect(JSON.stringify(service!.toolRequests)).not.toContain("ownerNodeId");
+    const steps = await db.select().from(runSteps).where(eq(runSteps.runId, runId!));
+    expect(steps.find((step) => step.nodeId === "record")?.status).toBe("succeeded");
+  }, 180_000);
   it("从任务与模型业务对象组合字段，HTTP 请求通过完整契约且不夹带其他输入", async () => {
     const handle = await prepare({ customer: { id: "c1", private: "not-for-tool" }, secretNote: "not-for-tool" });
     await expect(handle.returnValue).resolves.toEqual({ status: "completed" });

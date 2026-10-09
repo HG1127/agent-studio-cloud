@@ -7,6 +7,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { FatalError, RetryableError } from "workflow";
 import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
+import type { InlineOutputReferences } from "@/contracts/inline-output-reference";
 import type { ModelStepResult } from "@/contracts/model-output";
 import { modelConnections, runs } from "@/db/schema";
 import { db } from "@/lib/db";
@@ -29,6 +30,7 @@ export interface RunModelStepInput {
   outputs: Record<string, unknown>;
   input: Record<string, unknown>;
   qualityFeedback?: string | null;
+  inlineReferences?: InlineOutputReferences;
 }
 
 class UnusableModelOutputError extends Error {}
@@ -66,7 +68,7 @@ export async function runModelStep(args: RunModelStepInput): Promise<ModelStepRe
     await persistStep({ runId: args.runId, nodeId: node.id, nodeTitle: node.title, nodeType: node.type, status: "failed", error: configurationIssue });
     throw new FatalError(configurationIssue);
   }
-  const resolvedInput = resolveNodeInput({ node, input: args.input, outputs: args.outputs });
+  const resolvedInput = resolveNodeInput({ node, input: args.input, outputs: args.outputs, inlineReferences: args.inlineReferences });
   if (!resolvedInput.ok) {
     await persistStep({ runId: args.runId, nodeId: node.id, nodeTitle: node.title, nodeType: node.type, status: "failed", error: resolvedInput.error });
     throw new FatalError(resolvedInput.error);

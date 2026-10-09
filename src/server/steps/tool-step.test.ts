@@ -69,6 +69,17 @@ describe("真实工具步骤", () => {
     expect(JSON.stringify(mocks.appendTrace.mock.calls)).not.toContain("receipt-1");
   });
 
+  it("下游工具取得内部业务字段，不发送冻结定位或未选择成果", async () => {
+    const mapped = WorkflowNode.parse({ ...node, inputMapping: { fields: [{ target: ["customerId"], source: { kind: "output", nodeId: "group.extract", path: ["id"] } }] } });
+    mocks.invokeHttpTool.mockResolvedValue({ ok: true, output: { receiptId: "receipt-1" } });
+    await expect(runToolStep({ runId: "run-1", node: mapped, input: {}, outputs: { group: { status: "completed", steps: [{ output: { id: "001", other: "not-selected" } }] } },
+      inlineReferences: { "group.extract": { kind: "subflow", ownerNodeId: "group", stepIndex: 0 } },
+    })).resolves.toEqual({ receipt: { ok: true, receiptId: "receipt-1" } });
+    expect(mocks.invokeHttpTool).toHaveBeenCalledWith(expect.objectContaining({ input: { customerId: "001" }, outputs: {} }));
+    expect(JSON.stringify(mocks.invokeHttpTool.mock.calls)).not.toContain("ownerNodeId");
+    expect(JSON.stringify(mocks.invokeHttpTool.mock.calls)).not.toContain("not-selected");
+  });
+
   it("不把业务系统显式失败的回执记录成成功步骤", async () => {
     mocks.invokeHttpTool.mockResolvedValue({ ok: true, output: { ok: false, receiptId: "receipt-rejected" } });
     await expect(runToolStep({ runId: "run-1", node, input: {}, outputs: {} }))

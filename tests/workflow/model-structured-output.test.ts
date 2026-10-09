@@ -101,6 +101,8 @@ describe("持久工作流的结构化业务结果", () => {
   it.each([
     { mode: "main", missing: false }, { mode: "subflow", missing: false },
     { mode: "parallel", missing: false }, { mode: "loop", missing: false },
+    { mode: "after-subflow", missing: false }, { mode: "after-parallel", missing: false },
+    { mode: "after-parallel-issues", missing: false },
     { mode: "main", missing: true },
   ])("实际模型提取主题后，$mode 知识映射保留冻结范围，缺失=$missing 时不回退原任务", async ({ mode, missing }) => {
     const output = missing ? { rows: [{ other: "未提供检索主题" }] } : { rows: [{ topic: "退货政策" }] };
@@ -114,7 +116,10 @@ describe("持久工作流的结构化业务结果", () => {
       await db.insert(knowledgeSources).values({ id, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, name, mime: "text/plain", sizeBytes: content.length, sha256: `mapped-knowledge-${id}`, status: "indexed", chunkCount: 1 });
       await db.insert(knowledgeChunks).values({ sourceId: id, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, chunkIndex: 0, content, charStart: 0, charEnd: content.length });
     }
-    const extractId = mode === "subflow" ? "group.extract" : mode === "parallel" ? "batch.research.extract" : "extract";
+    const isSubflow = mode === "subflow" || mode === "after-subflow";
+    const isParallel = mode === "parallel" || mode === "after-parallel" || mode === "after-parallel-issues";
+    const after = mode.startsWith("after-");
+    const extractId = isSubflow ? "group.extract" : isParallel ? "batch.research.extract" : "extract";
     const lookupId = mode === "subflow" ? "group.lookup" : mode === "parallel" ? "batch.research.lookup" : "lookup";
     const extract = { id: "extract", title: "提取业务主题", type: "ai", modelOutput: { format: "json", providerMode: "json", maxRepairAttempts: 0, schema: { type: "object" } } };
     const lookup = { id: "lookup", title: "按业务主题查阅", type: "knowledge", knowledge: { space: "售后资料", query: "不应采用的固定主题", sourceIds: [sourceId] }, inputMapping: { fields: [
@@ -122,15 +127,17 @@ describe("持久工作流的结构化业务结果", () => {
       { target: ["sourceIds"], source: { kind: "literal", value: [outsideId] } },
     ] } };
     const nodes: Record<string, unknown> = { done: base.workflowSnapshot.nodes.done };
-    if (mode === "subflow") {
+    if (isSubflow) {
       nodes.start = { ...base.workflowSnapshot.nodes.start, next: "group" };
-      nodes.group = { id: "group", title: "顺序检索", type: "subflow", next: "done", subflow: { name: "提取并检索", steps: [extract, lookup] } };
-    } else if (mode === "parallel") {
+      nodes.group = { id: "group", title: "顺序检索", type: "subflow", next: after ? "lookup" : "done", subflow: { name: "提取并检索", steps: after ? [extract] : [extract, lookup] } };
+      if (after) nodes.lookup = { ...lookup, next: "done" };
+    } else if (isParallel) {
       nodes.start = { ...base.workflowSnapshot.nodes.start, next: "batch" };
-      nodes.batch = { id: "batch", title: "并行处理", type: "parallel", next: "done", parallel: { strategy: "all", failurePolicy: "fail_fast", branches: [
-        { id: "research", label: "提取并检索", steps: [extract, lookup] },
-        { id: "record", label: "独立记录", steps: [{ id: "record", title: "记录处理", type: "system" }] },
+      nodes.batch = { id: "batch", title: "并行处理", type: "parallel", next: after ? "lookup" : "done", parallel: { strategy: "all", failurePolicy: mode === "after-parallel-issues" ? "continue" : "fail_fast", branches: [
+        { id: "research", label: "提取并检索", steps: after ? [extract] : [extract, lookup] },
+        { id: "record", label: "独立记录", steps: [{ id: "record", title: "记录处理", type: mode === "after-parallel-issues" ? "tool" : "system" }] },
       ] } };
+      if (after) nodes.lookup = { ...lookup, next: "done" };
     } else {
       nodes.start = { ...base.workflowSnapshot.nodes.start, next: "extract" };
       nodes.extract = { ...extract, next: mode === "loop" ? "for_rows" : "lookup" };

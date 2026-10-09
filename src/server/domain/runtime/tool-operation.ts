@@ -1,5 +1,6 @@
 import { ToolOperationConfig, ToolOperationReceipt, type ToolOperationStatus } from "@/contracts/tool-operation";
 import type { WorkflowNode } from "@/contracts/workflow";
+import type { InlineOutputReferences } from "@/contracts/inline-output-reference";
 import { canonicalJson } from "@/server/domain/canonical-json";
 import { validateJsonObjectSchema } from "@/server/domain/json-schema";
 import { redactCredentialData } from "@/server/domain/security/redact-sensitive";
@@ -10,10 +11,11 @@ export function toolOperationKeyMaterial(args: {
   node: Pick<WorkflowNode, "title" | "toolOperation">;
   workspaceId: string; toolId: string; action: string;
   input: Record<string, unknown>; outputs: Record<string, unknown>;
+  inlineReferences?: InlineOutputReferences;
 }): { ok: true; material: string } | { ok: false; error: string } {
   const config = ToolOperationConfig.safeParse(args.node.toolOperation);
   if (!config.success) return { ok: false, error: `步骤「${args.node.title}」的操作防重配置无效` };
-  const value = resolveInputValue(config.data.key, args.input, args.outputs);
+  const value = resolveInputValue(config.data.key, args.input, args.outputs, args.inlineReferences);
   if ((typeof value !== "string" || !value.trim() || value.length > 256)
     && (typeof value !== "number" || !Number.isSafeInteger(value))) {
     return { ok: false, error: `步骤「${args.node.title}」缺少有效的业务操作标识，须使用短文字或安全整数` };
