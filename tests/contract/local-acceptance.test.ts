@@ -9,8 +9,40 @@ const script = readFileSync(new URL("../../acceptance.ps1", import.meta.url), "u
 const guard = readFileSync(new URL("../../scripts/check-local-acceptance.mjs", import.meta.url), "utf8");
 
 describe("完整本地验收入口", () => {
-  it("真实PowerShell入口在缺配置时立即失败，不启动数据库或测试", () => {
-    if (process.platform !== "win32") return;
+  it.runIf(process.platform === "win32").each([
+    { command: "Invoke-NeonQuiet", label: "创建临时分支", code: 7 },
+    { command: "Invoke-NeonQuiet", label: "严格删除本次临时分支", code: 9 },
+    { command: "Invoke-Checked", label: "完整单测", code: 13 },
+  ])("实际PowerShell函数保留$label失败阶段及退出码并隐藏凭据", ({ command, label, code }) => {
+    const source = path.resolve("acceptance.ps1").replaceAll("'", "''");
+    const invocation = command === "Invoke-NeonQuiet"
+      ? `Invoke-NeonQuiet '${label}' @('branches', 'create')`
+      : `Invoke-Checked '${label}' 'pnpm' @('test')`;
+    const codeText = `
+$ErrorActionPreference = 'Stop'
+$tokens = $null; $errors = $null
+$ast = [Management.Automation.Language.Parser]::ParseFile('${source}', [ref]$tokens, [ref]$errors)
+if ($errors.Count -ne 0) { throw '解析失败' }
+foreach ($name in @('Set-Stage','Invoke-NeonQuiet','Invoke-Checked')) {
+  $fn = $ast.Find({ param($item) $item -is [Management.Automation.Language.FunctionDefinitionAst] -and $item.Name -eq $name }, $true)
+  Invoke-Expression $fn.Extent.Text
+}
+function npx { $global:LASTEXITCODE = ${code}; Write-Output 'local-ci-dummy-secret' }
+function pnpm { $global:LASTEXITCODE = ${code}; Write-Output 'local-ci-dummy-secret' }
+$env:NEON_API_KEY = 'local-ci-dummy-secret'
+try { ${invocation}; throw '未拒绝' } catch {
+  Write-Output ('RESULT:' + (@{ stage=$stage; category=$failureCategory; exitCode=$failureExitCode } | ConvertTo-Json -Compress))
+}
+`;
+    const result = spawnSync("pwsh", ["-NoProfile", "-Command", codeText], { encoding: "utf8", timeout: 10_000 });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(0);
+    expect(result.stdout + result.stderr).not.toContain("local-ci-dummy-secret");
+    const record = JSON.parse(result.stdout.split("RESULT:")[1].trim());
+    expect(record.stage).toBe(label);
+    expect(record.exitCode).toBe(code);
+  });
+  it.runIf(process.platform === "win32")("真实PowerShell入口在缺配置时立即失败，不启动数据库或测试", () => {
     const result = spawnSync("pwsh", ["-NoProfile", "-File", "acceptance.ps1"], {
       encoding: "utf8", timeout: 10_000,
       env: { ...process.env, NEON_PROJECT_ID: "", NEON_API_KEY: "" },
@@ -67,7 +99,7 @@ describe("完整本地验收入口", () => {
   });
   it("仅迁移本次唯一分支的ci_test空库，隔离标记在迁移后设置", () => {
     expect(script).toContain("[Guid]::NewGuid()");
-    expect(script).toContain('databases create --name ci_test --branch $branchName');
+    expect(script).toContain('"databases", "create", "--name", "ci_test", "--branch", $branchName');
     expect(script).toContain('$parsedUrl.AbsolutePath -ne "/ci_test"');
     expect(script.indexOf('$env:MVP_ACCEPTANCE_ISOLATED_DB = "1"')).toBeGreaterThan(script.indexOf('Invoke-Checked "迁移本次临时空库"'));
     expect(script).toContain('$env:MVP_ACCEPTANCE_ISOLATED_DB = "0"');
@@ -80,13 +112,21 @@ describe("完整本地验收入口", () => {
     expect(guard).toContain('path.join(directory, file)');
   });
   it("创建结果未知也清理同一分支，删除失败不吞掉且环境恢复", () => {
-    expect(script.indexOf('$creationAttempted = $true')).toBeLessThan(script.indexOf('branches create --name $branchName'));
-    expect(script).toContain('branches delete $branchName');
+    expect(script.indexOf('$creationAttempted = $true')).toBeLessThan(script.indexOf('"branches", "create", "--name", $branchName'));
+    expect(script).toContain('"branches", "delete", $branchName');
     expect(script).toContain('branches list');
     expect(script).toContain('$remaining.Contains($branchName)');
     expect(script).toContain('if ($cleanupFailed) { throw');
     expect(script).toContain('[Environment]::SetEnvironmentVariable($name, $original[$name], "Process")');
     expect(script).toContain('$env:PLAYWRIGHT_REUSE_SERVER = "0"');
     expect(script).toContain('[Net.IPAddress]::Loopback, 0');
+  });
+  it("失败阶段和原错误分类保留，但不输出原异常和管理凭据", () => {
+    expect(script).toContain('阶段=$stage；分类=$failureCategory；退出码=$exitDescription');
+    expect(script).toContain('原失败=$failure');
+    expect(script).not.toContain('"--api-key"');
+    expect(script).toContain('neonctl@5.0.1');
+    expect(script).toContain('$env:NEON_PROFILE = $null');
+    expect(script).not.toMatch(/Write-Host\s+\$_|\$failure\s*=\s*\$_/);
   });
 });

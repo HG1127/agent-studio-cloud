@@ -13,3 +13,9 @@ GitHub Actions 对提交 `0a38c2a0fb544c199870c9300a794108fd1e1384` 的 PR53 运
 目前专用 Neon 管理配置缺失，因此完整 `pnpm acceptance` 尚未执行。修改入口前冻结提交 `0a38c2a` 在独立 CI 工作区的类型、完整 lint、317 文件 2775 项单测、helper 两项和构建通过；这是基础门禁证据，不是修改后完整验收。入口契约、实际 PowerShell 缺配置失败、真实 Node 数量守卫模拟报告测试独立记录，不能代替真实数据库、Workflow、E2E。
 
 验收入口通过也不自动证明受保护 Vercel 预览实际可访问或真实供应商可用；这两项仍需独立验收。代码后续变化必须在新的精确提交重新完整执行，不能沿用旧提交结果。
+
+## CLI 与失败诊断核对
+
+固定使用 `neonctl@5.0.1`，npm 元数据确认它依赖同版 `neon`；官方发布标签对应提交 `7572bcf6641b2d4ab83873fedae1321b0a8007b9`。官方 [分支源码](https://github.com/neondatabase/neon-pkgs/blob/7572bcf6641b2d4ab83873fedae1321b0a8007b9/packages/cli/src/commands/branches.ts) 的删除命令直接调用 `deleteProjectBranch`，没有交互确认或 force 参数。官方 [凭据中间件](https://github.com/neondatabase/neon-pkgs/blob/7572bcf6641b2d4ab83873fedae1321b0a8007b9/packages/cli/src/utils/middlewares.ts) 明确支持 `NEON_API_KEY` 环境变量；本地入口不将密钥放入命令参数，同时清空继承的 `NEON_PROFILE` 并使用本次独立配置目录，结束后恢复环境。
+
+创建、空库创建、连接获取和校验、迁移及清理均记录安全阶段；异常保存阶段、分类和退出码，不回显原 HTTP、数据库错误正文或凭据。原执行失败与清理失败同时保留，任何清理不确定都阻止通过。Windows 用例实际解析并执行 PowerShell 函数，以假外部命令验证失败分类和脱敏；非 Windows 用例明确跳过，不能声称实际 PowerShell 已验证。数量守卫的模拟报告测试仍不等于实际41项通过。helper 本机旧冻结提交实际为2/2通过；完整入口配置未齐，修改后真实两项和完整门禁仍需重新执行。
