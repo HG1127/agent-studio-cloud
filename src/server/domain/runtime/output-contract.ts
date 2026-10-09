@@ -1,6 +1,6 @@
 import { WorkflowOutputField, type WorkflowNode } from "@/contracts/workflow";
 import { InlineOutputReferences } from "@/contracts/inline-output-reference";
-import { boundedJsonStorageValue, isPassiveJsonData } from "@/contracts/json";
+import { boundedJsonStorageValue, isPassiveJsonData, type JsonStorageValue } from "@/contracts/json";
 import { MAX_RUN_RESULT_BYTES } from "@/contracts/run";
 import { safeDataPathSegments } from "@/server/domain/runtime/data-path";
 import { isHiddenControlNode } from "@/lib/workflow-node-visibility";
@@ -113,6 +113,27 @@ function writePath(target: Record<string, unknown>, path: string, value: unknown
   return true;
 }
 
+export function resolveWorkflowOutputValue(outputs: Record<string, unknown>, candidate: OutputField, references?: InlineOutputReferences):
+  | { status: "provided"; value: JsonStorageValue }
+  | { status: "missing" }
+  | { status: "invalid" } {
+  const configuration = WorkflowOutputField.safeParse(candidate);
+  if (!configuration.success || configuration.data.sourcePath?.some(isCredentialFieldName)) return { status: "invalid" };
+  const field = configuration.data;
+  const source = field.sourceNodeId
+    ? Object.hasOwn(outputs, field.sourceNodeId) ? ownData(outputs, field.sourceNodeId) : readInlineOutput(field.sourceNodeId, outputs, references)
+    : undefined;
+  const value = field.sourceNodeId
+    ? ownData(source, "status") === "failed" || ownData(source, "ok") === false ? undefined : readSourcePath(source, field.sourcePath ?? [])
+    : readPath(outputs, field.path);
+  if (value === undefined || value === null) return { status: "missing" };
+  if (!isPassiveJsonData(value, MAX_RUN_RESULT_BYTES)) return { status: "invalid" };
+  const parsed = SelectedResultValue.safeParse(value);
+  if (!parsed.success) return { status: "invalid" };
+  const copied: JsonStorageValue = JSON.parse(JSON.stringify(parsed.data));
+  return hasMeaningfulResult(copied) ? { status: "provided", value: copied } : { status: "missing" };
+}
+
 export function projectWorkflowResult(outputs: Record<string, unknown>, fields: OutputField[], inlineReferences?: InlineOutputReferences):
   | { ok: true; result: Record<string, unknown> }
   | { ok: false; missing: string[] } {
@@ -126,28 +147,14 @@ export function projectWorkflowResult(outputs: Record<string, unknown>, fields: 
   const result: Record<string, unknown> = {};
   const missing: string[] = [];
   for (const candidate of fields) {
-    const configuration = WorkflowOutputField.safeParse(candidate);
-    if (!configuration.success || configuration.data.sourcePath?.some(isCredentialFieldName)) return { ok: false, missing: [candidate.label || candidate.path] };
-    const field = configuration.data;
-    const source = field.sourceNodeId
-      ? Object.hasOwn(outputs, field.sourceNodeId) ? ownData(outputs, field.sourceNodeId) : readInlineOutput(field.sourceNodeId, outputs, references.data)
-      : undefined;
-    const value = field.sourceNodeId
-      ? ownData(source, "status") === "failed" || ownData(source, "ok") === false ? undefined : readSourcePath(source, field.sourcePath ?? [])
-      : readPath(outputs, field.path);
-    if (value === undefined || value === null) {
+    const selected = resolveWorkflowOutputValue(outputs, candidate, references.data);
+    if (selected.status === "invalid") return { ok: false, missing: [candidate.label || candidate.path] };
+    const field = WorkflowOutputField.parse(candidate);
+    if (selected.status === "missing") {
       if (field.required) missing.push(field.label || field.path);
       continue;
     }
-    if (!isPassiveJsonData(value, MAX_RUN_RESULT_BYTES)) return { ok: false, missing: [field.label || field.path] };
-    const parsed = SelectedResultValue.safeParse(value);
-    if (!parsed.success) return { ok: false, missing: [field.label || field.path] };
-    const copied = JSON.parse(JSON.stringify(parsed.data));
-    if (!hasMeaningfulResult(copied)) {
-      if (field.required) missing.push(field.label || field.path);
-      continue;
-    }
-    if (!writePath(result, field.path, copied) && field.required) missing.push(field.label || field.path);
+    if (!writePath(result, field.path, selected.value) && field.required) missing.push(field.label || field.path);
     if (!SelectedResultValue.safeParse(result).success) return { ok: false, missing: ["最终交付内容无效或超过容量限制"] };
   }
   return missing.length > 0 ? { ok: false, missing } : { ok: true, result };
