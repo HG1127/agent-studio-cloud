@@ -51,3 +51,41 @@ pnpm exec vitest run --config vitest.workflow.config.mts tests/workflow/mvp-acce
 2026-10-09：核心接入前9项模拟测试、新文件lint与类型检查通过。核心接入后按新 `invokeRegisteredTool` 入口适配；离线冻结依赖安装完成（禁用安装脚本）；两份安全测试共16项通过；4份代码文件lint通过。首次新增 Workflow 类型检查发现人工回执仍为unknown，已用生产 `ToolOperationReceipt` Zod契约校验并推导类型，修复后全项目类型检查通过。
 
 真实 Workflow/数据库11项尚未执行。未运行 build、Playwright、数据库迁移或远端 CI；静态通过不代表真实链路验收通过。
+
+## 第二批：生产模板入口验收
+
+共同基底：`c7b7c9e26cde54b0f1808065f0e77955fbbf5134`（连接、URL、模板与第一批验收已整合）；当前分支：`codex/mvp-production-template-acceptance`。上面的第一批记录保留为 PR52 历史证据，原四份代码文件不修改。
+
+| 新增文件 | 断言范围 | 执行范围 |
+| --- | --- | --- |
+| `tests/helpers/mvp-acceptance-template.ts` | 配置测试工具登记与中文业务参数，直接调用生产 `buildMvpTemplate`；复用本机 MCP/模型假服务；清理本套件创建 UUID 的资源 | 仅 CI 临时隔离库；不拼接节点、草稿或运行快照 |
+| `tests/integration/mvp-acceptance-template-persistence.test.ts` | 5 项真实模板保存/发布事务及门禁断言 | 仅 CI 临时隔离库；不启动 Workflow |
+| `tests/workflow/mvp-acceptance-production-template.test.ts` | 13 项生产模板合法入口到 SDK、审批、账本、结果和候选评测断言 | 仅 CI 临时隔离库；真实 Workflow 引擎、数据库和 SDK |
+
+### 四层证据分别计算
+
+1. **工厂产物**：helper 将 `MvpTemplateInput` 与真实 `listToolRegistryOptions()` 传给 `buildMvpTemplate`。只提供业务配置和登记字段，不复制模板实现。冻结及执行的 `read/plan/approve/execute` 节点来自生产工厂；不使用第一批手工 `createMvpAcceptanceFixture`。
+2. **真实保存事务**：调用 `createMvpAgentAction`，让生产 `importAgentAction` 完成事务。检查助手、重绑后的草稿、归属与导入审计；相同请求只留一套记录，改变同一请求内容被拒绝。非法操作来源在保存前拒绝，无半保存记录。
+3. **真实发布入口**：调用 `publishVersionAction`，保留设计审计、登记兼容性、模型配置及发布去重门禁。无启用样例时按当前策略得到生产版本，检查实际冻结的必填输入、交付字段 `sourceNodeId/sourcePath`、模型非模拟选择、原始设计审计计数和一次发布审计。模型未配置或当前登记漂移时无版本写入。保存/发布阶段无 SDK 请求；这些断言不能证明运行成功。
+4. **真实 Workflow**：用 `startRunAction` 创建运行并读取其真实引擎句柄，不直接插入版本/运行、拼装 manifest 或修改业务状态。缺少客户编号、防重编号、空值、类型错误及额外字段在创建运行和连接 SDK 前被拒绝。完整链路验证实际 MCP 取数参数、模型 JSON Schema 请求和有界修正、审批正文、审批前零账本/零写入、批准后精确业务参数、回执账本和最终结果查询。金额 `0` 和方案字段 `false` 保持不变；人工批准是独立的审批决定。最终仅投影回执的 `receiptId/amount/approved`，金额与否定值来自实际 `execute` 回执，不是预置结果。
+
+完整运行还区分两类防重：相同启动请求不新建运行；不同启动请求使用同一业务防重编号时，每次仍需真实审批，但复用一次写入的持久回执。断言真实模型计量、执行链资源快照、账本行、外部请求与副作用次数、复用轨迹、其他工作区无法读取结果。资源设置与模型连接不修改。
+
+拒绝、真实 Hook 挂起后取消、模型修正耗尽、取数目录漂移及非法业务回执分别阻断后续进展；非法回执场景的测试外部副作用已发生，账本阻断且结果不交付成功字段，不能把外部成功误写成系统已确认成功。
+
+候选版本用真实 `createEvaluationCaseAction` 创建样例，再发布候选版本；手动启动被拒绝，只有现有 `startEvaluationAction` 合法启动试跑。检查真实评测/样例快照/关联运行/审批/回执结果。满足预期后由生产完成回调自然晋升；故意不满足金额预期时，运行有真实回执但评测失败，版本保持候选且手动运行仍被拒绝。不会手工设置生产状态、通过数或成功结果。
+
+### CI 命令与本地验证边界
+
+CI/CD 对话须先确认临时 Neon 数据库隔离、当前迁移就绪，并设置 `MVP_ACCEPTANCE_ISOLATED_DB=1`；标记不足时两套测试直接失败。仅该显式标记不是隔离库证明，隔离环境仍由 CI/CD 负责确认。
+
+```text
+pnpm exec vitest run --config vitest.integration.config.mts tests/integration/mvp-acceptance-template-persistence.test.ts
+pnpm exec vitest run --config vitest.workflow.config.mts tests/workflow/mvp-acceptance-production-template.test.ts
+```
+
+两套测试只模拟 `next/cache` 刷新。生产工厂、创建/导入/发布/启动/评测/审批/取消入口、设计审计、模型计量、执行资源、数据库、工具账本和传输均不模拟。准备工具登记属于测试环境配置，测试外部服务是本机协议服务，不能当作真实客户业务系统验收或模型业务质量证明。
+
+2026-10-09：新增三份代码文件的 ESLint 和全项目 `tsc --noEmit` 通过。第二批 5 项保存/发布与 13 项 Workflow 断言已经编写，**尚未执行，不代表 18 项通过**；工厂层也没有额外运行本地测试。两批真实数据库/Workflow 的执行结果应由 CI/CD 后续填写。未执行本地数据库查询、测试、迁移、build、Playwright 或远端 CI。没有修改生产逻辑、依赖、UI、模型连接、日程或配置迁移。
+
+发布或启动若暴露真实缺口，必须保留失败，并按具体入口、门禁、返回错误及实际持久化记录交接；本线不得降低门禁或改写预期让失败成为成功。
