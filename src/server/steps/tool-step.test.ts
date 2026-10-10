@@ -15,6 +15,10 @@ vi.mock("@/server/services/tool-operation", () => ({ invokeToolOperation: mocks.
 vi.mock("@/server/tools/tool-registry", () => ({ getToolRegistration: mocks.getToolRegistration }));
 
 import { runToolStep } from "@/server/steps/tool-step";
+import { MAX_STEP_OUTPUT_BYTES, stepOutputStorageIssue } from "@/server/domain/runtime/json-storage";
+import { validateToolOperationReceipt } from "@/server/domain/runtime/tool-operation";
+import { FatalError } from "workflow";
+import type { ToolRegistration } from "@/server/tools/tool-registry";
 
 const node = WorkflowNode.parse({
   id: "update_customer", title: "更新客户资料", type: "tool",
@@ -24,7 +28,7 @@ const node = WorkflowNode.parse({
     outputSchema: { type: "object", required: ["receiptId"], properties: { receiptId: { type: "string" } } },
   },
 });
-const registration = {
+const registration: ToolRegistration = {
   id: "crm.update", name: "客户系统", description: "", endpoint: "https://tools.example.com/update",
   method: "POST", headers: {}, action: "update_customer", scope: "customer.write", risk: "medium",
   inputSchema: { type: "object" }, outputSchema: node.tool!.outputSchema,
@@ -80,9 +84,54 @@ describe("真实工具步骤", () => {
   });
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.persistStep.mockReset();
     mocks.attempt = 1;
     mocks.stepId = "step-1";
     mocks.getToolRegistration.mockReturnValue(registration);
+  });
+
+  it.each([
+    { margin: 0, providerOk: false }, { margin: 9, providerOk: false },
+    { margin: 10, providerOk: false }, { margin: 0, providerOk: true },
+  ])("合法HTTP回执首次和缓存重入都能保留完整业务结果 %#", async ({ margin, providerOk }) => {
+    const { invokeHttpTool } = await vi.importActual<typeof import("@/server/tools/invoke-http-tool")>("@/server/tools/invoke-http-tool");
+    const raw: Record<string, unknown> = { receiptId: "r1", text: "" };
+    if (providerOk) raw.ok = true;
+    raw.text = "x".repeat(MAX_STEP_OUTPUT_BYTES - margin - new TextEncoder().encode(JSON.stringify(raw)).byteLength);
+    const responseText = JSON.stringify(raw);
+    expect(new TextEncoder().encode(responseText).byteLength).toBe(MAX_STEP_OUTPUT_BYTES - margin);
+    const fetchImpl = vi.fn(async () => new Response(responseText, { status: 200 }));
+    let cached: Record<string, unknown> | undefined;
+    mocks.invokeToolOperation.mockImplementation(async () => {
+      const reused = cached !== undefined;
+      if (!cached) {
+        const invoked = await invokeHttpTool({ tool: registration, idempotencyKey: "business-1", action: registration.action,
+          input: {}, outputs: {}, fetchImpl });
+        if (!invoked.ok) return invoked;
+        const validated = validateToolOperationReceipt(invoked.output, node.tool!.outputSchema, registration.outputSchema);
+        if (!validated.ok) return { ok: false, error: validated.error, retryable: false };
+        cached = validated.value;
+      }
+      return { ok: true, output: cached, operationId: "00000000-0000-4000-8000-000000000123", reused };
+    });
+    mocks.persistStep.mockImplementation(async (step) => {
+      if (step.output === undefined) return;
+      const issue = stepOutputStorageIssue(step.output, step.nodeType, "步骤输出");
+      if (issue) throw new FatalError(issue);
+    });
+    const protectedNode = WorkflowNode.parse({ ...node, toolOperation: { scope: "crm-update", key: { kind: "literal", value: "c1" } } });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const result = await runToolStep({ runId: "run-1", node: protectedNode, input: {}, outputs: {} });
+      expect(result.receipt.ok).toBe(true);
+      expect(result.receipt.receiptId).toBe("r1");
+      expect(result.receipt.text).toBe(raw.text);
+      expect(new TextEncoder().encode(JSON.stringify(result.receipt)).byteLength)
+        .toBe(MAX_STEP_OUTPUT_BYTES - margin + (providerOk ? 0 : 10));
+    }
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(mocks.invokeHttpTool).not.toHaveBeenCalled();
+    expect(mocks.invokeToolOperation).toHaveBeenCalledTimes(2);
+    expect(mocks.appendTrace).toHaveBeenCalledWith(expect.objectContaining({ kind: "tool.operation_reused" }));
   });
 
   it("执行注册工具并持久化经过契约校验的业务回执", async () => {

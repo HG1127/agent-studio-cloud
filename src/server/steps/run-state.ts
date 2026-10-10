@@ -16,7 +16,7 @@ import {
   MAX_RUN_CONTEXT_BYTES,
   MAX_RUN_RESULT_BYTES,
   MAX_RUN_STEP_OUTPUT_TOTAL_BYTES,
-  MAX_STEP_OUTPUT_BYTES,
+  stepOutputStorageIssue,
 } from "@/server/domain/runtime/json-storage";
 import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
@@ -136,7 +136,7 @@ export async function persistStep(step: PersistStepInput): Promise<void> {
   const stepId = workflowStepId();
   const safeStep = step.error ? { ...step, error: redactSensitiveText(step.error) } : step;
   let rejectedOutput = safeStep.output !== undefined && safeStep.output !== null
-    ? jsonStorageIssue(safeStep.output, MAX_STEP_OUTPUT_BYTES, `步骤「${safeStep.nodeTitle ?? safeStep.nodeId}」的输出`)
+    ? stepOutputStorageIssue(safeStep.output, safeStep.nodeType, `步骤「${safeStep.nodeTitle ?? safeStep.nodeId}」的输出`)
     : null;
   let storedStep: PersistStepInput = rejectedOutput
     ? { ...safeStep, status: "failed", output: null, error: rejectedOutput }
