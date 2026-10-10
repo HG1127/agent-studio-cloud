@@ -3,6 +3,7 @@ import { ToolRegistryOption } from "@/contracts/tool-registry";
 import { WorkflowDraft } from "@/contracts/workflow";
 import { validateJsonObjectSchema, validateJsonSchemaDefinition } from "@/server/domain/json-schema";
 import { importedWorkflowIssue } from "@/server/domain/import-agent";
+import { mcpToolInputDefinitionIssue } from "@/server/domain/runtime/mcp-tool";
 
 type Schema = Record<string, unknown>;
 function readInputTypeMatches(declared: unknown, inputType: MvpTemplateInput["inputs"][number]["type"]): boolean {
@@ -76,6 +77,11 @@ export function buildMvpTemplate(input: unknown, registry: unknown):
     || (action.protocol === "mcp-streamable-http" ? action.operationKind !== "action" : action.operationKind === "read")
     || action.businessIdempotency !== true || !action.businessIdempotencyRetentionMs) {
     return { ok: false, error: "工具必须明确登记为只读取数和具备防重保证的业务操作，暂时无法创建" };
+  }
+  for (const tool of [read, action]) {
+    if (tool.protocol !== "mcp-streamable-http") continue;
+    const issue = mcpToolInputDefinitionIssue(tool.inputSchema);
+    if (issue) return { ok: false, error: issue };
   }
   const actionSchema = actionParameterSchema(action);
   const readFields = readInputFields(read.inputSchema), actionFields = actionSchema && objectFields(actionSchema);

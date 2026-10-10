@@ -3,8 +3,15 @@ import { isPassiveJsonData } from "@/contracts/json";
 import { canonicalJson } from "@/server/domain/canonical-json";
 import { validateJsonObjectSchema, validateJsonSchemaDefinition } from "@/server/domain/json-schema";
 
+export function mcpToolInputDefinitionIssue(definition: unknown): string | null {
+  const error = "工具参数定义无效或超过容量，请检查服务端配置";
+  if (!isPassiveJsonData(definition, MAX_MCP_DEFINITION_BYTES)) return error;
+  const parsed = McpToolInputDefinition.safeParse(definition);
+  return !parsed.success || parsed.data.type !== "object" || validateJsonSchemaDefinition(parsed.data) ? error : null;
+}
+
 export function mcpToolDefinitionIssue(actual: Record<string, unknown>, expected: Record<string, unknown>): string | null {
-  if (!isPassiveJsonData(actual, MAX_MCP_DEFINITION_BYTES) || !McpToolInputDefinition.safeParse(actual).success || validateJsonSchemaDefinition(actual)
+  if (mcpToolInputDefinitionIssue(actual) || mcpToolInputDefinitionIssue(expected)
     || canonicalJson(actual) !== canonicalJson(expected)) return "远端工具参数规则已变化，请核对并重新发布助手";
   return null;
 }

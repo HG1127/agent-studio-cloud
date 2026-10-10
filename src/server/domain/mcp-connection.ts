@@ -4,7 +4,7 @@ import { canonicalJson } from "@/server/domain/canonical-json";
 import { validateJsonSchemaDefinition } from "@/server/domain/json-schema";
 import { isPassiveJsonData } from "@/contracts/json";
 import { MAX_MCP_SESSION_BYTES } from "@/contracts/mcp-tool";
-import { mcpToolDefinitionIssue } from "@/server/domain/runtime/mcp-tool";
+import { mcpToolDefinitionIssue, mcpToolInputDefinitionIssue } from "@/server/domain/runtime/mcp-tool";
 const forbiddenHeaders = new Set(["connection", "content-length", "host", "cookie", "set-cookie", "proxy-authorization", "proxy-authenticate", "keep-alive", "te", "trailer", "transfer-encoding", "upgrade"]);
 
 export function parseMcpConnections(raw: string | undefined): McpConnectionRegistration[] | null {
@@ -25,8 +25,8 @@ export function parseMcpConnections(raw: string | undefined): McpConnectionRegis
       }
       const actions = new Set<string>();
       for (const tool of registration.tools) {
-        if (toolIds.has(tool.registryToolId) || actions.has(tool.action) || !tool.inputSchema || typeof tool.inputSchema !== "object" || Array.isArray(tool.inputSchema)
-          || tool.inputSchema.type !== "object" || validateJsonSchemaDefinition(tool.inputSchema) || tool.outputSchema && validateJsonSchemaDefinition(tool.outputSchema)) return null;
+        if (toolIds.has(tool.registryToolId) || actions.has(tool.action) || mcpToolInputDefinitionIssue(tool.inputSchema)
+          || tool.outputSchema && validateJsonSchemaDefinition(tool.outputSchema)) return null;
         toolIds.add(tool.registryToolId); actions.add(tool.action);
       }
     }

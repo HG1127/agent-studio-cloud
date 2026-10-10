@@ -26,6 +26,12 @@ describe("从模板创建真实业务草稿", () => {
       vi.restoreAllMocks();
     }
   });
+  it.each([0, 1])("已选 MCP 工具 %i 参数定义超容量时不进入保存", async (index) => {
+    mocks.listTools.mockReturnValue(mvpTemplateRegistry.map((tool, position) => position === index
+      ? { ...tool, inputSchema: { ...tool.inputSchema, description: "汉".repeat(12_000) } } : tool));
+    expect(await createMvpAgentAction(mvpTemplateInput, requestId)).toEqual({ ok: false, error: "工具参数定义无效或超过容量，请检查服务端配置" });
+    expect(mocks.importAgent).not.toHaveBeenCalled();
+  });
   it.each([
     { type: "object", properties: {}, additionalProperties: false }, { type: "object" },
   ])("零参数只读取数通过原子保存入口保留完整快照 %j", async (inputSchema) => {

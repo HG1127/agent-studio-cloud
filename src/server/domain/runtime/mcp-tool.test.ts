@@ -1,5 +1,32 @@
 import { describe, expect, it, vi } from "vitest";
-import { mcpToolDefinitionIssue, normalizeMcpToolResult } from "./mcp-tool";
+import { mcpToolDefinitionIssue, mcpToolInputDefinitionIssue, normalizeMcpToolResult } from "./mcp-tool";
+import { MAX_MCP_DEFINITION_BYTES } from "@/contracts/mcp-tool";
+
+describe("已登记 MCP 参数定义纯预检", () => {
+  it.each([{ type: "object" }, { type: "object", properties: {}, additionalProperties: false }, { type: "object", properties: { active: { type: "boolean", default: false }, amount: { type: "number", default: 0 } } }])("接受已支持对象和零参数定义 %#", (definition) => {
+    expect(mcpToolInputDefinitionIssue(definition)).toBeNull();
+  });
+  it.each([null, [], {}, { type: "string" }, { type: ["object", "null"] }, { type: "object", properties: [] }, { type: "object", maxProperties: -1 }])("拒绝不符合执行规则的定义 %#", (definition) => {
+    expect(mcpToolInputDefinitionIssue(definition)).toBe("工具参数定义无效或超过容量，请检查服务端配置");
+  });
+  it("按真实JSON和UTF8字节验证，边界值保留、不截断", () => {
+    const definition = { type: "object", description: "" };
+    definition.description = "x".repeat(MAX_MCP_DEFINITION_BYTES - new TextEncoder().encode(JSON.stringify(definition)).byteLength);
+    expect(new TextEncoder().encode(JSON.stringify(definition)).byteLength).toBe(MAX_MCP_DEFINITION_BYTES);
+    expect(mcpToolInputDefinitionIssue(definition)).toBeNull();
+    expect(mcpToolInputDefinitionIssue({ ...definition, description: `${definition.description}x` })).not.toBeNull();
+    expect(mcpToolInputDefinitionIssue({ type: "object", description: "汉".repeat(12_000) })).not.toBeNull();
+    expect(definition.description.length).toBe(MAX_MCP_DEFINITION_BYTES - 34);
+  });
+  it("不执行访问器和序列化代码，也不接受循环定义", () => {
+    const getter = vi.fn(() => "object"), toJSON = vi.fn(() => ({ type: "object" }));
+    expect(mcpToolInputDefinitionIssue({ get type() { return getter(); } })).not.toBeNull();
+    expect(mcpToolInputDefinitionIssue({ type: "object", toJSON })).not.toBeNull();
+    const cyclic: Record<string, unknown> = { type: "object" }; cyclic.properties = cyclic;
+    expect(mcpToolInputDefinitionIssue(cyclic)).not.toBeNull();
+    expect(getter).not.toHaveBeenCalled(); expect(toJSON).not.toHaveBeenCalled();
+  });
+});
 
 describe("MCP 回执与参数规则", () => {
   it("规则顺序无关，但新字段与语义改变不能静默接受", () => {

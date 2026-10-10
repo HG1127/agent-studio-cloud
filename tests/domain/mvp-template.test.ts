@@ -12,6 +12,7 @@ import { parseToolRegistry } from "@/server/tools/tool-registry";
 import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding";
 import { mvpTemplateInput as input, mvpTemplateRegistry as registry, mvpHttpAction } from "../fixtures/mvp-template";
 import { createMcpMvpFixture } from "../fixtures/mcp-mvp";
+import { MAX_MCP_DEFINITION_BYTES } from "@/contracts/mcp-tool";
 
 function build() {
   const result = buildMvpTemplate(input, registry);
@@ -26,6 +27,33 @@ function actionWithSchema(protocol: string, schema: Record<string, unknown>) {
 }
 
 describe("最小真实业务模板", () => {
+  it("取数定义恰好达到容量时保持快照，未选工具不阻塞创建", () => {
+    const inputSchema = { ...registry[0].inputSchema, description: "" };
+    inputSchema.description = "x".repeat(MAX_MCP_DEFINITION_BYTES - new TextEncoder().encode(JSON.stringify(inputSchema)).byteLength);
+    expect(new TextEncoder().encode(JSON.stringify(inputSchema)).byteLength).toBe(MAX_MCP_DEFINITION_BYTES);
+    const tools = [{ ...registry[0], inputSchema }, registry[1],
+      { ...registry[0], id: "unselected-large", inputSchema: { type: "object", description: "汉".repeat(12_000) } },
+      { ...registry[0], id: "unselected-scalar", inputSchema: { type: "string" } }];
+    const built = buildMvpTemplate(input, tools);
+    if (!built.ok) throw new Error(built.error);
+    expect(built.draft.nodes.read.tool!.inputSchema).toEqual(inputSchema);
+  });
+  it("MCP 输入容量限制不扩大到 HTTP 信封或工具输出定义", () => {
+    const description = "汉".repeat(12_000);
+    const outputSchema = { ...registry[0].outputSchema, description };
+    const inputSchema = { ...mvpHttpAction.inputSchema, description };
+    const built = buildMvpTemplate(input, [{ ...registry[0], outputSchema }, { ...mvpHttpAction, inputSchema }]);
+    if (!built.ok) throw new Error(built.error);
+    expect(built.draft.nodes.read.tool!.outputSchema).toEqual(outputSchema);
+    expect(built.draft.nodes.execute.tool!.inputSchema).toEqual(inputSchema);
+  });
+  it.each(["汉".repeat(12_000), "x".repeat(MAX_MCP_DEFINITION_BYTES - 20)])("取数定义超出实际执行字节限制时不创建草稿 %#", (description) => {
+    const tools = [{ ...registry[0], inputSchema: { ...registry[0].inputSchema, description } }, registry[1]];
+    expect(description.length).toBeLessThan(MAX_MCP_DEFINITION_BYTES);
+    expect(new TextEncoder().encode(JSON.stringify(tools[0].inputSchema)).byteLength).toBeGreaterThan(MAX_MCP_DEFINITION_BYTES);
+    expect(parseToolRegistry(JSON.stringify(tools.map((tool) => ({ ...tool, endpoint: "https://fixture.example/mcp" }))))).toHaveLength(2);
+    expect(buildMvpTemplate(input, tools).ok).toBe(false);
+  });
   it.each([
     { type: "object", properties: {}, additionalProperties: false }, { type: "object" },
     { type: "object", properties: {}, required: [], minProperties: 0, maxProperties: 0, const: {}, enum: [{}] },
