@@ -1,8 +1,9 @@
 import { eq, inArray, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { startMock, cancelMock } = vi.hoisted(() => ({ startMock: vi.fn(), cancelMock: vi.fn() }));
+const { startMock, cancelMock, workflowMetadataMock } = vi.hoisted(() => ({ startMock: vi.fn(), cancelMock: vi.fn(), workflowMetadataMock: vi.fn() }));
 vi.mock("workflow/api", () => ({ start: startMock }));
+vi.mock("workflow", async (original) => ({ ...await original<typeof import("workflow")>(), getWorkflowMetadata: workflowMetadataMock }));
 
 import { AgentManifest } from "@/contracts/manifest";
 import { agents, agentVersions, evaluationCaseResults, evaluationCases, evaluationRuns, knowledgeSources, runs } from "@/db/schema";
@@ -62,6 +63,7 @@ beforeEach(async () => {
   });
   cancelMock.mockReset().mockResolvedValue(undefined);
   startMock.mockReset().mockResolvedValue({ runId: "wrun_test_handle", cancel: cancelMock });
+  workflowMetadataMock.mockReset().mockReturnValue({ workflowRunId: "wrun_test_handle" });
 });
 
 afterEach(async () => {
@@ -651,6 +653,7 @@ describe("运行启动句柄恢复", () => {
     expect(result).toMatchObject({ ok: true, runId: expect.any(String) });
     const [run] = await db.select().from(runs).where(eq(runs.id, result.ok ? result.runId : ""));
     expect(run.status).toBe("running");
+    expect(run.workflowRunId).toBe("wrun_test_handle");
     expect(run.error).toBeNull();
     expect(await startRunCore({ agentId: AGENT_ID, input: {}, sourceKey: "manual:00000000-0000-4000-8000-0000000007d1" }))
       .toEqual(result);
@@ -658,18 +661,19 @@ describe("运行启动句柄恢复", () => {
     log.mockRestore();
   });
 
-  it("句柄回写失败时取消失联工作流并把活跃运行置为失败", async () => {
+  it("句柄回写失败且未绑定时保留待确认状态，不误取消或写失败", async () => {
     vi.spyOn(db, "update").mockImplementationOnce(() => { throw new Error("模拟句柄回写失败"); });
 
     const result = await startRunCore({ agentId: AGENT_ID, input: {} });
 
-    expect(result).toEqual({ ok: false, error: "运行启动失败，请稍后重试" });
-    expect(cancelMock).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ ok: true, runId: expect.any(String) });
+    expect(cancelMock).not.toHaveBeenCalled();
     const [run] = await db.select().from(runs).where(eq(runs.agentId, AGENT_ID));
-    expect(run).toMatchObject({ status: "failed", error: "运行启动失败，请稍后重试" });
+    expect(run).toMatchObject({ status: "queued", workflowRunId: null, error: null });
+    expect(readRunStartLease(run.stepStates)).not.toBeNull();
   });
 
-  it("句柄回写与取消都失败时保留运行，避免已接收的工作流被误判失败", async () => {
+  it("保存结果未知时不调用取消，即使取消接口本身也不可用", async () => {
     vi.spyOn(db, "update").mockImplementationOnce(() => { throw new Error("模拟句柄回写失败"); });
     cancelMock.mockRejectedValueOnce(new Error("模拟取消响应丢失"));
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -677,25 +681,27 @@ describe("运行启动句柄恢复", () => {
     const result = await startRunCore({ agentId: AGENT_ID, input: {} });
 
     expect(result).toMatchObject({ ok: true, runId: expect.any(String) });
-    expect(cancelMock).toHaveBeenCalledOnce();
+    expect(cancelMock).not.toHaveBeenCalled();
     const [pending] = await db.select().from(runs).where(eq(runs.id, result.ok ? result.runId : ""));
     expect(pending).toMatchObject({ status: "queued", error: null, workflowRunId: null });
     expect(readRunStartLease(pending.stepStates)).not.toBeNull();
     log.mockRestore();
   });
 
-  it("句柄回写失败后连失败状态也暂时无法保存时保留原运行", async () => {
-    vi.spyOn(db, "update")
-      .mockImplementationOnce(() => { throw new Error("模拟句柄回写失败"); })
-      .mockImplementationOnce(() => { throw new Error("模拟失败状态回写失败"); });
+  it("初始化已提交后句柄回写失败保留已绑定执行者", async () => {
+    startMock.mockImplementationOnce(async (_workflow, [runId, frozenManifest, , context]: [string, AgentManifest, Record<string, unknown>, { startToken: string }]) => {
+      await initializeRun(runId, frozenManifest.workflowSnapshot, context.startToken);
+      vi.spyOn(db, "update").mockImplementationOnce(() => { throw new Error("模拟句柄回写响应丢失"); });
+      return { runId: "wrun_test_handle", cancel: cancelMock };
+    });
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     const result = await startRunCore({ agentId: AGENT_ID, input: {} });
 
     expect(result).toMatchObject({ ok: true, runId: expect.any(String) });
-    expect(cancelMock).toHaveBeenCalledOnce();
+    expect(cancelMock).not.toHaveBeenCalled();
     const [pending] = await db.select().from(runs).where(eq(runs.id, result.ok ? result.runId : ""));
-    expect(pending).toMatchObject({ status: "queued", workflowRunId: null, error: null });
+    expect(pending).toMatchObject({ status: "running", workflowRunId: "wrun_test_handle", error: null });
     expect(readRunStartLease(pending.stepStates)).not.toBeNull();
     log.mockRestore();
   });
@@ -704,7 +710,7 @@ describe("运行启动句柄恢复", () => {
     const originalUpdate = db.update.bind(db);
     startMock.mockImplementationOnce(async (_workflow, [runId]: [string]) => {
       await originalUpdate(runs)
-        .set({ status: "completed", result: { done: true }, finishedAt: new Date() })
+        .set({ status: "completed", workflowRunId: "wrun_test_handle", result: { done: true }, finishedAt: new Date() })
         .where(eq(runs.id, runId));
       return { runId: "wrun_test_handle", cancel: cancelMock };
     });
@@ -713,7 +719,7 @@ describe("运行启动句柄恢复", () => {
     const result = await startRunCore({ agentId: AGENT_ID, input: {} });
 
     expect(result).toMatchObject({ ok: true, runId: expect.any(String) });
-    expect(cancelMock).toHaveBeenCalledOnce();
+    expect(cancelMock).not.toHaveBeenCalled();
     const [run] = await db.select().from(runs).where(eq(runs.agentId, AGENT_ID));
     expect(run).toMatchObject({ status: "completed", result: { done: true }, error: null });
     expect(result.ok && result.runId).toBe(run.id);

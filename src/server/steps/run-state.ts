@@ -1,8 +1,9 @@
 "use step";
 // 运行状态机步骤：initializeRun / persistStep / persistContext / finalizeRun / failRun。
 // 全部落在 runs / run_steps 两张表，状态机为 queued→running→completed|failed，中间可暂停等待确认或外部消息。
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
-import { FatalError, getStepMetadata } from "workflow";
+import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { FatalError, getStepMetadata, getWorkflowMetadata } from "workflow";
+import { RunExecutionClaim } from "@/contracts/run-execution-binding";
 import type { WorkflowDraft, WorkflowOutputField } from "@/contracts/workflow";
 import type { InlineOutputReferences } from "@/contracts/inline-output-reference";
 import { projectWorkflowResult } from "@/server/domain/runtime/output-contract";
@@ -21,6 +22,7 @@ import {
 import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { withSafeWorkflowError } from "@/server/security/workflow-error";
+import { runInitializationIssue } from "@/server/domain/runtime/run-execution-binding";
 
 function workflowStepId(): string {
   try {
@@ -32,24 +34,31 @@ function workflowStepId(): string {
 
 export async function initializeRun(runId: string, draft: WorkflowDraft, startToken?: string): Promise<void> {
   "use step";
+  let claim: RunExecutionClaim;
+  try {
+    claim = RunExecutionClaim.parse({ sdkRunId: getWorkflowMetadata().workflowRunId, startToken: startToken ?? null });
+  } catch {
+    throw new FatalError("运行执行身份无法确认，不能继续执行");
+  }
   const stepId = workflowStepId();
   const [run] = await withSafeWorkflowError(() => db
-    .select({ id: runs.id, workspaceId: runs.workspaceId, status: runs.status, stepStates: runs.stepStates })
+    .select({ id: runs.id, workspaceId: runs.workspaceId, status: runs.status, stepStates: runs.stepStates, workflowRunId: runs.workflowRunId })
     .from(runs)
     .where(eq(runs.id, runId))
     .limit(1), "运行状态暂时无法读取，请稍后重试");
   if (!run) throw new FatalError("运行记录不存在，无法继续执行");
   const lease = readRunStartLease(run.stepStates);
-  if ((lease && lease.token !== startToken) || (!lease && startToken) || (lease && !startToken)) {
-    throw new FatalError("运行启动已由新的请求接管");
-  }
+  const issue = runInitializationIssue({ status: run.status, sdkRunId: run.workflowRunId, startToken: lease?.token ?? (Object.hasOwn(run.stepStates, RUN_START_LEASE_KEY) ? undefined : null) }, claim);
+  if (issue) throw new FatalError(issue);
   const now = new Date();
   const updated = await withSafeWorkflowError(() => db
     .update(runs)
-    .set({ status: "running", startedAt: now, updatedAt: now, modelUsageTrackingVersion: "v1", collaborationTrackingVersion: "v1" })
+    .set({ status: "running", workflowRunId: claim.sdkRunId, startedAt: now, updatedAt: now, modelUsageTrackingVersion: "v1", collaborationTrackingVersion: "v1" })
     .where(and(
       eq(runs.id, runId),
+      eq(runs.workspaceId, run.workspaceId),
       eq(runs.status, "queued"),
+      or(isNull(runs.workflowRunId), eq(runs.workflowRunId, claim.sdkRunId)),
       startToken
         ? sql<boolean>`${runs.stepStates} -> ${RUN_START_LEASE_KEY} ->> 'token' = ${startToken}`
         : sql<boolean>`${runs.stepStates} -> ${RUN_START_LEASE_KEY} is null`,
@@ -57,15 +66,13 @@ export async function initializeRun(runId: string, draft: WorkflowDraft, startTo
     .returning({ id: runs.id }), "运行状态暂时无法更新，请稍后重试");
   if (updated.length === 0) {
     const [current] = await withSafeWorkflowError(() => db
-      .select({ status: runs.status, stepStates: runs.stepStates })
+      .select({ status: runs.status, stepStates: runs.stepStates, workflowRunId: runs.workflowRunId })
       .from(runs)
-      .where(eq(runs.id, runId))
+      .where(and(eq(runs.id, runId), eq(runs.workspaceId, run.workspaceId)))
       .limit(1), "运行状态暂时无法读取，请稍后重试");
     const currentLease = readRunStartLease(current?.stepStates);
-    if (current?.status === "running" && (
-      (startToken && currentLease?.token === startToken)
-      || (!startToken && !currentLease)
-    )) {
+    const currentIssue = runInitializationIssue({ status: current?.status, sdkRunId: current?.workflowRunId, startToken: currentLease?.token ?? (current && !Object.hasOwn(current.stepStates, RUN_START_LEASE_KEY) ? null : undefined) }, claim);
+    if (current?.status === "running" && !currentIssue) {
       await appendTrace({
         runId,
         nodeId: draft.startNodeId,
@@ -76,7 +83,7 @@ export async function initializeRun(runId: string, draft: WorkflowDraft, startTo
       });
       return;
     }
-    throw new FatalError("运行已经结束，不能重新启动");
+    throw new FatalError(currentIssue ?? "运行状态尚未确认，不能重新启动");
   }
   await appendTrace({
     runId,

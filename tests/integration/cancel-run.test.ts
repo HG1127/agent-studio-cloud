@@ -8,6 +8,7 @@ const { appendTraceMock, cancelMock, getRunMock, revalidatePathMock } = vi.hoist
   revalidatePathMock: vi.fn(),
 }));
 vi.mock("workflow/api", () => ({ getRun: getRunMock }));
+vi.mock("workflow", async (original) => ({ ...await original<typeof import("workflow")>(), getWorkflowMetadata: () => ({ workflowRunId: "workflow-cancel-test" }) }));
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 vi.mock("@/server/steps/trace-step", () => ({ appendTrace: appendTraceMock }));
 

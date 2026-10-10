@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+vi.mock("workflow", async (original) => ({ ...await original<typeof import("workflow")>(), getWorkflowMetadata: () => ({ workflowRunId: "wrun_model_usage_test" }) }));
 import { FatalError } from "workflow";
 import { GET } from "@/app/api/runs/[runId]/usage/route";
 import { ModelCallSettlement, RunModelUsageResult } from "@/contracts/model-usage";
@@ -98,7 +99,7 @@ describe("逐次模型账本真实数据库验收", () => {
     expect(await getRunModelUsage(workspaceId, id, now)).toMatchObject({ calls: { total: 5, returned: 3, failed: 1, pending: 1 }, usage: { completeCalls: 1, incompleteCalls: 4, invalidUsageCalls: 1, inputCalls: 2, outputCalls: 2, knownInputTokens: 12, knownOutputTokens: 8, knownCallTotalTokens: 18, recordedUsageComplete: false } });
   });
   it("历史覆盖与真实零用量分开，初始化只标记新启动的运行，重入不回填历史", async () => {
-    const legacy = await fixture({ modelUsageTrackingVersion: null }), queued = await fixture({ status: "queued", modelUsageTrackingVersion: null });
+    const legacy = await fixture({ modelUsageTrackingVersion: null, workflowRunId: "wrun_model_usage_test" }), queued = await fixture({ status: "queued", modelUsageTrackingVersion: null });
     const draft = WorkflowDraft.parse({ id: "usage-test", startNodeId: "start", rootAgent: { id: "test", name: "测试", role: "测试" }, nodes: { start: { id: "start", title: "开始", type: "trigger", next: "done" }, done: { id: "done", title: "完成", type: "end", next: null } }, memoryPolicy: { taskContext: true, longTerm: false } });
     await initializeRun(legacy, draft); await initializeRun(queued, draft);
     expect(await getRunModelUsage(workspaceId, legacy, now)).toMatchObject({ tracking: "legacy-or-partial", usage: { recordedUsageComplete: false, knownCallTotalTokens: null } });
