@@ -71,7 +71,7 @@ function runtimeDataPathOk(path: string | null | undefined): boolean {
 function toolExecutionIssue(node: WorkflowNode): string | null {
   const tool = node.tool;
   if (!tool || tool.unresolved === true) return "工具尚未绑定";
-  if (tool.registryToolId === "demo" || tool.protocol === "demo") return null;
+  if (tool.protocol === "demo") return null;
   const registration = getToolRegistration(tool.registryToolId);
   if (!registration) return "绑定的业务工具未在服务端配置";
   if (node.toolOperation && (registration.businessIdempotency !== true || !registration.businessIdempotencyRetentionMs)) return "绑定的业务工具尚未确认支持跨运行操作防重";

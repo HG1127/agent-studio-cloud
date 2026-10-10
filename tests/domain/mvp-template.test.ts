@@ -28,6 +28,19 @@ function actionWithSchema(protocol: string, schema: Record<string, unknown>) {
 }
 
 describe("最小真实业务模板", () => {
+  it("真实 MCP 取数工具标识 demo 保持真实协议和冻结定义", () => {
+    const read = { ...registry[0], id: "demo" };
+    const built = buildMvpTemplate({ ...input, readToolId: "demo" }, [read, registry[1]]);
+    if (!built.ok) throw new Error(built.error);
+    expect(built.draft.nodes.read.tool).toMatchObject({ registryToolId: "demo", protocol: "mcp-streamable-http", inputSchema: read.inputSchema, outputSchema: read.outputSchema });
+  });
+  it.each([registry[1], mvpHttpAction])("真实写工具标识 demo 仍可创建带业务防重的审批模板 %#", (action) => {
+    const built = buildMvpTemplate({ ...input, actionToolId: "demo" }, [registry[0], { ...action, id: "demo" }]);
+    if (!built.ok) throw new Error(built.error);
+    expect(built.draft.nodes.execute.tool).toMatchObject({ registryToolId: "demo", protocol: "protocol" in action ? action.protocol : "http-json" });
+    expect(built.draft.nodes.execute.toolOperation).toBeDefined();
+    expect(built.draft.nodes.approve.next).toBe("execute");
+  });
   describe.each(["MCP", "HTTP"])("%s 必需交付字段与回执规则兼容", (protocol) => {
     it.each([
       [{ type: "string", const: "" }, ""],

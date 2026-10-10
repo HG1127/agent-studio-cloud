@@ -31,6 +31,39 @@ const registration = {
 };
 
 describe("真实工具步骤", () => {
+  it("真实 HTTP 登记标识 demo 不会返回固定演示回执", async () => {
+    const real = WorkflowNode.parse({ ...node, tool: { ...node.tool!, registryToolId: "demo" } });
+    mocks.getToolRegistration.mockReturnValue({ ...registration, id: "demo" });
+    mocks.invokeHttpTool.mockResolvedValue({ ok: true, output: { receiptId: "real-demo-receipt" } });
+    await expect(runToolStep({ runId: "run-1", node: real, input: {}, outputs: {} }))
+      .resolves.toEqual({ receipt: { ok: true, receiptId: "real-demo-receipt" } });
+    expect(mocks.getToolRegistration).toHaveBeenCalledWith("demo");
+    expect(mocks.invokeHttpTool).toHaveBeenCalledOnce();
+  });
+  it("真实 HTTP 登记 demo 缺失或已变更不能退化为演示成功", async () => {
+    const real = WorkflowNode.parse({ ...node, tool: { ...node.tool!, registryToolId: "demo" } });
+    for (const current of [null, { ...registration, id: "demo", scope: "customer.admin" }]) {
+      mocks.getToolRegistration.mockReturnValue(current);
+      await expect(runToolStep({ runId: "run-1", node: real, input: {}, outputs: {} })).rejects.toMatchObject({ name: "FatalError" });
+    }
+    expect(mocks.invokeHttpTool).not.toHaveBeenCalled();
+    expect(mocks.persistStep).not.toHaveBeenCalledWith(expect.objectContaining({ status: "succeeded" }));
+  });
+  it("真实 HTTP 登记 demo 保留业务账本路径", async () => {
+    const real = WorkflowNode.parse({ ...node, tool: { ...node.tool!, registryToolId: "demo" }, toolOperation: { scope: "crm-update", key: { kind: "literal", value: "c1" } } });
+    mocks.getToolRegistration.mockReturnValue({ ...registration, id: "demo" });
+    mocks.invokeToolOperation.mockResolvedValue({ ok: true, output: { receiptId: "saved-demo-receipt" }, operationId: "00000000-0000-4000-8000-000000000123", reused: true });
+    await expect(runToolStep({ runId: "run-1", node: real, input: {}, outputs: {} })).resolves.toEqual({ receipt: { ok: true, receiptId: "saved-demo-receipt" } });
+    expect(mocks.invokeToolOperation).toHaveBeenCalledOnce();
+    expect(mocks.invokeHttpTool).not.toHaveBeenCalled();
+  });
+  it.each(["demo", "another-id", null])("显式演示协议保持固定回执且不调用真实工具 %#", async (registryToolId) => {
+    const demo = WorkflowNode.parse({ ...node, tool: { ...node.tool!, registryToolId, protocol: "demo" } });
+    await expect(runToolStep({ runId: "run-1", node: demo, input: {}, outputs: {} })).resolves.toEqual({ receipt: { ok: true, tool: "update_customer", summary: "演示工具已执行" } });
+    expect(mocks.getToolRegistration).not.toHaveBeenCalled();
+    expect(mocks.invokeHttpTool).not.toHaveBeenCalled();
+    expect(mocks.invokeToolOperation).not.toHaveBeenCalled();
+  });
   it("显式防重节点复用持久业务回执而不走普通外部调用", async () => {
     const protectedNode = WorkflowNode.parse({ ...node, toolOperation: { scope: "crm-update", key: { kind: "input", path: ["customerId"] } } });
     mocks.invokeToolOperation.mockResolvedValue({ ok: true, output: { receiptId: "receipt-1" }, operationId: "00000000-0000-4000-8000-000000000123", reused: true });
