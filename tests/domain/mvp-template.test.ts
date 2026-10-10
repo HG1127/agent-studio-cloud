@@ -13,6 +13,7 @@ import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding"
 import { mvpTemplateInput as input, mvpTemplateRegistry as registry, mvpHttpAction } from "../fixtures/mvp-template";
 import { createMcpMvpFixture } from "../fixtures/mcp-mvp";
 import { MAX_MCP_DEFINITION_BYTES } from "@/contracts/mcp-tool";
+import { validateToolOperationReceipt } from "@/server/domain/runtime/tool-operation";
 
 function build() {
   const result = buildMvpTemplate(input, registry);
@@ -27,6 +28,64 @@ function actionWithSchema(protocol: string, schema: Record<string, unknown>) {
 }
 
 describe("最小真实业务模板", () => {
+  describe.each(["MCP", "HTTP"])("%s 必需交付字段与回执规则兼容", (protocol) => {
+    it.each([
+      [{ type: "string", const: "" }, ""],
+      [{ enum: ["", "   ", null] }, ""],
+      [{ type: "null" }, null],
+      [{ type: "string", maxLength: 0 }, ""],
+      [{ type: "array", maxItems: 0 }, []],
+      [{ type: "object", maxProperties: 0 }, {}],
+      [{ const: [null, "   ", {}] }, [null, "   ", {}]],
+      [{ const: { empty: [] } }, { empty: [] }],
+      [{ type: ["null", "string", "array", "object"], maxLength: 0, maxItems: 0, maxProperties: 0 }, null],
+      [{ type: "array", enum: [[], [" "], [null]] }, []],
+      [{ const: { status: "failed", id: "真实编号" } }, { status: "failed", id: "真实编号" }],
+    ])("登记只允许无内容字段时在创建前拒绝 %#", (definition, value) => {
+      const outputSchema = { ...registry[1].outputSchema, properties: { ...registry[1].outputSchema.properties, task_id: definition } };
+      const action = { ...(protocol === "MCP" ? registry[1] : mvpHttpAction), outputSchema };
+      const receipt = { task_id: value, status: "已创建" };
+      expect(validateToolOperationReceipt(receipt, outputSchema, outputSchema).ok).toBe(true);
+      expect(projectWorkflowResult({ execute: { ok: true, ...receipt } }, build().outputContract!.fields))
+        .toEqual({ ok: false, missing: ["跟进任务编号"] });
+      expect(buildMvpTemplate(input, [registry[0], action])).toEqual({ ok: false, error: "业务回执规则无法提供所选的完整交付内容，暂时无法创建" });
+    });
+    it.each([
+      [{ type: "number", const: 0 }, 0], [{ type: "boolean", const: false }, false],
+      [{ enum: ["", null, "任务一"] }, "任务一"], [{ type: "string" }, "任务一"],
+      [{ type: ["null", "string"], maxLength: 8 }, "任务一"],
+      [{ type: "string", enum: [0, "任务一"] }, "任务一"],
+      [{ const: { empty: [], amount: 0 } }, { empty: [], amount: 0 }],
+      [{ type: "array", enum: [[], [false]] }, [false]],
+      [{ type: "string", default: null, examples: [""] }, "任务一"],
+    ])("允许有效回执的字段保持原规则，不放宽或改写 %#", (definition, value) => {
+      const outputSchema = { ...registry[1].outputSchema, properties: { ...registry[1].outputSchema.properties, task_id: definition } };
+      const action = { ...(protocol === "MCP" ? registry[1] : mvpHttpAction), outputSchema };
+      const before = structuredClone(action);
+      const built = buildMvpTemplate(input, [registry[0], action]);
+      if (!built.ok) throw new Error(built.error);
+      expect(action).toEqual(before);
+      expect(built.draft.nodes.execute.tool!.outputSchema).toEqual(outputSchema);
+      expect(projectWorkflowResult({ execute: { ok: true, task_id: value, status: "已创建" } }, built.draft.outputContract!.fields))
+        .toEqual({ ok: true, result: { task_id: value, status: "已创建" } });
+    });
+    it("回执固定选择必须存在一项能同时满足全部交付字段", () => {
+      const outputSchema = { ...registry[1].outputSchema, properties: { task_id: { type: "string" }, status: { type: "string" } },
+        enum: [{ task_id: "", status: "已创建" }, { task_id: "任务一", status: "" }] };
+      const action = { ...(protocol === "MCP" ? registry[1] : mvpHttpAction), outputSchema };
+      for (const receipt of outputSchema.enum) expect(validateToolOperationReceipt(receipt, outputSchema, outputSchema).ok).toBe(true);
+      expect(buildMvpTemplate(input, [registry[0], action])).toEqual({ ok: false, error: "业务回执规则无法提供所选的完整交付内容，暂时无法创建" });
+    });
+    it("完整固定回执、零值和未选择的空字段不被误拒", () => {
+      const receipt = { task_id: 0, status: "已创建", details: null };
+      const outputSchema = { type: "object", properties: { task_id: { type: "number" }, status: { type: "string" }, details: { type: "null" } },
+        required: ["task_id", "status", "details"], additionalProperties: false, const: receipt, enum: [receipt] };
+      const built = buildMvpTemplate(input, [registry[0], { ...(protocol === "MCP" ? registry[1] : mvpHttpAction), outputSchema }]);
+      if (!built.ok) throw new Error(built.error);
+      expect(built.draft.nodes.execute.tool!.outputSchema).toEqual(outputSchema);
+      expect(projectWorkflowResult({ execute: receipt }, built.draft.outputContract!.fields)).toEqual({ ok: true, result: { task_id: 0, status: "已创建" } });
+    });
+  });
   it("取数定义恰好达到容量时保持快照，未选工具不阻塞创建", () => {
     const inputSchema = { ...registry[0].inputSchema, description: "" };
     inputSchema.description = "x".repeat(MAX_MCP_DEFINITION_BYTES - new TextEncoder().encode(JSON.stringify(inputSchema)).byteLength);
