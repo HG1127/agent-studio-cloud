@@ -22,7 +22,7 @@
 | 模型调用 | Vercel AI SDK |
 | 文件/登录/推送 | Vercel Blob / Auth.js（后置）/ SSE 自建 |
 | 测试 | Vitest + Testing Library + @workflow/vitest + Playwright |
-| CI/CD | GitHub Actions + Vercel |
+| 验收与部署 | 本地完整验收 + 免费额度可用时按需 GitHub Actions + Vercel |
 | 包管理 | pnpm |
 
 不引入上表以外的重框架（状态管理、CSS 方案、ORM 等）；确需新增先更新设计文档再动代码。
@@ -89,10 +89,24 @@ server/workflows → server/steps → server/domain + lib/
 - `server/domain/` 新增/修改的纯函数必须有 Vitest 单测。
 - Workflow 的暂停/恢复、重试路径必须有 @workflow/vitest 集成测试。
 - 关键用户路径（创建 → 编排 → 运行 → 查看结果）必须有 Playwright E2E。
-- PR 合并门槛：`tsc --noEmit` + lint + vitest + build 全绿 + Vercel 预览可访问。
+- 每次合并或上线前先检查 GitHub Actions 是否可在免费额度内运行；只有确认免费可用时才可手动运行 GitHub CI。GitHub CI 无法使用时（包括账单状态不明、额度不足、runner 被阻止、权限不足、工作流入口不可用或服务故障），必须转用 `pnpm acceptance` 执行本地 CI，不以等待远程 CI 恢复替代本地验收；后续遇到同类问题直接按此规则执行。
+- 本地 CI 必须针对最终待合并或上线的同一份代码，执行锁定依赖安装、依赖审计、Next.js 类型生成、类型检查、lint、Vitest、构建、隔离 Neon 分支迁移、数据库与 Workflow 集成测试、Playwright；Vercel 预览可访问的门槛不变。验收后代码变化必须重新完整验收，不能用单项测试或旧分支的通过记录代替。
+- 执行前确认当前验收工作树的 `package.json` 含 `acceptance` 命令且 `acceptance.ps1` 存在。缺少入口、运行环境或安全的隔离测试配置时，明确记录未完成项并补齐条件；禁止改用生产数据库或归属不明的连接串，禁止跳过检查或虚报通过。
+- GitHub CI 中测试本身失败时必须修复，不能通过切换本地 CI 绕过。PR 或交接记录必须注明 GitHub CI 不可用的原因、本地验收的代码版本、命令、完整结果及未完成项；未执行、跳过或失败的检查一律不算通过。
+- PR 合并门槛：所选方式的类型检查、lint、Vitest、构建、隔离 Neon 分支迁移与集成测试、Playwright 全绿，且 Vercel 预览可访问；在 PR 描述中记录验收方式与结果。
 
 ## Git 工作流
 
 - 功能分支 + Pull Request；PR 描述写清做了什么、怎么验证。
 - 提交信息用中文一句话说清目的，不写流水账。
 - 破坏性操作（删分支、改迁移历史、force push）必须先征得确认。
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->
