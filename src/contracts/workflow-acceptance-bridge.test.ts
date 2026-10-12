@@ -3,7 +3,9 @@ import { runInNewContext } from "node:vm";
 import {
   MAX_WORKFLOW_ACCEPTANCE_BRIDGE_REQUEST_BYTES, MAX_WORKFLOW_ACCEPTANCE_OWNED_PROCESSES,
   WorkflowAcceptanceBridgeRequest, WorkflowAcceptanceObservedRecord, WorkflowAcceptanceOwnedBranchProvenance,
+  MAX_WORKFLOW_ACCEPTANCE_PREPARATION_REQUEST_BYTES, WorkflowAcceptanceCasePreparationRequest,
 } from "./workflow-acceptance-bridge";
+import { WorkflowAcceptanceCaseId } from "./workflow-case-acceptance";
 import type { WorkflowAcceptanceContext, WorkflowAcceptanceCleanupReceipt } from "./workflow-case-acceptance";
 
 const owner = "11111111-1111-4111-8111-111111111111";
@@ -159,5 +161,58 @@ describe("工作流验收分阶段桥接契约", () => {
     const parsed = WorkflowAcceptanceBridgeRequest.safeParse(raw);
     expect(parsed.success).toBe(false);
     if (!parsed.success) expect(parsed.error.issues[0].message).toBe("验收桥接只能包含有界普通数据");
+  });
+});
+
+function preparation(): WorkflowAcceptanceCasePreparationRequest {
+  const frozen = context();
+  return { version: 1, batchId: frozen.batchId, caseId: frozen.caseId,
+    sourceCommit: frozen.sourceCommit, sourceFingerprint: frozen.sourceFingerprint };
+}
+
+describe("实际创建隔离资源前的准备契约", () => {
+  it.each(WorkflowAcceptanceCaseId.options.map((caseId) => ({ caseId })))("原七案例只携带冻结批次及来源：$caseId", ({ caseId }) => {
+    const request = { ...preparation(), caseId };
+    expect(WorkflowAcceptanceCasePreparationRequest.parse(request)).toEqual(request);
+    expect(Object.keys(request)).toEqual(["version", "batchId", "caseId", "sourceCommit", "sourceFingerprint"]);
+  });
+  it.each(["databaseBranchId", "executionDomainId", "sdkDirectory", "caseDirectory", "provenance", "cleanup",
+    "ownedProcessIds", "processObservation", "databaseUrl", "apiKey"])("准备请求不能指定父方资源或秘密：%s", (field) => {
+    expect(WorkflowAcceptanceCasePreparationRequest.safeParse({ ...preparation(), [field]: "not-accepted" }).success).toBe(false);
+  });
+  it("冻结来源必填且严格校验，不能借占位分支或较短摘要启动", () => {
+    const frozen = preparation();
+    for (const field of ["batchId", "caseId", "sourceCommit", "sourceFingerprint"] as const) {
+      const missing: Record<string, unknown> = { ...frozen }; delete missing[field];
+      expect(WorkflowAcceptanceCasePreparationRequest.safeParse(missing).success).toBe(false);
+    }
+    for (const change of [{ version: 2 }, { batchId: "pending" }, { caseId: "all-passed" },
+      { sourceCommit: "a".repeat(39) }, { sourceCommit: "a".repeat(40) + "\n" },
+      { sourceFingerprint: "b".repeat(63) }, { sourceFingerprint: "B".repeat(64) }]) {
+      expect(WorkflowAcceptanceCasePreparationRequest.safeParse({ ...frozen, ...change }).success).toBe(false);
+    }
+  });
+  it("仅规范化批次UUID，不推断运行域、分支、目录或任何清理许可", () => {
+    const batchId = "abcdefab-1234-4123-8123-abcdefabcdef";
+    expect(WorkflowAcceptanceCasePreparationRequest.parse({ ...preparation(), batchId: batchId.toUpperCase() }))
+      .toEqual({ ...preparation(), batchId });
+    expect(WorkflowAcceptanceCasePreparationRequest.parse(runInNewContext(`(${JSON.stringify(preparation())})`))).toEqual(preparation());
+  });
+  it("普通数据预检先拒绝字段访问器和序列化函数", () => {
+    const request = preparation(); let calls = 0;
+    Object.defineProperty(request, "sourceCommit", { enumerable: true, get() { calls += 1; return "a".repeat(40); } });
+    expect(WorkflowAcceptanceCasePreparationRequest.safeParse(request).success).toBe(false);
+    const inherited = Object.create({ toJSON() { calls += 1; return preparation(); } }); Object.assign(inherited, preparation());
+    expect(WorkflowAcceptanceCasePreparationRequest.safeParse(inherited).success).toBe(false);
+    expect(calls).toBe(0);
+  });
+  it("UTF8上限在结构解析前拒绝膨胀或循环准备数据", () => {
+    const expanded = { ...preparation(), padding: "字".repeat(900) };
+    expect(expanded.padding.length).toBeLessThan(MAX_WORKFLOW_ACCEPTANCE_PREPARATION_REQUEST_BYTES);
+    const parsed = WorkflowAcceptanceCasePreparationRequest.safeParse(expanded);
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) expect(parsed.error.issues[0].message).toBe("验收桥接只能包含有界普通数据");
+    const cyclic: Record<string, unknown> = { ...preparation() }; cyclic.self = cyclic;
+    expect(WorkflowAcceptanceCasePreparationRequest.safeParse(cyclic).success).toBe(false);
   });
 });

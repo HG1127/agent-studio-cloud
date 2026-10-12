@@ -1,13 +1,14 @@
 import { z } from "zod";
 import { isPassiveJsonData } from "./json";
 import {
-  WorkflowAcceptanceContext, WorkflowAcceptanceParentObservation, WorkflowAcceptanceChildReport,
+  WorkflowAcceptanceCaseId, WorkflowAcceptanceContext, WorkflowAcceptanceParentObservation, WorkflowAcceptanceChildReport,
   WorkflowAcceptanceDatabaseObservation, WorkflowAcceptanceCleanupReceipt,
 } from "./workflow-case-acceptance";
 
 export const MAX_WORKFLOW_ACCEPTANCE_BRIDGE_REQUEST_BYTES = 32 * 1024;
 export const MAX_WORKFLOW_ACCEPTANCE_OBSERVED_RECORD_BYTES = 1024 * 1024;
 export const MAX_WORKFLOW_ACCEPTANCE_OWNED_PROCESSES = 64;
+export const MAX_WORKFLOW_ACCEPTANCE_PREPARATION_REQUEST_BYTES = 2 * 1024;
 
 function hasBoundedBytes(value: unknown, maximum: number): boolean {
   const encoder = new TextEncoder(), stack: unknown[] = [value];
@@ -48,6 +49,13 @@ function passiveBridge<T extends z.ZodType>(schema: T, maximum: number) {
 }
 
 const Id = z.uuid().transform((value) => value.toLowerCase());
+export const WorkflowAcceptanceCasePreparationRequest = passiveBridge(z.object({
+  version: z.literal(1), batchId: Id, caseId: WorkflowAcceptanceCaseId,
+  sourceCommit: z.string().length(40).regex(/^[a-f0-9]{40}$/),
+  sourceFingerprint: z.string().length(64).regex(/^[a-f0-9]{64}$/),
+}).strict(), MAX_WORKFLOW_ACCEPTANCE_PREPARATION_REQUEST_BYTES);
+export type WorkflowAcceptanceCasePreparationRequest = z.infer<typeof WorkflowAcceptanceCasePreparationRequest>;
+
 const BranchId = z.string().regex(/^br-[a-z0-9-]{1,180}$/).refine((value) => value === value.trim());
 const EndpointId = z.string().regex(/^ep-[a-z0-9-]{1,180}$/).refine((value) => value === value.trim());
 const EndpointHost = z.string().max(253).regex(/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+neon\.tech$/).refine((value) => value === value.trim());
