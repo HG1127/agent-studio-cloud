@@ -9,6 +9,7 @@ import { startModelJsonServer } from "../helpers/model-json-server";
 const mocks = vi.hoisted(() => ({ persist: vi.fn(), trace: vi.fn(), operation: vi.fn() }));
 vi.mock("workflow", async (original) => ({ ...await original<typeof import("workflow")>(), getStepMetadata: () => ({ attempt: 1, stepId: "acceptance-sdk-step" }) }));
 vi.mock("@/lib/db", () => ({ db: {} }));
+vi.mock("@/server/services/harness-policies", () => ({ readRunHarnessPolicy: async () => ({ workspaceId: "00000000-0000-4000-8000-000000000001", snapshot: null }) }));
 vi.mock("@/server/steps/run-state", () => ({ persistStep: mocks.persist }));
 vi.mock("@/server/steps/trace-step", () => ({ appendTrace: mocks.trace }));
 vi.mock("@/server/services/tool-operation", () => ({ invokeToolOperation: mocks.operation }));

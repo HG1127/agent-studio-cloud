@@ -9,6 +9,7 @@ vi.mock("workflow", async (importOriginal) => ({
   getStepMetadata: () => ({ stepName: "runToolStep", stepId: mocks.stepId, stepStartedAt: new Date(), attempt: mocks.attempt }),
 }));
 vi.mock("@/server/steps/run-state", () => ({ persistStep: mocks.persistStep }));
+vi.mock("@/server/services/harness-policies", () => ({ readRunHarnessPolicy: async () => ({ workspaceId: "00000000-0000-4000-8000-000000000001", snapshot: null }) }));
 vi.mock("@/server/steps/trace-step", () => ({ appendTrace: mocks.appendTrace }));
 vi.mock("@/server/tools/invoke-http-tool", () => ({ invokeHttpTool: mocks.invokeHttpTool }));
 vi.mock("@/server/services/tool-operation", () => ({ invokeToolOperation: mocks.invokeToolOperation }));

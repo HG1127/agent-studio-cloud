@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({ generateText: vi.fn(), persistStep: vi.fn(), a
 vi.mock("ai", async (importOriginal) => ({ ...await importOriginal<typeof import("ai")>(), generateText: mocks.generateText }));
 vi.mock("@ai-sdk/openai-compatible", () => ({ createOpenAICompatible: mocks.provider }));
 vi.mock("@/lib/db", () => ({ db: {} }));
+vi.mock("@/server/services/harness-policies", () => ({ readRunHarnessPolicy: async () => ({ workspaceId: "00000000-0000-4000-8000-000000000001", snapshot: null }) }));
 vi.mock("@/server/steps/run-state", () => ({ persistStep: mocks.persistStep }));
 vi.mock("@/server/steps/trace-step", () => ({ appendTrace: mocks.appendTrace }));
 vi.mock("@/server/model/recorded-run-model", () => ({ recordRunModel: (model: unknown) => model }));

@@ -7,6 +7,7 @@ import { startModelJsonServer } from "../../../tests/helpers/model-json-server";
 
 const mocks = vi.hoisted(() => ({ persistStep: vi.fn(), appendTrace: vi.fn() }));
 vi.mock("@/lib/db", () => ({ db: {} }));
+vi.mock("@/server/services/harness-policies", () => ({ readRunHarnessPolicy: async () => ({ workspaceId: "00000000-0000-4000-8000-000000000001", snapshot: null }) }));
 vi.mock("@/server/steps/run-state", () => ({ persistStep: mocks.persistStep }));
 vi.mock("@/server/steps/trace-step", () => ({ appendTrace: mocks.appendTrace }));
 vi.mock("@/server/services/model-call", () => ({

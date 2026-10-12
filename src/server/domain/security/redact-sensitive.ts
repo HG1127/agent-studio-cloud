@@ -7,6 +7,7 @@ const PRIVATE_KEY = /-----BEGIN [^-\r\n]{0,40}PRIVATE KEY-----[\s\S]*?-----END [
 const JWT = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g;
 const BEARER = /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi;
 const PROVIDER_KEY = /\b(?:sk|rk|pk|ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{12,}\b/g;
+const PUBLIC_TOOL_KEY = /\bpat_[a-f0-9]{64}\b/gi;
 const LABELED_SECRET = /\b(?:api[_-]?key|(?:access[_-]?|refresh[_-]?)?token|secret|password|passcode|authorization)\s*[:=]\s*(?!\[已隐藏敏感信息\])["']?(?:Bearer\s+)?[^\s,"'}）】》」』>]{6,}["']?/gi;
 const CHINESE_LABELED_SECRET = /(?:(?:访问|刷新)?令牌|密钥|密码|凭据|授权)\s*[：:=]\s*(?!\[已隐藏敏感信息\])["']?(?:Bearer\s+)?[^\s，,。；;）】》」』>]{4,}["']?/gi;
 const EMAIL = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
@@ -38,7 +39,8 @@ export function redactCredentialText(value: string): string {
     .replace(LABELED_SECRET, REDACTED)
     .replace(CHINESE_LABELED_SECRET, REDACTED)
     .replace(BEARER, REDACTED)
-    .replace(PROVIDER_KEY, REDACTED);
+    .replace(PROVIDER_KEY, REDACTED)
+    .replace(PUBLIC_TOOL_KEY, REDACTED);
 }
 
 export function redactSensitiveText(value: string): string {
@@ -60,10 +62,11 @@ function redactData(value: unknown, keyPattern: RegExp, redactText: (text: strin
   if (typeof value === "string") return redactText(value);
   if (Array.isArray(value)) return value.map((item) => redactData(item, keyPattern, redactText, depth + 1, maxDepth));
   if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [
-      key,
-      keyPattern.test(key) && !TOKEN_USAGE_KEY.test(key) ? REDACTED : redactData(item, keyPattern, redactText, depth + 1, maxDepth),
-    ]));
+    return Object.fromEntries(Object.entries(value).flatMap(([key, item]) => {
+      // 凭据也可能被当作字段名；省略整项避免重命名碰撞覆盖业务字段。
+      if (redactText(key) !== key) return [];
+      return [[key, keyPattern.test(key) && !TOKEN_USAGE_KEY.test(key) ? REDACTED : redactData(item, keyPattern, redactText, depth + 1, maxDepth)]];
+    }));
   }
   return value;
 }

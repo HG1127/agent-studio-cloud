@@ -88,6 +88,24 @@ describe("冻结默认成果帧", () => {
     expect(() => freeze({ text: "Bearer abcdefghijklmnop" })).toThrow("未隐藏");
     expect(() => freeze({ apiKey: "[已隐藏敏感信息]", inputTokens: 3 })).not.toThrow();
   });
+  it("普通文本或深层字段含新工具凭据时拒绝冻结，不能暗中改写后发送", () => {
+    const key = "pat_" + "a".repeat(64);
+    for (const result of [{ text: key }, { delivery: { rows: [{ detail: `收到 ${key}` }], amount: 0, approved: false } }]) {
+      const original = JSON.stringify(result);
+      expect(() => freeze(result)).toThrow("未隐藏");
+      expect(JSON.stringify(result)).toBe(original);
+    }
+    expect(() => freeze({ text: "[已隐藏敏感信息]", amount: 0, approved: false })).not.toThrow();
+  });
+  it("凭据作为顶层或数组内字段名时拒绝冻结，并保留原成果", () => {
+    const key = "pat_" + "a".repeat(64);
+    for (const result of [{ [key]: "完成", amount: 0 }, { delivery: { rows: [{ [`记录（${key}）`]: false, amount: 0 }] } }]) {
+      const original = JSON.stringify(result);
+      expect(() => freeze(result)).toThrow("未隐藏");
+      expect(JSON.stringify(result)).toBe(original);
+    }
+    expect(() => freeze({ pat_reference: false, ["pat_" + "a".repeat(63)]: 0, "[已隐藏敏感信息]": "业务原值" })).not.toThrow();
+  });
   it("只有相同任务、相同正文和相同哈希可以逻辑去重", () => {
     const frozen = freeze();
     expect(classifyDefaultResultFrame(frozen, { ...frozen.frame, runId: OTHER, frameId: OTHER })).toBe("conflict");
