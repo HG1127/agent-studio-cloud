@@ -16,6 +16,8 @@ function Invoke-OwnedCaseProcess {
   param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$CaseDirectory, [string]$BridgeRequestFile,
     [ValidateSet('business','bridge','migration')][string]$Phase = 'business')
   if ($BridgeRequestFile) { $Phase = 'bridge' }
+  $taskReadonlyRole = $null
+  $taskReadonlyInputPin = $null
   $taskProjectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
   $taskNode = 'C:/Program Files/nodejs/node.exe'
   $taskCli = Join-Path $taskProjectRoot 'node_modules/vitest/vitest.mjs'
@@ -64,10 +66,41 @@ function Invoke-OwnedCaseProcess {
   }
   if (-not $script:WorkflowOwnedCreations.ContainsKey([string]$Context.databaseBranchId)) { throw '子域没有本次父创建事件。' }
   $taskCreation = $script:WorkflowOwnedCreations[[string]$Context.databaseBranchId]
+  if ($Phase -eq 'bridge') {
+    $taskRequestName = [IO.Path]::GetFileName($BridgeRequestFile)
+    $taskFingerprintName = [string]::Equals($taskRequestName, 'context.json', [StringComparison]::Ordinal)
+    $taskRuntimeName = [string]::Equals($taskRequestName, 'observe-runtime-request.json', [StringComparison]::Ordinal)
+    if (-not ($taskFingerprintName -or $taskRuntimeName) -and
+      ([string]::Equals($taskRequestName, 'context.json', [StringComparison]::OrdinalIgnoreCase) -or
+      [string]::Equals($taskRequestName, 'observe-runtime-request.json', [StringComparison]::OrdinalIgnoreCase))) { throw '只读请求固定名称大小写不一致，拒绝退回旧控制面入口。' }
+    if ($taskFingerprintName -or $taskRuntimeName) {
+      Assert-OwnedWorkflowRawFileDeadline
+      $taskDomainId = [string]$Context.executionDomainId
+      if (-not [IO.Path]::IsPathFullyQualified($BridgeRequestFile) -or -not $script:WorkflowCreationPins.ContainsKey($taskDomainId)) { throw '只读入口没有本次父持有输入。' }
+      $taskReadonlyOwner = $script:WorkflowCreationPins[$taskDomainId]
+      $taskExpectedInput = Join-Path $taskReadonlyOwner.directory $taskRequestName
+      if ($BridgeRequestFile -match '[\x00-\x1f\x7f]' -or
+        -not [string]::Equals($BridgeRequestFile, $taskExpectedInput, [StringComparison]::OrdinalIgnoreCase) -or
+        $taskReadonlyOwner.directory -cne [IO.Path]::GetFullPath($CaseDirectory) -or $taskReadonlyOwner.branchId -cne $Context.databaseBranchId) { throw '只读输入不是本次固定案例文件。' }
+      $taskInputKey = if ($taskFingerprintName) { 'contextPin' } else { 'runtimeRequestPin' }
+      if (-not $taskReadonlyOwner.ContainsKey($taskInputKey)) { throw '只读输入不是父实际创建并登记的文件。' }
+      $taskReadonlyInputPin = $taskReadonlyOwner[$taskInputKey]
+      Assert-OwnedWorkflowRawFileDeadline
+      if ($taskReadonlyInputPin -isnot [AgentStudioAcceptance.OwnedJsonPin] -or
+        $taskReadonlyInputPin.IsClosed -or -not $taskReadonlyInputPin.OriginalBytesUnchanged()) { throw '只读输入原字节固定已失效。' }
+      $taskReadonlyRole = if ($taskFingerprintName) { 'fingerprints' } else { 'runtime-observation' }
+      foreach ($taskRelativeFile in @('tests/helpers/run-owned-workflow-bridge-entry.ts','tests/helpers/collect-owned-workflow-runtime-facts.ts',
+        'tests/helpers/read-owned-workflow-json.ts','tests/workflow/owned-case-bridge-entry.ts','src/contracts/workflow-runtime-observation.ts',
+        'src/server/domain/evaluate-workflow-runtime-coverage.ts')) {
+        Assert-OwnedWorkflowRawFileDeadline
+        if (-not (Test-Path -LiteralPath (Join-Path $taskProjectRoot $taskRelativeFile) -PathType Leaf)) { throw '只读指纹与完整运行观察依赖尚未齐备，拒绝启动。' }
+      }
+    }
+  }
   $taskFinalizing = ($Phase -eq 'bridge' -and $taskCreation.ContainsKey('absenceVerified') -and $taskCreation.absenceVerified -eq $true -and
     [IO.Path]::GetFileName($BridgeRequestFile) -ceq 'finalize-request.json')
   $taskDirectUri = $null
-  if (-not $taskFinalizing) {
+  if (-not $taskFinalizing -and -not $taskReadonlyRole) {
     if (-not $script:WorkflowDirectConnections.ContainsKey([string]$Context.databaseBranchId)) { throw '没有本控制器实际读取的专用连接，拒绝借用外部URI。' }
     $taskDirectUri = $script:WorkflowDirectConnections[[string]$Context.databaseBranchId]
     if ([string]::IsNullOrWhiteSpace($taskDirectUri)) { throw '缺少经父控制器验证的专用直接连接。' }
@@ -87,17 +120,20 @@ function Invoke-OwnedCaseProcess {
   $taskEnvironment['REAL_MODELS_ENABLED'] = '0'
   $taskEnvironment['MVP_ACCEPTANCE_ISOLATED_DB'] = '1'
   $taskEnvironment['MVP_WORKFLOW_ACCEPTANCE_CONTEXT'] = $Context | ConvertTo-Json -Depth 5 -Compress
-  if (-not $taskFinalizing) { $taskEnvironment['MVP_WORKFLOW_ACCEPTANCE_DATABASE_URL_UNPOOLED'] = $taskDirectUri }
+  if (-not $taskFinalizing -and -not $taskReadonlyRole) { $taskEnvironment['MVP_WORKFLOW_ACCEPTANCE_DATABASE_URL_UNPOOLED'] = $taskDirectUri }
   $taskEnvironment['MVP_WORKFLOW_ACCEPTANCE_CHILD_REPORT'] = $taskOutput
   $taskEnvironment['MVP_WORKFLOW_ACCEPTANCE_REALM_DIRECTORY'] = Join-Path $taskSdkRoot 'realms'
   $taskEnvironment['NODE_OPTIONS'] = '--max-old-space-size=768'
   $taskEnvironment['WORKFLOW_LOCAL_QUEUE_MAX_VISIBILITY'] = '5'
   if ($Phase -eq 'migration') { $taskEnvironment['DATABASE_URL'] = $taskDirectUri }
   if ($Phase -eq 'bridge') {
+    if ($taskReadonlyRole) { Assert-OwnedWorkflowRawFileDeadline }
     $taskPin = $script:WorkflowCreationPins[[string]$Context.executionDomainId]
     if (-not $taskPin -or $taskPin.branchId -cne $Context.databaseBranchId -or $taskPin.directory -cne [IO.Path]::GetFullPath($CaseDirectory) -or $taskPin.handle.IsClosed -or -not $taskPin.handle.OriginalBytesUnchanged() -or $script:WorkflowDirectoryPins[[string]$Context.executionDomainId].IsClosed -or -not [IO.Path]::IsPathFullyQualified($BridgeRequestFile) -or [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($BridgeRequestFile)) -cne $taskPin.directory) { throw '父持有的本次创建文件或桥接路径未确认。' }
-    if (-not $taskFinalizing) { $taskCreation = Confirm-OwnedWorkflowNeonBranch -BranchId $Context.databaseBranchId }
+    if (-not $taskFinalizing -and -not $taskReadonlyRole) { $taskCreation = Confirm-OwnedWorkflowNeonBranch -BranchId $Context.databaseBranchId }
     if ($taskCreation.requestId -cne $taskPin.requestId) { throw '创建文件不属于本父控制器POST事件。' }
+    $taskEnvironment['MVP_WORKFLOW_ACCEPTANCE_BRIDGE_REQUEST_FILE'] = $BridgeRequestFile
+    if (-not $taskReadonlyRole) {
     $taskControlKey = [Environment]::GetEnvironmentVariable('NEON_API_KEY', 'User')
     if ([string]::IsNullOrWhiteSpace($taskControlKey)) { throw '专用观察桥配置未确认。' }
     $taskEnvironment['MVP_WORKFLOW_ACCEPTANCE_CREATION_SHA256'] = $taskPin.sha256
@@ -113,6 +149,7 @@ function Invoke-OwnedCaseProcess {
     }
     if ($taskFinalizing -and (-not $taskPin.ContainsKey('observedPin') -or -not $taskCreation.ContainsKey('cleanupPin'))) { throw '最终桥接缺少父真实观察与清理原字节证明。' }
     $taskControlKey = $null
+    }
   }
   foreach ($taskArgument in @($taskCli, $taskConfig)) {
     if ($taskArgument -match '["\r\n\x00]') { throw '子执行路径不可安全引用。' }
@@ -184,6 +221,10 @@ function Invoke-OwnedCaseProcess {
           outputEof = ($taskInventory['stdoutEof'] -and $taskInventory['stderrEof']); exitCode = $taskRootMember[0]['exitCode'];
           remainingProcesses = $taskInventory['remainingOwnedProcesses']; stoppedAt = $taskStoppedAt; processInventory = $taskInventory;
           processInventoryFileStatus = 'unconfirmed'; runtimeFilesStatus = 'unconfirmed' }
+        if ($taskReadonlyRole) {
+          $taskRecord.readonlyRole = $taskReadonlyRole
+          $taskRecord.readonlyInputSha256 = $taskReadonlyInputPin.Sha256
+        }
         $script:WorkflowProcessRuns[[string]$Context.executionDomainId].Add($taskRecord)
       }
     } finally {
@@ -283,13 +324,15 @@ function Initialize-OwnedWorkflowCase {
   $taskDraft.databaseBranchId = $taskBranch
   $null = New-OwnedWorkflowEmptyDatabase -BranchId $taskBranch
   $taskProvenance = Get-OwnedWorkflowBranchProvenance -BranchId $taskBranch
+  $taskContextPin = $null
   foreach ($taskRecord in @(@{ name = 'context.json'; value = $taskDraft }, @{ name = 'creation-provenance.json'; value = $taskProvenance })) {
     $taskJson = $taskRecord.value | ConvertTo-Json -Depth 8 -Compress
     $taskFilePin = [AgentStudioAcceptance.OwnedJsonPin]::Create((Join-Path $Directory $taskRecord.name), $taskJson, 32768)
     $script:WorkflowCaseFilePins[$taskDomainId].Add($taskFilePin)
+    if ($taskRecord.name -ceq 'context.json') { $taskContextPin = $taskFilePin }
     if ($taskRecord.name -ceq 'creation-provenance.json') {
       $script:WorkflowCreationPins[$taskDomainId] = @{ handle = $taskFilePin; sha256 = $taskFilePin.Sha256; branchId = $taskBranch;
-        directory = [IO.Path]::GetFullPath($Directory); requestId = $taskProvenance.creationRequestId }
+        directory = [IO.Path]::GetFullPath($Directory); requestId = $taskProvenance.creationRequestId; contextPin = $taskContextPin }
     }
   }
   $taskMarkerPin = [AgentStudioAcceptance.OwnedJsonPin]::Create((Join-Path $taskSdk 'owner-context.json'), ($taskDraft | ConvertTo-Json -Depth 8 -Compress), 8192)
@@ -348,6 +391,168 @@ function Invoke-OwnedWorkflowBridgeRequest {
 
 function Assert-OwnedWorkflowRawFileDeadline {
   if (-not $script:WorkflowExecutionClock -or $script:WorkflowExecutionClock.ElapsedMilliseconds -ge 240000) { throw '原案例原始文件截止时间已到或未登记。' }
+}
+
+function Invoke-OwnedWorkflowFingerprintProbe {
+  param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$Directory)
+  Assert-OwnedWorkflowRawFileDeadline
+  $taskDomainId = [string]$Context.executionDomainId
+  $taskDirectory = [IO.Path]::GetFullPath($Directory)
+  if (-not $script:WorkflowCreationPins.ContainsKey($taskDomainId) -or -not $script:WorkflowDirectoryPins.ContainsKey($taskDomainId) -or
+    -not $script:WorkflowCaseFilePins.ContainsKey($taskDomainId) -or -not $script:WorkflowProcessRuns.ContainsKey($taskDomainId)) { throw '没有父登记的只读指纹域。' }
+  $taskOwner = $script:WorkflowCreationPins[$taskDomainId]
+  if ($taskOwner.directory -cne $taskDirectory -or $taskOwner.branchId -cne $Context.databaseBranchId -or
+    $script:WorkflowDirectoryPins[$taskDomainId].IsClosed -or -not $taskOwner.ContainsKey('contextPin') -or
+    $taskOwner.ContainsKey('fingerprintStatus')) { throw '只读指纹输入归属未知或已尝试，拒绝覆盖。' }
+  foreach ($taskPin in $script:WorkflowCaseFilePins[$taskDomainId]) {
+    Assert-OwnedWorkflowRawFileDeadline
+    if ($taskPin.IsClosed -or -not $taskPin.OriginalBytesUnchanged()) { throw '指纹探针启动前原字节固定已失效。' }
+  }
+  $taskHeldContext = $taskOwner.contextPin.Text | ConvertFrom-Json -AsHashtable -DateKind String
+  if ($taskHeldContext.Count -ne $Context.Count) { throw '指纹探针输入上下文不同。' }
+  foreach ($taskKey in $taskHeldContext.Keys) { if ($taskHeldContext[$taskKey] -cne $Context[$taskKey]) { throw '指纹探针输入上下文不同。' } }
+  $taskInputFile = Join-Path $taskDirectory 'context.json'
+  $taskOutputFile = Join-Path $taskDirectory 'expected-fingerprints.json'
+  Assert-OwnedWorkflowRawFileDeadline
+  if (Test-Path -LiteralPath $taskOutputFile) { throw '指纹原文件已存在，拒绝覆盖。' }
+  $taskOwner.fingerprintStatus = 'unconfirmed'
+  $taskRuns = $script:WorkflowProcessRuns[$taskDomainId]
+  $taskBefore = $taskRuns.Count
+  $taskPrimaryError = $null
+  try { $null = Invoke-OwnedCaseProcess -Context $Context -CaseDirectory $taskDirectory -BridgeRequestFile $taskInputFile }
+  catch { $taskPrimaryError = $_ }
+  try {
+    Assert-OwnedWorkflowRawFileDeadline
+    if ($taskRuns.Count -ne $taskBefore + 1) { throw '指纹输出没有唯一新增父自有运行。' }
+    $taskRun = $taskRuns[$taskBefore]
+    if ($taskRun.phase -cne 'bridge' -or -not $taskRun.ContainsKey('readonlyRole') -or $taskRun.readonlyRole -cne 'fingerprints' -or
+      $taskRun.readonlyInputSha256 -cne $taskOwner.contextPin.Sha256 -or $taskRun.rootProcessId -lt 1) { throw '指纹输出没有实际本次输入与运行归属。' }
+    Assert-OwnedWorkflowRawFileDeadline
+    if (-not (Test-Path -LiteralPath $taskOutputFile -PathType Leaf)) { throw '本次独立指纹输出不存在。' }
+    Assert-OwnedWorkflowRawFileDeadline
+    $taskOutputPin = [AgentStudioAcceptance.OwnedJsonPin]::Open($taskOutputFile, 32768)
+    $taskOwner.fingerprintPin = $taskOutputPin
+    $taskRun.fingerprintPin = $taskOutputPin
+    try { $script:WorkflowCaseFilePins[$taskDomainId].Add($taskOutputPin) }
+    catch { $taskOutputPin.Dispose(); throw }
+    foreach ($taskPin in $script:WorkflowCaseFilePins[$taskDomainId]) {
+      Assert-OwnedWorkflowRawFileDeadline
+      if ($taskPin.IsClosed -or -not $taskPin.OriginalBytesUnchanged()) { throw '指纹探针返回后原字节固定已失效。' }
+    }
+    $taskFingerprints = $taskOutputPin.Text | ConvertFrom-Json -AsHashtable -DateKind String
+    if ($taskFingerprints -isnot [Collections.IDictionary] -or $taskFingerprints.Count -ne 2) { throw '独立指纹输出字段未确认。' }
+    foreach ($taskKey in $taskFingerprints.Keys) {
+      if ($taskKey -isnot [string] -or (-not [string]::Equals($taskKey, 'adapterFingerprint', [StringComparison]::Ordinal) -and
+        -not [string]::Equals($taskKey, 'sdkFactoryFingerprint', [StringComparison]::Ordinal))) { throw '独立指纹输出字段未确认。' }
+    }
+    foreach ($taskKey in @('adapterFingerprint','sdkFactoryFingerprint')) {
+      if ($taskFingerprints[$taskKey] -isnot [string] -or $taskFingerprints[$taskKey].Length -ne 64 -or
+        $taskFingerprints[$taskKey] -cnotmatch '\A[a-f0-9]{64}\z') { throw '独立指纹不是严格小写原始SHA。' }
+    }
+    Assert-OwnedWorkflowRawFileDeadline
+    if ($script:WorkflowDirectoryPins[$taskDomainId].IsClosed) { throw '指纹探针返回后自有目录固定已失效。' }
+    if (-not $taskPrimaryError) {
+      $taskOwner.expectedFingerprints = $taskFingerprints
+      $taskOwner.fingerprintStatus = 'held'
+    }
+  } catch {
+    $taskOwner.fingerprintDiagnostic = '本次指纹输出留档或原字节复核未确认。'
+    if (-not $taskPrimaryError) { throw }
+    try { $taskPrimaryError.Exception.Data['OwnedWorkflowFingerprintDiagnostic'] = '本次指纹输出留档或原字节复核未确认。' } catch { }
+  }
+  if ($taskPrimaryError) { throw $taskPrimaryError }
+}
+
+function Invoke-OwnedWorkflowRuntimeObservation {
+  param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$Directory)
+  Assert-OwnedWorkflowRawFileDeadline
+  $taskDomainId = [string]$Context.executionDomainId
+  $taskDirectory = [IO.Path]::GetFullPath($Directory)
+  if (-not $script:WorkflowCreationPins.ContainsKey($taskDomainId) -or -not $script:WorkflowProcessRuns.ContainsKey($taskDomainId)) { throw '没有本次父登记的运行观察域。' }
+  $taskOwner = $script:WorkflowCreationPins[$taskDomainId]
+  if ($taskOwner.directory -cne $taskDirectory -or $taskOwner.branchId -cne $Context.databaseBranchId -or
+    -not $taskOwner.ContainsKey('fingerprintStatus') -or $taskOwner.fingerprintStatus -cne 'held' -or
+    -not $taskOwner.ContainsKey('fingerprintPin') -or $taskOwner.ContainsKey('runtimeObservationStatus')) { throw '运行观察缺独立指纹或已尝试，拒绝覆盖。' }
+  $taskRaw = Collect-OwnedWorkflowRuntimeFiles -Context $Context -Directory $taskDirectory
+  $taskBusiness = @($script:WorkflowProcessRuns[$taskDomainId] | Where-Object { $_.phase -ceq 'business' })
+  if ($taskBusiness.Count -ne 1) { throw '运行观察没有唯一实际业务运行。' }
+  $taskBusinessRun = $taskBusiness[0]
+  foreach ($taskPin in @($taskOwner.contextPin, $taskOwner.handle, $taskOwner.fingerprintPin)) {
+    Assert-OwnedWorkflowRawFileDeadline
+    if ($taskPin.IsClosed -or -not $taskPin.OriginalBytesUnchanged()) { throw '运行观察输入原字节固定已失效。' }
+  }
+  $taskFingerprints = $taskOwner.fingerprintPin.Text | ConvertFrom-Json -AsHashtable -DateKind String
+  if ($taskFingerprints -isnot [Collections.IDictionary] -or $taskFingerprints.Count -ne 2) { throw '父持有独立指纹字段未确认。' }
+  foreach ($taskKey in $taskFingerprints.Keys) {
+    if ($taskKey -isnot [string] -or (-not [string]::Equals($taskKey, 'adapterFingerprint', [StringComparison]::Ordinal) -and
+      -not [string]::Equals($taskKey, 'sdkFactoryFingerprint', [StringComparison]::Ordinal))) { throw '父持有独立指纹字段未确认。' }
+  }
+  foreach ($taskKey in @('adapterFingerprint','sdkFactoryFingerprint')) {
+    if ($taskFingerprints[$taskKey] -isnot [string] -or $taskFingerprints[$taskKey].Length -ne 64 -or
+      $taskFingerprints[$taskKey] -cnotmatch '\A[a-f0-9]{64}\z') { throw '父持有独立指纹格式未确认。' }
+  }
+  $taskProvenance = $taskOwner.handle.Text | ConvertFrom-Json -AsHashtable -DateKind String
+  $taskRequest = @{ version = 2; operation = 'observe-runtime'; context = $Context; caseDirectory = $taskDirectory;
+    provenance = $taskProvenance; ownedProcessIds = @($taskBusinessRun.processIds); processInventoryRef = $taskRaw.processInventoryRef;
+    childReportRef = $taskRaw.childReportRef; runtimeInventoryRefs = @($taskRaw.runtimeInventoryRefs); expectedFingerprints = $taskFingerprints }
+  $taskRequestFile = Join-Path $taskDirectory 'observe-runtime-request.json'
+  $taskOutputFile = Join-Path $taskDirectory 'runtime-coverage-evaluation.json'
+  Assert-OwnedWorkflowRawFileDeadline
+  if (Test-Path -LiteralPath $taskRequestFile) { throw '完整运行观察请求已存在，拒绝覆盖。' }
+  Assert-OwnedWorkflowRawFileDeadline
+  if (Test-Path -LiteralPath $taskOutputFile) { throw '完整运行判定已存在，拒绝覆盖。' }
+  $taskRequestJson = $taskRequest | ConvertTo-Json -Depth 16 -Compress
+  Assert-OwnedWorkflowRawFileDeadline
+  $taskRequestPin = [AgentStudioAcceptance.OwnedJsonPin]::Create($taskRequestFile, $taskRequestJson, 32768)
+  $taskOwner.runtimeRequestPin = $taskRequestPin
+  $taskOwner.runtimeObservationStatus = 'unconfirmed'
+  $taskBusinessRun.runtimeRequestPin = $taskRequestPin
+  try { $script:WorkflowCaseFilePins[$taskDomainId].Add($taskRequestPin) }
+  catch { $taskRequestPin.Dispose(); throw }
+  $taskRuns = $script:WorkflowProcessRuns[$taskDomainId]
+  $taskBefore = $taskRuns.Count
+  $taskPrimaryError = $null
+  try { $null = Invoke-OwnedCaseProcess -Context $Context -CaseDirectory $taskDirectory -BridgeRequestFile $taskRequestFile }
+  catch { $taskPrimaryError = $_ }
+  try {
+    Assert-OwnedWorkflowRawFileDeadline
+    if ($taskRuns.Count -ne $taskBefore + 1) { throw '运行判定没有唯一新增父自有运行。' }
+    $taskRun = $taskRuns[$taskBefore]
+    if ($taskRun.phase -cne 'bridge' -or -not $taskRun.ContainsKey('readonlyRole') -or $taskRun.readonlyRole -cne 'runtime-observation' -or
+      $taskRun.readonlyInputSha256 -cne $taskRequestPin.Sha256 -or $taskRun.rootProcessId -lt 1) { throw '运行判定没有实际本次输入与运行归属。' }
+    Assert-OwnedWorkflowRawFileDeadline
+    if (-not (Test-Path -LiteralPath $taskOutputFile -PathType Leaf)) { throw '本次完整运行判定不存在。' }
+    Assert-OwnedWorkflowRawFileDeadline
+    $taskOutputPin = [AgentStudioAcceptance.OwnedJsonPin]::Open($taskOutputFile, 32768)
+    $taskOwner.runtimeEvaluationPin = $taskOutputPin
+    $taskBusinessRun.runtimeEvaluationPin = $taskOutputPin
+    $taskRun.runtimeEvaluationPin = $taskOutputPin
+    try { $script:WorkflowCaseFilePins[$taskDomainId].Add($taskOutputPin) }
+    catch { $taskOutputPin.Dispose(); throw }
+    $taskBusinessRun.runtimeEvaluationJson = $taskOutputPin.Text
+    $taskBusinessRun.runtimeEvaluationSha256 = $taskOutputPin.Sha256
+    foreach ($taskPin in $script:WorkflowCaseFilePins[$taskDomainId]) {
+      Assert-OwnedWorkflowRawFileDeadline
+      if ($taskPin.IsClosed -or -not $taskPin.OriginalBytesUnchanged()) { throw '运行观察返回后原字节固定已失效。' }
+    }
+    $taskEvaluation = $taskOutputPin.Text | ConvertFrom-Json -AsHashtable -DateKind String
+    if ($taskEvaluation -isnot [Collections.IDictionary] -or -not $taskEvaluation.Contains('version') -or
+      -not $taskEvaluation.Contains('status') -or -not $taskEvaluation.Contains('cleanupPermitted')) { throw '完整运行判定诊断字段未确认。' }
+    if (($taskEvaluation.version -isnot [long] -and $taskEvaluation.version -isnot [int]) -or $taskEvaluation.version -ne 2 -or
+      $taskEvaluation.status -isnot [string] -or $taskEvaluation.status -cnotin @('consistent','unconfirmed') -or
+      $taskEvaluation.cleanupPermitted -isnot [bool] -or $taskEvaluation.cleanupPermitted) { throw '完整运行判定不能产生清理授权。' }
+    $null = Collect-OwnedWorkflowRuntimeFiles -Context $Context -Directory $taskDirectory
+    Assert-OwnedWorkflowRawFileDeadline
+    $taskBusinessRun.runtimeEvaluationStatus = $taskEvaluation.status
+    $taskOwner.runtimeObservationStatus = if ($taskPrimaryError) { 'unconfirmed' } else { 'held-diagnostic' }
+    if (-not $taskPrimaryError -and $taskEvaluation.status -cne 'consistent') { throw '完整运行证据未确认，保留诊断且不继续停止观察或清理。' }
+  } catch {
+    $taskOwner.runtimeObservationStatus = 'unconfirmed'
+    $taskBusinessRun.runtimeEvaluationDiagnostic = '本次运行判定留档或原始文件复核未确认。'
+    if (-not $taskPrimaryError) { throw }
+    try { $taskPrimaryError.Exception.Data['OwnedWorkflowRuntimeDiagnostic'] = '本次运行判定留档或原始文件复核未确认。' } catch { }
+  }
+  if ($taskPrimaryError) { throw $taskPrimaryError }
 }
 
 function Get-OwnedWorkflowRuntimeInventoryNames {
@@ -563,10 +768,12 @@ function Invoke-OwnedWorkflowCaseChain {
   $script:WorkflowExecutionClock = [Diagnostics.Stopwatch]::StartNew()
   try {
     $taskContext = Initialize-OwnedWorkflowCase -Preparation $Preparation -Directory $Directory
+    $null = Invoke-OwnedWorkflowFingerprintProbe -Context $taskContext -Directory $Directory
     $null = Get-OwnedWorkflowDirectConnection -BranchId $taskContext.databaseBranchId
     $null = Invoke-OwnedWorkflowEmptyObservation -Context $taskContext -Directory $Directory
     $null = Invoke-OwnedCaseProcess -Context $taskContext -CaseDirectory $Directory -Phase 'migration'
     $null = Invoke-OwnedCaseProcess -Context $taskContext -CaseDirectory $Directory -Phase 'business'
+    $null = Invoke-OwnedWorkflowRuntimeObservation -Context $taskContext -Directory $Directory
     $null = Invoke-OwnedWorkflowClosedObservation -Context $taskContext -Directory $Directory
     Confirm-OwnedWorkflowCleanupEvidence -Context $taskContext
     $taskCleanup = Remove-OwnedWorkflowNeonBranch -BranchId $taskContext.databaseBranchId
