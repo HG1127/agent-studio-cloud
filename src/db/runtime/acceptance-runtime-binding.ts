@@ -29,6 +29,7 @@ export function readAcceptanceRuntimeBinding(profile: unknown, scope: object) {
     };
     const identity = method("requireRealmIdentity"), assertAllowed = method("assertPoolCreationAllowed");
     const attach = method("attachNativeRegistry"), record = method("recordNativePoolCreation");
+    const initialize = method("registerNativeRealmInitializer");
     const realmId = AcceptancePoolCloseReceipt.shape.poolIds.element.parse(Reflect.apply(identity, hub, [scope]));
     const invoke = (native: Method, args: unknown[]) => {
       try { if (Reflect.apply(native, hub, args) !== undefined) throw new Error(); }
@@ -38,6 +39,7 @@ export function readAcceptanceRuntimeBinding(profile: unknown, scope: object) {
       source: hub, realmId,
       assertPoolCreationAllowed: () => invoke(assertAllowed, [scope]),
       attachNativeRegistry: (registry: Registry) => invoke(attach, [scope, registry]),
+      registerNativeRealmInitializer: (initializer: (scope: object) => void) => invoke(initialize, [initializer]),
       recordNativePoolCreation: (poolId: string) => {
         const parsed = AcceptancePoolCloseReceipt.shape.poolIds.element.safeParse(poolId);
         if (!parsed.success) throw new AcceptanceRuntimeBindingError();

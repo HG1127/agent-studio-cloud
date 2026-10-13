@@ -7,7 +7,7 @@ import {
   WorkflowAcceptanceRealmReceipt, WorkflowAcceptanceRealmRegistration,
 } from "@/contracts/workflow-case-acceptance";
 import { createAcceptancePoolRegistry } from "./acceptance-pool-registry";
-import { readAcceptanceRuntimeBinding } from "./acceptance-runtime-binding";
+import { ACCEPTANCE_RUNTIME_PROFILE, readAcceptanceRuntimeBinding } from "./acceptance-runtime-binding";
 
 export const ACCEPTANCE_CLIENT_LIFECYCLE_SYMBOL = Symbol.for("agent-studio.acceptance-client-lifecycle.v1");
 const MAX_CONTEXT_BYTES = 8 * 1024;
@@ -41,14 +41,15 @@ type AcceptanceState = {
   version: 1; mode: "acceptance"; context: WorkflowAcceptanceContext; contextKey: string; directUri: string;
   realmId: string; processId: number; threadId: number; registry: ReturnType<typeof createAcceptancePoolRegistry>;
   runtime: ReturnType<typeof readAcceptanceRuntimeBinding>;
+  runtimeInitializer?: (scope: object) => void;
   realmDirectory: string | null; inventoryRegistered: boolean;
   closes: Map<string, () => Promise<void>>; sealed: boolean; closing?: Promise<WorkflowAcceptanceRealmReceipt>;
 };
 type RealmState = ProductionState | AcceptanceState;
 type EndableClient = { end: () => Promise<void> };
 
-function existingState(): RealmState | undefined {
-  const descriptor = Object.getOwnPropertyDescriptor(globalThis, ACCEPTANCE_CLIENT_LIFECYCLE_SYMBOL);
+function existingState(scope: object = globalThis): RealmState | undefined {
+  const descriptor = Object.getOwnPropertyDescriptor(scope, ACCEPTANCE_CLIENT_LIFECYCLE_SYMBOL);
   if (!descriptor) return undefined;
   const value: unknown = "value" in descriptor ? descriptor.value : undefined;
   if (!value || typeof value !== "object" || !("version" in value) || value.version !== 1
@@ -57,8 +58,8 @@ function existingState(): RealmState | undefined {
   }
   return value as RealmState;
 }
-function storeState(state: RealmState): RealmState {
-  Object.defineProperty(globalThis, ACCEPTANCE_CLIENT_LIFECYCLE_SYMBOL, {
+function storeState(state: RealmState, scope: object = globalThis): RealmState {
+  Object.defineProperty(scope, ACCEPTANCE_CLIENT_LIFECYCLE_SYMBOL, {
     value: state, writable: false, enumerable: false, configurable: true,
   });
   return state;
@@ -152,21 +153,28 @@ function writeInventory(state: AcceptanceState, kind: "registered" | "final",
     if (fstatSync(descriptor).size !== bytes.byteLength) throw new Error();
   } finally { closeSync(descriptor); }
 }
-function currentState(): RealmState {
-  const state = existingState();
-  const context = parseContext();
+function currentState(scope: object = globalThis): RealmState {
   const profile = process.env.MVP_WORKFLOW_ACCEPTANCE_RUNTIME_PROFILE;
+  let runtime: ReturnType<typeof readAcceptanceRuntimeBinding> = null;
+  if (profile !== undefined) {
+    if (process.env.MVP_WORKFLOW_ACCEPTANCE_CONTEXT === undefined) {
+      throw new AcceptanceClientLifecycleError("runtime-unconfirmed");
+    }
+    try { runtime = readAcceptanceRuntimeBinding(profile, scope); }
+    catch { throw new AcceptanceClientLifecycleError("runtime-unconfirmed"); }
+    if (!runtime) throw new AcceptanceClientLifecycleError("runtime-unconfirmed");
+  }
+  if (scope !== globalThis && !runtime) throw new AcceptanceClientLifecycleError("runtime-unconfirmed");
+  const state = existingState(scope);
+  const context = parseContext();
   if (!context) {
     if (state?.mode === "acceptance") throw new AcceptanceClientLifecycleError("mode-changed");
     if (profile !== undefined) throw new AcceptanceClientLifecycleError("runtime-unconfirmed");
-    return state ?? storeState({ version: 1, mode: "production" });
+    return state ?? storeState({ version: 1, mode: "production" }, scope);
   }
   if (process.env.MVP_ACCEPTANCE_ISOLATED_DB !== "1") throw new AcceptanceClientLifecycleError("isolation-unconfirmed");
   const uri = directUri(), contextKey = JSON.stringify(context), directory = realmDirectory(context);
   if (state?.mode === "production") throw new AcceptanceClientLifecycleError("mode-changed");
-  let runtime: ReturnType<typeof readAcceptanceRuntimeBinding>;
-  try { runtime = readAcceptanceRuntimeBinding(profile, globalThis); }
-  catch { throw new AcceptanceClientLifecycleError("runtime-unconfirmed"); }
   if (state) {
     if (state.runtime?.source !== runtime?.source || state.runtime?.realmId !== runtime?.realmId) {
       throw new AcceptanceClientLifecycleError("runtime-changed");
@@ -191,7 +199,7 @@ function currentState(): RealmState {
     realmDirectory: directory, inventoryRegistered: false,
     registry: createAcceptancePoolRegistry(context.executionDomainId), closes: new Map(), sealed: false,
   };
-  storeState(created);
+  storeState(created, scope);
   try {
     runtime?.attachNativeRegistry(Object.freeze({
       close: () => closeState(created).then((completed) => completed.pools),
@@ -210,6 +218,14 @@ function currentState(): RealmState {
     } catch {
       void closeState(created).catch(() => undefined);
       throw new AcceptanceClientLifecycleError("realm-registration-failed");
+    }
+  }
+  if (runtime) {
+    created.runtimeInitializer = initializeAcceptanceObservedRealm;
+    try { runtime.registerNativeRealmInitializer(created.runtimeInitializer); }
+    catch {
+      void closeState(created).catch(() => undefined);
+      throw new AcceptanceClientLifecycleError("runtime-registration-failed");
     }
   }
   return created;
@@ -263,6 +279,15 @@ function closeState(state: AcceptanceState): Promise<WorkflowAcceptanceRealmRece
 export function readAcceptanceContext(): WorkflowAcceptanceContext | null {
   const state = currentState();
   return state.mode === "acceptance" ? WorkflowAcceptanceContext.parse(state.context) : null;
+}
+export function initializeAcceptanceObservedRealm(scope: object): void {
+  if (process.env.MVP_WORKFLOW_ACCEPTANCE_RUNTIME_PROFILE !== ACCEPTANCE_RUNTIME_PROFILE) {
+    throw new AcceptanceClientLifecycleError("runtime-unconfirmed");
+  }
+  const state = currentState(scope);
+  if (state.mode !== "acceptance" || !state.runtime) throw new AcceptanceClientLifecycleError("runtime-unconfirmed");
+  if (state.sealed) throw new AcceptanceClientLifecycleError("realm-sealed");
+  state.runtimeInitializer ??= initializeAcceptanceObservedRealm;
 }
 export function getAcceptanceRealmReceipt(): WorkflowAcceptanceRealmReceipt | null {
   const state = existingState();

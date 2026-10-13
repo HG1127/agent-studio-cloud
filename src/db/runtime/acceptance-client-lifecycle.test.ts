@@ -16,6 +16,7 @@ vi.mock("node:fs", () => ({
 import * as lifecycle from "./acceptance-client-lifecycle";
 import { WorkflowAcceptanceContext } from "@/contracts/workflow-case-acceptance";
 import { ACCEPTANCE_RUNTIME_PROFILE } from "./acceptance-runtime-binding";
+import type { AcceptancePoolCloseReceipt } from "@/contracts/workflow-execution-lifecycle";
 
 const privateUri = "postgresql://test-user:test-only-private@ep-direct.example.invalid/ci_test?sslmode=require";
 function context() {
@@ -434,7 +435,7 @@ describe("原生数据库构造入口的本 realm 验收生命周期（仅假构
   });
   it("观测模式使用实际身份、固定registry，unknown记录先于原生factory", async () => {
     const selected = configure(), realmId = randomUUID(), source = Object.freeze({ testOnly: true });
-    const runtime = { source, realmId, assertPoolCreationAllowed: vi.fn(), attachNativeRegistry: vi.fn(), recordNativePoolCreation: vi.fn() };
+    const runtime = { source, realmId, assertPoolCreationAllowed: vi.fn(), attachNativeRegistry: vi.fn(), recordNativePoolCreation: vi.fn(), registerNativeRealmInitializer: vi.fn() };
     vi.stubEnv("MVP_WORKFLOW_ACCEPTANCE_RUNTIME_PROFILE", ACCEPTANCE_RUNTIME_PROFILE); runtimeMocks.read.mockReturnValue(runtime);
     const end = vi.fn(async () => undefined), factory = vi.fn(() => {
       const pools = lifecycle.getAcceptanceRealmReceipt()!.pools;
@@ -466,7 +467,7 @@ describe("原生数据库构造入口的本 realm 验收生命周期（仅假构
   });
   it("已观测但全域封闭时不创建新state、pool或文件", () => {
     const runtime = { source: {}, realmId: randomUUID(), assertPoolCreationAllowed: vi.fn(() => { throw new Error(privateUri); }),
-      attachNativeRegistry: vi.fn(), recordNativePoolCreation: vi.fn() };
+      attachNativeRegistry: vi.fn(), recordNativePoolCreation: vi.fn(), registerNativeRealmInitializer: vi.fn() };
     vi.stubEnv("MVP_WORKFLOW_ACCEPTANCE_RUNTIME_PROFILE", ACCEPTANCE_RUNTIME_PROFILE); runtimeMocks.read.mockReturnValue(runtime);
     const factory = vi.fn(() => ({ end: async () => undefined }));
     expect(() => lifecycle.createAcceptanceAwareDatabaseClient(factory)).toThrow("观测绑定未确认");
@@ -475,7 +476,7 @@ describe("原生数据库构造入口的本 realm 验收生命周期（仅假构
   });
   it("真实registry附着失败不执行factory，仍可收集原空realm且无许可", async () => {
     const runtime = { source: {}, realmId: randomUUID(), assertPoolCreationAllowed: vi.fn(),
-      attachNativeRegistry: vi.fn(() => { throw new Error(privateUri); }), recordNativePoolCreation: vi.fn() };
+      attachNativeRegistry: vi.fn(() => { throw new Error(privateUri); }), recordNativePoolCreation: vi.fn(), registerNativeRealmInitializer: vi.fn() };
     vi.stubEnv("MVP_WORKFLOW_ACCEPTANCE_RUNTIME_PROFILE", ACCEPTANCE_RUNTIME_PROFILE); runtimeMocks.read.mockReturnValue(runtime);
     const factory = vi.fn(() => ({ end: async () => undefined }));
     expect(() => lifecycle.createAcceptanceAwareDatabaseClient(factory)).toThrow("无法绑定真实执行空间");
@@ -485,7 +486,7 @@ describe("原生数据库构造入口的本 realm 验收生命周期（仅假构
   });
   it("native工厂前事实登记失败保留unknown，不漏记或继续factory", async () => {
     const runtime = { source: {}, realmId: randomUUID(), assertPoolCreationAllowed: vi.fn(), attachNativeRegistry: vi.fn(),
-      recordNativePoolCreation: vi.fn(() => { throw new Error(privateUri); }) };
+      recordNativePoolCreation: vi.fn(() => { throw new Error(privateUri); }), registerNativeRealmInitializer: vi.fn() };
     vi.stubEnv("MVP_WORKFLOW_ACCEPTANCE_RUNTIME_PROFILE", ACCEPTANCE_RUNTIME_PROFILE); runtimeMocks.read.mockReturnValue(runtime);
     const factory = vi.fn(() => ({ end: async () => undefined }));
     expect(() => lifecycle.createAcceptanceAwareDatabaseClient(factory)).toThrow("创建回执无法确认");
@@ -494,7 +495,7 @@ describe("原生数据库构造入口的本 realm 验收生命周期（仅假构
     expect(pools.state).toBe("callback_failed"); expect(pools.unknownIds).toHaveLength(1); expect(pools.cleanupPermitted).toBe(false);
   });
   it.each(["source", "identity", "late-profile", "cleared-profile"])("观测%s改变拒新factory，旧固定native关闭仍可执行", async (kind) => {
-    const source = {}, runtime = { source, realmId: randomUUID(), assertPoolCreationAllowed: vi.fn(), attachNativeRegistry: vi.fn(), recordNativePoolCreation: vi.fn() };
+    const source = {}, runtime = { source, realmId: randomUUID(), assertPoolCreationAllowed: vi.fn(), attachNativeRegistry: vi.fn(), recordNativePoolCreation: vi.fn(), registerNativeRealmInitializer: vi.fn() };
     if (kind !== "late-profile") {
       vi.stubEnv("MVP_WORKFLOW_ACCEPTANCE_RUNTIME_PROFILE", ACCEPTANCE_RUNTIME_PROFILE); runtimeMocks.read.mockReturnValue(runtime);
     }
@@ -514,5 +515,83 @@ describe("原生数据库构造入口的本 realm 验收生命周期（仅假构
     const factory = vi.fn(() => ({ end: async () => undefined }));
     expect(() => lifecycle.createAcceptanceAwareDatabaseClient(factory)).toThrow("观测绑定未确认");
     expect(factory).not.toHaveBeenCalled(); expect(runtimeMocks.read).not.toHaveBeenCalled();
+  });
+  it("真实空registry初始化模拟空间且模块副本复用同一initializer，不生成PG", async () => {
+    const selected = configure(), simulatedScope = {}, source = {}, scopes = [globalThis, simulatedScope];
+    type Registry = { close: () => Promise<AcceptancePoolCloseReceipt>; snapshot: () => AcceptancePoolCloseReceipt };
+    const callbacks = new Map<object, Registry>();
+    let registered: ((scope: object) => void) | undefined;
+    const register = vi.fn((initializer: (scope: object) => void) => {
+      if (registered) { if (registered !== initializer) throw new Error("测试初始化函数不可替换"); return; }
+      registered = initializer; for (const scope of scopes) initializer(scope);
+    });
+    const runtimes = new Map(scopes.map((scope) => [scope, {
+      source, realmId: randomUUID(), assertPoolCreationAllowed: vi.fn(), recordNativePoolCreation: vi.fn(),
+      attachNativeRegistry: vi.fn((registry: Registry) => { callbacks.set(scope, registry); }), registerNativeRealmInitializer: register,
+    }]));
+    vi.stubEnv("MVP_WORKFLOW_ACCEPTANCE_RUNTIME_PROFILE", ACCEPTANCE_RUNTIME_PROFILE);
+    runtimeMocks.read.mockImplementation((profile: string, scope: object) => {
+      if (profile !== ACCEPTANCE_RUNTIME_PROFILE || !runtimes.has(scope)) throw new Error("未知模拟空间");
+      return runtimes.get(scope);
+    });
+    try {
+      lifecycle.initializeAcceptanceObservedRealm(globalThis);
+      expect(callbacks.size).toBe(2);
+      for (const [scope, registry] of callbacks) {
+        const snapshot = registry.snapshot();
+        expect(snapshot.ownerId).toBe(selected.executionDomainId); expect(snapshot.poolIds).toEqual([]);
+        expect(snapshot.state).toBe("open"); expect(snapshot.cleanupPermitted).toBe(false);
+        expect(Object.getOwnPropertyDescriptor(scope, lifecycle.ACCEPTANCE_CLIENT_LIFECYCLE_SYMBOL)?.value.realmId).toBe(runtimes.get(scope)!.realmId);
+      }
+      const first = registered;
+      vi.resetModules(); const repeated = await import("./acceptance-client-lifecycle");
+      repeated.initializeAcceptanceObservedRealm(globalThis); repeated.initializeAcceptanceObservedRealm(simulatedScope);
+      expect(registered).toBe(first); expect(register.mock.calls.every(([initializer]) => initializer === first)).toBe(true);
+      for (const runtime of runtimes.values()) expect(runtime.recordNativePoolCreation).not.toHaveBeenCalled();
+      for (const mock of Object.values(fsMocks)) expect(mock).not.toHaveBeenCalled();
+    } finally {
+      await Promise.all([...callbacks.values()].map((registry) => registry.close()));
+      Reflect.deleteProperty(simulatedScope, lifecycle.ACCEPTANCE_CLIENT_LIFECYCLE_SYMBOL);
+    }
+    expect(() => lifecycle.initializeAcceptanceObservedRealm(globalThis)).toThrow("已经封闭");
+  });
+  it("初始化缺profile或未知模拟空间不创建state或文件", () => {
+    const scope = {};
+    expect(() => lifecycle.initializeAcceptanceObservedRealm(scope)).toThrow("观测绑定未确认");
+    expect(runtimeMocks.read).not.toHaveBeenCalled();
+    vi.stubEnv("MVP_WORKFLOW_ACCEPTANCE_RUNTIME_PROFILE", ACCEPTANCE_RUNTIME_PROFILE);
+    runtimeMocks.read.mockImplementation(() => { throw new Error(privateUri); });
+    expect(() => lifecycle.initializeAcceptanceObservedRealm(scope)).toThrow("观测绑定未确认");
+    expect(Object.getOwnPropertyDescriptor(scope, lifecycle.ACCEPTANCE_CLIENT_LIFECYCLE_SYMBOL)).toBeUndefined();
+    for (const mock of Object.values(fsMocks)) expect(mock).not.toHaveBeenCalled();
+  });
+  it("初始化注册失败封闭已建真实registry，拒绝以后factory且不授予清理", async () => {
+    const runtime = { source: {}, realmId: randomUUID(), assertPoolCreationAllowed: vi.fn(), attachNativeRegistry: vi.fn(), recordNativePoolCreation: vi.fn(),
+      registerNativeRealmInitializer: vi.fn(() => { throw new Error(privateUri); }) };
+    vi.stubEnv("MVP_WORKFLOW_ACCEPTANCE_RUNTIME_PROFILE", ACCEPTANCE_RUNTIME_PROFILE); runtimeMocks.read.mockReturnValue(runtime);
+    expect(() => lifecycle.initializeAcceptanceObservedRealm(globalThis)).toThrow("无法绑定真实执行空间");
+    const factory = vi.fn(() => ({ end: async () => undefined }));
+    expect(() => lifecycle.createAcceptanceAwareDatabaseClient(factory)).toThrow("已经封闭"); expect(factory).not.toHaveBeenCalled();
+    const pools = (await lifecycle.closeAcceptanceRealmPools()).pools;
+    expect(pools.poolIds).toEqual([]); expect(pools.cleanupPermitted).toBe(false);
+  });
+  it.each(["getter", "proxy"] as const)("未知空间%s在读取任何状态前拒绝且不泄露原错误", (kind) => {
+    const getter = vi.fn(() => { throw new Error(privateUri); });
+    const trap = vi.fn(() => { throw new Error(privateUri); });
+    const target = {}, untrusted = Object.defineProperty({}, "version", { get: getter });
+    Object.defineProperty(target, lifecycle.ACCEPTANCE_CLIENT_LIFECYCLE_SYMBOL, { value: untrusted });
+    const scope = kind === "proxy" ? new Proxy(target, { getOwnPropertyDescriptor: trap }) : target;
+    vi.stubEnv("MVP_WORKFLOW_ACCEPTANCE_RUNTIME_PROFILE", ACCEPTANCE_RUNTIME_PROFILE);
+    runtimeMocks.read.mockImplementation(() => { throw new Error(privateUri); });
+    try { lifecycle.initializeAcceptanceObservedRealm(scope); throw new Error("应拒绝"); }
+    catch (error) {
+      expect(error).toBeInstanceOf(lifecycle.AcceptanceClientLifecycleError);
+      expect(error).toMatchObject({ code: "runtime-unconfirmed" }); expect(String(error)).not.toContain(privateUri);
+    }
+    expect(runtimeMocks.read).toHaveBeenCalledExactlyOnceWith(ACCEPTANCE_RUNTIME_PROFILE, scope);
+    expect(getter).not.toHaveBeenCalled(); expect(trap).not.toHaveBeenCalled();
+    expect(Object.getOwnPropertyDescriptor(target, lifecycle.ACCEPTANCE_CLIENT_LIFECYCLE_SYMBOL)?.value).toBe(untrusted);
+    expect(lifecycle.getAcceptanceRealmReceipt()).toBeNull();
+    for (const mock of Object.values(fsMocks)) expect(mock).not.toHaveBeenCalled();
   });
 });
