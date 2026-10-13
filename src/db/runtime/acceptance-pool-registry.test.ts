@@ -278,10 +278,9 @@ describe("每所属执行方独立的连接登记与关闭回调原语（不连�
 
   it("关闭回调内重入收尾复用已发布 Promise，不重复调用任何 close", async () => {
     const registry = createAcceptancePoolRegistry(randomUUID()), id = randomUUID();
-    let closing!: Promise<AcceptancePoolCloseReceipt>;
     const close = vi.fn(async () => { expect(registry.sealAndCollectCloseCallbacks()).toBe(closing); });
     registry.createPool(id, () => ({ resource: {}, close }));
-    closing = registry.sealAndCollectCloseCallbacks();
+    const closing = registry.sealAndCollectCloseCallbacks();
     expect(await closing).toMatchObject({ state: "callbacks_completed", completedIds: [id], cleanupPermitted: false });
     expect(close).toHaveBeenCalledExactlyOnceWith();
   });
