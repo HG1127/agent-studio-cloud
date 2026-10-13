@@ -9,6 +9,7 @@ import children from "node:child_process";
 import { types } from "node:util";
 import { createOwnedWorkflowInstrumentation, writeOwnedRuntimeInventory } from "./owned-workflow-instrumentation.mjs";
 import { createOwnedWorldFacadeSource, createOwnedQuickJsFacadeSource, createOwnedCoreWorldFacadeSource, assertUninitializedSdkWorldGlobals } from "./owned-workflow-world-adapter.mjs";
+import { buildOwnedNativeBuildProfile, createOwnedBuildServiceCollector } from "./owned-workflow-build-services.mjs";
 
 const NativeDate = Date;
 const ownUrl = import.meta.url;
@@ -244,8 +245,12 @@ export function installOwnedNativeFactories(instrumentation, native, launchOptio
     catch { return instrumentation.rejectCreation("host", null); }
     return Reflect.apply(fork, nativeChildren, [entry, safeArgs, safeOptions]);
   });
-  // 此 profile 不允许旁路创建 JS 宿主；额外原生构建子进程也须先独立审计。
-  for (const name of ["spawn", "spawnSync", "exec", "execSync", "execFile", "execFileSync"]) {
+  define(nativeChildren, "spawn", function (...args) {
+    if (!launchOptions.buildServices) return instrumentation.rejectCreation("host", null);
+    return launchOptions.buildServices.spawn(...args);
+  });
+  // 原生构建白名单不授权额外 JS 宿主、同步服务或 shell。
+  for (const name of ["spawnSync", "exec", "execSync", "execFile", "execFileSync"]) {
     define(nativeChildren, name, function () { return instrumentation.rejectCreation("host", null); });
   }
   syncBuiltins();
@@ -275,13 +280,14 @@ export async function bootstrapOwnedWorkflowPreload(runtime = process, io = fs) 
   const vitestDist = path.dirname(resolve("vitest/node")), warningsFile = path.join(vitestDist, "../suppress-warnings.cjs");
   assertOwnedPreloadArguments(runtime.execArgv, ownUrl, warningsFile, io);
   const profile = buildOwnedSdkProfile(resolve, io);
+  const buildProfile = buildOwnedNativeBuildProfile(resolve, io);
   assertUninitializedSdkWorldGlobals();
-  const adapterBytes = ["owned-workflow-preload.mjs", "owned-workflow-instrumentation.mjs", "owned-workflow-world-adapter.mjs"].map((name) => {
+  const adapterBytes = ["owned-workflow-preload.mjs", "owned-workflow-instrumentation.mjs", "owned-workflow-world-adapter.mjs", "owned-workflow-build-services.mjs"].map((name) => {
     const file = path.join(helperDirectory, name); regular(file, io); return `${name}:${hash(io.readFileSync(file))}`;
   });
   const launch = { version: 1, context, launchId: randomUUID(), processId: runtime.pid, threadId: workers.threadId,
     startedAt: new NativeDate(NativeDate.now()).toISOString(), adapterFingerprint: hash(adapterBytes.join("\n")),
-    sdkFactoryFingerprint: profile.sdkFactoryFingerprint, configuredVm: "node" };
+    sdkFactoryFingerprint: hash(`${profile.sdkFactoryFingerprint}\n${buildProfile.fingerprint}`), configuredVm: "node" };
   const instrumentation = createOwnedWorkflowInstrumentation(launch, { host: globalThis, assertProfile: () => {
     if (runtime.env.MVP_WORKFLOW_ACCEPTANCE_RUNTIME_PROFILE !== PROFILE || runtime.env.MVP_WORKFLOW_ACCEPTANCE_CONTEXT !== contextRaw
       || runtime.env.WORKFLOW_VM !== "node" || runtime.env.WORKFLOW_TARGET_WORLD !== "local"
@@ -290,8 +296,17 @@ export async function bootstrapOwnedWorkflowPreload(runtime = process, io = fs) 
   } });
   // 宿主事件是实际进程启动后的首次登记，不声称观测 Node 启动前的 V8 分配。
   instrumentation.captureNativeRealm("host", null, () => globalThis); instrumentation.publish(globalThis);
+  const buildServices = createOwnedBuildServiceCollector({ profile: buildProfile, cwd: runtime.cwd(), temporaryDirectory: context.sdkDirectory,
+    environment: runtime.env, nativeSpawn: children.spawn, io, onFailure: () => {
+      runtime.exitCode = 1;
+      instrumentation.hub.recordFailure();
+    },
+    assertCreationAllowed: () => {
+      instrumentation.hub.assertRuntimeProfile();
+      if (instrumentation.hub.snapshot().creationsSealedAt !== null) instrumentation.hub.recordFailure();
+    } });
   installOwnedNativeFactories(instrumentation, { vm, workers, children, syncBuiltins: syncBuiltinESMExports, host: globalThis },
-    { forkEntry: path.join(vitestDist, "workers/forks.js"), preloadUrl: ownUrl, warningsFile, contextRaw, io });
+    { forkEntry: path.join(vitestDist, "workers/forks.js"), preloadUrl: ownUrl, warningsFile, contextRaw, io, buildServices });
   if (typeof registerHooks !== "function") fail();
   registerHooks(createOwnedModuleHooks(profile, pathToFileURL(path.join(helperDirectory, "owned-workflow-world-adapter.mjs")).href, io));
   runtime.env.WORKFLOW_VM = "node"; runtime.env.WORKFLOW_TARGET_WORLD = "local";
@@ -305,7 +320,9 @@ export async function bootstrapOwnedWorkflowPreload(runtime = process, io = fs) 
     runtime.exitCode = 1;
     collecting = (async () => {
       let failed = false;
-      try { await instrumentation.hub.shutdown(); instrumentation.hub.assertCollectionReady(); } catch { failed = true; }
+      try { await instrumentation.hub.shutdown(); } catch { failed = true; }
+      try { await buildServices.close(); buildServices.assertClosed(); } catch { failed = true; }
+      try { instrumentation.hub.assertCollectionReady(); } catch { failed = true; }
       try { writeOwnedRuntimeInventory(runtimeDirectory, instrumentation.hub.snapshot(), io); } catch { failed = true; }
       if (failed) throw new Error("自有运行空间原始收集失败或未知，保留资源");
       runtime.exitCode = previousExitCode ?? 0;
