@@ -1,16 +1,27 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, writeFile, link, symlink, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, link, symlink, rm, realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readOwnedWorkflowJson, readOwnedWorkflowJsonWithHash } from "../helpers/read-owned-workflow-json";
 
 let fixture: string;
-beforeEach(async () => { fixture = await mkdtemp(path.join(os.tmpdir(), "owned-json-reader-")); });
+let fixtureParent: string;
+let ownedFixture = false;
+beforeEach(async () => {
+  ownedFixture = false;
+  fixture = "";
+  fixtureParent = "";
+  fixtureParent = await realpath(os.tmpdir());
+  fixture = await mkdtemp(path.join(fixtureParent, "owned-json-reader-"));
+  ownedFixture = true;
+});
 afterEach(async () => {
-  const absolute = path.resolve(fixture), parent = path.resolve(os.tmpdir());
-  if (!path.isAbsolute(fixture) || path.dirname(absolute) !== parent
+  if (!ownedFixture) return;
+  const absolute = path.resolve(fixture), parent = path.resolve(fixtureParent);
+  if (!path.isAbsolute(fixture) || !path.isAbsolute(fixtureParent) || path.dirname(absolute) !== parent
     || !path.basename(absolute).startsWith("owned-json-reader-")) throw new Error("拒绝清理非自建样本目录");
+  ownedFixture = false;
   await rm(absolute, { recursive: true, force: false });
 });
 
