@@ -52,8 +52,8 @@ function Invoke-OwnedCaseProcess {
   if ($Phase -eq 'business' -and (Test-Path -LiteralPath $taskOutput)) { throw '子报告已存在，拒绝覆盖旧案例。' }
   if (-not $script:WorkflowOwnedCreations.ContainsKey([string]$Context.databaseBranchId)) { throw '子域没有本次父创建事件。' }
   $taskCreation = $script:WorkflowOwnedCreations[[string]$Context.databaseBranchId]
-  $taskFinalizing = ($Phase -eq 'bridge' -and $taskCreation.ContainsKey('absenceVerified') -and $taskCreation.absenceVerified -eq $true
-    -and [IO.Path]::GetFileName($BridgeRequestFile) -ceq 'finalize-request.json')
+  $taskFinalizing = ($Phase -eq 'bridge' -and $taskCreation.ContainsKey('absenceVerified') -and $taskCreation.absenceVerified -eq $true -and
+    [IO.Path]::GetFileName($BridgeRequestFile) -ceq 'finalize-request.json')
   $taskDirectUri = $null
   if (-not $taskFinalizing) {
     if (-not $script:WorkflowDirectConnections.ContainsKey([string]$Context.databaseBranchId)) { throw '没有本控制器实际读取的专用连接，拒绝借用外部URI。' }
@@ -107,8 +107,8 @@ function Invoke-OwnedCaseProcess {
   }
   if ($Phase -eq 'business') {
     $taskPreloadUri = [Uri]::new($taskPreloadFile, [UriKind]::Absolute)
-    if (-not $taskPreloadUri.IsFile -or $taskPreloadUri.Host -or $taskPreloadUri.Query -or $taskPreloadUri.Fragment
-      -or -not [string]::Equals([IO.Path]::GetFullPath($taskPreloadUri.LocalPath), $taskPreloadFile, [StringComparison]::OrdinalIgnoreCase)) { throw '本树预加载文件地址未确认。' }
+    if (-not $taskPreloadUri.IsFile -or $taskPreloadUri.Host -or $taskPreloadUri.Query -or $taskPreloadUri.Fragment -or
+      -not [string]::Equals([IO.Path]::GetFullPath($taskPreloadUri.LocalPath), $taskPreloadFile, [StringComparison]::OrdinalIgnoreCase)) { throw '本树预加载文件地址未确认。' }
     $taskPreloadUrl = $taskPreloadUri.AbsoluteUri
     if ($taskPreloadUrl -match '["\r\n\x00]') { throw '预加载地址不可安全引用。' }
     $taskArguments = '--max-old-space-size=768 --import "' + $taskPreloadUrl + '" "' + $taskCli + '"'
@@ -118,8 +118,8 @@ function Invoke-OwnedCaseProcess {
   }
   $taskClock = $script:WorkflowExecutionClock
   if (-not $taskClock) { $taskClock = [Diagnostics.Stopwatch]::StartNew() }
-  if (-not $script:WorkflowCaseFilePins.ContainsKey([string]$Context.executionDomainId)
-    -or -not $script:WorkflowProcessRuns.ContainsKey([string]$Context.executionDomainId)) { throw '本次父创建的执行域不存在。' }
+  if (-not $script:WorkflowCaseFilePins.ContainsKey([string]$Context.executionDomainId) -or
+    -not $script:WorkflowProcessRuns.ContainsKey([string]$Context.executionDomainId)) { throw '本次父创建的执行域不存在。' }
   $taskEsbuild = Join-Path $taskProjectRoot 'node_modules/.pnpm/@esbuild+win32-x64@0.28.2/node_modules/@esbuild/win32-x64/esbuild.exe'
   $taskBinaryPins = [Collections.Generic.List[IDisposable]]::new()
   $taskPinsRegistered = $false
@@ -191,8 +191,8 @@ function Invoke-OwnedCaseProcess {
     }
   }
   # Vitest forks normally kills its worker. Zero member exit codes cannot attest a kill-free lifecycle or complete VM coverage.
-  if (-not $taskImagesConfirmed -or -not $taskRecord -or -not $taskRecord.zeroExitObserved -or -not $taskRecord.inventoryComplete -or -not $taskRecord.outputEof
-    -or $taskRecord.exitCode -ne 0 -or $taskRecord.remainingProcesses -ne 0) { throw '本次原生执行域终态未闭合。' }
+  if (-not $taskImagesConfirmed -or -not $taskRecord -or -not $taskRecord.zeroExitObserved -or -not $taskRecord.inventoryComplete -or -not $taskRecord.outputEof -or
+    $taskRecord.exitCode -ne 0 -or $taskRecord.remainingProcesses -ne 0) { throw '本次原生执行域终态未闭合。' }
   return $taskRecord
 }
 foreach ($taskPath in @($ContextFile, $OutputDirectory)) {
@@ -218,9 +218,9 @@ function Assert-OwnedWorkflowSource {
   if ($LASTEXITCODE -ne 0 -or $taskManifest.files.Count -ne $taskTracked.Count) { throw '冻结源码清单不是完整提交集合。' }
   $taskSeen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
   foreach ($taskFile in $taskManifest.files) {
-    if ($taskFile.path -isnot [string] -or [IO.Path]::IsPathFullyQualified($taskFile.path) -or $taskFile.path -match '[\x00-\x1f\x7f:]'
-      -or @($taskFile.path.Split('/') | Where-Object { $_ -in @('','.', '..') }).Count -or $taskFile.path -notin $taskTracked
-      -or -not $taskSeen.Add([string]$taskFile.path)) { throw '源码清单包含未知或重复路径。' }
+    if ($taskFile.path -isnot [string] -or [IO.Path]::IsPathFullyQualified($taskFile.path) -or $taskFile.path -match '[\x00-\x1f\x7f:]' -or
+      @($taskFile.path.Split('/') | Where-Object { $_ -in @('','.', '..') }).Count -or $taskFile.path -notin $taskTracked -or
+      -not $taskSeen.Add([string]$taskFile.path)) { throw '源码清单包含未知或重复路径。' }
     if ((Get-FileHash -LiteralPath (Join-Path $taskProjectRoot $taskFile.path)).Hash -cne $taskFile.sha256.ToUpperInvariant()) { throw '代码与冻结清单不一致。' }
   }
   foreach ($taskName in @('.env','.env.local','.env.test','.env.test.local','.env.production','.env.production.local','.env.development','.env.development.local')) {
@@ -317,8 +317,8 @@ function Invoke-OwnedWorkflowClosedObservation {
   param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$Directory)
   $taskRuns = $script:WorkflowProcessRuns[[string]$Context.executionDomainId]
   $taskBusiness = @($taskRuns | Where-Object { $_.phase -ceq 'business' })
-  if ($taskBusiness.Count -ne 1 -or -not $taskBusiness[0].natural -or -not $taskBusiness[0].inventoryComplete -or -not $taskBusiness[0].outputEof
-    -or $taskBusiness[0].exitCode -ne 0 -or $taskBusiness[0].remainingProcesses -ne 0) { throw '本案例实际业务Job自然终态未确认。' }
+  if ($taskBusiness.Count -ne 1 -or -not $taskBusiness[0].natural -or -not $taskBusiness[0].inventoryComplete -or -not $taskBusiness[0].outputEof -or
+    $taskBusiness[0].exitCode -ne 0 -or $taskBusiness[0].remainingProcesses -ne 0) { throw '本案例实际业务Job自然终态未确认。' }
   $null = Assert-OwnedWorkflowSource $Context
   $taskDirectories = $script:WorkflowDirectoryPins[[string]$Context.executionDomainId]
   if ($taskDirectories.IsClosed) { throw '父私有目录生命周期已失效。' }
@@ -362,27 +362,27 @@ function Confirm-OwnedWorkflowCleanupEvidence {
   if ($taskObserved.ownedProcessIds.Count -ne $taskIds.Count) { throw '停止记录遗漏本次Job进程。' }
   foreach ($taskId in $taskObserved.ownedProcessIds) { if (-not $taskIds.Contains([long]$taskId)) { throw '停止记录混入非本次Job进程。' } }
   $taskObservation = $taskObserved.observation
-  if ($taskObservation.executionDomainId -cne $Context.executionDomainId -or $taskObservation.applicationName -cne $Context.applicationName
-    -or $taskObservation.databaseBranchId -cne $Context.databaseBranchId -or -not $taskObservation.sourceMatched -or -not $taskObservation.launchOwnershipVerified
-    -or $taskObservation.termination -cne 'natural' -or $taskObservation.exitCode -ne $taskBusiness[0].exitCode -or -not $taskObservation.processObservationComplete
-    -or $taskObservation.remainingOwnedProcesses -ne 0 -or -not $taskObservation.sdkDirectoryOwnershipVerified -or -not $taskObservation.ownedBranchVerified) { throw '父停止记录与实际原生Job事实不一致。' }
+  if ($taskObservation.executionDomainId -cne $Context.executionDomainId -or $taskObservation.applicationName -cne $Context.applicationName -or
+    $taskObservation.databaseBranchId -cne $Context.databaseBranchId -or -not $taskObservation.sourceMatched -or -not $taskObservation.launchOwnershipVerified -or
+    $taskObservation.termination -cne 'natural' -or $taskObservation.exitCode -ne $taskBusiness[0].exitCode -or -not $taskObservation.processObservationComplete -or
+    $taskObservation.remainingOwnedProcesses -ne 0 -or -not $taskObservation.sdkDirectoryOwnershipVerified -or -not $taskObservation.ownedBranchVerified) { throw '父停止记录与实际原生Job事实不一致。' }
   # Only the independently instrumented bridge may derive this flag; paired realm files or OS exit alone never establish VM coverage.
-  if (-not $taskObservation.allRealmReceiptsCollected -or $taskObserved.child.businessStatus -cne 'passed' -or $null -ne $taskObserved.child.failureCode
-    -or $taskObserved.child.realms.Count -lt 1) { throw '完整执行空间覆盖或原业务断言未确认，保留资源。' }
+  if (-not $taskObservation.allRealmReceiptsCollected -or $taskObserved.child.businessStatus -cne 'passed' -or $null -ne $taskObserved.child.failureCode -or
+    $taskObserved.child.realms.Count -lt 1) { throw '完整执行空间覆盖或原业务断言未确认，保留资源。' }
   $taskPoolCount = 0
   foreach ($taskRealm in $taskObserved.child.realms) {
-    if (-not $taskIds.Contains([long]$taskRealm.processId) -or $taskRealm.executionDomainId -cne $Context.executionDomainId
-      -or $taskRealm.pools.ownerId -cne $Context.executionDomainId -or $taskRealm.pools.state -cne 'callbacks_completed'
-      -or $taskRealm.pools.failedIds.Count -ne 0 -or $taskRealm.pools.unknownIds.Count -ne 0
-      -or $taskRealm.pools.poolIds.Count -ne $taskRealm.pools.completedIds.Count) { throw '登记池的原生关闭回执不完整。' }
+    if (-not $taskIds.Contains([long]$taskRealm.processId) -or $taskRealm.executionDomainId -cne $Context.executionDomainId -or
+      $taskRealm.pools.ownerId -cne $Context.executionDomainId -or $taskRealm.pools.state -cne 'callbacks_completed' -or
+      $taskRealm.pools.failedIds.Count -ne 0 -or $taskRealm.pools.unknownIds.Count -ne 0 -or
+      $taskRealm.pools.poolIds.Count -ne $taskRealm.pools.completedIds.Count) { throw '登记池的原生关闭回执不完整。' }
     $taskPoolCount += $taskRealm.pools.poolIds.Count
   }
   if ($taskPoolCount -lt 1) { throw '真实业务连接没有登记关闭证据。' }
   $taskDatabase = $taskObserved.databaseObservation
-  if ($taskDatabase.observationStatus -cne 'observed' -or $taskDatabase.databaseBranchId -cne $Context.databaseBranchId
-    -or $taskDatabase.applicationName -cne $Context.applicationName -or $taskDatabase.databaseConnections -ne 0 -or $taskDatabase.activeSql -ne 0
-    -or -not $taskObservation.databaseObservationComplete -or -not $taskObservation.databaseSnapshotFresh
-    -or $taskObservation.databaseConnections -ne 0 -or $taskObservation.activeSql -ne 0) { throw '实际数据库停止观察未确认。' }
+  if ($taskDatabase.observationStatus -cne 'observed' -or $taskDatabase.databaseBranchId -cne $Context.databaseBranchId -or
+    $taskDatabase.applicationName -cne $Context.applicationName -or $taskDatabase.databaseConnections -ne 0 -or $taskDatabase.activeSql -ne 0 -or
+    -not $taskObservation.databaseObservationComplete -or -not $taskObservation.databaseSnapshotFresh -or
+    $taskObservation.databaseConnections -ne 0 -or $taskObservation.activeSql -ne 0) { throw '实际数据库停止观察未确认。' }
   $taskCheckedAt = [DateTimeOffset]::ParseExact([string]$taskDatabase.checkedAt, 'yyyy-MM-ddTHH:mm:ss.fffZ', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal)
   $taskNow = [DateTimeOffset]::UtcNow
   if ($taskCheckedAt -lt $taskBusiness[0].stoppedAt -or $taskCheckedAt -gt $taskNow -or ($taskNow-$taskCheckedAt).TotalSeconds -gt 30) { throw '停止SQL不是自然退出后的新鲜观察。' }
@@ -419,8 +419,8 @@ function Invoke-OwnedWorkflowCaseChain {
       $taskResult = $taskResultPin.Text | ConvertFrom-Json -AsHashtable -DateKind String
       foreach ($taskField in $taskContext.Keys) { if ($taskResult.context[$taskField] -cne $taskContext[$taskField]) { throw '最终回执上下文不同。' } }
       foreach ($taskField in $taskCleanup.Keys) { if ($taskResult.cleanup[$taskField] -cne $taskCleanup[$taskField]) { throw '最终回执不是实际清理结果。' } }
-      if ($taskResult.version -ne 1 -or $taskResult.evaluation.outcome -cne 'passed' -or -not $taskResult.evaluation.cleanupPermitted
-        -or $taskResult.evaluation.failures.Count -ne 0) { throw '完整实际执行或清理没有通过回执。' }
+      if ($taskResult.version -ne 1 -or $taskResult.evaluation.outcome -cne 'passed' -or -not $taskResult.evaluation.cleanupPermitted -or
+        $taskResult.evaluation.failures.Count -ne 0) { throw '完整实际执行或清理没有通过回执。' }
       $null = Assert-OwnedWorkflowSource $Preparation
     } finally { $taskResultPin.Dispose() }
   } finally {

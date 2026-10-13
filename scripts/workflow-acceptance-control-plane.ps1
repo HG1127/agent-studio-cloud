@@ -61,16 +61,16 @@ function Get-OwnedWorkflowNeonBranches {
     $taskPath = '/projects/' + $script:WorkflowProjectId + '/branches?limit=100&sort_by=created_at&sort_order=asc'
     if ($null -ne $taskCursor) { $taskPath += '&cursor=' + [Uri]::EscapeDataString($taskCursor) }
     $taskResponse = Invoke-OwnedWorkflowNeonApi GET $taskPath $null
-    if ($taskResponse -isnot [Collections.IDictionary] -or $taskResponse.branches -isnot [Array]
-      -or $taskResponse.branches.Count -gt 100 -or $taskResponse.pagination -isnot [Collections.IDictionary]) { throw '临时分支分页未确认。' }
+    if ($taskResponse -isnot [Collections.IDictionary] -or $taskResponse.branches -isnot [Array] -or
+      $taskResponse.branches.Count -gt 100 -or $taskResponse.pagination -isnot [Collections.IDictionary]) { throw '临时分支分页未确认。' }
     foreach ($taskBranch in $taskResponse.branches) {
       if ($taskBranch.project_id -cne $script:WorkflowProjectId -or $taskBranch.id -notmatch '^br-[a-z0-9-]+$' -or -not $taskIds.Add([string]$taskBranch.id)) { throw '分支归属或分页唯一性未确认。' }
       $taskBranches.Add($taskBranch)
     }
     $taskPagination = $taskResponse.pagination
     foreach ($taskKey in $taskPagination.Keys) { if ($taskKey -cnotin @('next','sort_by','sort_order')) { throw '分支分页包含未知字段。' } }
-    if ($taskPagination.ContainsKey('sort_by') -and $taskPagination.sort_by -cne 'created_at'
-      -or $taskPagination.ContainsKey('sort_order') -and $taskPagination.sort_order -cne 'asc') { throw '分支分页排序状态未知。' }
+    if ($taskPagination.ContainsKey('sort_by') -and $taskPagination.sort_by -cne 'created_at' -or
+      $taskPagination.ContainsKey('sort_order') -and $taskPagination.sort_order -cne 'asc') { throw '分支分页排序状态未知。' }
     # The official CursorPagination response omits next on the final page; cursor is a request parameter only.
     if (-not $taskPagination.ContainsKey('next')) { return $taskBranches.ToArray() }
     if ($taskPagination.next -isnot [string] -or [string]::IsNullOrWhiteSpace($taskPagination.next)) { throw '分支分页游标未确认。' }
@@ -136,8 +136,8 @@ function Remove-OwnedWorkflowNeonBranch {
   Assert-OwnedWorkflowCleanupPermission $BranchId
   $taskDeleted = Invoke-OwnedWorkflowNeonApi DELETE ('/projects/' + $script:WorkflowProjectId + '/branches/' + $BranchId) $null
   if (-not $taskCreation.ContainsKey('deleteResponseStatus') -or $taskCreation.deleteResponseStatus -notin @(200,204)) { throw '删除请求没有官方成功回执。' }
-  if ($taskCreation.deleteResponseStatus -eq 200 -and ($taskDeleted.branch.id -cne $BranchId -or $taskDeleted.branch.project_id -cne $script:WorkflowProjectId
-    -or $taskDeleted.branch.created_at -cne $taskCreation.branch.created_at -or $taskDeleted.branch.name -cne $taskCreation.branch.name)) { throw '删除响应不是本次自建分支；保留未知清理状态。' }
+  if ($taskCreation.deleteResponseStatus -eq 200 -and ($taskDeleted.branch.id -cne $BranchId -or $taskDeleted.branch.project_id -cne $script:WorkflowProjectId -or
+    $taskDeleted.branch.created_at -cne $taskCreation.branch.created_at -or $taskDeleted.branch.name -cne $taskCreation.branch.name)) { throw '删除响应不是本次自建分支；保留未知清理状态。' }
   for ($taskAttempt = 0; $taskAttempt -lt 10; $taskAttempt++) {
     $taskBranch = Invoke-OwnedWorkflowNeonApi GET ('/projects/' + $script:WorkflowProjectId + '/branches/' + $BranchId) $null -AllowAbsent
     $taskEndpoint = Invoke-OwnedWorkflowNeonApi GET ('/projects/' + $script:WorkflowProjectId + '/endpoints/' + $taskProvenance.endpointId) $null -AllowAbsent
@@ -158,9 +158,9 @@ function Assert-OwnedWorkflowCleanupPermission {
   if (-not $script:WorkflowOwnedCreations.ContainsKey($BranchId) -or -not $script:WorkflowCleanupPermissions.ContainsKey($BranchId)) { throw '没有父控制器实际停止证明，拒绝删除。' }
   $taskCreation = $script:WorkflowOwnedCreations[$BranchId]
   $taskPermission = $script:WorkflowCleanupPermissions[$BranchId]
-  if ($taskPermission.creationRequestId -cne $taskCreation.requestId -or $taskPermission.executionDomainId -cne $taskCreation.context.executionDomainId
-    -or $taskPermission.observedPin.IsClosed -or -not $taskPermission.observedPin.OriginalBytesUnchanged()
-    -or $taskPermission.directoryPins.IsClosed -or $taskPermission.runs.Count -lt 4) { throw '本次父持有的停止证明已经失效。' }
+  if ($taskPermission.creationRequestId -cne $taskCreation.requestId -or $taskPermission.executionDomainId -cne $taskCreation.context.executionDomainId -or
+    $taskPermission.observedPin.IsClosed -or -not $taskPermission.observedPin.OriginalBytesUnchanged() -or
+    $taskPermission.directoryPins.IsClosed -or $taskPermission.runs.Count -lt 4) { throw '本次父持有的停止证明已经失效。' }
   foreach ($taskRun in $taskPermission.runs) {
     if (-not $taskRun.natural -or -not $taskRun.inventoryComplete -or -not $taskRun.outputEof -or $taskRun.exitCode -ne 0 -or $taskRun.remainingProcesses -ne 0) { throw '本次仍有未确认执行域，拒绝删除。' }
   }
@@ -201,9 +201,9 @@ function Get-OwnedWorkflowBranchProvenance {
   $taskEndpoint = (Invoke-OwnedWorkflowNeonApi GET ('/projects/' + $script:WorkflowProjectId + '/endpoints/' + $taskEndpointId) $null).endpoint
   if ($taskEndpoint.id -cne $taskEndpointId -or $taskEndpoint.branch_id -cne $BranchId -or $taskEndpoint.project_id -cne $script:WorkflowProjectId -or $taskEndpoint.type -cne 'read_write' -or $taskEndpoint.host -cne $taskEndpoints[0].host -or $taskEndpoint.created_at -cne $taskEndpoints[0].created_at -or $taskEndpoint.host -notmatch '^ep-[a-z0-9-]+\.[a-z0-9.-]+\.neon\.tech$' -or $taskEndpoint.host.Split('.')[0] -cne $taskEndpointId -or $taskEndpoint.host -match 'pooler|pgbouncer') { throw '官方端点与自创建分支不一致。' }
   $taskDatabases = Invoke-OwnedWorkflowNeonApi GET ('/projects/' + $script:WorkflowProjectId + '/branches/' + $BranchId + '/databases') $null
-  if ($taskDatabases.databases -isnot [Array] -or @($taskDatabases.databases | Where-Object { $_.name -ceq 'ci_test' }).Count -ne 1
-    -or @($taskDatabases.databases | Where-Object { ($_.id -is [long] -or $_.id -is [int]) -and $_.id -eq $taskCreation.database.id -and $_.branch_id -ceq $BranchId
-      -and $_.name -ceq 'ci_test' -and $_.created_at -ceq $taskCreation.database.created_at -and $_.owner_name -ceq $taskCreation.database.owner_name }).Count -ne 1) { throw '本次POST数据库与官方现状不一致。' }
+  if ($taskDatabases.databases -isnot [Array] -or @($taskDatabases.databases | Where-Object { $_.name -ceq 'ci_test' }).Count -ne 1 -or
+    @($taskDatabases.databases | Where-Object { ($_.id -is [long] -or $_.id -is [int]) -and $_.id -eq $taskCreation.database.id -and $_.branch_id -ceq $BranchId -and
+      $_.name -ceq 'ci_test' -and $_.created_at -ceq $taskCreation.database.created_at -and $_.owner_name -ceq $taskCreation.database.owner_name }).Count -ne 1) { throw '本次POST数据库与官方现状不一致。' }
   return @{ version = 1; projectId = $script:WorkflowProjectId; databaseBranchId = $BranchId; branchName = $taskCreation.branch.name;
     executionDomainId = $taskCreation.context.executionDomainId; batchId = $taskCreation.context.batchId;
     sourceCommit = $taskCreation.context.sourceCommit; sourceFingerprint = $taskCreation.context.sourceFingerprint;
@@ -220,11 +220,11 @@ function Get-OwnedWorkflowDirectConnection {
   $taskPath += '&endpoint_id=' + [Uri]::EscapeDataString($taskProvenance.endpointId) + '&database_name=ci_test&role_name=neondb_owner&pooled=false'
   $taskResponse = Invoke-OwnedWorkflowNeonApi GET $taskPath $null
   $taskUri = $null
-  if ($taskResponse.uri -isnot [string] -or $taskResponse.uri -cne $taskResponse.uri.Trim() -or [Text.Encoding]::UTF8.GetByteCount($taskResponse.uri) -gt 16384
-    -or $taskResponse.uri -match '[\x00-\x20\x7f]' -or -not [Uri]::TryCreate($taskResponse.uri, [UriKind]::Absolute, [ref]$taskUri)) { throw '本次官方专用连接未确认。' }
-  if ($taskUri.Scheme -cnotin @('postgres','postgresql') -or $taskUri.Host -cne $taskProvenance.endpointHost -or $taskUri.AbsolutePath -cne '/ci_test'
-    -or $taskUri.Port -notin @(-1,5432) -or $taskUri.Fragment -or $taskUri.UserInfo.Split(':').Count -ne 2
-    -or [Uri]::UnescapeDataString($taskUri.UserInfo.Split(':')[0]) -cne 'neondb_owner' -or [string]::IsNullOrEmpty($taskUri.UserInfo.Split(':')[1])) { throw '拒绝非本次直接ci_test连接。' }
+  if ($taskResponse.uri -isnot [string] -or $taskResponse.uri -cne $taskResponse.uri.Trim() -or [Text.Encoding]::UTF8.GetByteCount($taskResponse.uri) -gt 16384 -or
+    $taskResponse.uri -match '[\x00-\x20\x7f]' -or -not [Uri]::TryCreate($taskResponse.uri, [UriKind]::Absolute, [ref]$taskUri)) { throw '本次官方专用连接未确认。' }
+  if ($taskUri.Scheme -cnotin @('postgres','postgresql') -or $taskUri.Host -cne $taskProvenance.endpointHost -or $taskUri.AbsolutePath -cne '/ci_test' -or
+    $taskUri.Port -notin @(-1,5432) -or $taskUri.Fragment -or $taskUri.UserInfo.Split(':').Count -ne 2 -or
+    [Uri]::UnescapeDataString($taskUri.UserInfo.Split(':')[0]) -cne 'neondb_owner' -or [string]::IsNullOrEmpty($taskUri.UserInfo.Split(':')[1])) { throw '拒绝非本次直接ci_test连接。' }
   $taskOptions = @{}
   foreach ($taskOption in $taskUri.Query.TrimStart('?').Split('&')) {
     $taskParts = $taskOption.Split('=')
