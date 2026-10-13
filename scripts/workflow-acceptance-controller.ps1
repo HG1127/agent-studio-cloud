@@ -50,6 +50,18 @@ function Invoke-OwnedCaseProcess {
   }
   $taskOutput = Join-Path $CaseDirectory 'child-result.json'
   if ($Phase -eq 'business' -and (Test-Path -LiteralPath $taskOutput)) { throw '子报告已存在，拒绝覆盖旧案例。' }
+  if ($Phase -eq 'business') {
+    Assert-OwnedWorkflowRawFileDeadline
+    if (Test-Path -LiteralPath (Join-Path $CaseDirectory 'business-process-inventory.json')) { throw '父进程原始库存已存在，拒绝覆盖。' }
+    $taskRuntimeDirectory = Join-Path $taskSdkRoot 'runtime-inventory'
+    Assert-OwnedWorkflowRawFileDeadline
+    $taskRuntimeEntries = [IO.Directory]::EnumerateFileSystemEntries($taskRuntimeDirectory).GetEnumerator()
+    try {
+      Assert-OwnedWorkflowRawFileDeadline
+      if ($taskRuntimeEntries.MoveNext()) { throw '本次业务运行前已有引擎原始库存，拒绝复用。' }
+    }
+    finally { $taskRuntimeEntries.Dispose() }
+  }
   if (-not $script:WorkflowOwnedCreations.ContainsKey([string]$Context.databaseBranchId)) { throw '子域没有本次父创建事件。' }
   $taskCreation = $script:WorkflowOwnedCreations[[string]$Context.databaseBranchId]
   $taskFinalizing = ($Phase -eq 'bridge' -and $taskCreation.ContainsKey('absenceVerified') -and $taskCreation.absenceVerified -eq $true -and
@@ -170,24 +182,39 @@ function Invoke-OwnedCaseProcess {
         $taskRecord = @{ phase = $Phase; processIds = $taskIds; rootProcessId = [long]$taskDomain.ProcessId;
           zeroExitObserved = $taskInventory['inventoryComplete']; natural = $false; inventoryComplete = $taskInventory['inventoryComplete'];
           outputEof = ($taskInventory['stdoutEof'] -and $taskInventory['stderrEof']); exitCode = $taskRootMember[0]['exitCode'];
-          remainingProcesses = $taskInventory['remainingOwnedProcesses']; stoppedAt = $taskStoppedAt; processInventory = $taskInventory }
+          remainingProcesses = $taskInventory['remainingOwnedProcesses']; stoppedAt = $taskStoppedAt; processInventory = $taskInventory;
+          processInventoryFileStatus = 'unconfirmed'; runtimeFilesStatus = 'unconfirmed' }
+        $script:WorkflowProcessRuns[[string]$Context.executionDomainId].Add($taskRecord)
       }
     } finally {
       # Disposal of a still-live job is forced termination, never a passing cleanup acknowledgement.
-      if ($taskDomain) {
-        $taskDomain.Dispose()
-        if ($taskRecord -and $taskDomain.ForcedTermination) { $taskRecord.processInventory['termination'] = 'forced' }
+      try {
+        if ($taskDomain) {
+          try { $taskDomain.Dispose() }
+          finally { if ($taskRecord -and $taskDomain.ForcedTermination) { $taskRecord.processInventory['termination'] = 'forced' } }
+        }
+      } finally {
+        if (-not $taskPinsRegistered) { foreach ($taskBinaryPin in $taskBinaryPins) { $taskBinaryPin.Dispose() } }
+        $taskEnvironment.Clear()
+        $taskDirectUri = $null
       }
-      if (-not $taskPinsRegistered) { foreach ($taskBinaryPin in $taskBinaryPins) { $taskBinaryPin.Dispose() } }
-      $taskEnvironment.Clear()
-      $taskDirectUri = $null
     }
     if ($taskRecord) {
       # This private serialized fact is not an observe-v1 payload or cleanup authorization.
       $taskInventoryJson = $taskRecord.processInventory | ConvertTo-Json -Depth 16 -Compress
       if ([Text.Encoding]::UTF8.GetByteCount($taskInventoryJson) -gt 256KB) { throw '父方进程事实超过共享字节上限。' }
       $taskRecord.processInventoryJson = $taskInventoryJson
-      $script:WorkflowProcessRuns[[string]$Context.executionDomainId].Add($taskRecord)
+      if ($Phase -eq 'business') {
+        Assert-OwnedWorkflowRawFileDeadline
+        $taskInventoryPin = [AgentStudioAcceptance.OwnedJsonPin]::Create((Join-Path $CaseDirectory 'business-process-inventory.json'), $taskInventoryJson, 256KB)
+        try { $script:WorkflowCaseFilePins[[string]$Context.executionDomainId].Add($taskInventoryPin) }
+        catch { $taskInventoryPin.Dispose(); throw }
+        $taskRecord.processInventoryPin = $taskInventoryPin
+        $taskRecord.processInventoryFileStatus = 'held'
+        if ($taskRecord.inventoryComplete -and $taskRecord.outputEof -and $taskRecord.remainingProcesses -eq 0) {
+          $null = Collect-OwnedWorkflowRuntimeFiles -Context $Context -Directory $CaseDirectory
+        }
+      }
     }
   }
   # Vitest forks normally kills its worker. Zero member exit codes cannot attest a kill-free lifecycle or complete VM coverage.
@@ -237,9 +264,15 @@ function Initialize-OwnedWorkflowCase {
   if (Test-Path -LiteralPath $taskSdk) { throw '私有执行目录已存在，拒绝覆盖。' }
   $null = New-Item -ItemType Directory -Path $taskSdk
   $null = New-Item -ItemType Directory -Path (Join-Path $taskSdk 'realms')
+  Assert-OwnedWorkflowRawFileDeadline
+  $null = New-Item -ItemType Directory -Path (Join-Path $taskSdk 'runtime-inventory')
   if (-not ('AgentStudioAcceptance.OwnedDirectoryPins' -as [type])) { Add-Type -LiteralPath (Join-Path $PSScriptRoot 'workflow-acceptance-process-domain.cs') }
   $taskDirectories = [AgentStudioAcceptance.OwnedDirectoryPins]::new()
   $taskDirectories.Pin([IO.Path]::GetFullPath($Directory)); $taskDirectories.Pin($taskSdk); $taskDirectories.Pin((Join-Path $taskSdk 'realms'))
+  try {
+    Assert-OwnedWorkflowRawFileDeadline
+    $taskDirectories.Pin((Join-Path $taskSdk 'runtime-inventory'))
+  } catch { $taskDirectories.Dispose(); throw }
   $script:WorkflowDirectoryPins[$taskDomainId] = $taskDirectories
   $script:WorkflowCaseFilePins[$taskDomainId] = [Collections.Generic.List[IDisposable]]::new()
   $script:WorkflowProcessRuns[$taskDomainId] = [Collections.Generic.List[object]]::new()
@@ -311,6 +344,137 @@ function Invoke-OwnedWorkflowBridgeRequest {
   $taskPin = [AgentStudioAcceptance.OwnedJsonPin]::Create($taskFile, ($Request | ConvertTo-Json -Depth 16 -Compress), 32768)
   try { return Invoke-OwnedCaseProcess -Context $Request.context -CaseDirectory $Request.caseDirectory -BridgeRequestFile $taskFile }
   finally { $taskPin.Dispose() }
+}
+
+function Assert-OwnedWorkflowRawFileDeadline {
+  if (-not $script:WorkflowExecutionClock -or $script:WorkflowExecutionClock.ElapsedMilliseconds -ge 240000) { throw '原案例原始文件截止时间已到或未登记。' }
+}
+
+function Get-OwnedWorkflowRuntimeInventoryNames {
+  param([Parameter(Mandatory)][string]$Directory)
+  if (-not [IO.Path]::IsPathFullyQualified($Directory)) { throw '引擎原始库存目录不是本地绝对路径。' }
+  Assert-OwnedWorkflowRawFileDeadline
+  $taskRoot = [IO.Path]::GetFullPath($Directory)
+  $taskItem = Get-Item -LiteralPath $taskRoot -Force
+  if (-not $taskItem.PSIsContainer -or ($taskItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw '引擎原始库存目录身份未知。' }
+  $taskNames = [Collections.Generic.List[string]]::new()
+  $taskSeen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+  Assert-OwnedWorkflowRawFileDeadline
+  $taskEntries = [IO.Directory]::EnumerateFileSystemEntries($taskRoot).GetEnumerator()
+  try {
+    while ($true) {
+      Assert-OwnedWorkflowRawFileDeadline
+      if (-not $taskEntries.MoveNext()) { break }
+      if ($taskNames.Count -ge 64) { throw '引擎原始库存超过全量64文件边界。' }
+      $taskPath = [IO.Path]::GetFullPath([string]$taskEntries.Current)
+      $taskName = [IO.Path]::GetFileName($taskPath)
+      if ($taskName -cnotmatch '^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.json$' -or
+        -not [string]::Equals([IO.Path]::GetDirectoryName($taskPath), $taskRoot, [StringComparison]::OrdinalIgnoreCase) -or -not $taskSeen.Add($taskName)) { throw '引擎原始库存存在未知名称、路径或重复文件。' }
+      Assert-OwnedWorkflowRawFileDeadline
+      $taskFile = Get-Item -LiteralPath $taskPath -Force
+      if ($taskFile.PSIsContainer -or ($taskFile.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw '引擎原始库存含目录或重解析文件。' }
+      $taskNames.Add($taskName)
+    }
+  } finally { $taskEntries.Dispose() }
+  if ($taskNames.Count -lt 1) { throw '本次引擎原始库存为空，不能声明全集。' }
+  $taskNames.Sort([StringComparer]::Ordinal)
+  return ,$taskNames.ToArray()
+}
+
+function Collect-OwnedWorkflowRuntimeFiles {
+  param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$Directory)
+  $taskDomainId = [string]$Context.executionDomainId
+  $taskCaseDirectory = [IO.Path]::GetFullPath($Directory)
+  Assert-OwnedWorkflowRawFileDeadline
+  if (-not $script:WorkflowCreationPins.ContainsKey($taskDomainId) -or -not $script:WorkflowDirectoryPins.ContainsKey($taskDomainId) -or
+    -not $script:WorkflowCaseFilePins.ContainsKey($taskDomainId) -or -not $script:WorkflowProcessRuns.ContainsKey($taskDomainId)) { throw '没有本次父登记的原始文件域。' }
+  $taskCreation = $script:WorkflowCreationPins[$taskDomainId]
+  Assert-OwnedWorkflowRawFileDeadline
+  if ($taskCreation.directory -cne $taskCaseDirectory -or $taskCreation.branchId -cne $Context.databaseBranchId -or
+    $taskCreation.handle.IsClosed -or -not $taskCreation.handle.OriginalBytesUnchanged() -or $script:WorkflowDirectoryPins[$taskDomainId].IsClosed) { throw '本次原始文件归属或目录固定已失效。' }
+  $taskBusiness = @($script:WorkflowProcessRuns[$taskDomainId] | Where-Object { $_.phase -ceq 'business' })
+  if ($taskBusiness.Count -ne 1) { throw '本次没有唯一实际业务进程记录。' }
+  $taskRun = $taskBusiness[0]
+  if (-not $taskRun.inventoryComplete -or -not $taskRun.outputEof -or $taskRun.remainingProcesses -ne 0 -or
+    -not $taskRun.ContainsKey('processInventoryPin') -or $taskRun.processInventoryFileStatus -cne 'held') { throw '实际业务写入者停止或父库存原文件未确认。' }
+  foreach ($taskKey in $taskRun.processInventory['context'].Keys) {
+    if ($taskRun.processInventory['context'][$taskKey] -cne $Context[$taskKey]) { throw '原始库存收集混入其他实际上下文。' }
+  }
+  $taskExisting = $taskRun.ContainsKey('rawRuntimeFiles')
+  if ($taskExisting -and $taskRun.runtimeFilesStatus -cne 'held') { throw '旧原始文件收集仍未确认，拒绝覆盖诊断。' }
+  if (-not $taskExisting) {
+    $taskRun.rawRuntimeFiles = @{ childReportPin = $null; runtimePins = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::Ordinal);
+      runtimeNames = @(); runtimeInventoryRefs = @(); runtimeBytes = 0 }
+  }
+  $taskRaw = $taskRun.rawRuntimeFiles
+  try {
+    foreach ($taskPin in $script:WorkflowCaseFilePins[$taskDomainId]) {
+      Assert-OwnedWorkflowRawFileDeadline
+      if ($taskPin.IsClosed -or -not $taskPin.OriginalBytesUnchanged()) { throw '父持有的本次原始文件已关闭或改变。' }
+    }
+    $taskRuntimeDirectory = Join-Path ([IO.Path]::GetFullPath([string]$Context.sdkDirectory)) 'runtime-inventory'
+    $taskNames = Get-OwnedWorkflowRuntimeInventoryNames -Directory $taskRuntimeDirectory
+    if ($taskExisting) {
+      if ($taskNames.Count -ne $taskRaw.runtimeNames.Count -or $taskNames.Count -ne $taskRaw.runtimePins.Count) { throw '实际引擎库存全集已改变。' }
+      for ($taskIndex = 0; $taskIndex -lt $taskNames.Count; $taskIndex++) {
+        if ($taskNames[$taskIndex] -cne $taskRaw.runtimeNames[$taskIndex]) { throw '实际引擎库存全集已改变。' }
+      }
+    } else {
+      $taskRaw.runtimeNames = $taskNames
+      Assert-OwnedWorkflowRawFileDeadline
+      $taskChildPin = [AgentStudioAcceptance.OwnedJsonPin]::Open((Join-Path $taskCaseDirectory 'child-result.json'), 512KB)
+      try { $script:WorkflowCaseFilePins[$taskDomainId].Add($taskChildPin) }
+      catch { $taskChildPin.Dispose(); throw }
+      $taskRaw.childReportPin = $taskChildPin
+    }
+    Assert-OwnedWorkflowRawFileDeadline
+    if ($taskRaw.childReportPin.IsClosed -or -not $taskRaw.childReportPin.OriginalBytesUnchanged()) { throw '实际子报告原字节固定已失效。' }
+    $taskBytes = 0
+    $taskRefs = [Collections.Generic.List[object]]::new()
+    foreach ($taskName in $taskNames) {
+      Assert-OwnedWorkflowRawFileDeadline
+      if ($taskExisting) {
+        if (-not $taskRaw.runtimePins.ContainsKey($taskName)) { throw '已有库存固定句柄遗漏实际全集成员。' }
+        $taskFilePin = $taskRaw.runtimePins[$taskName]
+      } else {
+        $taskFilePin = [AgentStudioAcceptance.OwnedJsonPin]::Open((Join-Path $taskRuntimeDirectory $taskName), 512KB)
+        try { $script:WorkflowCaseFilePins[$taskDomainId].Add($taskFilePin) }
+        catch { $taskFilePin.Dispose(); throw }
+        $taskRaw.runtimePins.Add($taskName, $taskFilePin)
+      }
+      Assert-OwnedWorkflowRawFileDeadline
+      if ($taskFilePin.IsClosed -or -not $taskFilePin.OriginalBytesUnchanged()) { throw '实际引擎库存原字节固定已失效。' }
+      $taskBytes += [Text.Encoding]::UTF8.GetByteCount($taskFilePin.Text)
+      if ($taskBytes -gt 32MB) { throw '实际引擎库存总原字节超过32MiB边界。' }
+      $taskRefs.Add(@{ launchId = $taskName.Substring(0,36); sha256 = $taskFilePin.Sha256 })
+    }
+    foreach ($taskPin in $script:WorkflowCaseFilePins[$taskDomainId]) {
+      Assert-OwnedWorkflowRawFileDeadline
+      if ($taskPin.IsClosed -or -not $taskPin.OriginalBytesUnchanged()) { throw '消费前本次原始文件固定已失效。' }
+    }
+    $taskAfter = Get-OwnedWorkflowRuntimeInventoryNames -Directory $taskRuntimeDirectory
+    if ($taskAfter.Count -ne $taskNames.Count) { throw '两次实际枚举的引擎库存全集不同。' }
+    for ($taskIndex = 0; $taskIndex -lt $taskNames.Count; $taskIndex++) {
+      if ($taskAfter[$taskIndex] -cne $taskNames[$taskIndex]) { throw '两次实际枚举的引擎库存全集不同。' }
+    }
+    Assert-OwnedWorkflowRawFileDeadline
+    if ($taskExisting) {
+      if ($taskRaw.processInventoryRef.sha256 -cne $taskRun.processInventoryPin.Sha256 -or
+        $taskRaw.childReportRef.sha256 -cne $taskRaw.childReportPin.Sha256 -or $taskRaw.runtimeBytes -ne $taskBytes -or
+        $taskRaw.runtimeInventoryRefs.Count -ne $taskRefs.Count) { throw '已有原始文件引用与父持有字节不一致。' }
+      for ($taskIndex = 0; $taskIndex -lt $taskRefs.Count; $taskIndex++) {
+        if ($taskRaw.runtimeInventoryRefs[$taskIndex].launchId -cne $taskRefs[$taskIndex].launchId -or
+          $taskRaw.runtimeInventoryRefs[$taskIndex].sha256 -cne $taskRefs[$taskIndex].sha256) { throw '已有引擎库存原始引用发生变化。' }
+      }
+    } else {
+      $taskRaw.processInventoryRef = @{ sha256 = $taskRun.processInventoryPin.Sha256 }
+      $taskRaw.childReportRef = @{ sha256 = $taskRaw.childReportPin.Sha256 }
+      $taskRaw.runtimeInventoryRefs = $taskRefs.ToArray()
+      $taskRaw.runtimeBytes = $taskBytes
+    }
+    $taskRun.runtimeFilesStatus = 'held'
+    return $taskRaw
+  } catch { $taskRun.runtimeFilesStatus = 'unconfirmed'; throw }
 }
 
 function Invoke-OwnedWorkflowClosedObservation {
