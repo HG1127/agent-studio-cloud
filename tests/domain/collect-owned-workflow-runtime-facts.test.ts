@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { WorkflowAcceptanceRuntimeCoverageEvaluation, type WorkflowAcceptanceRuntimeObservationRequest,
+import { WorkflowAcceptanceRuntimeCoverageEvaluation, WorkflowAcceptanceRuntimeFingerprints, type WorkflowAcceptanceRuntimeObservationRequest,
   type WorkflowAcceptanceRuntimeCoverageFailure } from "@/contracts/workflow-runtime-observation";
 import type { WorkflowAcceptanceRuntimeInventory } from "@/contracts/workflow-runtime-inventory";
 import type { WorkflowAcceptanceProcessInventory } from "@/contracts/workflow-process-inventory";
@@ -20,7 +20,7 @@ vi.mock("../helpers/read-owned-workflow-json", () => ({ readOwnedWorkflowJsonWit
 vi.mock("../helpers/owned-workflow-preload.mjs", () => ({ buildOwnedSdkProfile: dependencies.sdk }));
 vi.mock("../helpers/owned-workflow-build-services.mjs", () => ({ buildOwnedNativeBuildProfile: dependencies.native }));
 
-import { collectOwnedWorkflowRuntimeFacts } from "../helpers/collect-owned-workflow-runtime-facts";
+import { collectOwnedWorkflowRuntimeFacts, deriveOwnedWorkflowRuntimeFingerprints } from "../helpers/collect-owned-workflow-runtime-facts";
 
 const PROJECT = path.resolve(import.meta.dirname, "../..");
 const adapterNames = ["owned-workflow-preload.mjs", "owned-workflow-instrumentation.mjs", "owned-workflow-world-adapter.mjs", "owned-workflow-build-services.mjs"];
@@ -473,5 +473,55 @@ describe("内存原始证据全集消费与真实域判定（不连接 SDK 或�
     if (kind === "source-read") dependencies.readSync.mockImplementation(failure);
     if (kind === "source-close") dependencies.closeSync.mockImplementation(failure);
     expectUnknown(await collectOwnedWorkflowRuntimeFacts(value.request));
+  });
+});
+
+describe("无参只读指纹出口（仅内存来源模拟）", () => {
+  it("独立从fixture原bytes派生两个hash，不接收或倒填请求中的期望值", async () => {
+    const value = fixture();
+    const expected = { adapterFingerprint: sha(adapterNames.map((name) => `${name}:${sha(entry(sourcePath(name)).bytes)}`).join("\n")),
+      sdkFactoryFingerprint: sha(`${sha(entry(sdkSource).bytes)}\n${sha(entry(nativeSource).bytes)}`) };
+    value.request.expectedFingerprints = { adapterFingerprint: "0".repeat(64), sdkFactoryFingerprint: "0".repeat(64) };
+    const result = await deriveOwnedWorkflowRuntimeFingerprints();
+    expect(result).toEqual(expected);
+    expect(Object.keys(result).sort()).toEqual(["adapterFingerprint", "sdkFactoryFingerprint"]);
+    expect(WorkflowAcceptanceRuntimeFingerprints.safeParse(result).success).toBe(true);
+    expect(deriveOwnedWorkflowRuntimeFingerprints.length).toBe(0);
+    expect(dependencies.sdk).toHaveBeenCalledTimes(1); expect(dependencies.native).toHaveBeenCalledTimes(1);
+    expect(dependencies.lstat).not.toHaveBeenCalled(); expect(dependencies.read).not.toHaveBeenCalled();
+    expect(dependencies.opendir).not.toHaveBeenCalled(); expect(descriptors.size).toBe(0);
+  });
+
+  it.each(["adapter", "sdk", "native"])("%s 初始字节独立改变输出，不使用冻结请求期望值", async (kind) => {
+    const value = fixture(), previous = { ...value.request.expectedFingerprints };
+    const file = kind === "adapter" ? sourcePath(adapterNames[0]) : kind === "sdk" ? sdkSource : nativeSource;
+    entry(file).bytes = Buffer.from("changed mock source before independent scan\n");
+    const expected = { adapterFingerprint: sha(adapterNames.map((name) => `${name}:${sha(entry(sourcePath(name)).bytes)}`).join("\n")),
+      sdkFactoryFingerprint: sha(`${sha(entry(sdkSource).bytes)}\n${sha(entry(nativeSource).bytes)}`) };
+    const result = await deriveOwnedWorkflowRuntimeFingerprints();
+    expect(result).toEqual(expected); expect(result).not.toEqual(previous);
+    expect(value.request.expectedFingerprints).toEqual(previous);
+  });
+
+  it.each(["adapter-bytes", "sdk-bytes", "native-bytes", "adapter-meta", "sdk-meta", "native-meta"])("%s 在派生后最终复核前漂移必须拒绝", async (kind) => {
+    fixture();
+    onProfile = (profile, call) => {
+      if (profile !== "native" || call !== 1) return;
+      queueMicrotask(() => {
+        const file = kind.startsWith("adapter") ? sourcePath(adapterNames[0]) : kind.startsWith("sdk") ? sdkSource : nativeSource;
+        const value = entry(file); value.time++;
+        if (kind.endsWith("bytes")) { const bytes = Buffer.from(value.bytes); bytes[0] ^= 1; value.bytes = bytes; }
+      });
+    };
+    await expect(deriveOwnedWorkflowRuntimeFingerprints()).rejects.toThrow();
+    expect(descriptors.size).toBe(0);
+  });
+
+  it.each(["profile", "import-pair", "import-inline"])("%s 激活条件在独立出口拒绝且零sourceIO/builder", async (kind) => {
+    fixture();
+    if (kind === "profile") process.env.MVP_WORKFLOW_ACCEPTANCE_RUNTIME_PROFILE = "node-sdk5-v1";
+    else process.execArgv.push(...(kind === "import-pair" ? ["--import", "mock-preload"] : ["--import=mock-preload"]));
+    await expect(deriveOwnedWorkflowRuntimeFingerprints()).rejects.toThrow();
+    for (const dependency of Object.values(dependencies)) expect(dependency).not.toHaveBeenCalled();
   });
 });

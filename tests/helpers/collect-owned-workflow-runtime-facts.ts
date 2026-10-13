@@ -9,7 +9,7 @@ import { WorkflowAcceptanceContext, MAX_WORKFLOW_ACCEPTANCE_REPORT_BYTES } from 
 import { MAX_WORKFLOW_ACCEPTANCE_PROCESS_INVENTORY_BYTES } from "@/contracts/workflow-process-inventory";
 import { WorkflowAcceptanceOwnedBranchProvenance, MAX_WORKFLOW_ACCEPTANCE_OWNED_PROCESSES } from "@/contracts/workflow-acceptance-bridge";
 import { WorkflowAcceptanceRuntimeInventory, MAX_WORKFLOW_RUNTIME_INVENTORY_BYTES } from "@/contracts/workflow-runtime-inventory";
-import { WorkflowAcceptanceRuntimeObservationRequest, WorkflowAcceptanceRuntimeCoverageEvaluation,
+import { WorkflowAcceptanceRuntimeObservationRequest, WorkflowAcceptanceRuntimeCoverageEvaluation, WorkflowAcceptanceRuntimeFingerprints,
   WORKFLOW_BUSINESS_PROCESS_INVENTORY_FILE, WORKFLOW_BUSINESS_CHILD_REPORT_FILE, WORKFLOW_RUNTIME_INVENTORY_DIRECTORY,
   type WorkflowAcceptanceRuntimeCoverageFailure } from "@/contracts/workflow-runtime-observation";
 import { evaluateWorkflowRuntimeCoverage } from "@/server/domain/evaluate-workflow-runtime-coverage";
@@ -74,8 +74,76 @@ function noActivatedProfile(): void {
     || process.execArgv.some((argument) => argument === "--import" || argument.startsWith("--import="))) reject("source-fingerprint-mismatch");
 }
 
+function createFingerprintSession() {
+  const sources = new Map<string, Snapshot>();
+  function privateSource(file: string) {
+    if (typeof file !== "string" || !path.isAbsolute(file) || !inside(file, PROJECT)) reject("source-fingerprint-mismatch");
+    for (let current = path.dirname(file); ; current = path.dirname(current)) {
+      const stat = fs.lstatSync(current);
+      if (!stat.isDirectory() || stat.isSymbolicLink() || key(fs.realpathSync(current)) !== key(current)) reject("source-fingerprint-mismatch");
+      if (path.dirname(current) === current) break;
+    }
+    if (key(fs.realpathSync(file)) !== key(file)) reject("source-fingerprint-mismatch");
+  }
+  function sourceBytes(file: string): Buffer {
+    privateSource(file);
+    const before = fs.lstatSync(file, { bigint: true });
+    if (!before.isFile() || before.isSymbolicLink() || before.size < BigInt(1) || before.size > BigInt(MAX_SOURCE_BYTES)) reject("source-fingerprint-mismatch");
+    const previous = sources.get(file);
+    if (previous && !sameFile(previous, before)) reject("source-fingerprint-mismatch");
+    const descriptor = fs.openSync(file, "r");
+    try {
+      if (!sameFile(before, fs.fstatSync(descriptor, { bigint: true }))) reject("source-fingerprint-mismatch");
+      const bytes = Buffer.alloc(Number(before.size) + 1); let length = 0;
+      while (length < bytes.length) {
+        const read = fs.readSync(descriptor, bytes, length, bytes.length - length, length);
+        if (read === 0) break;
+        length += read;
+      }
+      if (BigInt(length) !== before.size || !sameFile(before, fs.fstatSync(descriptor, { bigint: true }))
+        || !sameFile(before, fs.lstatSync(file, { bigint: true }))) reject("source-fingerprint-mismatch");
+      sources.set(file, before);
+      return bytes.subarray(0, length);
+    } finally { fs.closeSync(descriptor); }
+  }
+  async function derive(): Promise<WorkflowAcceptanceRuntimeFingerprints> {
+    noActivatedProfile();
+    const adapterLines = ADAPTERS.map((name) => `${name}:${createHash("sha256").update(sourceBytes(path.join(PROJECT, "tests/helpers", name))).digest("hex")}`);
+    const require = createRequire(pathToFileURL(path.join(PROJECT, "package.json")));
+    const resolve = (specifier: string, importer?: string): string => {
+      const resolved = fs.realpathSync((importer ? createRequire(pathToFileURL(importer)) : require).resolve(specifier));
+      if (!inside(resolved, path.join(PROJECT, "node_modules"))) reject("source-fingerprint-mismatch");
+      return resolved;
+    };
+    const io = { lstatSync: (file: string) => { privateSource(file); return fs.lstatSync(file); },
+      realpathSync: (file: string) => { privateSource(file); return fs.realpathSync(file); }, readFileSync: sourceBytes };
+    // This collector is only for the unprofiled observation bridge; imports must never bootstrap a runtime.
+    const { buildOwnedSdkProfile } = await import("./owned-workflow-preload.mjs");
+    const { buildOwnedNativeBuildProfile } = await import("./owned-workflow-build-services.mjs");
+    noActivatedProfile();
+    const profile = buildOwnedSdkProfile(resolve, io), build = buildOwnedNativeBuildProfile(resolve, io);
+    return { adapterFingerprint: createHash("sha256").update(adapterLines.join("\n")).digest("hex"),
+      sdkFactoryFingerprint: createHash("sha256").update(`${profile.sdkFactoryFingerprint}\n${build.fingerprint}`).digest("hex") };
+  }
+  function assertUnchanged() {
+    for (const [file, before] of sources) {
+      privateSource(file);
+      if (!sameFile(before, fs.lstatSync(file, { bigint: true }))) reject("source-fingerprint-mismatch");
+    }
+  }
+  return { derive, assertUnchanged };
+}
+
+export async function deriveOwnedWorkflowRuntimeFingerprints(): Promise<WorkflowAcceptanceRuntimeFingerprints> {
+  const session = createFingerprintSession();
+  const fingerprints = await session.derive();
+  session.assertUnchanged();
+  return WorkflowAcceptanceRuntimeFingerprints.parse(fingerprints);
+}
+
 export async function collectOwnedWorkflowRuntimeFacts(rawRequest: unknown): Promise<WorkflowAcceptanceRuntimeCoverageEvaluation> {
-  const files = new Map<string, Snapshot>(), directories = new Map<string, Snapshot>(), sources = new Map<string, Snapshot>();
+  const files = new Map<string, Snapshot>(), directories = new Map<string, Snapshot>();
+  const fingerprintSession = createFingerprintSession();
   let stage: WorkflowAcceptanceRuntimeCoverageFailure = "invalid-request";
   try {
     passiveRequest(rawRequest);
@@ -105,57 +173,8 @@ export async function collectOwnedWorkflowRuntimeFacts(rawRequest: unknown): Pro
     }
     if (!sameRecord(WorkflowAcceptanceOwnedBranchProvenance.parse(await read(path.join(caseDirectory, "creation-provenance.json"), 16 * 1024)), request.provenance)) reject("context-mismatch");
 
-    function privateSource(file: string) {
-      if (typeof file !== "string" || !path.isAbsolute(file) || !inside(file, PROJECT)) reject("source-fingerprint-mismatch");
-      for (let current = path.dirname(file); ; current = path.dirname(current)) {
-        const stat = fs.lstatSync(current);
-        if (!stat.isDirectory() || stat.isSymbolicLink() || key(fs.realpathSync(current)) !== key(current)) reject("source-fingerprint-mismatch");
-        if (path.dirname(current) === current) break;
-      }
-      if (key(fs.realpathSync(file)) !== key(file)) reject("source-fingerprint-mismatch");
-    }
-    function sourceBytes(file: string): Buffer {
-      privateSource(file);
-      const before = fs.lstatSync(file, { bigint: true });
-      if (!before.isFile() || before.isSymbolicLink() || before.size < BigInt(1) || before.size > BigInt(MAX_SOURCE_BYTES)) reject("source-fingerprint-mismatch");
-      const previous = sources.get(file);
-      if (previous && !sameFile(previous, before)) reject("source-fingerprint-mismatch");
-      const descriptor = fs.openSync(file, "r");
-      try {
-        if (!sameFile(before, fs.fstatSync(descriptor, { bigint: true }))) reject("source-fingerprint-mismatch");
-        const bytes = Buffer.alloc(Number(before.size) + 1); let length = 0;
-        while (length < bytes.length) {
-          const read = fs.readSync(descriptor, bytes, length, bytes.length - length, length);
-          if (read === 0) break;
-          length += read;
-        }
-        if (BigInt(length) !== before.size || !sameFile(before, fs.fstatSync(descriptor, { bigint: true }))
-          || !sameFile(before, fs.lstatSync(file, { bigint: true }))) reject("source-fingerprint-mismatch");
-        sources.set(file, before);
-        return bytes.subarray(0, length);
-      } finally { fs.closeSync(descriptor); }
-    }
-    async function fingerprints(): Promise<WorkflowAcceptanceRuntimeObservationRequest["expectedFingerprints"]> {
-      noActivatedProfile();
-      const adapterLines = ADAPTERS.map((name) => `${name}:${createHash("sha256").update(sourceBytes(path.join(PROJECT, "tests/helpers", name))).digest("hex")}`);
-      const require = createRequire(pathToFileURL(path.join(PROJECT, "package.json")));
-      const resolve = (specifier: string, importer?: string): string => {
-        const resolved = fs.realpathSync((importer ? createRequire(pathToFileURL(importer)) : require).resolve(specifier));
-        if (!inside(resolved, path.join(PROJECT, "node_modules"))) reject("source-fingerprint-mismatch");
-        return resolved;
-      };
-      const io = { lstatSync: (file: string) => { privateSource(file); return fs.lstatSync(file); },
-        realpathSync: (file: string) => { privateSource(file); return fs.realpathSync(file); }, readFileSync: sourceBytes };
-      // This collector is only for the unprofiled observation bridge; imports must never bootstrap a runtime.
-      const { buildOwnedSdkProfile } = await import("./owned-workflow-preload.mjs");
-      const { buildOwnedNativeBuildProfile } = await import("./owned-workflow-build-services.mjs");
-      noActivatedProfile();
-      const profile = buildOwnedSdkProfile(resolve, io), build = buildOwnedNativeBuildProfile(resolve, io);
-      return { adapterFingerprint: createHash("sha256").update(adapterLines.join("\n")).digest("hex"),
-        sdkFactoryFingerprint: createHash("sha256").update(`${profile.sdkFactoryFingerprint}\n${build.fingerprint}`).digest("hex") };
-    }
     stage = "source-fingerprint-mismatch";
-    if (!sameRecord(await fingerprints(), request.expectedFingerprints)) reject(stage);
+    if (!sameRecord(await fingerprintSession.derive(), request.expectedFingerprints)) reject(stage);
     stage = "invalid-process-inventory";
     const processInventory = await read(path.join(caseDirectory, WORKFLOW_BUSINESS_PROCESS_INVENTORY_FILE), MAX_WORKFLOW_ACCEPTANCE_PROCESS_INVENTORY_BYTES, request.processInventoryRef.sha256);
     stage = "invalid-child-report";
@@ -188,11 +207,8 @@ export async function collectOwnedWorkflowRuntimeFacts(rawRequest: unknown): Pro
     const after = await enumeration();
     if (names.length !== after.length || names.some((name, index) => name !== after[index])) reject("launch-set-mismatch");
     stage = "source-fingerprint-mismatch";
-    if (!sameRecord(await fingerprints(), request.expectedFingerprints)) reject(stage);
-    for (const [file, before] of sources) {
-      privateSource(file);
-      if (!sameFile(before, fs.lstatSync(file, { bigint: true }))) reject("source-fingerprint-mismatch");
-    }
+    if (!sameRecord(await fingerprintSession.derive(), request.expectedFingerprints)) reject(stage);
+    fingerprintSession.assertUnchanged();
     for (const [file, before] of files) if (!sameFile(before, await lstat(file, { bigint: true }))) reject("runtime-lifecycle-unconfirmed");
     for (const [file, before] of directories) {
       const current = await lstat(file, { bigint: true });
