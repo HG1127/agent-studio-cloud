@@ -16,8 +16,9 @@ function fixture(): WorkflowAcceptanceRuntimeInventory {
       { sequence: 2, creationId: creation, factory: "host", phase: "returned", parentRealmId: null, realmId: host, at: at(2), failureCode: null },
     ], realms: [{ realmId: host, factory: "host", parentRealmId: null, poolCreationIds: [pool],
       poolCloseReceipt: { ownerId: owner, state: "callbacks_completed", poolIds: [pool], completedIds: [pool], failedIds: [], unknownIds: [], cleanupPermitted: false } }],
-    handlers: [{ handlerId: id("7"), startedAt: at(3), settledAt: at(5), result: "fulfilled" }], pendingCreationIds: [], failedCreationIds: [], unfinishedHandlerIds: [],
-    dispatchStoppedAt: at(6), creationsSealedAt: at(7), collectedAt: at(8), cleanupPermitted: false };
+    handlers: [{ sequence: 1, handlerId: id("7"), startedAt: at(3), settledAt: at(5), result: "fulfilled" }], pendingCreationIds: [], failedCreationIds: [], unfinishedHandlerIds: [],
+    dispatchStoppedAt: at(6), dispatchStoppedAfterHandlerSequence: 1, creationsSealedAt: at(7), creationsSealedAfterEventSequence: 2,
+    collectedAt: at(8), cleanupPermitted: false };
 }
 
 function largeFixture(poolsPerRealm: number, extra: number): WorkflowAcceptanceRuntimeInventory {
@@ -32,6 +33,7 @@ function largeFixture(poolsPerRealm: number, extra: number): WorkflowAcceptanceR
     value.realms.push({ realmId, factory, parentRealmId, poolCreationIds: poolIds,
       poolCloseReceipt: { ownerId: owner, state: "callbacks_completed", poolIds, completedIds: poolIds, failedIds: [], unknownIds: [], cleanupPermitted: false } });
   }
+  value.creationsSealedAfterEventSequence = value.creationEvents.length;
   return value;
 }
 
@@ -66,6 +68,7 @@ describe("执行空间独立观测事实契约", () => {
     const value = fixture(); value.creationEvents.pop(); value.realms = [];
     value.pendingCreationIds = [creation]; value.handlers[0].settledAt = null; value.handlers[0].result = "unknown";
     value.unfinishedHandlerIds = [id("7")]; value.dispatchStoppedAt = null; value.creationsSealedAt = null;
+    value.dispatchStoppedAfterHandlerSequence = null; value.creationsSealedAfterEventSequence = null;
     expect(WorkflowAcceptanceRuntimeInventory.parse(value).pendingCreationIds).toEqual([creation]);
   });
   it("实际失败或不支持的QuickJS创建可以记录，但不是支持或通过", () => {
@@ -99,7 +102,7 @@ describe("执行空间独立观测事实契约", () => {
     if (mode === "unfinished") value.unfinishedHandlerIds = [id("7")];
     if (mode === "duplicate") value.handlers.push({ ...value.handlers[0] });
     if (mode === "time") value.handlers[0].settledAt = at(1);
-    if (mode === "dispatch") value.dispatchStoppedAt = at(3);
+    if (mode === "dispatch") { value.dispatchStoppedAt = at(3); value.dispatchStoppedAfterHandlerSequence = 0; }
     if (mode === "seal") value.creationsSealedAt = at(1);
     if (mode === "collected") value.collectedAt = at(0);
     if (mode === "future") value.handlers[0].settledAt = at(9);
@@ -162,6 +165,39 @@ describe("执行空间独立观测事实契约", () => {
     expect(WorkflowAcceptanceRuntimeInventory.safeParse(value).success).toBe(true);
     value.launch.context.sdkDirectory += "界";
     expect(Buffer.byteLength(JSON.stringify(value), "utf8")).toBe(MAX_WORKFLOW_RUNTIME_INVENTORY_BYTES + 3);
+    expect(WorkflowAcceptanceRuntimeInventory.safeParse(value).success).toBe(false);
+  });
+  it.each(["creation", "handler"])("同一真实毫秒封闭前的%s按实际因果序号读取", (kind) => {
+    const value = fixture();
+    if (kind === "creation") {
+      value.handlers = []; value.dispatchStoppedAfterHandlerSequence = 0; value.dispatchStoppedAt = at(1);
+      value.creationsSealedAt = at(1); value.creationsSealedAfterEventSequence = 1;
+    } else value.dispatchStoppedAt = at(3);
+    expect(WorkflowAcceptanceRuntimeInventory.safeParse(value).success).toBe(true);
+  });
+  it.each(["creation", "handler"])("同一真实毫秒封闭后的%s不能冒充之前事实", (kind) => {
+    const value = fixture();
+    if (kind === "creation") {
+      value.handlers = []; value.dispatchStoppedAfterHandlerSequence = 0; value.dispatchStoppedAt = at(1);
+      value.creationsSealedAt = at(1); value.creationsSealedAfterEventSequence = 0;
+    } else { value.dispatchStoppedAt = at(3); value.dispatchStoppedAfterHandlerSequence = 0; }
+    expect(WorkflowAcceptanceRuntimeInventory.safeParse(value).success).toBe(false);
+  });
+  it.each(["dispatch-time", "dispatch-marker", "creation-time", "creation-marker", "dispatch-range", "creation-range", "handler-sequence"])("拒绝时刻与因果序号不一致 %s", (kind) => {
+    const value = fixture();
+    if (kind === "dispatch-time") value.dispatchStoppedAt = null;
+    if (kind === "dispatch-marker") value.dispatchStoppedAfterHandlerSequence = null;
+    if (kind === "creation-time") value.creationsSealedAt = null;
+    if (kind === "creation-marker") value.creationsSealedAfterEventSequence = null;
+    if (kind === "dispatch-range") value.dispatchStoppedAfterHandlerSequence = 2;
+    if (kind === "creation-range") value.creationsSealedAfterEventSequence = 3;
+    if (kind === "handler-sequence") value.handlers[0].sequence = 2;
+    expect(WorkflowAcceptanceRuntimeInventory.safeParse(value).success).toBe(false);
+  });
+  it.each(["marker-ahead", "marker-behind"])("实际返回不能与封闭因果序号矛盾 %s", (kind) => {
+    const value = fixture(); value.handlers = []; value.dispatchStoppedAfterHandlerSequence = 0; value.dispatchStoppedAt = at(1);
+    value.creationsSealedAt = kind === "marker-ahead" ? at(1) : at(3);
+    value.creationsSealedAfterEventSequence = kind === "marker-ahead" ? 2 : 1;
     expect(WorkflowAcceptanceRuntimeInventory.safeParse(value).success).toBe(false);
   });
 });

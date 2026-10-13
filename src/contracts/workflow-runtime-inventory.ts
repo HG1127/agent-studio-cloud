@@ -94,6 +94,7 @@ const RealmBody = z.object({
   realmId: Id, factory: Factory, parentRealmId: Id.nullable(), poolCreationIds: PoolIds, poolCloseReceipt: AcceptancePoolCloseReceipt.nullable(),
 }).strict();
 const HandlerBody = z.object({
+  sequence: z.number().int().positive().max(MAX_WORKFLOW_RUNTIME_HANDLERS),
   handlerId: Id, startedAt: Timestamp, settledAt: Timestamp.nullable(), result: z.enum(["fulfilled", "rejected", "unknown"]),
 }).strict().superRefine((value, context) => {
   if (value.result !== "unknown" && value.settledAt === null || value.settledAt !== null && Date.parse(value.settledAt) < Date.parse(value.startedAt)) {
@@ -108,10 +109,18 @@ export const WorkflowAcceptanceRuntimeInventory = boundedPassive(z.object({
   realms: z.array(RealmBody).max(MAX_WORKFLOW_RUNTIME_REALMS), handlers: z.array(HandlerBody).max(MAX_WORKFLOW_RUNTIME_HANDLERS),
   pendingCreationIds: z.array(Id).max(MAX_WORKFLOW_RUNTIME_REALMS), failedCreationIds: z.array(Id).max(MAX_WORKFLOW_RUNTIME_REALMS),
   unfinishedHandlerIds: z.array(Id).max(MAX_WORKFLOW_RUNTIME_HANDLERS),
-  dispatchStoppedAt: Timestamp.nullable(), creationsSealedAt: Timestamp.nullable(), collectedAt: Timestamp,
+  dispatchStoppedAt: Timestamp.nullable(), dispatchStoppedAfterHandlerSequence: z.number().int().nonnegative().max(MAX_WORKFLOW_RUNTIME_HANDLERS).nullable(),
+  creationsSealedAt: Timestamp.nullable(), creationsSealedAfterEventSequence: z.number().int().nonnegative().max(MAX_WORKFLOW_RUNTIME_CREATION_EVENTS).nullable(),
+  collectedAt: Timestamp,
   cleanupPermitted: z.literal(false),
 }).strict().superRefine((value, context) => {
   const issue = (message: string) => context.addIssue({ code: "custom", message });
+  if ((value.dispatchStoppedAt === null) !== (value.dispatchStoppedAfterHandlerSequence === null)
+    || value.dispatchStoppedAfterHandlerSequence !== null && value.dispatchStoppedAfterHandlerSequence > value.handlers.length
+    || (value.creationsSealedAt === null) !== (value.creationsSealedAfterEventSequence === null)
+    || value.creationsSealedAfterEventSequence !== null && value.creationsSealedAfterEventSequence > value.creationEvents.length) {
+    issue("封闭时刻与已观测因果序号必须同时确认且有界");
+  }
   const started = new Map<string, z.infer<typeof CreationBody>>(), settled = new Set<string>();
   const created = new Map<string, z.infer<typeof CreationBody>>(), failed = new Set<string>();
   let previousTime = Date.parse(value.launch.startedAt);
@@ -119,9 +128,14 @@ export const WorkflowAcceptanceRuntimeInventory = boundedPassive(z.object({
     const at = Date.parse(event.at);
     if (event.sequence !== index + 1 || at < previousTime || at > Date.parse(value.collectedAt)) issue("创建事件序列或时刻不连续");
     previousTime = at;
+    if (value.creationsSealedAt !== null && value.creationsSealedAfterEventSequence !== null
+      && (event.sequence <= value.creationsSealedAfterEventSequence ? at > Date.parse(value.creationsSealedAt) : at < Date.parse(value.creationsSealedAt))) {
+      issue("创建返回或失败时刻不能与封闭因果序号矛盾");
+    }
     if (event.phase === "started") {
       if (started.has(event.creationId) || event.parentRealmId !== null && !created.has(event.parentRealmId)) issue("创建标识重复或父空间未观察");
-      if (value.creationsSealedAt !== null && at >= Date.parse(value.creationsSealedAt)) issue("封闭创建之后仍有新创建事实");
+      if (value.creationsSealedAt !== null && (at > Date.parse(value.creationsSealedAt)
+        || value.creationsSealedAfterEventSequence !== null && event.sequence > value.creationsSealedAfterEventSequence)) issue("封闭创建之后仍有新创建事实");
       started.set(event.creationId, event);
     } else {
       const initial = started.get(event.creationId);
@@ -147,11 +161,12 @@ export const WorkflowAcceptanceRuntimeInventory = boundedPassive(z.object({
   }
   if (!sameIds([...realms], new Set(created.keys()))) issue("已创建空间不能从最终事实清单中遗漏");
   const handlers = new Set<string>(), unfinished = new Set<string>();
-  for (const handler of value.handlers) {
-    if (handlers.has(handler.handlerId) || Date.parse(handler.startedAt) < Date.parse(value.launch.startedAt)
+  for (const [index, handler] of value.handlers.entries()) {
+    if (handler.sequence !== index + 1 || handlers.has(handler.handlerId) || Date.parse(handler.startedAt) < Date.parse(value.launch.startedAt)
       || Date.parse(handler.startedAt) > Date.parse(value.collectedAt)
       || handler.settledAt !== null && Date.parse(handler.settledAt) > Date.parse(value.collectedAt)) issue("后台处理标识或观测时刻无效");
-    if (value.dispatchStoppedAt !== null && Date.parse(handler.startedAt) >= Date.parse(value.dispatchStoppedAt)) issue("停止派发之后仍有新后台处理");
+    if (value.dispatchStoppedAt !== null && (Date.parse(handler.startedAt) > Date.parse(value.dispatchStoppedAt)
+      || value.dispatchStoppedAfterHandlerSequence !== null && handler.sequence > value.dispatchStoppedAfterHandlerSequence)) issue("停止派发之后仍有新后台处理");
     handlers.add(handler.handlerId); if (handler.settledAt === null) unfinished.add(handler.handlerId);
   }
   if (!sameIds(value.unfinishedHandlerIds, unfinished)) issue("未完成后台处理不能被记成零");
