@@ -4,6 +4,7 @@ import {
   MAX_WORKFLOW_ACCEPTANCE_BRIDGE_REQUEST_BYTES, MAX_WORKFLOW_ACCEPTANCE_OWNED_PROCESSES,
   WorkflowAcceptanceBridgeRequest, WorkflowAcceptanceObservedRecord, WorkflowAcceptanceOwnedBranchProvenance,
   MAX_WORKFLOW_ACCEPTANCE_PREPARATION_REQUEST_BYTES, WorkflowAcceptanceCasePreparationRequest,
+  MAX_WORKFLOW_ACCEPTANCE_EMPTY_DATABASE_OBSERVATION_BYTES, WorkflowAcceptanceEmptyDatabaseObservation,
 } from "./workflow-acceptance-bridge";
 import { WorkflowAcceptanceCaseId } from "./workflow-case-acceptance";
 import type { WorkflowAcceptanceContext, WorkflowAcceptanceCleanupReceipt } from "./workflow-case-acceptance";
@@ -214,5 +215,64 @@ describe("实际创建隔离资源前的准备契约", () => {
     if (!parsed.success) expect(parsed.error.issues[0].message).toBe("验收桥接只能包含有界普通数据");
     const cyclic: Record<string, unknown> = { ...preparation() }; cyclic.self = cyclic;
     expect(WorkflowAcceptanceCasePreparationRequest.safeParse(cyclic).success).toBe(false);
+  });
+});
+
+function emptyDatabaseObservation(): WorkflowAcceptanceEmptyDatabaseObservation {
+  const owned = provenance();
+  return { version: 1, databaseBranchId: owned.databaseBranchId, endpointId: owned.endpointId,
+    databaseName: "ci_test", checkedAt: "2026-10-12T10:00:00.000Z", userRelationCount: 0, observationStatus: "observed" };
+}
+
+describe("迁移前专用数据库实际观测契约", () => {
+  it.each([0, 1, Number.MAX_SAFE_INTEGER])("如实保留已观察数量，不把合法非零值变成空库：%s", (userRelationCount) => {
+    const receipt = { ...emptyDatabaseObservation(), userRelationCount };
+    expect(WorkflowAcceptanceEmptyDatabaseObservation.parse(receipt)).toEqual(receipt);
+  });
+  it.each(["failed", "unknown"] as const)("%s 只接受未知数量，不生成零或清理许可", (observationStatus) => {
+    const receipt = { ...emptyDatabaseObservation(), observationStatus, userRelationCount: null };
+    expect(WorkflowAcceptanceEmptyDatabaseObservation.parse(receipt)).toEqual(receipt);
+    for (const userRelationCount of [0, 1]) {
+      expect(WorkflowAcceptanceEmptyDatabaseObservation.safeParse({ ...receipt, userRelationCount }).success).toBe(false);
+    }
+  });
+  it.each([null, -1, 0.5, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity, "0"]
+    .map((userRelationCount) => ({ userRelationCount })))("已观察必须有非负安全整数：$userRelationCount", ({ userRelationCount }) => {
+    expect(WorkflowAcceptanceEmptyDatabaseObservation.safeParse({ ...emptyDatabaseObservation(), userRelationCount }).success).toBe(false);
+  });
+  it.each([
+    { version: 2 }, { databaseBranchId: "production" }, { databaseBranchId: "br-own-case\n" },
+    { endpointId: "ep-own-case\n" }, { endpointId: "https://ep-own-case.neon.tech" }, { databaseName: "neondb" },
+    { checkedAt: "unknown" }, { observationStatus: "empty" },
+  ])("拒绝不完整或不确定的资源观测：%j", (change) => {
+    expect(WorkflowAcceptanceEmptyDatabaseObservation.safeParse({ ...emptyDatabaseObservation(), ...change }).success).toBe(false);
+  });
+  it.each(["version", "databaseBranchId", "endpointId", "databaseName", "checkedAt", "userRelationCount", "observationStatus"])("实际观测字段不能省略：%s", (field) => {
+    const receipt: Record<string, unknown> = { ...emptyDatabaseObservation() }; delete receipt[field];
+    expect(WorkflowAcceptanceEmptyDatabaseObservation.safeParse(receipt).success).toBe(false);
+  });
+  it.each(["apiKey", "databaseUrl", "rawError", "emptyVerified", "cleanupPermitted"])("不接收秘密、错误正文或预先通过声明：%s", (field) => {
+    expect(WorkflowAcceptanceEmptyDatabaseObservation.safeParse({ ...emptyDatabaseObservation(), [field]: true }).success).toBe(false);
+  });
+  it("只验证有界普通数据，不能由访问器或序列化函数提供观察事实", () => {
+    let reads = 0;
+    const receipt = emptyDatabaseObservation();
+    Object.defineProperty(receipt, "userRelationCount", { enumerable: true, get() { reads += 1; return 0; } });
+    expect(WorkflowAcceptanceEmptyDatabaseObservation.safeParse(receipt).success).toBe(false);
+    const inherited = Object.create({ toJSON() { reads += 1; return emptyDatabaseObservation(); } });
+    Object.assign(inherited, emptyDatabaseObservation());
+    expect(WorkflowAcceptanceEmptyDatabaseObservation.safeParse(inherited).success).toBe(false);
+    expect(reads).toBe(0);
+    expect(WorkflowAcceptanceEmptyDatabaseObservation.parse(runInNewContext(`(${JSON.stringify(emptyDatabaseObservation())})`)))
+      .toEqual(emptyDatabaseObservation());
+  });
+  it("超长或循环观测在字段解析前拒绝", () => {
+    const expanded = { ...emptyDatabaseObservation(), padding: "字".repeat(900) };
+    expect(expanded.padding.length).toBeLessThan(MAX_WORKFLOW_ACCEPTANCE_EMPTY_DATABASE_OBSERVATION_BYTES);
+    const parsed = WorkflowAcceptanceEmptyDatabaseObservation.safeParse(expanded);
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) expect(parsed.error.issues[0].message).toBe("验收桥接只能包含有界普通数据");
+    const cyclic: Record<string, unknown> = { ...emptyDatabaseObservation() }; cyclic.self = cyclic;
+    expect(WorkflowAcceptanceEmptyDatabaseObservation.safeParse(cyclic).success).toBe(false);
   });
 });

@@ -9,6 +9,7 @@ export const MAX_WORKFLOW_ACCEPTANCE_BRIDGE_REQUEST_BYTES = 32 * 1024;
 export const MAX_WORKFLOW_ACCEPTANCE_OBSERVED_RECORD_BYTES = 1024 * 1024;
 export const MAX_WORKFLOW_ACCEPTANCE_OWNED_PROCESSES = 64;
 export const MAX_WORKFLOW_ACCEPTANCE_PREPARATION_REQUEST_BYTES = 2 * 1024;
+export const MAX_WORKFLOW_ACCEPTANCE_EMPTY_DATABASE_OBSERVATION_BYTES = 2 * 1024;
 
 function hasBoundedBytes(value: unknown, maximum: number): boolean {
   const encoder = new TextEncoder(), stack: unknown[] = [value];
@@ -73,6 +74,17 @@ const ProvenanceBody = z.object({
 });
 export const WorkflowAcceptanceOwnedBranchProvenance = passiveBridge(ProvenanceBody, MAX_WORKFLOW_ACCEPTANCE_BRIDGE_REQUEST_BYTES);
 export type WorkflowAcceptanceOwnedBranchProvenance = z.infer<typeof WorkflowAcceptanceOwnedBranchProvenance>;
+
+export const WorkflowAcceptanceEmptyDatabaseObservation = passiveBridge(z.object({
+  version: z.literal(1), databaseBranchId: BranchId, endpointId: EndpointId, databaseName: z.literal("ci_test"),
+  checkedAt: z.iso.datetime(), userRelationCount: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(),
+  observationStatus: z.enum(["observed", "failed", "unknown"]),
+}).strict().superRefine((value, context) => {
+  if (value.observationStatus === "observed" ? value.userRelationCount === null : value.userRelationCount !== null) {
+    context.addIssue({ code: "custom", message: "未观察到的数据库对象数量必须保留未知，不能记为零" });
+  }
+}), MAX_WORKFLOW_ACCEPTANCE_EMPTY_DATABASE_OBSERVATION_BYTES);
+export type WorkflowAcceptanceEmptyDatabaseObservation = z.infer<typeof WorkflowAcceptanceEmptyDatabaseObservation>;
 
 const CaseDirectory = z.string().min(1).max(2048).refine((value) => {
   if (value !== value.trim() || /[\x00-\x1f\x7f<>|?*]/.test(value)) return false;
