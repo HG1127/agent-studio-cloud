@@ -38,14 +38,19 @@ function prepare(options: PoolOptions) {
   const preload = path.resolve(import.meta.dirname, "owned-workflow-preload.mjs");
   regular(entry);
   regular(preload, true);
-  const env: NodeJS.ProcessEnv = {};
+  const env: Record<string, string> & { NODE_ENV: NodeJS.ProcessEnv["NODE_ENV"] } = { NODE_ENV: "test" };
   for (const name of ENVIRONMENT_KEYS) {
     const descriptor = Object.getOwnPropertyDescriptor(options.env, name);
     if (!descriptor) continue;
     if (!("value" in descriptor) || typeof descriptor.value !== "string" || descriptor.value.includes("\0")) {
       throw new Error("自有工作进程环境无效");
     }
-    env[name] = descriptor.value;
+    if (name === "NODE_ENV") {
+      if (descriptor.value !== "test" && descriptor.value !== "development" && descriptor.value !== "production") {
+        throw new Error("自有工作进程运行模式无效");
+      }
+      env.NODE_ENV = descriptor.value;
+    } else env[name] = descriptor.value;
   }
   if (env.MODEL_MOCK !== "1" || env.MVP_ACCEPTANCE_ISOLATED_DB !== "1" || env.REAL_MODELS_ENABLED !== "0"
     || !env.MVP_WORKFLOW_ACCEPTANCE_CONTEXT || !env.MVP_WORKFLOW_ACCEPTANCE_DATABASE_URL_UNPOOLED

@@ -49,8 +49,9 @@ describe("公开工具事务服务 mock", () => {
       .mockResolvedValueOnce([{ ...toolRow(), revision: 3 }]);
     const result = await managePublicTool({ operation: "mint-key", toolId: ids.tool, expectedRevision: 2, requestId: ids.request, name: "调用方", expiresAt: null, confirmed: true });
     if (!result.ok || !result.token) throw new Error("缺少一次密钥");
+    const token = result.token;
     const values = mocks.values.mock.calls.map(([value]) => value);
-    expect(values.some((value) => value.tokenHash === publicToolHash(result.token))).toBe(true);
+    expect(values.some((value) => value.tokenHash === publicToolHash(token))).toBe(true);
     expect(JSON.stringify(values)).not.toContain(result.token);
     expect(JSON.stringify(result.key)).not.toContain("tokenHash");
   });

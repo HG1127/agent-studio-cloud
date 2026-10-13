@@ -68,10 +68,32 @@ describe("自有 Workflow 原生工作进程池", () => {
     await start(input);
     const [entry, args, launch] = mocks.fork.mock.calls[0];
     expect(entry).toBe(path.join(dist, "workers/forks.js")); expect(args).toEqual([]);
-    expect(launch.env).toEqual({ ...options().env, PATH: "owned-path" });
+    expect(launch.env).toEqual({ NODE_ENV: "test", ...options().env, PATH: "owned-path" });
     expect(launch.execArgv).toEqual(["--max-old-space-size=384", "--import", expect.stringMatching(/owned-workflow-preload[.]mjs$/)]);
     expect(launch).toMatchObject({ serialization: "advanced", windowsHide: true, stdio: ["ignore", "pipe", "pipe", "ipc"] });
     expect(child.stdout.pipe).toHaveBeenCalledWith(input.project.vitest.logger.outputStream, { end: false });
+  });
+  it.each(["test", "development", "production"] as const)("显式运行模式%s保留且不修改调用方环境", async (mode) => {
+    const input = options(); input.env = { ...input.env, NODE_ENV: mode };
+    const before = { ...input.env };
+    await start(input);
+    expect(mocks.fork.mock.calls[0][2].env.NODE_ENV).toBe(mode);
+    expect(input.env).toEqual(before);
+  });
+  it.each(["", "custom", "test\0private"])("未知运行模式%s不启动原生进程", async (mode) => {
+    const input = options(); Object.defineProperty(input.env, "NODE_ENV", { value: mode });
+    await expect(worker(input).start()).rejects.toThrow(); expect(mocks.fork).not.toHaveBeenCalled();
+  });
+  it("缺少运行模式时只在独立克隆中设为测试模式", async () => {
+    const input = options();
+    expect(Object.hasOwn(input.env, "NODE_ENV")).toBe(false);
+    await start(input);
+    expect(mocks.fork.mock.calls[0][2].env.NODE_ENV).toBe("test");
+    expect(Object.hasOwn(input.env, "NODE_ENV")).toBe(false);
+  });
+  it("运行模式访问器在启动前拒绝且不调用getter", async () => {
+    const input = options(), getter = vi.fn(); Object.defineProperty(input.env, "NODE_ENV", { get: getter });
+    await expect(worker(input).start()).rejects.toThrow(); expect(getter).not.toHaveBeenCalled(); expect(mocks.fork).not.toHaveBeenCalled();
   });
   it("未来预加载文件缺失时不启动任何进程", async () => {
     mocks.lstat.mockImplementation((file: string) => { if (file.endsWith("owned-workflow-preload.mjs")) throw new Error("missing");

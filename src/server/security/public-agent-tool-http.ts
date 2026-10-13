@@ -1,9 +1,10 @@
 import { MAX_PUBLIC_TOOL_RECEIPT_BYTES, PublicToolFailure, publicToolResponseFits } from "@/contracts/public-agent-tool";
+import type { PublicToolCallResult, PublicToolListResult, PublicToolManageResult, PublicToolReadResult } from "@/contracts/public-agent-tool";
 import { readBoundedRequestText } from "@/server/security/bounded-request-body";
 import { publicToolBearer, publicToolBrowserRequestAllowed } from "@/server/security/public-agent-tool";
 
 const noStore = { "cache-control": "no-store", "referrer-policy": "no-referrer", "x-content-type-options": "nosniff" };
-export function publicToolHttpResponse(result: { ok: boolean } & object, successStatus = 200): Response {
+export function publicToolHttpResponse(result: PublicToolManageResult | PublicToolListResult | PublicToolReadResult | PublicToolCallResult, successStatus = 200): Response {
   if (!publicToolResponseFits(result)) return Response.json({ ok: false, code: "unavailable", error: "工具回执超过容量或暂时无法确认" }, { status: 503, headers: noStore });
   if (result.ok) return Response.json(result, { status: successStatus, headers: noStore });
   const failure = PublicToolFailure.parse(result);
