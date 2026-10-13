@@ -95,11 +95,24 @@ function Invoke-OwnedCaseProcess {
   }
   $taskArguments = '"' + $taskCli + '" run --config "' + $taskConfig + '" --maxWorkers=1 --no-cache --no-fsModuleCache'
   if ($Phase -eq 'migration') { $taskArguments = '"' + $taskCli + '" migrate --config "' + $taskConfig + '"' }
-  $taskDomain = [AgentStudioAcceptance.OwnedProcessDomain]::new()
   $taskClock = $script:WorkflowExecutionClock
   if (-not $taskClock) { $taskClock = [Diagnostics.Stopwatch]::StartNew() }
+  if (-not $script:WorkflowCaseFilePins.ContainsKey([string]$Context.executionDomainId)
+    -or -not $script:WorkflowProcessRuns.ContainsKey([string]$Context.executionDomainId)) { throw '本次父创建的执行域不存在。' }
+  $taskEsbuild = Join-Path $taskProjectRoot 'node_modules/.pnpm/@esbuild+win32-x64@0.28.2/node_modules/@esbuild/win32-x64/esbuild.exe'
+  $taskBinaryPins = [Collections.Generic.List[IDisposable]]::new()
+  $taskPinsRegistered = $false
+  $taskDomain = $null
   $taskRecord = $null
+  $taskImagesConfirmed = $false
   try {
+    $taskNodePin = [AgentStudioAcceptance.OwnedBinaryPin]::OpenNode($taskNode)
+    $taskBinaryPins.Add($taskNodePin)
+    $taskEsbuildPin = [AgentStudioAcceptance.OwnedBinaryPin]::OpenEsbuild($taskEsbuild)
+    $taskBinaryPins.Add($taskEsbuildPin)
+    foreach ($taskBinaryPin in $taskBinaryPins) { $script:WorkflowCaseFilePins[[string]$Context.executionDomainId].Add($taskBinaryPin) }
+    $taskPinsRegistered = $true
+    $taskDomain = [AgentStudioAcceptance.OwnedProcessDomain]::new($taskNodePin, $taskEsbuildPin)
     $taskRemaining = [Math]::Max(0, 240000 - [int]$taskClock.ElapsedMilliseconds)
     if ($taskRemaining -le 0) { throw '原案例截止时间已到，拒绝启动子执行域。' }
     $taskDomain.StartRedirected($taskNode, $taskArguments, $taskProjectRoot, $taskEnvironment)
@@ -113,24 +126,52 @@ function Invoke-OwnedCaseProcess {
     if (-not $taskDomain.WaitForOutputEof($taskRemaining)) {
       throw '自有进程、后台worker或输出终态未确认，保留数据库资源。'
     }
-    $taskIds = @($taskDomain.ObservedProcessIds())
-    if ($taskIds.Count -lt 1 -or $taskIds.Count -gt 64 -or @($taskIds | Where-Object { $_ -lt 1 -or $_ -gt 0xffffffff }).Count) { throw '实际自有进程清单超出共享边界。' }
-    $taskRecord = @{ phase = $Phase; processIds = @($taskIds | ForEach-Object { [long]$_ }); rootProcessId = [long]$taskDomain.ProcessId;
-      zeroExitObserved = $taskDomain.AllMembersExitedZero(); natural = $false; inventoryComplete = $taskDomain.ProcessInventoryComplete();
-      outputEof = $taskDomain.OutputEofConfirmed(); exitCode = [long]$taskDomain.RootExitCode(); remainingProcesses = [long]$taskDomain.RemainingProcesses();
-      stoppedAt = [DateTimeOffset]::UtcNow }
   } finally {
-    # Disposal of a still-live job is forced termination, never a passing cleanup acknowledgement.
-    $taskDomain.Dispose()
-    if ($taskRecord -and $taskDomain.ForcedTermination) { $taskRecord.natural = $false }
-    $taskEnvironment.Clear()
-    $taskDirectUri = $null
+    try {
+      if ($taskDomain -and $taskDomain.ProcessId -ne 0) {
+        $taskInventory = $taskDomain.SnapshotProcessFacts()
+        $taskImagesConfirmed = $taskDomain.AllProcessImagesConfirmed()
+        if (-not $taskImagesConfirmed) { $taskInventory = $taskDomain.SnapshotProcessFacts() }
+        $taskIds = @($taskInventory['members'] | ForEach-Object { [long]($_['processId']) })
+        if ($taskIds.Count -lt 1 -or $taskIds.Count -gt 64 -or @($taskIds | Where-Object { $_ -lt 1 -or $_ -gt 0xffffffff }).Count) { throw '实际自有进程清单超出共享边界。' }
+        $taskInventory['version'] = 1
+        $taskInventory['phase'] = $Phase
+        $taskInventory['context'] = @{ version = $Context.version; batchId = $Context.batchId; caseId = $Context.caseId;
+          sourceCommit = $Context.sourceCommit; sourceFingerprint = $Context.sourceFingerprint; executionDomainId = $Context.executionDomainId;
+          databaseBranchId = $Context.databaseBranchId; applicationName = $Context.applicationName; sdkDirectory = $Context.sdkDirectory }
+        $taskRootMember = @($taskInventory['members'] | Where-Object { $_['processId'] -eq [long]$taskDomain.ProcessId })
+        if ($taskRootMember.Count -ne 1) { throw '实际全量清单没有唯一根进程。' }
+        $taskStoppedAt = $null
+        if ($null -ne $taskInventory['stoppedAt']) {
+          $taskStoppedAt = [DateTimeOffset]::ParseExact([string]$taskInventory['stoppedAt'], "yyyy-MM-dd'T'HH:mm:ss.fff'Z'",
+            [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal)
+        }
+        $taskRecord = @{ phase = $Phase; processIds = $taskIds; rootProcessId = [long]$taskDomain.ProcessId;
+          zeroExitObserved = $taskInventory['inventoryComplete']; natural = $false; inventoryComplete = $taskInventory['inventoryComplete'];
+          outputEof = ($taskInventory['stdoutEof'] -and $taskInventory['stderrEof']); exitCode = $taskRootMember[0]['exitCode'];
+          remainingProcesses = $taskInventory['remainingOwnedProcesses']; stoppedAt = $taskStoppedAt; processInventory = $taskInventory }
+      }
+    } finally {
+      # Disposal of a still-live job is forced termination, never a passing cleanup acknowledgement.
+      if ($taskDomain) {
+        $taskDomain.Dispose()
+        if ($taskRecord -and $taskDomain.ForcedTermination) { $taskRecord.processInventory['termination'] = 'forced' }
+      }
+      if (-not $taskPinsRegistered) { foreach ($taskBinaryPin in $taskBinaryPins) { $taskBinaryPin.Dispose() } }
+      $taskEnvironment.Clear()
+      $taskDirectUri = $null
+    }
+    if ($taskRecord) {
+      # This private serialized fact is not an observe-v1 payload or cleanup authorization.
+      $taskInventoryJson = $taskRecord.processInventory | ConvertTo-Json -Depth 16 -Compress
+      if ([Text.Encoding]::UTF8.GetByteCount($taskInventoryJson) -gt 256KB) { throw '父方进程事实超过共享字节上限。' }
+      $taskRecord.processInventoryJson = $taskInventoryJson
+      $script:WorkflowProcessRuns[[string]$Context.executionDomainId].Add($taskRecord)
+    }
   }
   # Vitest forks normally kills its worker. Zero member exit codes cannot attest a kill-free lifecycle or complete VM coverage.
-  if (-not $taskRecord -or -not $taskRecord.zeroExitObserved -or -not $taskRecord.inventoryComplete -or -not $taskRecord.outputEof
+  if (-not $taskImagesConfirmed -or -not $taskRecord -or -not $taskRecord.zeroExitObserved -or -not $taskRecord.inventoryComplete -or -not $taskRecord.outputEof
     -or $taskRecord.exitCode -ne 0 -or $taskRecord.remainingProcesses -ne 0) { throw '本次原生执行域终态未闭合。' }
-  if (-not $script:WorkflowProcessRuns.ContainsKey([string]$Context.executionDomainId)) { throw '本次父创建的执行域不存在。' }
-  $script:WorkflowProcessRuns[[string]$Context.executionDomainId].Add($taskRecord)
   return $taskRecord
 }
 foreach ($taskPath in @($ContextFile, $OutputDirectory)) {

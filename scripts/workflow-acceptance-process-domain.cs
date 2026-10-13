@@ -7,6 +7,8 @@ using System.IO;
 using System.IO.Pipes;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Globalization;
+using System.Security.Cryptography;
 
 namespace AgentStudioAcceptance {
   public sealed class OwnedJsonPin : IDisposable {
@@ -113,6 +115,132 @@ namespace AgentStudioAcceptance {
     [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GetFileInformationByHandle(IntPtr handle, out DirectoryInformation information);
     [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
   }
+  public sealed class OwnedBinaryPin : IDisposable {
+    private const long MaximumBytes = 256L * 1024 * 1024;
+    private const string EsbuildSha256 = "c7bee37877d0aa6a046e52783fa0a2cf1a9ce5579d68bb3083bda99d4bff18ef";
+    private FileStream stream;
+    private OwnedDirectoryPins directories;
+    private readonly FileInformation identity;
+    public string ImagePath { get; private set; }
+    public string Sha256 { get; private set; }
+    public long ByteLength { get; private set; }
+    public uint VolumeSerialNumber { get { return identity.Volume; } }
+    public string FileIndex { get { return (((ulong)identity.IndexHigh << 32) | identity.IndexLow).ToString("x16", CultureInfo.InvariantCulture); } }
+    public string PinnedAt { get; private set; }
+    public bool IsClosed { get { return stream == null || stream.SafeFileHandle.IsClosed || directories == null || directories.IsClosed; } }
+
+    private OwnedBinaryPin(FileStream file, OwnedDirectoryPins ancestors, FileInformation information, string path, string hash) {
+      stream = file; directories = ancestors; identity = information; ImagePath = path; Sha256 = hash;
+      ByteLength = ((long)information.SizeHigh << 32) | information.SizeLow;
+      PinnedAt = Timestamp(DateTimeOffset.UtcNow);
+    }
+    public static OwnedBinaryPin OpenNode(string path) { return Open(path, "node.exe", null); }
+    public static OwnedBinaryPin OpenEsbuild(string path) { return Open(path, "esbuild.exe", EsbuildSha256); }
+    private static OwnedBinaryPin Open(string path, string basename, string expectedHash) {
+      if (!Path.IsPathFullyQualified(path)) throw new ArgumentException("镜像路径必须为本地绝对路径");
+      string requested = CanonicalLocalPath(Path.GetFullPath(path.Replace('/', '\\')));
+      if (!String.Equals(Path.GetFileName(requested), basename, StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("固定镜像类别无效");
+      var ancestors = new OwnedDirectoryPins();
+      Microsoft.Win32.SafeHandles.SafeFileHandle handle = null;
+      FileStream file = null; bool transferred = false;
+      try {
+        ancestors.Pin(Path.GetDirectoryName(requested));
+        handle = CreateFile(requested, 0x80000000, 1, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero);
+        if (handle.IsInvalid) throw new Win32Exception();
+        FileInformation before;
+        if (!GetFileInformationByHandle(handle, out before) || !ValidFile(before) || GetFileType(handle) != 1) throw new InvalidOperationException("镜像文件身份或容量未知");
+        string final = FinalLocalPath(handle);
+        if (!String.Equals(requested, final, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("镜像路径没有固定到实际文件");
+        file = new FileStream(handle, FileAccess.Read);
+        long length = ((long)before.SizeHigh << 32) | before.SizeLow;
+        string hash = HashBounded(file, length);
+        FileInformation after;
+        if (!GetFileInformationByHandle(handle, out after) || !SameIdentity(before, after)
+          || !String.Equals(final, FinalLocalPath(handle), StringComparison.OrdinalIgnoreCase)
+          || expectedHash != null && !String.Equals(hash, expectedHash, StringComparison.Ordinal)) throw new InvalidOperationException("固定镜像身份或字节不一致");
+        var pin = new OwnedBinaryPin(file, ancestors, before, final, hash); transferred = true; return pin;
+      } finally {
+        if (!transferred) { if (file != null) file.Dispose(); else if (handle != null) handle.Dispose(); ancestors.Dispose(); }
+      }
+    }
+    private static bool ValidFile(FileInformation value) {
+      long length = ((long)value.SizeHigh << 32) | value.SizeLow;
+      return (value.Attributes & 0x410) == 0 && value.Links > 0 && length > 0 && length <= MaximumBytes;
+    }
+    private static bool SameIdentity(FileInformation before, FileInformation after) {
+      return ValidFile(after) && before.Volume == after.Volume && before.IndexHigh == after.IndexHigh && before.IndexLow == after.IndexLow
+        && before.SizeHigh == after.SizeHigh && before.SizeLow == after.SizeLow
+        && before.Created.dwHighDateTime == after.Created.dwHighDateTime && before.Created.dwLowDateTime == after.Created.dwLowDateTime
+        && before.Written.dwHighDateTime == after.Written.dwHighDateTime && before.Written.dwLowDateTime == after.Written.dwLowDateTime;
+    }
+    private static string HashBounded(FileStream file, long length) {
+      if (length < 1 || length > MaximumBytes) throw new InvalidOperationException("镜像字节超过上限");
+      file.Position = 0;
+      using (var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256)) {
+        var buffer = new byte[64 * 1024]; long remaining = length;
+        while (remaining > 0) {
+          int read = file.Read(buffer, 0, (int)Math.Min(buffer.Length, remaining));
+          if (read == 0) throw new InvalidOperationException("镜像字节长度发生变化");
+          hash.AppendData(buffer, 0, read); remaining -= read;
+        }
+        if (file.ReadByte() != -1) throw new InvalidOperationException("镜像字节长度发生变化");
+        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+      }
+    }
+    internal static string CanonicalLocalPath(string path) {
+      if (path == null || path.Length < 4 || path.Length > 2048 || !((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z'))
+        || path[1] != ':' || path[2] != '\\') throw new InvalidOperationException("镜像不是规范的本地 Windows 路径");
+      foreach (char value in path) {
+        if (value < 32 || value == 127 || "/\"<>|?*".IndexOf(value) >= 0) throw new InvalidOperationException("镜像路径字符无效");
+      }
+      foreach (string part in path.Substring(3).Split('\\')) {
+        if (part.Length == 0 || part == "." || part == ".." || part.Contains(":") || part.EndsWith(".", StringComparison.Ordinal)
+          || part.EndsWith(" ", StringComparison.Ordinal)) throw new InvalidOperationException("镜像路径没有规范化");
+      }
+      return path;
+    }
+    private static string FinalLocalPath(Microsoft.Win32.SafeHandles.SafeFileHandle handle) {
+      var buffer = new StringBuilder(4096);
+      uint length = GetFinalPathNameByHandle(handle, buffer, (uint)buffer.Capacity, 0);
+      if (length == 0 || length >= buffer.Capacity || buffer.Length != length) throw new Win32Exception();
+      string path = buffer.ToString();
+      if (path.StartsWith("\\\\?\\", StringComparison.Ordinal)) path = path.Substring(4);
+      return CanonicalLocalPath(path);
+    }
+    internal static string Timestamp(DateTimeOffset time) { return time.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture); }
+    internal bool IdentityUnchanged() {
+      if (IsClosed) return false;
+      FileInformation current;
+      return GetFileInformationByHandle(stream.SafeFileHandle, out current) && SameIdentity(identity, current)
+        && String.Equals(ImagePath, FinalLocalPath(stream.SafeFileHandle), StringComparison.OrdinalIgnoreCase);
+    }
+    public bool OriginalBytesUnchanged() {
+      try { return IdentityUnchanged() && HashBounded(stream, ByteLength) == Sha256 && IdentityUnchanged(); }
+      catch { return false; }
+    }
+    internal bool SameImage(OwnedBinaryPin actual) {
+      return String.Equals(ImagePath, actual.ImagePath, StringComparison.OrdinalIgnoreCase) && Sha256 == actual.Sha256
+        && ByteLength == actual.ByteLength && VolumeSerialNumber == actual.VolumeSerialNumber && FileIndex == actual.FileIndex;
+    }
+    public Dictionary<string,object> Snapshot() {
+      return new Dictionary<string,object> { { "imagePath", ImagePath }, { "sha256", Sha256 }, { "byteLength", ByteLength },
+        { "volumeSerialNumber", (long)VolumeSerialNumber }, { "fileIndex", FileIndex }, { "pinnedAt", PinnedAt } };
+    }
+    public void Dispose() {
+      if (stream != null) { stream.Dispose(); stream = null; }
+      if (directories != null) { directories.Dispose(); directories = null; }
+    }
+    [StructLayout(LayoutKind.Sequential)] private struct FileInformation {
+      public uint Attributes; public System.Runtime.InteropServices.ComTypes.FILETIME Created, Accessed, Written;
+      public uint Volume, SizeHigh, SizeLow, Links, IndexHigh, IndexLow;
+    }
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true, EntryPoint="CreateFileW")] private static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFile(
+      string name, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
+    [DllImport("kernel32.dll", SetLastError=true)] private static extern bool GetFileInformationByHandle(Microsoft.Win32.SafeHandles.SafeFileHandle handle, out FileInformation information);
+    [DllImport("kernel32.dll", SetLastError=true)] private static extern uint GetFileType(Microsoft.Win32.SafeHandles.SafeFileHandle handle);
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true, EntryPoint="GetFinalPathNameByHandleW")] private static extern uint GetFinalPathNameByHandle(
+      Microsoft.Win32.SafeHandles.SafeFileHandle handle, StringBuilder path, uint capacity, uint flags);
+  }
   // A suspended child joins the non-breakaway job before executing any user code.
   public sealed class OwnedProcessDomain : IDisposable {
     private IntPtr job;
@@ -121,6 +249,11 @@ namespace AgentStudioAcceptance {
     private readonly HashSet<ulong> observedProcesses = new HashSet<ulong>();
     private readonly Dictionary<ulong, IntPtr> ownedProcessHandles = new Dictionary<ulong, IntPtr>();
     private readonly Dictionary<ulong, uint> observedExitCodes = new Dictionary<ulong, uint>();
+    private readonly Dictionary<ulong, Dictionary<string,object>> observedImages = new Dictionary<ulong, Dictionary<string,object>>();
+    private readonly OwnedBinaryPin nodeImage, esbuildImage;
+    private bool imageObservationUnknown;
+    private bool imagePinsUnknown;
+    private string startedAt;
     private bool memberObservationUnknown;
     private bool abnormalMemberExit;
     private AnonymousPipeServerStream stdoutPipe, stderrPipe, stdinPipe;
@@ -130,7 +263,13 @@ namespace AgentStudioAcceptance {
     public uint ProcessId { get; private set; }
     public bool ForcedTermination { get; private set; }
 
-    public OwnedProcessDomain() {
+    public OwnedProcessDomain(OwnedBinaryPin nodePin, OwnedBinaryPin esbuildPin) {
+      if (nodePin == null || esbuildPin == null || nodePin.IsClosed || esbuildPin.IsClosed
+        || !String.Equals(Path.GetFileName(nodePin.ImagePath), "node.exe", StringComparison.OrdinalIgnoreCase)
+        || !String.Equals(Path.GetFileName(esbuildPin.ImagePath), "esbuild.exe", StringComparison.OrdinalIgnoreCase)
+        || nodePin.VolumeSerialNumber == esbuildPin.VolumeSerialNumber && nodePin.FileIndex == esbuildPin.FileIndex)
+        throw new InvalidOperationException("执行域必须使用父持有的两个独立镜像固定句柄");
+      nodeImage = nodePin; esbuildImage = esbuildPin;
       job = CreateJobObject(IntPtr.Zero, null);
       if (job == IntPtr.Zero) throw new Win32Exception();
       var limits = new ExtendedLimits();
@@ -154,6 +293,9 @@ namespace AgentStudioAcceptance {
         throw new ArgumentException("执行路径或参数无效");
       if (stdoutWrite == IntPtr.Zero || stderrWrite == IntPtr.Zero || stdinRead == IntPtr.Zero)
         throw new ArgumentException("必须使用父控制器自有重定向句柄");
+      string canonicalExecutable = OwnedBinaryPin.CanonicalLocalPath(Path.GetFullPath(executable.Replace('/', '\\')));
+      if (!nodeImage.IdentityUnchanged() || !esbuildImage.IdentityUnchanged()
+        || !String.Equals(nodeImage.ImagePath, canonicalExecutable, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("启动前固定镜像归属已失效");
       var keys = new List<string>(environment.Keys); keys.Sort(StringComparer.OrdinalIgnoreCase);
       var block = new StringBuilder();
       foreach (var key in keys) {
@@ -183,6 +325,9 @@ namespace AgentStudioAcceptance {
         if (!UpdateProcThreadAttribute(attributes, 0, new UIntPtr(0x00020002), handles,
           new UIntPtr((uint)(IntPtr.Size * 3)), IntPtr.Zero, IntPtr.Zero)) throw new Win32Exception();
         var command = new StringBuilder("\"" + executable + "\" " + quotedArguments);
+        startedAt = OwnedBinaryPin.Timestamp(DateTimeOffset.UtcNow);
+        if (String.CompareOrdinal(nodeImage.PinnedAt, startedAt) > 0 || String.CompareOrdinal(esbuildImage.PinnedAt, startedAt) > 0)
+          throw new InvalidOperationException("镜像固定与启动时间发生回退");
         if (!CreateProcess(executable, command, IntPtr.Zero, IntPtr.Zero, true, 0x00000004 | 0x00000400 | 0x08000000 | 0x00080000,
           env, directory, ref startup, out info)) throw new Win32Exception();
       } finally {
@@ -233,9 +378,10 @@ namespace AgentStudioAcceptance {
     }
 
     public bool OutputEofConfirmed() {
-      return stdoutDrain != null && stderrDrain != null && stdoutDrain.IsCompletedSuccessfully
-        && stderrDrain.IsCompletedSuccessfully && Interlocked.Read(ref outputBytes) <= 512 * 1024;
+      return StdoutEofConfirmed() && StderrEofConfirmed();
     }
+    public bool StdoutEofConfirmed() { return stdoutDrain != null && stdoutDrain.IsCompletedSuccessfully && Interlocked.Read(ref outputBytes) <= 512 * 1024; }
+    public bool StderrEofConfirmed() { return stderrDrain != null && stderrDrain.IsCompletedSuccessfully && Interlocked.Read(ref outputBytes) <= 512 * 1024; }
 
     public bool WaitForOutputEof(uint milliseconds) {
       if (stdoutDrain == null || stderrDrain == null) return false;
@@ -288,7 +434,10 @@ namespace AgentStudioAcceptance {
           if (handle == IntPtr.Zero || !IsProcessInJob(handle, job, out member) || !member) {
             if (handle != IntPtr.Zero && handle != process) CloseHandle(handle);
             memberObservationUnknown = true;
-          } else ownedProcessHandles.Add(id, handle);
+          } else {
+            ownedProcessHandles.Add(id, handle);
+            CaptureProcessImage(id, handle);
+          }
         }
         if (message == 7 || message == 8) {
           if (message == 8) abnormalMemberExit = true;
@@ -299,6 +448,80 @@ namespace AgentStudioAcceptance {
         }
       }
       if (Marshal.GetLastWin32Error() != 258) throw new Win32Exception();
+    }
+
+    private void CaptureProcessImage(ulong id, IntPtr handle) {
+      try {
+        var path = new StringBuilder(2049); uint length = (uint)path.Capacity;
+        if (!QueryFullProcessImageName(handle, 0, path, ref length) || length == 0 || length >= path.Capacity || path.Length != length)
+          throw new InvalidOperationException("实际进程镜像路径未知");
+        string actualPath = OwnedBinaryPin.CanonicalLocalPath(path.ToString());
+        OwnedBinaryPin expected; string kind;
+        if (String.Equals(actualPath, nodeImage.ImagePath, StringComparison.OrdinalIgnoreCase)) { expected = nodeImage; kind = "node"; }
+        else if (String.Equals(actualPath, esbuildImage.ImagePath, StringComparison.OrdinalIgnoreCase)) { expected = esbuildImage; kind = "esbuild"; }
+        else throw new InvalidOperationException("本次 Job 含未知镜像");
+        if (id == ProcessId && kind != "node" || !expected.IdentityUnchanged()) throw new InvalidOperationException("实际镜像归属发生变化");
+        using (var actual = kind == "node" ? OwnedBinaryPin.OpenNode(actualPath) : OwnedBinaryPin.OpenEsbuild(actualPath)) {
+          if (!expected.SameImage(actual) || !expected.IdentityUnchanged()) throw new InvalidOperationException("实际镜像文件没有匹配父固定字节");
+          string observedAt = OwnedBinaryPin.Timestamp(DateTimeOffset.UtcNow);
+          if (String.CompareOrdinal(observedAt, startedAt) < 0) throw new InvalidOperationException("镜像观察时间发生回退");
+          var image = actual.Snapshot(); image.Remove("pinnedAt");
+          image.Add("kind", kind); image.Add("observedAt", observedAt);
+          observedImages.Add(id, image);
+        }
+      } catch { imageObservationUnknown = true; }
+    }
+
+    public bool AllProcessImagesConfirmed() {
+      if (disposed || imageObservationUnknown || observedProcesses.Count < 1 || observedProcesses.Count > 64
+        || observedImages.Count != observedProcesses.Count || !ImagePinsUnchanged()) return false;
+      foreach (ulong id in observedProcesses) { if (!observedImages.ContainsKey(id)) return false; }
+      return observedImages.ContainsKey(ProcessId) && (string)observedImages[ProcessId]["kind"] == "node";
+    }
+
+    private bool ImagePinsUnchanged() {
+      if (imagePinsUnknown) return false;
+      bool valid = nodeImage.OriginalBytesUnchanged() && esbuildImage.OriginalBytesUnchanged();
+      if (!valid) { imagePinsUnknown = true; imageObservationUnknown = true; }
+      return valid;
+    }
+
+    public Dictionary<string,object> SnapshotProcessFacts() {
+      RequireProcess();
+      try { DrainProcessEvents(); } catch { memberObservationUnknown = true; }
+      if (!observedProcesses.Contains(ProcessId)) memberObservationUnknown = true;
+      if (ProcessId == 0) throw new InvalidOperationException("没有实际创建的根进程身份");
+      bool pinsValid = ImagePinsUnchanged();
+      bool zero = false;
+      try { zero = AllMembersExitedZero(); } catch { memberObservationUnknown = true; }
+      Accounting accounting; uint size;
+      bool counted = QueryInformationJobObject(job, 1, out accounting, (uint)Marshal.SizeOf<Accounting>(), out size) && size == Marshal.SizeOf<Accounting>();
+      // The real creation handle survives a missing notification; this union never fabricates a NEW event.
+      var actualIds = new HashSet<ulong>(observedProcesses); actualIds.Add(ProcessId);
+      if (actualIds.Count > 64) throw new InvalidOperationException("实际全量进程清单超出共享边界");
+      bool complete = zero && counted && accounting.TotalProcesses == actualIds.Count && accounting.ActiveProcesses == 0;
+      bool stdoutEof = StdoutEofConfirmed(), stderrEof = StderrEofConfirmed();
+      string stopped = complete && stdoutEof && stderrEof ? OwnedBinaryPin.Timestamp(DateTimeOffset.UtcNow) : null;
+      if (stopped != null && String.CompareOrdinal(stopped, startedAt) < 0) throw new InvalidOperationException("实际启动与停止时间发生回退");
+      var ids = new ulong[actualIds.Count]; actualIds.CopyTo(ids); Array.Sort(ids);
+      var members = new Dictionary<string,object>[ids.Length];
+      for (int index = 0; index < ids.Length; index++) {
+        ulong id = ids[index]; uint exit;
+        bool exitKnown = observedExitCodes.TryGetValue(id, out exit);
+        if (!exitKnown && id == ProcessId) exitKnown = WaitForSingleObject(process, 0) == 0 && GetExitCodeProcess(process, out exit);
+        bool known = pinsValid && observedImages.ContainsKey(id);
+        if (known && stopped != null && String.CompareOrdinal((string)observedImages[id]["observedAt"], stopped) > 0)
+          throw new InvalidOperationException("镜像观察与停止时间发生回退");
+        members[index] = new Dictionary<string,object> { { "processId", (long)id }, { "imageObservationStatus", known ? "observed" : "unknown" },
+          { "image", known ? new Dictionary<string,object>(observedImages[id]) : null },
+          { "exitCode", exitKnown ? (object)(long)exit : null } };
+      }
+      // Zero exit alone never establishes a kill-free SDK/worker lifecycle.
+      return new Dictionary<string,object> { { "rootProcessId", (long)ProcessId }, { "startedAt", startedAt }, { "stoppedAt", stopped },
+        { "expectedImages", new Dictionary<string,object> { { "node", nodeImage.Snapshot() }, { "esbuild", esbuildImage.Snapshot() } } },
+        { "members", members }, { "totalProcesses", counted && accounting.TotalProcesses > 0 ? (object)(long)accounting.TotalProcesses : null },
+        { "remainingOwnedProcesses", counted ? (object)(long)accounting.ActiveProcesses : null }, { "inventoryComplete", complete },
+        { "stdoutEof", stdoutEof }, { "stderrEof", stderrEof }, { "termination", ForcedTermination ? "forced" : "unknown" }, { "observationStatus", "unknown" } };
     }
 
     public bool ProcessInventoryComplete() {
@@ -342,7 +565,7 @@ namespace AgentStudioAcceptance {
       disposed = true;
       if (job != IntPtr.Zero) { CloseHandle(job); job = IntPtr.Zero; }
       foreach (var handle in ownedProcessHandles.Values) { if (handle != process) CloseHandle(handle); }
-      ownedProcessHandles.Clear(); observedExitCodes.Clear();
+      ownedProcessHandles.Clear(); observedExitCodes.Clear(); observedImages.Clear();
       if (process != IntPtr.Zero) { CloseHandle(process); process = IntPtr.Zero; }
       if (completionPort != IntPtr.Zero) { CloseHandle(completionPort); completionPort = IntPtr.Zero; }
       if (stdoutPipe != null) stdoutPipe.Dispose();
@@ -388,6 +611,8 @@ namespace AgentStudioAcceptance {
     [DllImport("kernel32.dll", SetLastError=true)] private static extern bool GetExitCodeProcess(IntPtr process, out uint code);
     [DllImport("kernel32.dll", SetLastError=true)] private static extern IntPtr OpenProcess(uint access, bool inherit, uint id);
     [DllImport("kernel32.dll", SetLastError=true)] private static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool member);
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true, EntryPoint="QueryFullProcessImageNameW")] private static extern bool QueryFullProcessImageName(
+      IntPtr process, uint flags, StringBuilder path, ref uint length);
     [DllImport("kernel32.dll", SetLastError=true)] private static extern bool TerminateProcess(IntPtr process, uint code);
     [DllImport("kernel32.dll", SetLastError=true)] private static extern bool CloseHandle(IntPtr handle);
   }
