@@ -276,3 +276,59 @@ describe("迁移前专用数据库实际观测契约", () => {
     expect(WorkflowAcceptanceEmptyDatabaseObservation.safeParse(cyclic).success).toBe(false);
   });
 });
+
+function observeEmpty(): Extract<WorkflowAcceptanceBridgeRequest, { operation: "observe-empty" }> {
+  return { version: 1, operation: "observe-empty", context: context(), caseDirectory: "D:/owned/case", provenance: provenance() };
+}
+
+describe("迁移前空库观察请求与结果分离", () => {
+  it.each(WorkflowAcceptanceCaseId.options.map((caseId) => ({ caseId })))("原案例只请求本冻结目标的观察：$caseId", ({ caseId }) => {
+    const request = { ...observeEmpty(), context: { ...context(), caseId } };
+    const parsed = WorkflowAcceptanceBridgeRequest.parse(request);
+    expect(parsed).toEqual(request);
+    expect(Object.keys(parsed)).toEqual(["version", "context", "caseDirectory", "provenance", "operation"]);
+  });
+  it.each(["executionDomainId", "batchId", "databaseBranchId", "sourceCommit", "sourceFingerprint"] as const)("空库请求不能混入其他冻结身份：%s", (key) => {
+    const request = observeEmpty();
+    if (key === "executionDomainId" || key === "batchId") request.provenance[key] = "55555555-5555-4555-8555-555555555555";
+    else if (key === "databaseBranchId") request.provenance[key] = "br-other-case";
+    else request.provenance[key] = "c".repeat(key === "sourceCommit" ? 40 : 64);
+    expect(WorkflowAcceptanceBridgeRequest.safeParse(request).success).toBe(false);
+  });
+  it.each(["emptyObservation", "userRelationCount", "observationStatus", "checkedAt", "emptyVerified", "cleanup",
+    "ownedProcessIds", "processObservation", "databaseUrl", "apiKey", "rawError"])("请求不能提供观察结果、清理声明或秘密：%s", (field) => {
+    expect(WorkflowAcceptanceBridgeRequest.safeParse({ ...observeEmpty(), [field]: true }).success).toBe(false);
+  });
+  it.each(["context", "provenance", "caseDirectory"])("父方目标字段不能省略：%s", (field) => {
+    const request: Record<string, unknown> = { ...observeEmpty() }; delete request[field];
+    expect(WorkflowAcceptanceBridgeRequest.safeParse(request).success).toBe(false);
+  });
+  it("复用原本地路径限制，不由请求声明物理目录或官方归属", () => {
+    for (const caseDirectory of ["D:/owned/case", "C:/owned/case", "/owned/case"]) {
+      expect(WorkflowAcceptanceBridgeRequest.safeParse({ ...observeEmpty(), caseDirectory }).success).toBe(true);
+    }
+    for (const caseDirectory of ["relative/case", "D:/owned/../case", "//host/share/case"]) {
+      expect(WorkflowAcceptanceBridgeRequest.safeParse({ ...observeEmpty(), caseDirectory }).success).toBe(false);
+    }
+  });
+  it("访问器及继承序列化函数不能执行，普通跨VM数据保留", () => {
+    let calls = 0;
+    const request = observeEmpty();
+    Object.defineProperty(request.provenance, "endpointHost", { enumerable: true, get() { calls += 1; return "ep-own-case.neon.tech"; } });
+    expect(WorkflowAcceptanceBridgeRequest.safeParse(request).success).toBe(false);
+    const inherited = Object.create({ toJSON() { calls += 1; return observeEmpty(); } });
+    Object.assign(inherited, observeEmpty());
+    expect(WorkflowAcceptanceBridgeRequest.safeParse(inherited).success).toBe(false);
+    expect(calls).toBe(0);
+    expect(WorkflowAcceptanceBridgeRequest.parse(runInNewContext("(" + JSON.stringify(observeEmpty()) + ")"))).toEqual(observeEmpty());
+  });
+  it("在字段解析前保留总UTF8上限及循环数据拒绝", () => {
+    const expanded = { ...observeEmpty(), padding: "字".repeat(12_000) };
+    expect(expanded.padding.length).toBeLessThan(MAX_WORKFLOW_ACCEPTANCE_BRIDGE_REQUEST_BYTES);
+    const parsed = WorkflowAcceptanceBridgeRequest.safeParse(expanded);
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) expect(parsed.error.issues[0].message).toBe("验收桥接只能包含有界普通数据");
+    const cyclic: Record<string, unknown> = { ...observeEmpty() }; cyclic.self = cyclic;
+    expect(WorkflowAcceptanceBridgeRequest.safeParse(cyclic).success).toBe(false);
+  });
+});

@@ -110,6 +110,7 @@ function checkIdentity(value: { context: WorkflowAcceptanceContext; provenance: 
 
 export const WorkflowAcceptanceBridgeRequest = passiveBridge(z.discriminatedUnion("operation", [
   z.object({ ...SharedFields, operation: z.literal("observe"), ownedProcessIds: OwnedProcessIds, processObservation: ProcessObservation }).strict(),
+  z.object({ ...SharedFields, operation: z.literal("observe-empty") }).strict(),
   z.object({ ...SharedFields, operation: z.literal("finalize"), cleanup: WorkflowAcceptanceCleanupReceipt }).strict(),
 ]).superRefine((value, context) => {
   checkIdentity(value, context);
@@ -117,7 +118,7 @@ export const WorkflowAcceptanceBridgeRequest = passiveBridge(z.discriminatedUnio
     const observed = value.processObservation;
     if (observed.executionDomainId !== value.context.executionDomainId || observed.applicationName !== value.context.applicationName
       || observed.databaseBranchId !== value.context.databaseBranchId) context.addIssue({ code: "custom", message: "进程观察必须属于本冻结案例" });
-  } else if (value.cleanup.databaseBranchId !== value.context.databaseBranchId) {
+  } else if (value.operation === "finalize" && value.cleanup.databaseBranchId !== value.context.databaseBranchId) {
     context.addIssue({ code: "custom", message: "清理回执必须属于本次创建的临时分支" });
   }
 }), MAX_WORKFLOW_ACCEPTANCE_BRIDGE_REQUEST_BYTES);
