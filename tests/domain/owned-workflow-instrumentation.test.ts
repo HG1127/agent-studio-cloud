@@ -248,12 +248,12 @@ describe("原生参数只按自有数据描述符读取（模拟API）", () => {
         env: Record<string, string>; execArgv: string[]; stdio?: string[];
       }) => "forked"), spawn: vi.fn(), spawnSync: vi.fn(), exec: vi.fn(), execSync: vi.fn(), execFile: vi.fn(), execFileSync: vi.fn() },
       syncBuiltins: vi.fn() };
-    const compile = api.vm.compileFunction, fork = api.children.fork;
+    const compile = api.vm.compileFunction, fork = api.children.fork, createContext = api.vm.createContext;
     const options = { forkEntry: path.resolve("fixtures/forks.js"), preloadUrl: "file:///fixture/owned-workflow-preload.mjs",
       warningsFile: path.resolve("fixtures/warnings.cjs"), contextRaw: "sealed-fixture" };
     installOwnedNativeFactories(current.instrument, { ...api, host: current.host }, options);
     const environment = { MVP_WORKFLOW_ACCEPTANCE_CONTEXT: options.contextRaw, MODEL_MOCK: "1", REAL_MODELS_ENABLED: "0", MVP_ACCEPTANCE_ISOLATED_DB: "1" };
-    return { ...current, api, compile, fork, options, environment };
+    return { ...current, api, compile, fork, createContext, options, environment };
   }
   it.each(["compile-options", "compile-params", "fork-options", "fork-env", "fork-args", "fork-argv", "fork-stdio"])("未知%s拒绝前不触发Proxy trap或原生API", (kind) => {
     const current = entry(), trap = vi.fn(() => { throw new Error("private-trap"); });
@@ -267,7 +267,7 @@ describe("原生参数只按自有数据描述符读取（模拟API）", () => {
       ? current.api.vm.compileFunction("return 1", kind === "compile-params" ? new Proxy([], traps) : [], kind === "compile-options" ? new Proxy({}, traps) : {})
       : current.api.children.fork(current.options.forkEntry, args, kind === "fork-options" ? new Proxy(forkOptions, traps) : forkOptions);
     expect(attempt).toThrow(); expect(trap).not.toHaveBeenCalled();
-    expect(current.compile).not.toHaveBeenCalled(); expect(current.fork).not.toHaveBeenCalled(); expect(current.api.vm.createContext).not.toHaveBeenCalled();
+    expect(current.compile).not.toHaveBeenCalled(); expect(current.fork).not.toHaveBeenCalled(); expect(current.createContext).not.toHaveBeenCalled();
   });
   it.each(["compile-context", "fork-env", "fork-argv", "env-context", "argv-item"])("%s访问器不被读取或转交原生API", (kind) => {
     const current = entry(), getter = vi.fn(() => { throw new Error("private-getter"); });
