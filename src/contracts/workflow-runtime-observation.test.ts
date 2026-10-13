@@ -2,6 +2,8 @@ import { runInNewContext } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
 import {
   WorkflowAcceptanceRuntimeCoverageEvaluation, WorkflowAcceptanceRuntimeObservationRequest,
+  WorkflowAcceptanceRuntimeFingerprints, WORKFLOW_EXPECTED_FINGERPRINTS_FILE,
+  WORKFLOW_RUNTIME_OBSERVATION_REQUEST_FILE, WORKFLOW_RUNTIME_COVERAGE_EVALUATION_FILE,
   WORKFLOW_BUSINESS_PROCESS_INVENTORY_FILE, WORKFLOW_BUSINESS_CHILD_REPORT_FILE, WORKFLOW_RUNTIME_INVENTORY_DIRECTORY,
 } from "./workflow-runtime-observation";
 
@@ -25,6 +27,51 @@ function consistent(): WorkflowAcceptanceRuntimeCoverageEvaluation {
   return { version: 2, status: "consistent", cleanupPermitted: false, failures: [],
     counts: { processes: 2, nodeProcesses: 1, launches: 1, realms: 17, pools: 17 } };
 }
+
+describe("父探针与运行读取器的共享指纹", () => {
+  it("复用请求中的两项指纹及固定文件名，不增加自报许可", () => {
+    const fingerprints = fixture().expectedFingerprints;
+    expect(WorkflowAcceptanceRuntimeFingerprints.parse(fingerprints)).toEqual(
+      WorkflowAcceptanceRuntimeObservationRequest.parse(fixture()).expectedFingerprints,
+    );
+    expect(WORKFLOW_EXPECTED_FINGERPRINTS_FILE).toBe("expected-fingerprints.json");
+    expect(WORKFLOW_RUNTIME_OBSERVATION_REQUEST_FILE).toBe("observe-runtime-request.json");
+    expect(WORKFLOW_RUNTIME_COVERAGE_EVALUATION_FILE).toBe("runtime-coverage-evaluation.json");
+    expect(Object.keys(WorkflowAcceptanceRuntimeFingerprints.parse(fingerprints)).sort()).toEqual(["adapterFingerprint", "sdkFactoryFingerprint"]);
+  });
+  it.each(["missing-adapter", "missing-sdk", "unknown-field", "uppercase", "short", "non-string", "non-object"])("拒绝无效独立指纹 %s", (mode) => {
+    const value: Record<string, unknown> = { ...fixture().expectedFingerprints };
+    if (mode === "missing-adapter") delete value.adapterFingerprint;
+    if (mode === "missing-sdk") delete value.sdkFactoryFingerprint;
+    if (mode === "unknown-field") value.cleanupPermitted = true;
+    if (mode === "uppercase") value.adapterFingerprint = "A".repeat(64);
+    if (mode === "short") value.sdkFactoryFingerprint = "a".repeat(63);
+    if (mode === "non-string") value.adapterFingerprint = 1;
+    expect(WorkflowAcceptanceRuntimeFingerprints.safeParse(mode === "non-object" ? null : value).success).toBe(false);
+  });
+  it("独立解析不执行指纹访问器", () => {
+    const value = fixture().expectedFingerprints, getter = vi.fn(() => "f".repeat(64));
+    Object.defineProperty(value, "adapterFingerprint", { enumerable: true, get: getter });
+    expect(WorkflowAcceptanceRuntimeFingerprints.safeParse(value).success).toBe(false);
+    expect(getter).not.toHaveBeenCalled();
+  });
+  it("独立解析接受其他原生执行空间的普通记录", () => {
+    const fingerprints = fixture().expectedFingerprints;
+    expect(WorkflowAcceptanceRuntimeFingerprints.parse(runInNewContext(`(${JSON.stringify(fingerprints)})`))).toEqual(fingerprints);
+  });
+  it("独立解析拒绝 constructor 访问器，不执行调用者代码", () => {
+    const value = fixture().expectedFingerprints, getter = vi.fn(), prototype = Object.create(null);
+    Object.defineProperty(prototype, "constructor", { get: getter });
+    Object.setPrototypeOf(value, prototype);
+    expect(WorkflowAcceptanceRuntimeFingerprints.safeParse(value).success).toBe(false);
+    expect(getter).not.toHaveBeenCalled();
+  });
+  it("独立解析拒绝自定义序列化函数，不调用 toJSON", () => {
+    const toJSON = vi.fn(() => fixture().expectedFingerprints);
+    expect(WorkflowAcceptanceRuntimeFingerprints.safeParse({ ...fixture().expectedFingerprints, toJSON }).success).toBe(false);
+    expect(toJSON).not.toHaveBeenCalled();
+  });
+});
 
 describe("完整运行观察的独立共享契约", () => {
   it("固定原文件布局只输出引用，不携带伪造的实际观察布尔值", () => {

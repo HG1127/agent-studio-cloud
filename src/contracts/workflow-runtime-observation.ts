@@ -8,6 +8,9 @@ export const MAX_WORKFLOW_RUNTIME_OBSERVATION_REQUEST_BYTES = 32 * 1024;
 export const WORKFLOW_BUSINESS_PROCESS_INVENTORY_FILE = "business-process-inventory.json";
 export const WORKFLOW_BUSINESS_CHILD_REPORT_FILE = "child-result.json";
 export const WORKFLOW_RUNTIME_INVENTORY_DIRECTORY = "runtime-inventory";
+export const WORKFLOW_EXPECTED_FINGERPRINTS_FILE = "expected-fingerprints.json";
+export const WORKFLOW_RUNTIME_OBSERVATION_REQUEST_FILE = "observe-runtime-request.json";
+export const WORKFLOW_RUNTIME_COVERAGE_EVALUATION_FILE = "runtime-coverage-evaluation.json";
 const Id = z.uuid().transform((value) => value.toLowerCase());
 const Hash = z.string().regex(/^[a-f0-9]{64}$/);
 const ProcessId = z.number().int().positive().max(0xffffffff);
@@ -59,6 +62,9 @@ function passive<T extends z.ZodType>(schema: T) {
   }, schema);
 }
 
+export const WorkflowAcceptanceRuntimeFingerprints = passive(z.object({ adapterFingerprint: Hash, sdkFactoryFingerprint: Hash }).strict());
+export type WorkflowAcceptanceRuntimeFingerprints = z.infer<typeof WorkflowAcceptanceRuntimeFingerprints>;
+
 export const WorkflowAcceptanceRuntimeObservationRequest = passive(z.object({
   version: z.literal(2), operation: z.literal("observe-runtime"), context: WorkflowAcceptanceContext,
   caseDirectory: z.string().min(1).max(2048).refine((value) => {
@@ -72,7 +78,7 @@ export const WorkflowAcceptanceRuntimeObservationRequest = passive(z.object({
   processInventoryRef: FileRef, childReportRef: FileRef,
   runtimeInventoryRefs: z.array(z.object({ launchId: Id, sha256: Hash }).strict()).min(1).max(MAX_WORKFLOW_ACCEPTANCE_OWNED_PROCESSES)
     .refine((values) => new Set(values.map((value) => value.launchId)).size === values.length),
-  expectedFingerprints: z.object({ adapterFingerprint: Hash, sdkFactoryFingerprint: Hash }).strict(),
+  expectedFingerprints: WorkflowAcceptanceRuntimeFingerprints,
 }).strict().superRefine((value, context) => {
   for (const key of ["executionDomainId", "batchId", "sourceCommit", "sourceFingerprint", "databaseBranchId"] as const) {
     if (value.context[key] !== value.provenance[key]) context.addIssue({ code: "custom", message: "原始文件请求与创建归属不一致" });
