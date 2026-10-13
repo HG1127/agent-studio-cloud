@@ -321,7 +321,7 @@ describe("原生参数只按自有数据描述符读取（模拟API）", () => {
 
 describe("独占有界原始事实文件", () => {
   function io() {
-    return { lstatSync: vi.fn(() => ({ isDirectory: () => true, isSymbolicLink: () => false })), realpathSync: vi.fn((value: string) => value),
+    return { lstatSync: vi.fn(() => ({ isDirectory: () => true, isSymbolicLink: (): boolean => false })), realpathSync: vi.fn((value: string) => value),
       openSync: vi.fn(() => 10), fstatSync: vi.fn(() => ({ isFile: () => true, nlink: 1 })), writeFileSync: vi.fn(), fsyncSync: vi.fn(), closeSync: vi.fn() };
   }
   it("仅 wx/0600 新建唯一 launch 文件，确认单链接后写入并 fsync/close", () => {

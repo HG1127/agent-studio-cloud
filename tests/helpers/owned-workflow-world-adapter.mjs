@@ -78,6 +78,7 @@ export function createWorldAdapter(original, hub = requireOwnedWorkflowHub()) {
   });
 }
 
+/** @param {object} host */
 export function createCoreWorldAdapter(original, hub = requireOwnedWorkflowHub(), host = globalThis) {
   if (!host || types.isProxy(host) || types.isProxy(hub)) throw new Error("原生世界宿主未确认");
   const native = Object.fromEntries(["createWorld", "createWorldFromModule", "getWorld", "getWorldHandlers", "setWorld"].map((name) => [name, nativeFunction(original, name)]));

@@ -347,6 +347,7 @@ export function createOwnedWorkflowInstrumentation(rawLaunch, options = {}) {
   return Object.freeze({ hub, captureNativeRealm, bindNativeGlobal, rejectCreation, publish });
 }
 
+/** @param {object} globalObject */
 export function requireOwnedWorkflowHub(globalObject = globalThis) {
   object(globalObject);
   const descriptor = Object.getOwnPropertyDescriptor(globalObject, OWNED_WORKFLOW_HUB);
