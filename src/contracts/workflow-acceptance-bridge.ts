@@ -66,8 +66,11 @@ const ProvenanceBody = z.object({
   sourceCommit: z.string().length(40).regex(/^[a-f0-9]{40}$/), sourceFingerprint: z.string().length(64).regex(/^[a-f0-9]{64}$/),
   createdAt: z.iso.datetime(), endpointId: EndpointId, endpointHost: EndpointHost,
   databaseName: z.literal("ci_test"), creationRequestId: z.string().regex(/^[A-Za-z0-9._-]{1,200}$/).refine((value) => value === value.trim()),
+  databaseId: z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
+  databaseCreatedAt: z.iso.datetime(), databaseOwner: z.literal("neondb_owner"), parentBranchId: BranchId,
 }).strict().superRefine((value, context) => {
   if (value.branchName !== `mvp-wf-${value.executionDomainId}`) context.addIssue({ code: "custom", message: "临时分支名必须对应唯一执行域" });
+  if (value.parentBranchId === value.databaseBranchId) context.addIssue({ code: "custom", message: "临时分支不能把自身作为来源" });
   if (value.endpointHost.split(".")[0] !== value.endpointId || /pooler|pgbouncer/.test(value.endpointHost)) {
     context.addIssue({ code: "custom", message: "端点摘要必须是本端点的专用直接连接目标" });
   }

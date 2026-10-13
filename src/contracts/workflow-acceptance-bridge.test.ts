@@ -20,7 +20,8 @@ function provenance(): WorkflowAcceptanceOwnedBranchProvenance {
     branchName: `mvp-wf-${owner}`, executionDomainId: owner, batchId: context().batchId,
     sourceCommit: context().sourceCommit, sourceFingerprint: context().sourceFingerprint,
     createdAt: "2026-10-12T09:00:00.000Z", endpointId: "ep-own-case", endpointHost: "ep-own-case.region.aws.neon.tech",
-    databaseName: "ci_test", creationRequestId: "own-create-request-1" };
+    databaseName: "ci_test", creationRequestId: "own-create-request-1", databaseId: 123,
+    databaseCreatedAt: "2026-10-12T09:00:01.000Z", databaseOwner: "neondb_owner", parentBranchId: "br-source-case" };
 }
 function observe(): Extract<WorkflowAcceptanceBridgeRequest, { operation: "observe" }> {
   return { version: 1, operation: "observe", context: context(), caseDirectory: "D:/owned/case", provenance: provenance(),
@@ -330,5 +331,37 @@ describe("迁移前空库观察请求与结果分离", () => {
     if (!parsed.success) expect(parsed.error.issues[0].message).toBe("验收桥接只能包含有界普通数据");
     const cyclic: Record<string, unknown> = { ...observeEmpty() }; cyclic.self = cyclic;
     expect(WorkflowAcceptanceBridgeRequest.safeParse(cyclic).success).toBe(false);
+  });
+});
+
+describe("本次数据库创建身份摘要", () => {
+  it.each([Number.MIN_SAFE_INTEGER, -1, 0, 1, Number.MAX_SAFE_INTEGER])("如实保留可无损表示的官方整数ID：%s", (databaseId) => {
+    const record = { ...provenance(), databaseId };
+    expect(WorkflowAcceptanceOwnedBranchProvenance.parse(record)).toEqual(record);
+  });
+  it.each([null, "123", NaN, Infinity, -Infinity, 0.5, Number.MAX_SAFE_INTEGER + 1, Number.MIN_SAFE_INTEGER - 1, {}]
+    .map((databaseId) => ({ databaseId })))("拒绝失精度、字符串替代和非整数ID：$databaseId", ({ databaseId }) => {
+    expect(WorkflowAcceptanceOwnedBranchProvenance.safeParse({ ...provenance(), databaseId }).success).toBe(false);
+  });
+  it.each(["databaseId", "databaseCreatedAt", "databaseOwner", "parentBranchId"])("创建摘要必须包含父方实际创建字段：%s", (field) => {
+    const record: Record<string, unknown> = { ...provenance() }; delete record[field];
+    expect(WorkflowAcceptanceOwnedBranchProvenance.safeParse(record).success).toBe(false);
+  });
+  it("拒绝不确定的创建时间、非专用角色或无效来源，不生成归属证明", () => {
+    for (const change of [{ databaseCreatedAt: "unknown" }, { databaseOwner: "other_owner" },
+      { parentBranchId: "production" }, { parentBranchId: provenance().databaseBranchId }]) {
+      expect(WorkflowAcceptanceOwnedBranchProvenance.safeParse({ ...provenance(), ...change }).success).toBe(false);
+    }
+    expect(WorkflowAcceptanceOwnedBranchProvenance.safeParse({ ...provenance(), databaseCreationVerified: true }).success).toBe(false);
+  });
+  it("不能通过访问器伪造创建ID，也不执行输入对象的序列化函数", () => {
+    let reads = 0;
+    const record = provenance();
+    Object.defineProperty(record, "databaseId", { enumerable: true, get() { reads += 1; return 123; } });
+    expect(WorkflowAcceptanceOwnedBranchProvenance.safeParse(record).success).toBe(false);
+    const inherited = Object.create({ toJSON() { reads += 1; return provenance(); } });
+    Object.assign(inherited, provenance());
+    expect(WorkflowAcceptanceOwnedBranchProvenance.safeParse(inherited).success).toBe(false);
+    expect(reads).toBe(0);
   });
 });
