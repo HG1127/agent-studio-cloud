@@ -200,4 +200,16 @@ describe("执行空间独立观测事实契约", () => {
     value.creationsSealedAfterEventSequence = kind === "marker-ahead" ? 2 : 1;
     expect(WorkflowAcceptanceRuntimeInventory.safeParse(value).success).toBe(false);
   });
+  it.each(["fulfilled", "rejected", "unknown"] as const)("后台%s结果与结束时间必须同时确认或同时未知", (result) => {
+    const value = fixture(); value.handlers[0].result = result;
+    value.handlers[0].settledAt = result === "unknown" ? at(5) : null;
+    value.unfinishedHandlerIds = result === "unknown" ? [] : [value.handlers[0].handlerId];
+    expect(WorkflowAcceptanceRuntimeInventory.safeParse(value).success).toBe(false);
+  });
+  it("已实际结束的失败处理可以记录，但不授予业务通过或清理", () => {
+    const value = fixture(); value.handlers[0].result = "rejected";
+    const result = WorkflowAcceptanceRuntimeInventory.parse(value);
+    expect(result.handlers[0]).toEqual(value.handlers[0]); expect(result.unfinishedHandlerIds).toEqual([]);
+    expect(result.cleanupPermitted).toBe(false); expect(result).not.toHaveProperty("coverageComplete");
+  });
 });

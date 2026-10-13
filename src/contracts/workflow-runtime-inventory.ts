@@ -97,7 +97,8 @@ const HandlerBody = z.object({
   sequence: z.number().int().positive().max(MAX_WORKFLOW_RUNTIME_HANDLERS),
   handlerId: Id, startedAt: Timestamp, settledAt: Timestamp.nullable(), result: z.enum(["fulfilled", "rejected", "unknown"]),
 }).strict().superRefine((value, context) => {
-  if (value.result !== "unknown" && value.settledAt === null || value.settledAt !== null && Date.parse(value.settledAt) < Date.parse(value.startedAt)) {
+  if ((value.result === "unknown") !== (value.settledAt === null)
+    || value.settledAt !== null && Date.parse(value.settledAt) < Date.parse(value.startedAt)) {
     context.addIssue({ code: "custom", message: "后台处理的结束时间或结果未确认" });
   }
 });
