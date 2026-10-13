@@ -165,13 +165,13 @@ describe("早期同步 Node resolve/load 的精确源码适配", () => {
     const root = path.resolve("fixtures/packages"), resolve = (specifier: string) => path.join(root, specifier.replaceAll("/", "-"), "dist/index.js");
     const io = { realpathSync: (file: string) => file, lstatSync: () => ({ isFile: () => true, isSymbolicLink: () => false, size: 100 }),
       readFileSync: (file: string) => Buffer.from(file.endsWith("package.json") ? JSON.stringify({ name: "@workflow/core", version: "4.8.9" }) : "changed") };
-    expect(() => buildOwnedSdkProfile(resolve, io as unknown as typeof import("node:fs"))).toThrow();
+    expect(() => buildOwnedSdkProfile(resolve, io)).toThrow();
     io.readFileSync = (file: string) => {
       const name = file.includes("quickjs-wasi") ? "quickjs-wasi" : file.includes("world-local") ? "@workflow/world-local"
         : file.includes("vitest") ? "@workflow/vitest" : file.includes("builders") ? "@workflow/builders" : "@workflow/core";
       return Buffer.from(file.endsWith("package.json") ? JSON.stringify({ name, version: name === "quickjs-wasi" ? "3.4.0" : "5.0.0" }) : "changed");
     };
-    expect(() => buildOwnedSdkProfile(resolve, io as unknown as typeof import("node:fs"))).toThrow();
+    expect(() => buildOwnedSdkProfile(resolve, io)).toThrow();
   });
   it.each([{ argv: [] }, { argv: ["--import", "file:///other.mjs"] }, { argv: ["--import", adapterUrl, "--import", adapterUrl] }])("非唯一指定 --import 不启动事实入口：$argv", ({ argv }) => {
     expect(isOwnPreloadRequested(argv, adapterUrl)).toBe(false);

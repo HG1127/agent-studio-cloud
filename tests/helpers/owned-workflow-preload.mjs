@@ -36,6 +36,9 @@ const PINNED = Object.freeze({
   "builders:base-builder.js": "3ea4059148df17f685536ddbf90f30bb8de630f3577907a8d6aabda76d8f4e8f",
 });
 
+/** @typedef {{isFile:()=>boolean,isSymbolicLink:()=>boolean,size:number}} OwnedSdkFileStat */
+/** @typedef {Readonly<{lstatSync:(file:string)=>OwnedSdkFileStat,realpathSync:(file:string)=>string,readFileSync:(file:string)=>Buffer}>} OwnedSdkProfileIo */
+
 function key(file) { return process.platform === "win32" ? path.resolve(file).toLowerCase() : path.resolve(file); }
 function hash(bytes) { return createHash("sha256").update(bytes).digest("hex"); }
 function fail() { throw new Error("自有执行空间预加载条件未确认，保留资源"); }
@@ -87,6 +90,10 @@ export function assertOwnedPreloadArguments(execArgv, url, warningsFile, io = fs
   if (!heap) fail();
 }
 
+/**
+ * @param {(specifier:string,parentFilename?:string)=>string} resolve
+ * @param {OwnedSdkProfileIo} [io]
+ */
 export function buildOwnedSdkProfile(resolve, io = fs) {
   const coreRuntime = io.realpathSync(resolve("@workflow/core/runtime"));
   const coreDist = path.dirname(coreRuntime), worldEntry = io.realpathSync(resolve("@workflow/world-local", coreRuntime));
