@@ -30,7 +30,6 @@ async function publicToolApproval(): Promise<void> {
   const { waitForPendingApprovalHook } = await import("./approval-helpers");
   const admin = "workflow-public-tool-admin-".repeat(2);
   let agentId = "", versionId = "", toolId = "", credential = "", runId = "";
-  let handle: ReturnType<typeof getRun>;
   vi.stubEnv("PUBLIC_AGENT_TOOLS_ADMIN_TOKEN", admin); vi.stubEnv("HARNESS_POLICY_JSON", ""); vi.stubEnv("HARNESS_MAX_PROMPT_CHARS", "");
   agentId = randomUUID(); versionId = randomUUID();
   const base = publicToolTestManifest(agentId);
@@ -56,7 +55,7 @@ async function publicToolApproval(): Promise<void> {
   expect(started).toMatchObject({ ok: true, call: { resultAvailable: false, deliveryConfirmed: false } });
   const [run] = await db.select().from(runs).where(and(eq(runs.agentId, agentId), eq(runs.workspaceId, DEMO_WORKSPACE_ID)));
   runId = run.id; expect(run.versionId).toBe(versionId); expect(run.workflowRunId).toBeTruthy();
-  handle = getRun(run.workflowRunId!);
+  const handle = getRun(run.workflowRunId!);
   const hook = await waitForPendingApprovalHook(handle, runId);
   expect(await readPublicToolCallAction(credential, { toolId, requestId })).toMatchObject({ ok: true, call: { state: "waiting_approval", result: null } });
   await callPublicToolAction(credential, toolId, input);
