@@ -20,10 +20,22 @@ function Invoke-OwnedCaseProcess {
   $taskNode = 'C:/Program Files/nodejs/node.exe'
   $taskCli = Join-Path $taskProjectRoot 'node_modules/vitest/vitest.mjs'
   $taskConfig = Join-Path $taskProjectRoot 'tests/workflow/owned-case-child.config.mts'
+  $taskBusinessDependencies = @()
+  if ($Phase -eq 'business') {
+    $taskCli = Join-Path $taskProjectRoot 'tests/helpers/owned-workflow-cli.mjs'
+    $taskPreloadFile = [IO.Path]::GetFullPath((Join-Path $taskProjectRoot 'tests/helpers/owned-workflow-preload.mjs'))
+    $taskBusinessDependencies = @($taskPreloadFile,
+      (Join-Path $taskProjectRoot 'tests/workflow/owned-case-child-entry.ts'),
+      (Join-Path $taskProjectRoot 'tests/workflow/owned-case-business.ts'),
+      (Join-Path $taskProjectRoot 'tests/helpers/collect-owned-workflow-realms.ts'))
+  }
   if ($Phase -eq 'bridge') { $taskConfig = Join-Path $taskProjectRoot 'tests/workflow/owned-case-bridge.config.mts' }
   if ($Phase -eq 'migration') { $taskCli = Join-Path $taskProjectRoot 'node_modules/drizzle-kit/bin.cjs'; $taskConfig = Join-Path $taskProjectRoot 'drizzle.config.ts' }
   foreach ($taskFile in @($taskNode, $taskCli, $taskConfig)) {
     if (-not (Test-Path -LiteralPath $taskFile -PathType Leaf)) { throw '独占子域运行依赖未就绪。' }
+  }
+  foreach ($taskFile in $taskBusinessDependencies) {
+    if (-not (Test-Path -LiteralPath $taskFile -PathType Leaf)) { throw '专用业务入口、业务执行或空间收集依赖尚未齐备，拒绝启动。' }
   }
   $taskSdkRoot = [IO.Path]::GetFullPath([string]$Context.sdkDirectory)
   foreach ($taskDirectory in @($CaseDirectory, $taskSdkRoot, (Join-Path $taskSdkRoot 'realms'))) {
@@ -93,8 +105,17 @@ function Invoke-OwnedCaseProcess {
   foreach ($taskArgument in @($taskCli, $taskConfig)) {
     if ($taskArgument -match '["\r\n\x00]') { throw '子执行路径不可安全引用。' }
   }
-  $taskArguments = '"' + $taskCli + '" run --config "' + $taskConfig + '" --maxWorkers=1 --no-cache --no-fsModuleCache'
-  if ($Phase -eq 'migration') { $taskArguments = '"' + $taskCli + '" migrate --config "' + $taskConfig + '"' }
+  if ($Phase -eq 'business') {
+    $taskPreloadUri = [Uri]::new($taskPreloadFile, [UriKind]::Absolute)
+    if (-not $taskPreloadUri.IsFile -or $taskPreloadUri.Host -or $taskPreloadUri.Query -or $taskPreloadUri.Fragment
+      -or -not [string]::Equals([IO.Path]::GetFullPath($taskPreloadUri.LocalPath), $taskPreloadFile, [StringComparison]::OrdinalIgnoreCase)) { throw '本树预加载文件地址未确认。' }
+    $taskPreloadUrl = $taskPreloadUri.AbsoluteUri
+    if ($taskPreloadUrl -match '["\r\n\x00]') { throw '预加载地址不可安全引用。' }
+    $taskArguments = '--max-old-space-size=768 --import "' + $taskPreloadUrl + '" "' + $taskCli + '"'
+  } else {
+    $taskArguments = '"' + $taskCli + '" run --config "' + $taskConfig + '" --maxWorkers=1 --no-cache --no-fsModuleCache'
+    if ($Phase -eq 'migration') { $taskArguments = '"' + $taskCli + '" migrate --config "' + $taskConfig + '"' }
+  }
   $taskClock = $script:WorkflowExecutionClock
   if (-not $taskClock) { $taskClock = [Diagnostics.Stopwatch]::StartNew() }
   if (-not $script:WorkflowCaseFilePins.ContainsKey([string]$Context.executionDomainId)
