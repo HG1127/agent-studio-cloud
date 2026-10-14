@@ -7,6 +7,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { FatalError, RetryableError } from "workflow";
 import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
+import type { InlineOutputReferences } from "@/contracts/inline-output-reference";
 import type { ModelStepResult } from "@/contracts/model-output";
 import { modelConnections, runs } from "@/db/schema";
 import { db } from "@/lib/db";
@@ -18,6 +19,9 @@ import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 import { validateModelJsonOutput, validateModelOutputConfiguration } from "@/server/domain/runtime/model-output";
 import { resolveNodeInput } from "@/server/domain/runtime/input-mapping";
+import { recordRunModel } from "@/server/model/recorded-run-model";
+import { runModelControlError } from "@/server/model/run-model-control-error";
+import { ExecutionResourceLimitError } from "@/server/services/execution-resources";
 
 export interface RunModelStepInput {
   runId: string;
@@ -26,6 +30,7 @@ export interface RunModelStepInput {
   outputs: Record<string, unknown>;
   input: Record<string, unknown>;
   qualityFeedback?: string | null;
+  inlineReferences?: InlineOutputReferences;
 }
 
 class UnusableModelOutputError extends Error {}
@@ -63,7 +68,7 @@ export async function runModelStep(args: RunModelStepInput): Promise<ModelStepRe
     await persistStep({ runId: args.runId, nodeId: node.id, nodeTitle: node.title, nodeType: node.type, status: "failed", error: configurationIssue });
     throw new FatalError(configurationIssue);
   }
-  const resolvedInput = resolveNodeInput({ node, input: args.input, outputs: args.outputs });
+  const resolvedInput = resolveNodeInput({ node, input: args.input, outputs: args.outputs, inlineReferences: args.inlineReferences });
   if (!resolvedInput.ok) {
     await persistStep({ runId: args.runId, nodeId: node.id, nodeTitle: node.title, nodeType: node.type, status: "failed", error: resolvedInput.error });
     throw new FatalError(resolvedInput.error);
@@ -158,7 +163,10 @@ export async function runModelStep(args: RunModelStepInput): Promise<ModelStepRe
       });
       try {
         const generated = await generateText({
-          model: provider(target.kind === "mock" ? "" : target.modelId),
+          model: recordRunModel(provider(target.kind === "mock" ? "" : target.modelId), {
+            runId: args.runId, nodeId: node.id, nodeTitle: node.title, modelId: target.kind === "mock" ? "mock" : target.modelId,
+            connectionId: target.kind === "connection" ? target.connectionId : null,
+          }),
           system: currentPrompt.system,
           prompt: currentPrompt.user,
           abortSignal: AbortSignal.timeout(60_000),
@@ -210,7 +218,12 @@ export async function runModelStep(args: RunModelStepInput): Promise<ModelStepRe
     }
     throw new StructuredModelOutputError("模型结果未满足字段契约，已停止后续执行");
   } catch (error) {
-    if (FatalError.is(error) || RetryableError.is(error)) throw error;
+    const controlError = runModelControlError(error);
+    if (controlError) {
+      if (controlError instanceof ExecutionResourceLimitError) await persistStep({ runId: args.runId, nodeId: node.id, nodeTitle: node.title, nodeType: node.type, status: "failed", error: controlError.message,
+        ...(outputConfig ? { output: { usage: usageTotals, mock: false, repairCount } } : {}) });
+      throw controlError;
+    }
     const retryable = isTransientModelError(error);
     const reason = error instanceof StructuredModelOutputError ? error.message : retryable
       ? "模型服务暂时不可用，稍后自动重试"

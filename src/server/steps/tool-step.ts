@@ -2,6 +2,7 @@
 // 工具步骤：演示工具保持确定性回执；真实工具只从服务端注册表取地址和凭据，草稿不保存秘密。
 import { FatalError, getStepMetadata, RetryableError } from "workflow";
 import type { WorkflowNode } from "@/contracts/workflow";
+import type { InlineOutputReferences } from "@/contracts/inline-output-reference";
 import { validateJsonObjectSchema } from "@/server/domain/json-schema";
 import { canRetryStep, MAX_STEP_ATTEMPTS, resolveToolRetryPolicy } from "@/server/domain/runtime/retry-policy";
 import { persistStep } from "@/server/steps/run-state";
@@ -10,19 +11,22 @@ import { invokeHttpTool } from "@/server/tools/invoke-http-tool";
 import { getToolRegistration } from "@/server/tools/tool-registry";
 import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding";
 import { resolveNodeInput } from "@/server/domain/runtime/input-mapping";
+import { invokeToolOperation } from "@/server/services/tool-operation";
+import { ToolOperationTraceData } from "@/contracts/tool-operation";
 
 export interface RunToolStepInput {
   runId: string;
   node: WorkflowNode;
   input: Record<string, unknown>;
   outputs: Record<string, unknown>;
+  inlineReferences?: InlineOutputReferences;
 }
 
 export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Record<string, unknown> }> {
   "use step";
   const { node } = args;
   const stepMetadata = getStepMetadata();
-  const reject = async (reason: string, retryable = false): Promise<never> => {
+  const reject = async (reason: string, retryable = false, retryAfterMs?: number): Promise<never> => {
     await persistStep({
       runId: args.runId,
       nodeId: node.id,
@@ -42,7 +46,7 @@ export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Re
     if (retryable) {
       const policy = resolveToolRetryPolicy(node);
       if (canRetryStep(stepMetadata.attempt, policy.maxAttempts)) {
-        throw new RetryableError(reason, { retryAfter: policy.backoffMs });
+        throw new RetryableError(reason, { retryAfter: retryAfterMs ?? policy.backoffMs });
       }
     }
     throw new FatalError(reason);
@@ -66,7 +70,7 @@ export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Re
     return reject(`步骤「${node.title}」的工具未绑定，无法执行`);
   }
   const demo = tool.registryToolId === "demo" || tool.protocol === "demo";
-  const resolvedInput = resolveNodeInput({ node, input: args.input, outputs: args.outputs });
+  const resolvedInput = resolveNodeInput({ node, input: args.input, outputs: args.outputs, inlineReferences: args.inlineReferences });
   if (!resolvedInput.ok) return reject(resolvedInput.error);
   let receipt: Record<string, unknown>;
   if (demo) {
@@ -83,7 +87,10 @@ export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Re
     if (inputSchemaError) return reject(`工具输入不符合字段契约：${inputSchemaError}`);
     const currentInputSchemaError = validateJsonObjectSchema(requestPayload, registration.inputSchema);
     if (currentInputSchemaError) return reject(`工具输入不符合当前服务端字段契约：${currentInputSchemaError}`);
-    const invoked = await invokeHttpTool({
+    const operationResult = node.toolOperation ? await invokeToolOperation({
+      runId: args.runId, node, tool: registration, input: args.input, outputs: args.outputs, payload: requestPayload, inlineReferences: args.inlineReferences,
+    }) : undefined;
+    const invoked = operationResult ?? await invokeHttpTool({
       tool: registration,
       // 同一次步骤重试时 stepId 稳定；循环再次调用同一节点时 stepId 会变化。
       idempotencyKey: `${args.runId}:${node.id}:${stepMetadata.stepId}`,
@@ -91,7 +98,15 @@ export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Re
       input: requestPayload.input,
       outputs: requestPayload.outputs,
     });
-    if (!invoked.ok) return reject(invoked.error, invoked.retryable);
+    if (!invoked.ok) return reject(invoked.error, invoked.retryable, operationResult && !operationResult.ok ? operationResult.retryAfterMs : undefined);
+    if (operationResult?.ok) {
+      await appendTrace({
+        runId: args.runId, nodeId: node.id, kind: operationResult.reused ? "tool.operation_reused" : "tool.operation_completed",
+        title: operationResult.confirmedByHuman ? `「${node.title}」已复用人工核对后的业务回执`
+          : operationResult.reused ? `「${node.title}」已复用相同业务操作的回执` : `「${node.title}」已保存业务操作回执`,
+        data: ToolOperationTraceData.parse({ operationId: operationResult.operationId, reused: operationResult.reused, confirmedByHuman: operationResult.confirmedByHuman ?? false }),
+      });
+    }
     if (Object.hasOwn(invoked.output, "ok") && invoked.output.ok !== true) {
       return reject("业务系统回执表明操作未完成");
     }

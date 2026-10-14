@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import type { ExecutionResourceSnapshot } from "@/contracts/execution-resources";
 
 export const runs = pgTable(
   "runs",
@@ -10,6 +11,11 @@ export const runs = pgTable(
     agentId: uuid("agent_id").notNull(),
     versionId: uuid("version_id").notNull(),
     workflowRunId: text("workflow_run_id"),
+    modelUsageTrackingVersion: text("model_usage_tracking_version"),
+    parentRunId: uuid("parent_run_id"),
+    collaborationTrackingVersion: text("collaboration_tracking_version"),
+    executionRootRunId: uuid("execution_root_run_id"),
+    executionResources: jsonb("execution_resources").$type<ExecutionResourceSnapshot>(),
     status: text("status").notNull().default("queued"),
     input: jsonb("input").$type<Record<string, unknown>>().notNull().default({}),
     context: jsonb("context").$type<Record<string, unknown>>().notNull().default({}),
@@ -28,6 +34,12 @@ export const runs = pgTable(
     index("runs_workspace_created_idx").on(t.workspaceId, t.createdAt),
     index("runs_workspace_status_created_idx").on(t.workspaceId, t.status, t.createdAt),
     index("runs_workspace_agent_created_idx").on(t.workspaceId, t.agentId, t.createdAt),
+    index("runs_workspace_finished_idx").on(t.workspaceId, t.finishedAt),
+    index("runs_workspace_agent_finished_idx").on(t.workspaceId, t.agentId, t.finishedAt),
+    index("runs_workspace_parent_created_idx").on(t.workspaceId, t.parentRunId, t.createdAt),
+    index("runs_workspace_legacy_parent_idx").on(t.workspaceId, sql`lower(substring(${t.sourceKey} from '^(?:agent-call|handoff):([0-9a-fA-F-]{36}):'))`).where(sql`${t.parentRunId} is null and ${t.sourceType} in ('agent_call', 'handoff')`),
+    index("runs_workspace_execution_reservation_idx").on(t.workspaceId, t.executionRootRunId, t.id).where(sql`${t.status} not in ('completed', 'failed', 'cancelled')`),
+    index("runs_workspace_execution_root_idx").on(t.workspaceId, t.executionRootRunId, t.id),
   ],
 );
 export type Run = typeof runs.$inferSelect;

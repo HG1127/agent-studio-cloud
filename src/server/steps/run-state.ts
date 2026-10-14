@@ -3,7 +3,9 @@
 // 全部落在 runs / run_steps 两张表，状态机为 queued→running→completed|failed，中间可暂停等待确认或外部消息。
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { FatalError, getStepMetadata } from "workflow";
-import type { WorkflowDraft } from "@/contracts/workflow";
+import type { WorkflowDraft, WorkflowOutputField } from "@/contracts/workflow";
+import type { InlineOutputReferences } from "@/contracts/inline-output-reference";
+import { projectWorkflowResult } from "@/server/domain/runtime/output-contract";
 import { db } from "@/lib/db";
 import { approvals, runSteps, runs } from "@/db/schema";
 import { appendTrace } from "@/server/steps/trace-step";
@@ -44,7 +46,7 @@ export async function initializeRun(runId: string, draft: WorkflowDraft, startTo
   const now = new Date();
   const updated = await withSafeWorkflowError(() => db
     .update(runs)
-    .set({ status: "running", startedAt: now, updatedAt: now })
+    .set({ status: "running", startedAt: now, updatedAt: now, modelUsageTrackingVersion: "v1", collaborationTrackingVersion: "v1" })
     .where(and(
       eq(runs.id, runId),
       eq(runs.status, "queued"),
@@ -223,6 +225,22 @@ export async function finalizeRun(
   contextOutputs: Record<string, unknown> = result,
 ): Promise<void> {
   "use step";
+  await persistCompletedRun(runId, result, contextOutputs);
+}
+
+export async function finalizeWorkflowResult(args: {
+  runId: string;
+  outputs: Record<string, unknown>;
+  fields: WorkflowOutputField[];
+  inlineReferences?: InlineOutputReferences;
+}): Promise<void> {
+  "use step";
+  const projected = projectWorkflowResult(args.outputs, args.fields, args.inlineReferences);
+  if (!projected.ok) throw new FatalError(`缺少必需交付内容：${projected.missing.join("、")}`);
+  await persistCompletedRun(args.runId, projected.result, args.outputs);
+}
+
+async function persistCompletedRun(runId: string, result: Record<string, unknown>, contextOutputs: Record<string, unknown>): Promise<void> {
   const resultIssue = jsonStorageIssue(result, MAX_RUN_RESULT_BYTES, "运行结果");
   if (resultIssue) throw new FatalError(resultIssue);
   const contextIssue = jsonStorageIssue({ outputs: contextOutputs }, MAX_RUN_CONTEXT_BYTES, "运行完整上下文");

@@ -1,14 +1,22 @@
+import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { resumeHook, start } from "workflow/api";
 import { waitForHook } from "@workflow/vitest";
 import { AgentManifest } from "@/contracts/manifest";
-import { runSteps, runs, traceEvents, waitEventSubmissions } from "@/db/schema";
+import { attentionCases, runSteps, runs, traceEvents, waitEventSubmissions } from "@/db/schema";
+import { AttentionHandlingInput } from "@/contracts/attention-handling";
+import { AttentionReference } from "@/contracts/attention-reference";
+import { recordAttentionHandlingAction } from "@/server/actions/record-attention-handling";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
 import { getPendingWaitHook } from "@/server/queries/runs";
 import { POST as submitWaitMessage } from "@/app/api/runs/[runId]/events/[eventKey]/route";
+import { AttentionListInput } from "@/contracts/attention";
+import { listAttention } from "@/server/queries/attention";
+import { RuntimeOverviewInput } from "@/contracts/runtime-overview";
+import { getRuntimeOverview } from "@/server/queries/runtime-overview";
 
 const AGENT_ID = "00000000-0000-4000-8000-0000000000b1";
 const VERSION_ID = "00000000-0000-4000-8000-0000000000b2";
@@ -48,6 +56,7 @@ async function insertRun() {
 }
 
 async function cleanup(runId: string) {
+  await db.delete(attentionCases).where(eq(attentionCases.runId, runId));
   await db.delete(waitEventSubmissions).where(eq(waitEventSubmissions.runId, runId));
   await db.delete(traceEvents).where(eq(traceEvents.runId, runId));
   await db.delete(runSteps).where(eq(runSteps.runId, runId));
@@ -130,6 +139,8 @@ describe("等待节点暂停与恢复", () => {
       expect(waiting?.status).toBe("waiting_event");
       expect(pending?.submissionToken).toMatch(/^[A-Za-z0-9_-]{40,}$/);
       expect(pending?.submissionToken).not.toBe(token);
+      expect(await getRuntimeOverview(DEMO_WORKSPACE_ID, RuntimeOverviewInput.parse({ agentId: AGENT_ID }))).toMatchObject({ active: { waitingEvent: 1, total: 1 }, finished: { total: 0, failureRatePercent: null } });
+      expect(await listAttention(DEMO_WORKSPACE_ID, AttentionListInput.parse({ runId }))).toMatchObject({ ok: true, items: [{ timing: { waitMode: "event", state: "normal", expectedAt: null } }] });
 
       await resumeHook(token, { customerId: "C-100", complete: true });
       expect(await handle.returnValue).toEqual({ status: "completed" });
@@ -145,7 +156,32 @@ describe("等待节点暂停与恢复", () => {
       });
       const traces = await db.select().from(traceEvents).where(eq(traceEvents.runId, runId));
       expect(traces.map((item) => item.kind)).toEqual(expect.arrayContaining(["wait.started", "wait.resumed", "run.completed"]));
+      expect(await listAttention(DEMO_WORKSPACE_ID, AttentionListInput.parse({ runId }))).toEqual({ ok: true, items: [], nextCursor: null });
+      expect(await getRuntimeOverview(DEMO_WORKSPACE_ID, RuntimeOverviewInput.parse({ agentId: AGENT_ID }))).toMatchObject({ active: { total: 0 }, finished: { completed: 1, total: 1, failureRatePercent: 0 } });
     } finally {
+      await cleanup(runId);
+    }
+  }, 240_000);
+
+  it("真实定时等待保持计划状态，不开放消息凭据或误导提交消息", async () => {
+    const runId = await insertRun();
+    const manifest = manifestFor({ mode: "delay", durationMs: 120_000, eventKey: "timer.only" });
+    let handle: Awaited<ReturnType<typeof start>> | undefined;
+    try {
+      handle = await start(agentRunWorkflow, [runId, manifest, {}]);
+      await expect.poll(async () => (await db.select({ status: runs.status }).from(runs).where(eq(runs.id, runId)).limit(1))[0]?.status,
+        { timeout: 90_000, interval: 100 }).toBe("waiting_event");
+      const result = await listAttention(DEMO_WORKSPACE_ID, AttentionListInput.parse({ runId }));
+      expect(result).toMatchObject({ ok: true, items: [{ title: "定时等待", timing: { waitMode: "timer", state: "normal" } }] });
+      if (!result.ok) throw new Error(result.error);
+      expect(result.items[0].timing?.expectedAt).not.toBeNull();
+      expect(result.items[0].summary).toContain("无需提交外部消息");
+      expect(await getPendingWaitHook(runId, DEMO_WORKSPACE_ID)).toBeNull();
+    } finally {
+      if (handle) {
+        await handle.cancel();
+        await expect(handle.returnValue).rejects.toThrow();
+      }
       await cleanup(runId);
     }
   }, 240_000);
@@ -204,9 +240,20 @@ describe("等待节点暂停与恢复", () => {
     try {
       const handle = await start(agentRunWorkflow, [runId, loopManifest, { items: ["第一项", "第二项"] }]);
       const firstToken = await waitForCurrentWaitHook(handle, runId);
+      const firstPage = await listAttention(DEMO_WORKSPACE_ID, AttentionListInput.parse({ runId, kind: "wait-event" }));
+      if (!firstPage.ok) throw new Error(firstPage.error);
+      const firstItem = firstPage.items[0];
+      const reference = AttentionReference.parse({ kind: firstItem.kind, id: firstItem.id, runId, occurrence: firstItem.occurrence });
+      expect(await recordAttentionHandlingAction(AttentionHandlingInput.parse({ reference, action: "acknowledge", requestId: randomUUID(), expectedRevision: 0, reason: "正在核对第一轮资料" }))).toMatchObject({ ok: true, item: { revision: 1, status: "in-progress" } });
       await resumeHook(firstToken, { item: "第一项" });
       const secondToken = await waitForCurrentWaitHook(handle, runId, firstToken);
       expect(secondToken).not.toBe(firstToken);
+      expect(await recordAttentionHandlingAction(AttentionHandlingInput.parse({ reference, action: "close-resolved", requestId: randomUUID(), expectedRevision: 1, reason: "第一轮资料已恢复，不处理第二轮", confirmedReviewed: true }))).toMatchObject({ ok: true, item: { status: "closed", sourceState: "changed" } });
+      const secondPage = await listAttention(DEMO_WORKSPACE_ID, AttentionListInput.parse({ runId, kind: "wait-event", handlingState: "open" }));
+      expect(secondPage).toMatchObject({ ok: true, items: [{ handling: { caseId: null, revision: 0 } }] });
+      if (!secondPage.ok) throw new Error(secondPage.error);
+      expect(secondPage.items[0].occurrence).not.toBe(reference.occurrence);
+      expect((await getPendingWaitHook(runId, DEMO_WORKSPACE_ID))?.hookToken).toBe(secondToken);
       await resumeHook(secondToken, { item: "第二项" });
       await expect(handle.returnValue).resolves.toEqual({ status: "completed" });
     } finally {

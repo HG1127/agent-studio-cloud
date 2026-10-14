@@ -8,6 +8,7 @@ import { createWaitEventToken } from "@/server/security/wait-event-token";
 import { markRunRunning, persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 import { withSafeWorkflowError } from "@/server/security/workflow-error";
+import { createWaitTiming } from "@/server/domain/runtime/wait-timing";
 
 function waitDescription(node: WorkflowNode): string {
   const wait = node.wait;
@@ -37,6 +38,9 @@ export async function beginWait(args: { runId: string; node: WorkflowNode; hookT
     status: "running",
   });
   const submissionToken = args.node.wait.mode === "event" ? createWaitEventToken() : undefined;
+  let timing;
+  try { timing = createWaitTiming(args.node.wait, new Date()); }
+  catch { throw new FatalError(`步骤「${args.node.title}」的等待时间无效`); }
   await appendTrace({
     runId: args.runId,
     nodeId: args.node.id,
@@ -49,8 +53,9 @@ export async function beginWait(args: { runId: string; node: WorkflowNode; hookT
           payloadSchema: args.node.wait.payloadSchema,
           hookToken: args.hookToken,
           submissionToken,
+          timing,
         }
-      : null,
+      : { timing },
     dedupeKey: `wait-started:${stepId}`,
   });
   // 先保存本次等待凭据，再开放等待状态，避免读到上一次等待的消息凭据。

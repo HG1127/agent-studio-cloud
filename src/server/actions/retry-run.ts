@@ -37,7 +37,7 @@ export async function retryRunAction(runId: string, requestId?: string): Promise
       sourceType: "manual",
       sourceKey: requestId ? `manual-retry:${runId}:${requestId}` : null,
     });
-    if (!result.ok && result.retryable) throw new RunStartPendingError("运行启动状态待确认，请用同一次请求重试");
+    if (!result.ok && result.retryable && !result.resourceLimit) throw new RunStartPendingError("运行启动状态待确认，请用同一次请求重试");
     if (result.ok) {
       revalidatePathsAfterCommit(["/runs", `/runs/${runId}`], "run-retry");
     }

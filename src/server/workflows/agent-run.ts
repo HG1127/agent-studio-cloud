@@ -2,13 +2,15 @@
 import { createHook, FatalError, sleep } from "workflow";
 import type { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
+import type { InlineOutputReferences } from "@/contracts/inline-output-reference";
+import { buildInlineOutputCatalog, selectInlineOutputReferences, selectWorkflowOutputReferences } from "@/server/domain/runtime/inline-output-references";
 import { requestApproval, recordDecision } from "@/server/steps/approval-step";
 import { awaitApprovalDecision } from "@/server/workflows/approval-hook";
 import { MAX_COLLABORATION_DEPTH } from "@/server/domain/runtime/collaboration-chain";
 import { resolveLoopCollection, workflowExecutionLimit } from "@/server/domain/runtime/loop-runtime";
 import { prepareParallelBranches, resolveParallelOutcome, type PreparedParallelBranch } from "@/server/domain/runtime/parallel-runtime";
 import { prepareSubflow, type PreparedSubflow } from "@/server/domain/runtime/subflow-runtime";
-import { projectWorkflowResult, rejectedWorkflowResult } from "@/server/domain/runtime/output-contract";
+import { rejectedWorkflowResult } from "@/server/domain/runtime/output-contract";
 import { evaluateCondition } from "@/server/steps/condition-step";
 import { beginAgentCall, finishAgentCall } from "@/server/steps/agent-call-step";
 import { beginHandoff, finishHandoff } from "@/server/steps/handoff-step";
@@ -18,7 +20,7 @@ import { beginLoopIteration, completeLoop } from "@/server/steps/loop-step";
 import { runMemoryStep } from "@/server/steps/memory-step";
 import { runModelStep } from "@/server/steps/model-step";
 import { beginParallel, finishParallel } from "@/server/steps/parallel-step";
-import { failRun, finalizeRun, initializeRun, markRunRunning, persistContext, persistStep } from "@/server/steps/run-state";
+import { failRun, finalizeRun, finalizeWorkflowResult, initializeRun, markRunRunning, persistContext, persistStep } from "@/server/steps/run-state";
 import { beginSubflow, finishSubflow } from "@/server/steps/subflow-step";
 import { runQualityGate } from "@/server/steps/quality-step";
 import { appendTrace } from "@/server/steps/trace-step";
@@ -73,6 +75,7 @@ async function executeAutomaticNode(args: {
   manifest: AgentManifest;
   input: Record<string, unknown>;
   outputs: Record<string, unknown>;
+  inlineReferences?: InlineOutputReferences;
   depth: number;
   currentItem?: unknown;
 }): Promise<unknown> {
@@ -80,10 +83,10 @@ async function executeAutomaticNode(args: {
     return (await runModelStep(args)).output;
   }
   if (args.node.type === "tool") {
-    return (await runToolStep({ runId: args.runId, node: args.node, input: args.input, outputs: args.outputs })).receipt;
+    return (await runToolStep({ runId: args.runId, node: args.node, input: args.input, outputs: args.outputs, inlineReferences: args.inlineReferences })).receipt;
   }
   if (args.node.type === "knowledge") {
-    return (await runKnowledgeStep({ runId: args.runId, node: args.node, manifest: args.manifest, input: args.input, currentItem: args.currentItem })).receipt;
+    return (await runKnowledgeStep({ runId: args.runId, node: args.node, manifest: args.manifest, input: args.input, outputs: args.outputs, currentItem: args.currentItem, inlineReferences: args.inlineReferences })).receipt;
   }
   if (args.node.type === "system") {
     return (await runInlineSystemStep({ runId: args.runId, node: args.node })).output;
@@ -93,7 +96,7 @@ async function executeAutomaticNode(args: {
   }
   if (args.node.type === "agent_call") {
     if (args.depth >= MAX_COLLABORATION_DEPTH) throw new FatalError(`步骤「${args.node.title}」超过助手协作层级上限`);
-    const prepared = await beginAgentCall({ runId: args.runId, node: args.node, parentInput: args.input, outputs: args.outputs });
+    const prepared = await beginAgentCall({ runId: args.runId, node: args.node, parentInput: args.input, outputs: args.outputs, inlineReferences: args.inlineReferences });
     const [settled] = await Promise.allSettled([
       agentRunWorkflow(prepared.childRunId, prepared.manifest, prepared.input, { depth: args.depth + 1 }),
     ]);
@@ -108,7 +111,7 @@ async function executeAutomaticNode(args: {
   }
   if (args.node.type === "handoff") {
     if (args.depth >= MAX_COLLABORATION_DEPTH) throw new FatalError(`步骤「${args.node.title}」超过助手交接层级上限`);
-    const prepared = await beginHandoff({ runId: args.runId, node: args.node, parentInput: args.input, outputs: args.outputs });
+    const prepared = await beginHandoff({ runId: args.runId, node: args.node, parentInput: args.input, outputs: args.outputs, inlineReferences: args.inlineReferences });
     const [settled] = await Promise.allSettled([
       agentRunWorkflow(prepared.childRunId, prepared.manifest, prepared.input, { depth: args.depth + 1 }),
     ]);
@@ -130,6 +133,8 @@ async function executeParallelBranch(args: {
   manifest: AgentManifest;
   input: Record<string, unknown>;
   parentOutputs: Record<string, unknown>;
+  inlineCatalog: InlineOutputReferences;
+  ownerNodeId: string;
   depth: number;
   currentItem?: unknown;
 }): Promise<ParallelBranchResult> {
@@ -141,6 +146,7 @@ async function executeParallelBranch(args: {
       manifest: args.manifest,
       input: args.input,
       outputs: { ...args.parentOutputs, ...branchOutputs },
+      inlineReferences: selectInlineOutputReferences(args.inlineCatalog, node, args.ownerNodeId),
       depth: args.depth,
       currentItem: args.currentItem,
     });
@@ -154,6 +160,8 @@ async function executeSubflow(args: {
   manifest: AgentManifest;
   input: Record<string, unknown>;
   parentOutputs: Record<string, unknown>;
+  inlineCatalog: InlineOutputReferences;
+  ownerNodeId: string;
   depth: number;
   currentItem?: unknown;
 }): Promise<Array<{ title: string; output: unknown }>> {
@@ -166,6 +174,7 @@ async function executeSubflow(args: {
       manifest: args.manifest,
       input: args.input,
       outputs: { ...args.parentOutputs, ...childOutputs },
+      inlineReferences: selectInlineOutputReferences(args.inlineCatalog, node, args.ownerNodeId),
       depth: args.depth,
       currentItem: args.currentItem,
     });
@@ -183,9 +192,11 @@ export async function agentRunWorkflow(
 ) {
   "use workflow";
   const draft = manifest.workflowSnapshot;
+  const inlineCatalog = buildInlineOutputCatalog(draft);
   await initializeRun(runId, draft, executionContext.startToken);
   let currentId: string | null = draft.startNodeId;
   let outputs: Record<string, unknown> = {};
+  let lastModelOutputNodeId: string | null = null;
   const loopStates: Record<string, {
     items: unknown[];
     sourceCount: number;
@@ -194,6 +205,7 @@ export async function agentRunWorkflow(
     index: number;
     iterations: Array<{ iteration: number; item: unknown; bodyOutput: unknown }>;
     baselineOutputs: Record<string, unknown>;
+    baselineModelOutputNodeId: string | null;
     baselineRepairAttempts: Record<string, number>;
   }> = {};
   const activeLoops: Array<{ loopId: string; iteration: number; total: number; item: unknown }> = [];
@@ -210,6 +222,7 @@ export async function agentRunWorkflow(
         ? draft.nodes[currentId]
         : undefined;
       if (!node) break;
+      const inlineReferences = selectInlineOutputReferences(inlineCatalog, node);
       const incomingNodeId = lastVisitedNodeId;
       lastVisitedNodeId = node.id;
       if (node.type === "trigger") {
@@ -222,20 +235,21 @@ export async function agentRunWorkflow(
           await finalizeRun(runId, rejected, outputs);
           return { status: "completed" };
         }
-        const projected = projectWorkflowResult(outputs, manifest.outputContract?.fields ?? []);
-        if (!projected.ok) throw new FatalError(`缺少必需交付内容：${projected.missing.join("、")}`);
-        await finalizeRun(runId, projected.result, outputs);
+        const fields = manifest.outputContract?.fields ?? [];
+        await finalizeWorkflowResult({ runId, outputs, fields, inlineReferences: selectWorkflowOutputReferences(inlineCatalog, fields) });
         return { status: "completed" };
       }
       if (node.type === "ai") {
         try {
-          const r = await runModelStep({ runId, node, manifest, outputs, input });
+          const r = await runModelStep({ runId, node, manifest, outputs, input, inlineReferences });
           outputs[node.id] = r.output;
+          lastModelOutputNodeId = node.id;
           currentId = node.next;
         } catch (error) {
           if (!node.onErrorNext) throw error;
           const reason = executionFailureReason(error, `步骤「${node.title}」执行失败`);
           outputs[node.id] = { status: "failed", error: reason };
+          lastModelOutputNodeId = node.id;
           await appendTrace({ runId, nodeId: node.id, kind: "step.failed_handled", level: "warn", title: `「${node.title}」未完成，转入备用处理`, detail: reason });
           currentId = node.onErrorNext;
         }
@@ -243,7 +257,7 @@ export async function agentRunWorkflow(
       }
       if (node.type === "tool") {
         try {
-          const r = await runToolStep({ runId, node, input, outputs });
+          const r = await runToolStep({ runId, node, input, outputs, inlineReferences });
           outputs[node.id] = r.receipt;
           currentId = node.next;
         } catch (error) {
@@ -257,7 +271,7 @@ export async function agentRunWorkflow(
       }
       if (node.type === "knowledge") {
         try {
-          const r = await runKnowledgeStep({ runId, node, manifest, input, currentItem: activeLoops.at(-1)?.item });
+          const r = await runKnowledgeStep({ runId, node, manifest, input, outputs, currentItem: activeLoops.at(-1)?.item, inlineReferences });
           outputs[node.id] = r.receipt;
           currentId = node.next;
         } catch (error) {
@@ -283,7 +297,7 @@ export async function agentRunWorkflow(
         let preparedCall: Awaited<ReturnType<typeof beginAgentCall>>;
         try {
           if (executionContext.depth >= MAX_COLLABORATION_DEPTH) throw new FatalError(`步骤「${node.title}」超过助手协作层级上限`);
-          preparedCall = await beginAgentCall({ runId, node, parentInput: input, outputs });
+          preparedCall = await beginAgentCall({ runId, node, parentInput: input, outputs, inlineReferences });
         } catch (error) {
           const handled = await recordHandledNodeFailure({ runId, node, error, fallback: `步骤「${node.title}」无法发起助手协作` });
           outputs[node.id] = handled.output;
@@ -328,7 +342,7 @@ export async function agentRunWorkflow(
         let preparedHandoff: Awaited<ReturnType<typeof beginHandoff>>;
         try {
           if (executionContext.depth >= MAX_COLLABORATION_DEPTH) throw new FatalError(`步骤「${node.title}」超过助手交接层级上限`);
-          preparedHandoff = await beginHandoff({ runId, node, parentInput: input, outputs });
+          preparedHandoff = await beginHandoff({ runId, node, parentInput: input, outputs, inlineReferences });
         } catch (error) {
           const handled = await recordHandledNodeFailure({ runId, node, error, fallback: `步骤「${node.title}」无法发起助手交接` });
           outputs[node.id] = handled.output;
@@ -384,12 +398,14 @@ export async function agentRunWorkflow(
       if (node.type === "rule") {
         if (node.rule?.kind === "business_rule" && !node.quality) {
           try {
-            const result = await runModelStep({ runId, node, manifest, outputs, input });
+            const result = await runModelStep({ runId, node, manifest, outputs, input, inlineReferences });
             outputs[node.id] = result.output;
+            lastModelOutputNodeId = node.id;
             currentId = node.next;
           } catch (error) {
             const handled = await recordHandledNodeFailure({ runId, node, error, fallback: `步骤「${node.title}」执行业务判断失败` });
             outputs[node.id] = handled.output;
+            lastModelOutputNodeId = node.id;
             currentId = handled.next;
           }
           continue;
@@ -405,12 +421,14 @@ export async function agentRunWorkflow(
             const repaired = await runModelStep({
               runId,
               node: repairNode,
+              inlineReferences: selectInlineOutputReferences(inlineCatalog, repairNode),
               manifest,
               outputs,
               input,
               qualityFeedback: quality.repair.feedback,
             });
             outputs[repairNode.id] = repaired.output;
+            lastModelOutputNodeId = repairNode.id;
             currentId = node.id;
             continue;
           }
@@ -437,7 +455,8 @@ export async function agentRunWorkflow(
       }
       if (node.type === "human") {
         await persistContext(runId, outputs);
-        const approval = await requestApproval({ runId, node, outputs, nodes: draft.nodes });
+        const approval = await requestApproval({ runId, node, outputs, nodes: draft.nodes,
+          ...(lastModelOutputNodeId ? { reviewSourceNodeId: lastModelOutputNodeId } : {}) });
         const { approvalId } = approval;
         const decision = await awaitApprovalDecision(runId, approval);
         const recordedDecision = await recordDecision({ runId, node, approvalId, decision });
@@ -529,6 +548,7 @@ export async function agentRunWorkflow(
             index: 0,
             iterations: [],
             baselineOutputs: { ...outputs },
+            baselineModelOutputNodeId: lastModelOutputNodeId,
             baselineRepairAttempts: { ...qualityRepairAttempts },
           };
         }
@@ -544,6 +564,7 @@ export async function agentRunWorkflow(
           if (state.index > 0) {
             // 下一项不能借用上一项的步骤产出或返工次数，保留入循环前的上游上下文。
             outputs = { ...state.baselineOutputs };
+            lastModelOutputNodeId = state.baselineModelOutputNodeId;
             qualityRepairAttempts = { ...state.baselineRepairAttempts };
           }
           const item = state.items[state.index];
@@ -584,6 +605,8 @@ export async function agentRunWorkflow(
           manifest,
           input,
           parentOutputs: outputs,
+          inlineCatalog,
+          ownerNodeId: node.id,
           depth: executionContext.depth,
           currentItem: activeLoops.at(-1)?.item,
         })));
@@ -638,6 +661,8 @@ export async function agentRunWorkflow(
           manifest,
           input,
           parentOutputs: outputs,
+          inlineCatalog,
+          ownerNodeId: node.id,
           depth: executionContext.depth,
           currentItem: activeLoops.at(-1)?.item,
         })]);

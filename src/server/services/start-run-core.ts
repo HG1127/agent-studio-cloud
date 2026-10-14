@@ -3,7 +3,10 @@ import { z } from "zod";
 import { start } from "workflow/api";
 import { AgentManifest } from "@/contracts/manifest";
 import { RunInputPayload, type StartRunResult } from "@/contracts/run";
-import { agentVersions, agents, knowledgeSources, runs } from "@/db/schema";
+import { agentVersions, agents, knowledgeSources, runDeliveries, runs } from "@/db/schema";
+import { RUN_DELIVERY_INTENT_KEY, type RunDeliveryBinding } from "@/contracts/run-delivery-config";
+import { deliveryTargetBinding, getDeliveryTarget } from "@/server/delivery/target-registry";
+import { runDeliveryIntentMatches } from "@/server/domain/runtime/run-delivery";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { prepareParallelBranches } from "@/server/domain/runtime/parallel-runtime";
@@ -37,6 +40,7 @@ import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { jsonValuesEqual } from "@/server/domain/json-value";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding";
+import { ExecutionResourceRejected, lockExecutionWorkspace, reserveRootExecutionResources } from "@/server/services/execution-resources";
 
 // 发布快照允许进入运行引擎的完整节点类型；未知类型必须在创建 run 前拒绝。
 const SUPPORTED_NODE_TYPES: ReadonlySet<string> = new Set([
@@ -70,6 +74,7 @@ function toolExecutionIssue(node: WorkflowNode): string | null {
   if (tool.registryToolId === "demo" || tool.protocol === "demo") return null;
   const registration = getToolRegistration(tool.registryToolId);
   if (!registration) return "绑定的业务工具未在服务端配置";
+  if (node.toolOperation && (registration.businessIdempotency !== true || !registration.businessIdempotencyRetentionMs)) return "绑定的业务工具尚未确认支持跨运行操作防重";
   return toolRegistrationCompatibilityIssue(tool, registration);
 }
 
@@ -86,8 +91,15 @@ async function createRunWithLockedDependencies(args: {
   sourceType: "manual" | "schedule" | "evaluation";
   sourceKey: string | null;
   lease: RunStartLease;
+  deliveryBinding?: RunDeliveryBinding;
 }): Promise<{ runId: string | null; error: string | null }> {
   return db.transaction(async (tx) => {
+    await lockExecutionWorkspace(tx, args.workspaceId);
+    if (args.sourceKey) {
+      const [existing] = await tx.select({ id: runs.id }).from(runs)
+        .where(and(eq(runs.workspaceId, args.workspaceId), eq(runs.sourceKey, args.sourceKey))).limit(1);
+      if (existing) return { runId: null, error: null };
+    }
     const collaborationKeys = workflowCollaborationKeys(args.manifest.workflowSnapshot);
     let collaborationAgentIds: string[] = [];
     let collaborationKnowledgeIds: string[] = [];
@@ -146,21 +158,30 @@ async function createRunWithLockedDependencies(args: {
       }
     }
 
+    const executionResources = await reserveRootExecutionResources(tx, args.workspaceId);
+    const rootRunId = crypto.randomUUID();
     const [run] = await tx
       .insert(runs)
       .values({
+        id: rootRunId,
+        executionRootRunId: rootRunId,
+        executionResources,
         workspaceId: args.workspaceId,
         createdBy: DEMO_USER_ID,
         agentId: args.agentId,
         versionId: args.versionId,
         status: "queued",
         input: args.input,
-        stepStates: withRunStartLease({}, args.lease),
+        stepStates: withRunStartLease(args.deliveryBinding ? { [RUN_DELIVERY_INTENT_KEY]: args.deliveryBinding } : {}, args.lease),
         sourceType: args.sourceType,
         sourceKey: args.sourceKey,
       })
       .onConflictDoNothing()
       .returning({ id: runs.id });
+    if (run && args.deliveryBinding) {
+      await tx.insert(runDeliveries).values({ workspaceId: args.workspaceId, createdBy: DEMO_USER_ID, runId: run.id,
+        targetId: args.deliveryBinding.targetId, targetHash: args.deliveryBinding.targetHash, retentionMs: args.deliveryBinding.retentionMs });
+    }
     return { runId: run?.id ?? null, error: null };
   });
 }
@@ -306,7 +327,8 @@ export async function resumeQueuedRunStartCore(runId: string): Promise<StartRunR
         eq(runs.workspaceId, DEMO_WORKSPACE_ID),
         eq(runs.status, "queued"),
         isNull(runs.workflowRunId),
-        eq(runs.updatedAt, candidate.updatedAt),
+        // Date 会丢失 Postgres 微秒；比较完整启动状态，既保留领取互斥也避免永远领不到。
+        eq(runs.stepStates, candidate.stepStates),
       ))
       .returning({ id: runs.id });
     if (!claimed) return { ok: true, runId: candidate.id };
@@ -557,14 +579,17 @@ async function validateRuntimePreflight(args: {
 
 async function reuseExistingRun(args: {
   agentId: string;
+  versionId?: string;
   input: Record<string, unknown>;
   sourceType: "manual" | "schedule" | "evaluation";
   sourceKey: string;
+  deliveryTargetId?: string;
 }): Promise<StartRunResult | null> {
   const [existing] = await db
     .select({
       id: runs.id,
       agentId: runs.agentId,
+      versionId: runs.versionId,
       sourceType: runs.sourceType,
       input: runs.input,
       status: runs.status,
@@ -583,12 +608,29 @@ async function reuseExistingRun(args: {
   if (args.sourceType === "manual" && !jsonValuesEqual(existing.input, args.input)) {
     return { ok: false, error: "运行输入已改变，请重新发起" };
   }
+  if (!runDeliveryIntentMatches(existing.stepStates ?? {}, args.deliveryTargetId)) {
+    return { ok: false, error: "成果接收方已改变，请使用新的请求标识" };
+  }
+  if (args.versionId && existing.versionId !== args.versionId) {
+    return { ok: false, error: "这项请求标识已用于另一个版本，请重新发起" };
+  }
   if (existing.status === "failed" && !existing.workflowRunId) {
     return { ok: false, error: existing.error ?? "运行启动失败，请稍后重试" };
   }
   if (existing.status === "queued" && !existing.workflowRunId
     && isRunStartLeaseExpired(existing.stepStates, existing.updatedAt)) {
-    return resumeQueuedRunStartCore(existing.id);
+    const resumed = await resumeQueuedRunStartCore(existing.id);
+    if (resumed.ok || resumed.retryable) return resumed;
+    // 读到过期租约之后另一请求可能已领取或启动；原任务已被接收，不应伪报业务冲突。
+    const [current] = await db.select({
+      status: runs.status, workflowRunId: runs.workflowRunId, stepStates: runs.stepStates, updatedAt: runs.updatedAt,
+    }).from(runs).where(and(eq(runs.id, existing.id), eq(runs.workspaceId, DEMO_WORKSPACE_ID))).limit(1);
+    if (current && (current.workflowRunId
+      || ["running", "waiting_approval", "waiting_event", "completed", "cancelled"].includes(current.status)
+      || (current.status === "queued" && !isRunStartLeaseExpired(current.stepStates, current.updatedAt)))) {
+      return { ok: true, runId: existing.id };
+    }
+    return resumed;
   }
   return { ok: true, runId: existing.id };
 }
@@ -599,6 +641,7 @@ export async function startRunCore(args: {
   sourceType?: "manual" | "schedule" | "evaluation";
   sourceKey?: string | null;
   versionId?: string;
+  deliveryTargetId?: string;
 }): Promise<StartRunResult> {
   const { agentId } = args;
   const sourceType = args.sourceType ?? "manual";
@@ -609,9 +652,11 @@ export async function startRunCore(args: {
   const runInput = parsedRunInput.data;
   try {
     if (args.sourceKey) {
-      const existing = await reuseExistingRun({ agentId, input: runInput, sourceType, sourceKey: args.sourceKey });
+      const existing = await reuseExistingRun({ agentId, versionId: args.versionId, input: runInput, sourceType, sourceKey: args.sourceKey, deliveryTargetId: args.deliveryTargetId });
       if (existing) return existing;
     }
+    const target = args.deliveryTargetId ? getDeliveryTarget(args.deliveryTargetId) : null;
+    if (args.deliveryTargetId !== undefined && !target) return { ok: false, error: "成果接收方尚未在服务端正确配置" };
     const [agent] = await db
       .select()
       .from(agents)
@@ -659,19 +704,21 @@ export async function startRunCore(args: {
       sourceType,
       sourceKey: args.sourceKey ?? null,
       lease,
+      ...(target ? { deliveryBinding: deliveryTargetBinding(target) } : {}),
     });
     if (created.error) return { ok: false, error: created.error };
     if (!created.runId && args.sourceKey) {
-      return await reuseExistingRun({ agentId, input: runInput, sourceType, sourceKey: args.sourceKey })
+      return await reuseExistingRun({ agentId, versionId: args.versionId, input: runInput, sourceType, sourceKey: args.sourceKey, deliveryTargetId: args.deliveryTargetId })
         ?? { ok: false, error: "运行启动冲突，请稍后重试" };
     }
     if (!created.runId) return { ok: false, error: "运行启动冲突，请稍后重试" };
     return launchClaimedRun({ runId: created.runId, manifest, input: runInput, lease });
   } catch (error) {
+    if (error instanceof ExecutionResourceRejected) return { ok: false, error: error.message, resourceLimit: error.limit, retryable: true };
     console.error("运行启动失败：", safeErrorForLog(error));
     if (args.sourceKey) {
       try {
-        const existing = await reuseExistingRun({ agentId, input: runInput, sourceType, sourceKey: args.sourceKey });
+        const existing = await reuseExistingRun({ agentId, versionId: args.versionId, input: runInput, sourceType, sourceKey: args.sourceKey, deliveryTargetId: args.deliveryTargetId });
         if (existing) return existing;
       } catch (lookupError) {
         console.error("核对运行启动状态失败：", safeErrorForLog(lookupError));

@@ -1,7 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { EvaluationCaseArchiveInput, EvaluationCaseUpdateInput } from "@/contracts/evaluation";
+import { EvaluationCaseArchiveInput, EvaluationCaseUpdateInput, EvaluationExpectation } from "@/contracts/evaluation";
 
 describe("验收样例更新契约", () => {
+  it("数组元素验收沿用同一共享字段契约，零值和否定值不丢失", () => {
+    expect(EvaluationExpectation.parse({ path: "订单.0.金额", operator: "equals", value: 0 }))
+      .toEqual({ path: "订单.0.金额", operator: "equals", value: 0 });
+    expect(EvaluationExpectation.parse({ path: "订单.0.已确认", operator: "equals", value: false }))
+      .toEqual({ path: "订单.0.已确认", operator: "equals", value: false });
+    expect(EvaluationExpectation.safeParse({ path: "批次.0.0.明细.1.名称", operator: "exists" }).success).toBe(true);
+  });
+
+  it.each(["订单..金额", ".订单", "订单.", "订单.0.__proto__.金额", "订单.0.constructor", "订单.0.prototype"])("继续拒绝非法或原型路径 %s", (path) => {
+    expect(EvaluationExpectation.safeParse({ path, operator: "exists" }).success).toBe(false);
+  });
+
   it("要求样例和助手标识都有效", () => {
     expect(EvaluationCaseUpdateInput.safeParse({
       agentId: "00000000-0000-4000-8000-000000000001",

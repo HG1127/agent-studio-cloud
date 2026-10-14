@@ -8,13 +8,13 @@ describe("步骤字段映射共享契约", () => {
     expect(InputMapping.parse({ fields: [field] })).toEqual({ fields: [{ ...field, required: true }], includeUpstreamOutputs: false });
     expect(WorkflowNode.parse({ id: "work", title: "处理", type: "ai" })).not.toHaveProperty("inputMapping");
   });
-  it.each(["ai", "tool", "rule", "agent_call", "handoff"])("%s 的业务处理保存映射契约", (type) => {
+  it.each(["ai", "tool", "rule", "knowledge", "agent_call", "handoff"])("%s 的业务处理保存映射契约", (type) => {
     expect(WorkflowNode.safeParse({ id: "work", title: "处理", type, rule: { kind: "business_rule" }, inputMapping: { fields: [field] } }).success).toBe(true);
   });
-  it.each(["condition", "system", "human"])("%s 不能保存尚未执行的映射配置", (type) => {
+  it.each(["condition", "system", "human", "memory"])("%s 不能保存尚未执行的映射配置", (type) => {
     expect(WorkflowNode.safeParse({ id: "work", title: "处理", type, inputMapping: { fields: [field] } }).success).toBe(false);
   });
-  it.each(["agent_call", "handoff"])("%s 不接受静默附带全部成果", (type) => {
+  it.each(["knowledge", "agent_call", "handoff"])("%s 不接受静默附带全部成果", (type) => {
     expect(WorkflowNode.safeParse({ id: "work", title: "协作", type, inputMapping: { fields: [field], includeUpstreamOutputs: true } }).success).toBe(false);
   });
   it("质量检查不接受映射配置", () => {

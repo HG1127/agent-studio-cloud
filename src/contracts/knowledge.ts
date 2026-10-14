@@ -1,6 +1,12 @@
 import { z } from "zod";
 
 export const MAX_KNOWLEDGE_FILENAME_LENGTH = 240;
+export const MAX_KNOWLEDGE_QUERY_CHARS = 1_000;
+export const KnowledgeQuery = z.union([
+  z.string().trim().min(1, "检索内容不能为空").max(MAX_KNOWLEDGE_QUERY_CHARS, "检索内容不能超过 1000 个字符"),
+  z.number().transform((value) => String(value)),
+]);
+export type KnowledgeQuery = z.infer<typeof KnowledgeQuery>;
 
 export const KnowledgeSourceStatus = z.enum(["parsing", "indexed", "failed", "archived"]);
 export type KnowledgeSourceStatus = z.infer<typeof KnowledgeSourceStatus>;
@@ -35,6 +41,20 @@ export const KnowledgeSearchResult = z.object({
   truncated: z.boolean(),
 });
 export type KnowledgeSearchResult = z.infer<typeof KnowledgeSearchResult>;
+
+export const KnowledgeReceiptHit = KnowledgeSearchHit.pick({ chunkIndex: true, excerpt: true, score: true }).extend({ source: z.string() });
+export type KnowledgeReceiptHit = z.infer<typeof KnowledgeReceiptHit>;
+
+export const KnowledgeReceipt = z.object({
+  ok: z.literal(true),
+  space: z.string(),
+  query: z.string(),
+  scannedCount: z.number().int().nonnegative(),
+  truncated: z.boolean(),
+  hitCount: z.number().int().nonnegative(),
+  hits: z.array(KnowledgeReceiptHit),
+}).refine((receipt) => receipt.hitCount === receipt.hits.length && receipt.hitCount <= receipt.scannedCount, "检索回执数量不一致");
+export type KnowledgeReceipt = z.infer<typeof KnowledgeReceipt>;
 
 export const KnowledgeUploadResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true), deduped: z.boolean(), blobStored: z.boolean(), source: KnowledgeSourceView }),

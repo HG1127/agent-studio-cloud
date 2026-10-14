@@ -6,6 +6,7 @@ import { EvaluationCaseSnapshot, MAX_EVALUATION_CASES } from "@/contracts/evalua
 import { auditEventValues } from "@/server/audit/event-values";
 import { redactCredentialData } from "@/server/domain/security/redact-sensitive";
 import { REGRESSION_EXPECTATION_REQUIRED } from "@/server/domain/evaluation";
+import { evaluationResultSchemaIssue } from "@/server/domain/evaluation-result-schema";
 
 function safeCases<T extends { input: unknown }>(cases: T[]): Array<Omit<T, "input"> & { input: Record<string, unknown> }> {
   return cases.map((testCase) => ({
@@ -42,6 +43,10 @@ export async function prepareEvaluationRun(agentId: string, requestId?: string) 
         : [];
       if (cases.length > MAX_EVALUATION_CASES) {
         return { ok: false as const, error: `自动验收最多支持 ${MAX_EVALUATION_CASES} 条样例` };
+      }
+      if (cases.some((testCase) => testCase.caseSnapshot != null
+        && evaluationResultSchemaIssue(EvaluationCaseSnapshot.parse(testCase.caseSnapshot).resultSchema))) {
+        return { ok: false as const, error: "验收结果字段规则快照无效，请重新验收" };
       }
       return {
         ok: true as const,
@@ -106,7 +111,7 @@ export async function prepareEvaluationRun(agentId: string, requestId?: string) 
       .limit(1);
     if (!version) return { ok: false as const, error: "请先发布一个待验收版本" };
     const cases = await tx
-      .select({ id: evaluationCases.id, name: evaluationCases.name, input: evaluationCases.input, expectations: evaluationCases.expectations })
+      .select({ id: evaluationCases.id, name: evaluationCases.name, input: evaluationCases.input, expectations: evaluationCases.expectations, resultSchema: evaluationCases.resultSchema })
       .from(evaluationCases)
       .where(and(
         eq(evaluationCases.agentId, agentId),
@@ -116,7 +121,9 @@ export async function prepareEvaluationRun(agentId: string, requestId?: string) 
       .limit(MAX_EVALUATION_CASES + 1);
     if (cases.length === 0) return { ok: false as const, error: "请先添加至少一条验收样例" };
     if (cases.length > MAX_EVALUATION_CASES) return { ok: false as const, error: `自动验收最多支持 ${MAX_EVALUATION_CASES} 条样例` };
-    const emptyCaseIds = cases.filter((testCase) => testCase.expectations.length === 0).map((testCase) => testCase.id);
+    const schemaIssue = cases.map((testCase) => evaluationResultSchemaIssue(testCase.resultSchema)).find(Boolean);
+    if (schemaIssue) return { ok: false as const, error: schemaIssue };
+    const emptyCaseIds = cases.filter((testCase) => testCase.expectations.length === 0 && !testCase.resultSchema).map((testCase) => testCase.id);
     if (emptyCaseIds.length > 0) {
       const [linkedFeedback] = await tx.select({ id: runFeedback.id }).from(runFeedback).where(and(
         eq(runFeedback.workspaceId, DEMO_WORKSPACE_ID),
@@ -125,7 +132,10 @@ export async function prepareEvaluationRun(agentId: string, requestId?: string) 
       )).limit(1);
       if (linkedFeedback) return { ok: false as const, error: REGRESSION_EXPECTATION_REQUIRED };
     }
-    const snapshots = cases.map((testCase) => EvaluationCaseSnapshot.safeParse(testCase));
+    const snapshots = cases.map((testCase) => EvaluationCaseSnapshot.safeParse({
+      name: testCase.name, input: testCase.input, expectations: testCase.expectations,
+      ...(testCase.resultSchema == null ? {} : { resultSchema: testCase.resultSchema }),
+    }));
     if (snapshots.some((snapshot) => !snapshot.success)) {
       return { ok: false as const, error: "验收样例数据不完整，请编辑样例后重试" };
     }

@@ -55,14 +55,14 @@ export function redactSensitiveText(value: string): string {
     ));
 }
 
-function redactData(value: unknown, keyPattern: RegExp, redactText: (text: string) => string, depth = 0): unknown {
-  if (depth > 12) return "[内容层级过深，已省略]";
+function redactData(value: unknown, keyPattern: RegExp, redactText: (text: string) => string, depth = 0, maxDepth = 12): unknown {
+  if (depth > maxDepth) return "[内容层级过深，已省略]";
   if (typeof value === "string") return redactText(value);
-  if (Array.isArray(value)) return value.map((item) => redactData(item, keyPattern, redactText, depth + 1));
+  if (Array.isArray(value)) return value.map((item) => redactData(item, keyPattern, redactText, depth + 1, maxDepth));
   if (value && typeof value === "object") {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [
       key,
-      keyPattern.test(key) && !TOKEN_USAGE_KEY.test(key) ? REDACTED : redactData(item, keyPattern, redactText, depth + 1),
+      keyPattern.test(key) && !TOKEN_USAGE_KEY.test(key) ? REDACTED : redactData(item, keyPattern, redactText, depth + 1, maxDepth),
     ]));
   }
   return value;
@@ -70,6 +70,15 @@ function redactData(value: unknown, keyPattern: RegExp, redactText: (text: strin
 
 export function redactCredentialData(value: unknown): unknown {
   return redactData(value, CREDENTIAL_KEY, redactCredentialText);
+}
+
+export function isCredentialFieldName(name: string): boolean {
+  return CREDENTIAL_KEY.test(name) && !TOKEN_USAGE_KEY.test(name);
+}
+
+// 结构化成果先经过有界 JSON 校验，不能按旧上下文的 12 层限制悄悄省略待确认字段。
+export function redactStructuredCredentialData(value: unknown): unknown {
+  return redactData(value, CREDENTIAL_KEY, redactCredentialText, 0, 32);
 }
 
 export function redactSensitiveData(value: unknown): unknown {

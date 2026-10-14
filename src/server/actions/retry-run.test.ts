@@ -57,6 +57,17 @@ describe("再次运行幂等键", () => {
     expect(mocks.revalidatePath).not.toHaveBeenCalled();
   });
 
+  it("再次运行容量拒绝返回资源原因，同一次请求等待释放后可继续", async () => {
+    const refused = { ok: false as const, error: "当前执行链并发名额已满，请等待已有任务结束后重试", retryable: true as const,
+      resourceLimit: { kind: "concurrent-chains" as const, current: 1, maximum: 1 } };
+    mocks.startRun.mockResolvedValueOnce(refused);
+
+    await expect(retryRunAction(RUN_ID, REQUEST_ID)).resolves.toEqual(refused);
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
+    await expect(retryRunAction(RUN_ID, REQUEST_ID)).resolves.toMatchObject({ ok: true });
+    expect(mocks.startRun.mock.calls[0]).toEqual(mocks.startRun.mock.calls[1]);
+  });
+
   it("新运行已启动后缓存刷新失败不误报再次运行失败", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
     mocks.revalidatePath.mockImplementationOnce(() => { throw new Error("缓存暂时不可用"); });

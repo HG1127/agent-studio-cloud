@@ -36,6 +36,13 @@ function manifest(outputCount: number) {
 }
 
 describe("从发布契约生成验收样例", () => {
+  it("规则不同不是同一验收样例，未配置与旧空列保持兼容", () => {
+    const original = { name: "金额验收", input: {}, expectations: [] };
+    expect(evaluationCaseSetsEqual([{ ...original, resultSchema: null }], [original])).toBe(true);
+    expect(evaluationCaseSetsEqual([{ ...original, resultSchema: { type: "object", minProperties: 1 } }], [original])).toBe(false);
+    expect(evaluationCaseSetsEqual([{ ...original, resultSchema: { type: "object", minProperties: 1 } }], [{ ...original, resultSchema: { minProperties: 1, type: "object" } }])).toBe(true);
+  });
+
   it("按输入类型生成可编辑示例并只检查必需交付字段", () => {
     const [generated] = generateEvaluationCases(manifest(3));
     expect(generated.input).toEqual({

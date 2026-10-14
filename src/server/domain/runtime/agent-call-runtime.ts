@@ -1,5 +1,6 @@
 import { AgentManifest } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
+import type { InlineOutputReferences } from "@/contracts/inline-output-reference";
 import { buildBoundedCollaborationContext, collaborationDataWithMemoryPolicy } from "@/server/domain/runtime/collaboration-input";
 import { resolveNodeInput } from "./input-mapping";
 import { safeDataPathSegments } from "@/server/domain/runtime/data-path";
@@ -15,6 +16,7 @@ export function buildAgentCallInput(args: {
   targetManifest: AgentManifest;
   input: Record<string, unknown>;
   outputs: Record<string, unknown>;
+  inlineReferences?: InlineOutputReferences;
 }): { ok: true; input: Record<string, unknown> } | { ok: false; error: string } {
   const fields = args.targetManifest.inputContract.fields;
   const input = redactSensitiveData(args.input) as Record<string, unknown>;
@@ -23,7 +25,7 @@ export function buildAgentCallInput(args: {
   const outputs = redactSensitiveData(accessibleOutputs) as Record<string, unknown>;
   if (args.node.inputMapping) {
     if (args.node.inputMapping.includeUpstreamOutputs) return { ok: false, error: "助手协作请逐项映射需要的上游字段，不能额外携带全部成果" };
-    const mapped = resolveNodeInput({ node: args.node, input, outputs });
+    const mapped = resolveNodeInput({ node: args.node, input, outputs, inlineReferences: args.inlineReferences });
     if (!mapped.ok) return mapped;
     const mappedInput = collaborationDataWithMemoryPolicy(mapped.input, team);
     return { ok: true, input: redactSensitiveData(mappedInput) as Record<string, unknown> };

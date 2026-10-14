@@ -12,7 +12,8 @@ const fixture = vi.hoisted(() => ({
   generateText: vi.fn(),
 }));
 
-vi.mock("ai", () => ({ generateText: fixture.generateText }));
+vi.mock("ai", async (original) => ({ ...await original<typeof import("ai")>(), generateText: fixture.generateText }));
+vi.mock("@/server/model/recorded-run-model", () => ({ recordRunModel: (model: unknown) => model }));
 vi.mock("@ai-sdk/openai-compatible", () => ({ createOpenAICompatible: () => () => ({}) }));
 vi.mock("@/server/steps/run-state", () => ({ persistStep: vi.fn() }));
 vi.mock("@/server/steps/trace-step", () => ({ appendTrace: vi.fn() }));

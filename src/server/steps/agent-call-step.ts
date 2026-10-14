@@ -3,6 +3,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { FatalError, getStepMetadata, RetryableError } from "workflow";
 import { AgentManifest, type AgentManifest as AgentManifestType } from "@/contracts/manifest";
 import type { WorkflowNode } from "@/contracts/workflow";
+import type { InlineOutputReferences } from "@/contracts/inline-output-reference";
 import { agents, agentVersions, runs } from "@/db/schema";
 import { db } from "@/lib/db";
 import { buildAgentCallInput, validateAgentCallOutput } from "@/server/domain/runtime/agent-call-runtime";
@@ -13,12 +14,14 @@ import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
 import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 import { withSafeWorkflowError } from "@/server/security/workflow-error";
+import { enforceChildRunResourceLimit, ExecutionResourceLimitError, lockExecutionWorkspace, prepareExecutionResourceScope } from "@/server/services/execution-resources";
 
 export async function beginAgentCall(args: {
   runId: string;
   node: WorkflowNode;
   parentInput: Record<string, unknown>;
   outputs: Record<string, unknown>;
+  inlineReferences?: InlineOutputReferences;
 }): Promise<{ childRunId: string; targetName: string; manifest: AgentManifestType; input: Record<string, unknown> }> {
   "use step";
   const call = args.node.agentCall;
@@ -52,7 +55,7 @@ export async function beginAgentCall(args: {
     .limit(1), "协作助手暂时无法读取，请稍后重试");
   const parsedManifest = target ? AgentManifest.safeParse(target.manifest) : null;
   if (!target || !parsedManifest?.success) throw new FatalError(`步骤「${args.node.title}」绑定的协作助手版本不可用`);
-  const derivedInput = buildAgentCallInput({ node: args.node, targetManifest: parsedManifest.data, input: args.parentInput, outputs: args.outputs });
+  const derivedInput = buildAgentCallInput({ node: args.node, targetManifest: parsedManifest.data, input: args.parentInput, outputs: args.outputs, inlineReferences: args.inlineReferences });
   if (!derivedInput.ok) throw new FatalError(derivedInput.error);
   const validatedInput = validateCollaborationInput(derivedInput.input, parsedManifest.data.inputContract.fields);
   if (!validatedInput.ok) throw new FatalError(`步骤「${args.node.title}」生成的协作输入无效：${validatedInput.error}`);
@@ -60,13 +63,18 @@ export async function beginAgentCall(args: {
   await persistStep({ runId: args.runId, nodeId: args.node.id, nodeTitle: args.node.title, nodeType: args.node.type, status: "running" });
   const sourceKey = `agent-call:${args.runId}:${args.node.id}:${getStepMetadata().stepId}`;
   const childRunId = await withSafeWorkflowError(() => db.transaction(async (tx) => {
+    await lockExecutionWorkspace(tx, parent.workspaceId);
+    const scope = await prepareExecutionResourceScope(tx, parent.workspaceId, args.runId);
     const [lockedParent] = await tx
       .select({ id: runs.id })
       .from(runs)
-      .where(and(eq(runs.id, args.runId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])))
+      .where(and(eq(runs.id, args.runId), eq(runs.workspaceId, parent.workspaceId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])))
       .for("update")
       .limit(1);
     if (!lockedParent) return null;
+    const [existing] = await tx.select({ id: runs.id }).from(runs).where(and(eq(runs.workspaceId, parent.workspaceId), eq(runs.sourceKey, sourceKey))).limit(1);
+    if (existing) return existing.id;
+    enforceChildRunResourceLimit(scope);
     const [inserted] = await tx
       .insert(runs)
       .values({
@@ -77,6 +85,9 @@ export async function beginAgentCall(args: {
         status: "queued",
         input,
         sourceType: "agent_call",
+        parentRunId: args.runId,
+        executionRootRunId: scope.rootRunId,
+        executionResources: scope.snapshot,
         sourceKey,
       })
       .onConflictDoNothing()
@@ -87,7 +98,10 @@ export async function beginAgentCall(args: {
         eq(runs.sourceKey, sourceKey),
       )).limit(1)
     )[0]?.id ?? null;
-  }), "协作任务暂时无法创建，请稍后重试");
+  }), "协作任务暂时无法创建，请稍后重试").catch(async (error) => {
+    if (error instanceof ExecutionResourceLimitError) await persistStep({ runId: args.runId, nodeId: args.node.id, nodeTitle: args.node.title, nodeType: args.node.type, status: "failed", error: error.message });
+    throw error;
+  });
   if (!childRunId) throw new FatalError(`步骤「${args.node.title}」无法创建协作任务`);
   await appendTrace({ runId: args.runId, nodeId: args.node.id, kind: "agent_call.started", title: `「${args.node.title}」已交给「${target.name}」处理` });
   return { childRunId, targetName: target.name, manifest: parsedManifest.data, input };

@@ -1,0 +1,1 @@
+ALTER TABLE "evaluation_cases" ADD COLUMN "result_schema" jsonb;

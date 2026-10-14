@@ -1,10 +1,12 @@
 import { z } from "zod";
-import { isPlainJsonObject } from "./json";
+import { boundedJsonStorageValue, isPlainJsonObject } from "./json";
 import { AgentInputContract } from "./manifest";
 import { RunFeedbackView } from "./run-feedback";
 import { WorkflowDraft } from "./workflow";
+import { ExecutionResourceLimit } from "./execution-resources";
 
 export const MAX_RUN_INPUT_BYTES = 100 * 1024;
+export const MAX_RUN_RESULT_BYTES = 2 * 1024 * 1024;
 export const MAX_WAIT_EVENT_PAYLOAD_BYTES = 256 * 1024;
 const MAX_RUN_INPUT_DEPTH = 12;
 const MAX_RUN_INPUT_ENTRIES = 2_000;
@@ -145,13 +147,13 @@ export type PendingWaitView = z.infer<typeof PendingWaitView>;
 // 启动动作返回的判别联合唯一来源：状态待确认时沿用原请求标识重试
 export const StartRunResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true), runId: z.string().uuid() }),
-  z.object({ ok: z.literal(false), error: z.string(), retryable: z.literal(true).optional() }),
+  z.object({ ok: z.literal(false), error: z.string(), retryable: z.literal(true).optional(), resourceLimit: ExecutionResourceLimit.optional() }),
 ]);
 export type StartRunResult = z.infer<typeof StartRunResult>;
 
 export const CancelRunResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true) }),
-  z.object({ ok: z.literal(false), error: z.string() }),
+  z.object({ ok: z.literal(false), error: z.string(), retryable: z.literal(true).optional() }),
 ]);
 export type CancelRunResult = z.infer<typeof CancelRunResult>;
 
@@ -207,10 +209,21 @@ export const TraceEventView = z.object({
 });
 export type TraceEventView = z.infer<typeof TraceEventView>;
 
+export const MAX_APPROVAL_REVIEW_BYTES = MAX_RUN_RESULT_BYTES;
+const ApprovalReviewJson = boundedJsonStorageValue(MAX_APPROVAL_REVIEW_BYTES, "待确认内容");
 export const ApprovalReview = z.object({
   sourceNodeId: z.string(),
   sourceTitle: z.string(),
-  content: z.string().min(1),
+  content: z.string().min(1).refine((value) => new TextEncoder().encode(value).byteLength <= MAX_APPROVAL_REVIEW_BYTES, "待确认内容不能超过 2MB"),
+  format: z.enum(["text", "json"]).optional(),
+}).superRefine((review, context) => {
+  if (review.format !== "json" || new TextEncoder().encode(review.content).byteLength > MAX_APPROVAL_REVIEW_BYTES) return;
+  try {
+    const value: unknown = JSON.parse(review.content);
+    if (value === null || typeof value !== "object" || !ApprovalReviewJson.safeParse(value).success) throw new Error();
+  } catch {
+    context.addIssue({ code: "custom", path: ["content"], message: "结构化待确认内容必须是有效的 JSON 对象或数组" });
+  }
 });
 export type ApprovalReview = z.infer<typeof ApprovalReview>;
 
@@ -241,7 +254,7 @@ export type ApprovalDecisionInput = z.infer<typeof ApprovalDecisionInput>;
 // 恢复执行引擎失败时，审批决定仍会保留，saved 提醒页面切换到可恢复状态。
 export const ApprovalDecisionResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true) }),
-  z.object({ ok: z.literal(false), error: z.string(), saved: z.literal(true).optional() }),
+  z.object({ ok: z.literal(false), error: z.string(), saved: z.literal(true).optional(), retryable: z.literal(true).optional() }),
 ]);
 export type ApprovalDecisionResult = z.infer<typeof ApprovalDecisionResult>;
 

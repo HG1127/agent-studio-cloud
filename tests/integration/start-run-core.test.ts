@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { startMock, cancelMock } = vi.hoisted(() => ({ startMock: vi.fn(), cancelMock: vi.fn() }));
@@ -198,6 +198,18 @@ describe("运行启动句柄恢复", () => {
     expect(stored[0].versionId).toBe(VERSION_ID);
   });
 
+  it("同一请求显式指定另一个版本时拒绝复用，省略版本仍找回原运行", async () => {
+    const sourceKey = "manual:00000000-0000-4000-8000-0000000007e1";
+    const first = await startRunCore({ agentId: AGENT_ID, versionId: VERSION_ID, input: {}, sourceKey });
+    expect(first.ok).toBe(true);
+    await db.insert(agentVersions).values({ id: CROSS_VERSION_ID, agentId: AGENT_ID, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, version: 2, status: "production", manifest });
+    expect(await startRunCore({ agentId: AGENT_ID, versionId: CROSS_VERSION_ID, input: {}, sourceKey })).toEqual({ ok: false, error: "这项请求标识已用于另一个版本，请重新发起" });
+    expect(await startRunCore({ agentId: AGENT_ID, versionId: VERSION_ID, input: {}, sourceKey })).toEqual(first);
+    expect(await startRunCore({ agentId: AGENT_ID, input: {}, sourceKey })).toEqual(first);
+    expect(startMock).toHaveBeenCalledOnce();
+    expect(await db.select().from(runs).where(eq(runs.sourceKey, sourceKey))).toHaveLength(1);
+  });
+
   it("已创建运行在助手归档后仍可按原请求标识找回", async () => {
     const sourceKey = "manual:00000000-0000-4000-8000-0000000007b6";
     const first = await startRunCore({ agentId: AGENT_ID, input: {}, sourceKey });
@@ -296,6 +308,81 @@ describe("运行启动句柄恢复", () => {
       expect.objectContaining({ startToken: expect.not.stringMatching(staleLease.token) }),
     ]));
     expect(await db.select().from(runs).where(eq(runs.sourceKey, sourceKey))).toHaveLength(1);
+  });
+
+  it("微秒时间记录并发按原请求补启时只领取一次并保留原步骤状态", async () => {
+    const sourceKey = "manual:00000000-0000-4000-8000-0000000007d1";
+    const staleLease = createRunStartLease(new Date(Date.now() - RUN_START_LEASE_MS * 2));
+    const [existing] = await db.insert(runs).values({
+      workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, agentId: AGENT_ID, versionId: VERSION_ID,
+      status: "queued", input: { request: "原始输入" }, sourceType: "manual", sourceKey,
+      stepStates: withRunStartLease({ preserved: { attempt: 1 } }, staleLease),
+      updatedAt: sql`TIMESTAMPTZ '2000-01-01 00:00:00.123456+00'`,
+    }).returning({ id: runs.id });
+    const [before] = await db.select({ fraction: sql<string>`to_char(${runs.updatedAt}, 'US')` }).from(runs).where(eq(runs.id, existing.id));
+    expect(before.fraction).toBe("123456");
+
+    const results = await Promise.all(Array.from({ length: 4 }, () => startRunCore({ agentId: AGENT_ID, input: { request: "原始输入" }, sourceKey })));
+
+    expect(results).toEqual(Array.from({ length: 4 }, () => ({ ok: true, runId: existing.id })));
+    expect(startMock).toHaveBeenCalledOnce();
+    const [stored] = await db.select().from(runs).where(eq(runs.id, existing.id));
+    expect(stored.workflowRunId).toBe("wrun_test_handle");
+    expect(stored.stepStates.preserved).toEqual({ attempt: 1 });
+    expect(readRunStartLease(stored.stepStates)).toMatchObject({ attempt: 2 });
+    expect(readRunStartLease(stored.stepStates)?.token).not.toBe(staleLease.token);
+    expect(await db.select().from(runs).where(eq(runs.sourceKey, sourceKey))).toHaveLength(1);
+  });
+
+  it.each(["claimed", "started"] as const)("过期记录被另一请求 %s 后，原请求重试找回任务而非误报冲突", async (mode) => {
+    const sourceKey = mode === "claimed" ? "manual:00000000-0000-4000-8000-0000000007d2" : "manual:00000000-0000-4000-8000-0000000007d3";
+    const [existing] = await db.insert(runs).values({
+      workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, agentId: AGENT_ID, versionId: VERSION_ID,
+      status: "queued", input: {}, sourceType: "manual", sourceKey,
+      stepStates: withRunStartLease({}, createRunStartLease(new Date(Date.now() - RUN_START_LEASE_MS * 2))),
+    }).returning();
+    const originalSelect = db.select.bind(db);
+    const candidate = {
+      from: () => candidate, leftJoin: () => candidate, where: () => candidate,
+      limit: async () => {
+        const now = new Date();
+        if (mode === "started") {
+          await db.update(runs).set({ workflowRunId: "wrun_other_request", updatedAt: now }).where(eq(runs.id, existing.id));
+          return [];
+        }
+        const states = withRunStartLease(existing.stepStates, createRunStartLease(now, 2));
+        await db.update(runs).set({ stepStates: states, updatedAt: now }).where(eq(runs.id, existing.id));
+        return [{ ...existing, stepStates: states, updatedAt: now, manifest, existingAgentId: AGENT_ID, agentArchivedAt: null }];
+      },
+    };
+    const select = vi.spyOn(db, "select")
+      .mockImplementationOnce(() => originalSelect({
+        id: runs.id, agentId: runs.agentId, versionId: runs.versionId, sourceType: runs.sourceType, input: runs.input,
+        status: runs.status, workflowRunId: runs.workflowRunId, stepStates: runs.stepStates, updatedAt: runs.updatedAt, error: runs.error,
+      }) as ReturnType<typeof db.select>)
+      .mockImplementationOnce(() => candidate as unknown as ReturnType<typeof db.select>);
+    try {
+      expect(await startRunCore({ agentId: AGENT_ID, input: {}, sourceKey })).toEqual({ ok: true, runId: existing.id });
+      expect(startMock).not.toHaveBeenCalled();
+      expect(await db.select().from(runs).where(eq(runs.sourceKey, sourceKey))).toHaveLength(1);
+    } finally {
+      select.mockRestore();
+    }
+  });
+
+  it("没有启动租约的旧微秒记录也能补启，而非不断返回排队任务", async () => {
+    const [existing] = await db.insert(runs).values({
+      workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, agentId: AGENT_ID, versionId: VERSION_ID,
+      status: "queued", input: {}, stepStates: { preserved: true },
+      updatedAt: sql`TIMESTAMPTZ '2000-01-01 00:00:00.123456+00'`,
+    }).returning({ id: runs.id });
+
+    expect(await resumeQueuedRunStartCore(existing.id)).toEqual({ ok: true, runId: existing.id });
+    expect(startMock).toHaveBeenCalledOnce();
+    const [stored] = await db.select().from(runs).where(eq(runs.id, existing.id));
+    expect(stored.stepStates.preserved).toBe(true);
+    expect(readRunStartLease(stored.stepStates)).toMatchObject({ attempt: 1 });
+    expect(stored.workflowRunId).toBe("wrun_test_handle");
   });
 
   it("自动接管达到启动次数上限后终结排队运行", async () => {

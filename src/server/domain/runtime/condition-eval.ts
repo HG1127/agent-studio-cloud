@@ -34,6 +34,13 @@ export function resolvePath(path: string, ctx: RunEvalContext): unknown {
   return current;
 }
 
+function numericValue(value: unknown): number | undefined {
+  if (typeof value !== "number" && typeof value !== "string") return undefined;
+  if (typeof value === "string" && !value.trim()) return undefined;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
+}
+
 // eq/neq/contains/gt/gte/lt/lte/truthy/exists；未知 operator 一律返回 false（不猜不误判）
 export function compare(actual: unknown, operator: string, expected: unknown): boolean {
   switch (operator) {
@@ -50,11 +57,9 @@ export function compare(actual: unknown, operator: string, expected: unknown): b
     case "gte":
     case "lt":
     case "lte": {
-      if (actual === undefined || actual === null || expected === undefined || expected === null) return false;
-      if ((typeof actual === "string" && !actual.trim()) || (typeof expected === "string" && !expected.trim())) return false;
-      const left = Number(actual);
-      const right = Number(expected);
-      if (!Number.isFinite(left) || !Number.isFinite(right)) return false;
+      const left = numericValue(actual);
+      const right = numericValue(expected);
+      if (left === undefined || right === undefined) return false;
       if (operator === "gt") return left > right;
       if (operator === "gte") return left >= right;
       if (operator === "lt") return left < right;

@@ -104,7 +104,7 @@ export async function completeEvaluationForRun(
   if (run?.sourceType !== "evaluation" || !run.sourceKey || !EvaluationSourceKey.safeParse(run.sourceKey).success) return;
   const [, evaluationRunId, evaluationCaseId] = run.sourceKey.split(":");
   const [caseResult] = await db
-    .select({ caseSnapshot: evaluationCaseResults.caseSnapshot, expectations: evaluationCases.expectations })
+    .select({ caseSnapshot: evaluationCaseResults.caseSnapshot, expectations: evaluationCases.expectations, resultSchema: evaluationCases.resultSchema })
     .from(evaluationCaseResults)
     .leftJoin(evaluationCases, and(
       eq(evaluationCases.id, evaluationCaseResults.evaluationCaseId),
@@ -120,7 +120,9 @@ export async function completeEvaluationForRun(
   const expectations = snapshot === null
     ? caseResult?.expectations
     : snapshot.success ? snapshot.data.expectations : undefined;
-  const [linkedFeedback] = !runError && result && expectations?.length === 0
+  const resultSchema = snapshot?.success ? snapshot.data.resultSchema : undefined;
+  const legacySchemaMissing = snapshot === null && caseResult?.resultSchema != null;
+  const [linkedFeedback] = !runError && result && expectations?.length === 0 && !resultSchema && !legacySchemaMissing
     ? await db.select({ id: runFeedback.id }).from(runFeedback).where(and(
         eq(runFeedback.evaluationCaseId, evaluationCaseId),
         eq(runFeedback.workspaceId, run.workspaceId),
@@ -128,8 +130,10 @@ export async function completeEvaluationForRun(
     : [];
   const outcome = runError
     ? { passed: false, errors: [runError] }
+    : legacySchemaMissing
+      ? { passed: false, errors: ["验收结果字段规则缺少启动快照，请重新验收"] }
     : expectations && result
-      ? evaluateExpectations(result, expectations, { feedbackRegression: Boolean(linkedFeedback) })
+      ? evaluateExpectations(result, expectations, { feedbackRegression: Boolean(linkedFeedback), resultSchema })
       : { passed: false, errors: ["验收样例或运行结果不存在"] };
   await db
     .update(evaluationCaseResults)

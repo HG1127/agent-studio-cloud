@@ -15,7 +15,7 @@ export async function startRunAction(input: RunStartInput): Promise<StartRunResu
     sourceType: "manual",
     sourceKey: parsedInput.data.requestId ? `manual:${parsedInput.data.requestId}` : null,
   });
-  if (!result.ok && result.retryable) throw new Error("运行启动状态待确认，请用同一次请求重试");
+  if (!result.ok && result.retryable && !result.resourceLimit) throw new Error("运行启动状态待确认，请用同一次请求重试");
   if (result.ok) {
     revalidatePathsAfterCommit([`/agents/${parsedInput.data.agentId}`, "/agents"], "run-start");
   }

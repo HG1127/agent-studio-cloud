@@ -10,6 +10,12 @@ const tool = {
 };
 
 describe("业务工具注册表", () => {
+  it("跨运行防重必须显式声明服务端保证的键有效期", () => {
+    expect(parseToolRegistry(JSON.stringify([{ ...tool, businessIdempotency: true }]))).toEqual([]);
+    expect(parseToolRegistry(JSON.stringify([{ ...tool, businessIdempotency: true, businessIdempotencyRetentionMs: 600_000 }])))
+      .toEqual([expect.objectContaining({ businessIdempotencyRetentionMs: 600_000 })]);
+    expect(parseToolRegistry(JSON.stringify([{ ...tool, businessIdempotency: true, businessIdempotencyRetentionMs: 1000 }]))).toEqual([]);
+  });
   it.each(["inputSchema", "outputSchema"])("注册时保留 %s 中多处重复的格式规则，交由有界匹配校验", (field) => {
     const schema = { type: "object", properties: { code: { type: "string", pattern: "^a+a+a+a+a+a+b$", maxLength: 80 } } };
     expect(parseToolRegistry(JSON.stringify([{ ...tool, [field]: schema }])))

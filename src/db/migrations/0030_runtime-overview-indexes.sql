@@ -1,0 +1,2 @@
+CREATE INDEX "runs_workspace_finished_idx" ON "runs" USING btree ("workspace_id","finished_at");--> statement-breakpoint
+CREATE INDEX "runs_workspace_agent_finished_idx" ON "runs" USING btree ("workspace_id","agent_id","finished_at");

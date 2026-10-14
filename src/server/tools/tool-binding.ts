@@ -38,6 +38,7 @@ function toolNodeRegistrationIssue(
   if (tool.registryToolId === "demo" || tool.protocol === "demo") return null;
   const registration = getRegistration(tool.registryToolId);
   if (!registration) return "绑定的业务工具未在服务端配置";
+  if (node.toolOperation && (registration.businessIdempotency !== true || !registration.businessIdempotencyRetentionMs)) return "绑定的业务工具尚未确认支持跨运行操作防重";
   return toolRegistrationCompatibilityIssue(tool, registration);
 }
 

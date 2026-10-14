@@ -1,5 +1,5 @@
 // condition-eval 纯函数单测：resolvePath 三种路径来源 + compare 9 个 operator + 未知路径。
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { compare, matchConditionRules, resolvePath, runEvalContext, type RunEvalContext } from "@/server/domain/runtime/condition-eval";
 
 const ctx: RunEvalContext = {
@@ -59,6 +59,33 @@ describe("resolvePath", () => {
 });
 
 describe("compare", () => {
+  it.each(["gt", "gte", "lt", "lte"])("%s 仅比较业务数字，不将布尔值、数组或对象当成金额", (operator) => {
+    for (const value of [false, true, [], [0], [1], ["100"], {}, BigInt(0), Symbol("不是金额")]) {
+      expect(compare(value, operator, 0)).toBe(false);
+      expect(compare(0, operator, value)).toBe(false);
+    }
+  });
+
+  it("数值比较不执行对象的类型转换方法", () => {
+    const convert = vi.fn(() => 100), amount = { valueOf: convert, toString: convert };
+    expect(compare(amount, "gte", 50)).toBe(false);
+    expect(compare(50, "lte", amount)).toBe(false);
+    expect(convert).not.toHaveBeenCalled();
+  });
+
+  it("有效数字文字、零值和有限边界保持原有比较行为", () => {
+    expect(compare(0, "gte", "0")).toBe(true);
+    expect(compare(" -0 ", "lte", 0)).toBe(true);
+    expect(compare(" 123.5 ", "gt", "100")).toBe(true);
+    expect(compare("1e2", "gte", 100)).toBe(true);
+    expect(compare("-2.5", "lt", "-2")).toBe(true);
+    expect(compare("", "gte", 0)).toBe(false);
+    expect(compare(" ", "lte", 0)).toBe(false);
+    expect(compare("NaN", "gt", 0)).toBe(false);
+    expect(compare("Infinity", "gt", 0)).toBe(false);
+    expect(compare(Infinity, "gt", 0)).toBe(false);
+  });
+
   it("eq：相等为真，类型不同为假", () => {
     expect(compare("high", "eq", "high")).toBe(true);
     expect(compare("high", "eq", "low")).toBe(false);

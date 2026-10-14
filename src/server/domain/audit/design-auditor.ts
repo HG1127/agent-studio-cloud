@@ -4,6 +4,9 @@ import { forbiddenActionMatch, type PolicyNode } from "@/server/domain/grounding
 import { safeDataPathSegments } from "@/server/domain/runtime/data-path";
 import { canProduceQualityResult } from "@/server/domain/runtime/quality-checks";
 import { isHiddenControlNode } from "@/lib/workflow-node-visibility";
+import { WorkflowNode, WorkflowOutputField } from "@/contracts/workflow";
+import { workflowOutputSourceNodes } from "@/server/domain/runtime/output-contract";
+import { isCredentialFieldName } from "@/server/domain/security/redact-sensitive";
 
 // 旧系统 server/designAuditor.mjs 的逐行移植（设计审计 auditWorkflow，minified 展开为可读 TS）。
 // 移植边界按引用可达性逐个核实：旧版 proposeAuditFixes 不直接移植，仅保留检查逻辑；
@@ -477,6 +480,23 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
       issue("critical", "data", "没有定义最终交付物", "流程只说明了怎么执行，却没有说明最终要交给员工什么结果；不能据此判定任务完成。", { fixable: true, code: "output_contract_missing" }),
     );
   } else {
+    const containers: Record<string, WorkflowNode> = {};
+    for (const [id, node] of Object.entries(nodes)) {
+      if (node.type !== "subflow" && node.type !== "parallel") continue;
+      const parsed = WorkflowNode.safeParse({ ...node, id, title: node.title || id });
+      if (parsed.success) containers[id] = parsed.data;
+    }
+    const inlineSources = workflowOutputSourceNodes(containers);
+    const invalidSelection = outputFields.some((field) => {
+      if (!field || typeof field !== "object" || !Object.hasOwn(field, "sourcePath")) return false;
+      const parsed = WorkflowOutputField.safeParse(field);
+      return !parsed.success || parsed.data.sourcePath?.some(isCredentialFieldName);
+    });
+    if (invalidSelection) issues.push(issue(
+      "critical", "data", "最终交付字段选择无效",
+      "需要选择有效的业务来源和字段，不能使用保留名称或凭据字段。",
+      { fixable: false, code: "output_contract_selection_invalid" },
+    ));
     const invalidSource = outputFields.some((field) => {
       if (!field || typeof field !== "object" || Array.isArray(field)) return true;
       const record = field as Record<string, unknown>;
@@ -485,7 +505,8 @@ export function auditWorkflow(workflow: AuditWorkflow, blueprint: AuditBlueprint
         : typeof record.path === "string"
           ? record.path.split(".")[0]
           : "";
-      const source = sourceId && Object.prototype.hasOwnProperty.call(nodes, sourceId) ? nodes[sourceId] : undefined;
+      const source = sourceId && Object.prototype.hasOwnProperty.call(nodes, sourceId) ? nodes[sourceId]
+        : sourceId && Object.hasOwn(inlineSources, sourceId) ? inlineSources[sourceId] : undefined;
       return !source
         || source.type === "trigger"
         || source.type === "end"

@@ -9,6 +9,10 @@ const mocks = vi.hoisted(() => ({ persistStep: vi.fn(), appendTrace: vi.fn() }))
 vi.mock("@/lib/db", () => ({ db: {} }));
 vi.mock("@/server/steps/run-state", () => ({ persistStep: mocks.persistStep }));
 vi.mock("@/server/steps/trace-step", () => ({ appendTrace: mocks.appendTrace }));
+vi.mock("@/server/services/model-call", () => ({
+  beginRunModelCall: async (input: { runId: string }) => ({ id: crypto.randomUUID(), workspaceId: "00000000-0000-4000-8000-000000000002", runId: input.runId }),
+  settleRunModelCall: async () => undefined,
+}));
 import { runModelStep } from "./model-step";
 
 let service: Awaited<ReturnType<typeof startModelJsonServer>> | undefined;

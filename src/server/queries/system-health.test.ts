@@ -20,7 +20,29 @@ describe("数据库就绪检查", () => {
       "public.run_feedback_workspace_agent_updated_idx",
       "public.run_feedback_workspace_case_idx",
       "public.runs_workspace_source_key_unique",
+      "public.runs_workspace_finished_idx",
+      "public.model_calls",
+      "public.model_calls_workspace_run_created_idx",
+      "public.model_calls_workspace_agent_created_idx",
+      "public.runs_workspace_parent_created_idx",
+      "public.runs_workspace_legacy_parent_idx",
+      "public.runs_workspace_agent_finished_idx",
       "public.wait_event_submissions",
+      "public.tool_operations",
+      "public.tool_operations_workspace_key_unique",
+      "public.tool_operations_workspace_run_idx",
+      "public.tool_operations_workspace_created_id_idx",
+      "public.tool_operations_workspace_status_created_id_idx",
+      "public.run_deliveries",
+      "public.run_deliveries_workspace_run_unique",
+      "public.run_deliveries_workspace_status_due_idx",
+      "public.run_deliveries_workspace_lease_idx",
+      "public.run_deliveries_workspace_status_created_id_idx",
+      "public.trace_events_workspace_run_kind_idx",
+      "public.attention_cases",
+      "public.attention_cases_workspace_source_occurrence_unique",
+      "public.attention_cases_workspace_created_id_idx",
+      "public.attention_cases_workspace_run_idx",
       "public.wait_event_submissions_token_unique",
       "public.wait_event_submissions_run_created_idx",
       "public.evaluation_runs_workspace_request_unique",
@@ -47,6 +69,15 @@ describe("数据库就绪检查", () => {
       allowDefault: false,
     });
     expect(LATEST_MIGRATION_WHEN).toBe(migrationJournal.entries.at(-1)?.when);
+    expect(REQUIRED_DATABASE_COLUMNS).toContainEqual({ tableName: "evaluation_cases", columnName: "result_schema", requireNotNull: false, allowDefault: false });
+    expect(REQUIRED_DATABASE_COLUMNS).toContainEqual({ tableName: "runs", columnName: "model_usage_tracking_version", requireNotNull: false, allowDefault: false });
+    expect(REQUIRED_DATABASE_COLUMNS).toContainEqual({ tableName: "runs", columnName: "parent_run_id", requireNotNull: false, allowDefault: false });
+    expect(REQUIRED_DATABASE_COLUMNS).toContainEqual({ tableName: "runs", columnName: "collaboration_tracking_version", requireNotNull: false, allowDefault: false });
+    expect(REQUIRED_DATABASE_COLUMNS).toContainEqual({ tableName: "model_calls", columnName: "created_by", requireNotNull: true, allowDefault: false });
+    expect(REQUIRED_DATABASE_COLUMNS).toContainEqual({ tableName: "tool_operations", columnName: "retry_deadline", requireNotNull: true, allowDefault: true });
+    expect(REQUIRED_DATABASE_COLUMNS).toContainEqual({ tableName: "run_deliveries", columnName: "workspace_id", requireNotNull: true, allowDefault: false });
+    expect(REQUIRED_DATABASE_COLUMNS).toContainEqual({ tableName: "run_deliveries", columnName: "retention_ms", requireNotNull: true, allowDefault: false });
+    expect(REQUIRED_DATABASE_COLUMNS).toContainEqual({ tableName: "attention_cases", columnName: "occurrence", requireNotNull: true, allowDefault: false });
   });
 
   it("只在数据库结构、最新迁移和演示租户都就绪时返回正常", async () => {

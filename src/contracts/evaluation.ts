@@ -1,11 +1,18 @@
 import { z } from "zod";
 import { RunInputPayload } from "@/contracts/run";
+import { boundedJsonStorageValue, JsonStorageRecord } from "@/contracts/json";
 
 const RESERVED_PATH_SEGMENTS: ReadonlySet<string> = new Set(["__proto__", "prototype", "constructor"]);
 
 export const MAX_EVALUATION_CASES = 100;
 export const MAX_EVALUATION_EXPECTATIONS = 20;
 const MAX_EVALUATION_CASE_BYTES = 128 * 1024;
+
+export const MAX_EVALUATION_RESULT_SCHEMA_BYTES = 32 * 1024;
+export const EvaluationResultSchema = boundedJsonStorageValue(MAX_EVALUATION_RESULT_SCHEMA_BYTES, "验收结果字段规则")
+  .pipe(JsonStorageRecord)
+  .refine((schema) => schema.type === "object", "验收结果字段规则的根类型必须是对象");
+export type EvaluationResultSchema = z.infer<typeof EvaluationResultSchema>;
 
 function evaluationCaseSizeIssue(value: unknown): string | null {
   try {
@@ -35,6 +42,10 @@ export const EvaluationCaseSnapshot = z.object({
   name: z.string().trim().min(1).max(80),
   input: RunInputPayload,
   expectations: z.array(EvaluationExpectation).max(MAX_EVALUATION_EXPECTATIONS),
+  resultSchema: EvaluationResultSchema.nullable().optional(),
+}).superRefine((value, ctx) => {
+  const issue = evaluationCaseSizeIssue(value);
+  if (issue) ctx.addIssue({ code: "custom", message: issue });
 });
 export type EvaluationCaseSnapshot = z.infer<typeof EvaluationCaseSnapshot>;
 
@@ -43,6 +54,7 @@ const EvaluationCaseFields = z.object({
   name: z.string().trim().min(1).max(80),
   input: RunInputPayload,
   expectations: z.array(EvaluationExpectation).max(MAX_EVALUATION_EXPECTATIONS).default([]),
+  resultSchema: EvaluationResultSchema.nullable().optional(),
 });
 export const EvaluationCaseCreateInput = EvaluationCaseFields.superRefine((value, ctx) => {
   const issue = evaluationCaseSizeIssue(value);
@@ -64,6 +76,7 @@ export const EvaluationCaseView = z.object({
   name: z.string(),
   input: z.record(z.string(), z.unknown()),
   expectations: z.array(EvaluationExpectation),
+  resultSchema: EvaluationResultSchema.nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string().optional(),
 });

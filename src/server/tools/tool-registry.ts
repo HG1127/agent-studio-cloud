@@ -48,6 +48,7 @@ export function parseToolRegistry(raw: string | undefined): ToolRegistration[] {
     if (!parsed.success) return [];
     const ids = new Set<string>();
     for (const tool of parsed.data) {
+      if (tool.businessIdempotency === true && tool.businessIdempotencyRetentionMs === undefined) return [];
       if (ids.has(tool.id) || !safeHeaders(tool.headers)) return [];
       if (validateJsonSchemaDefinition(tool.inputSchema) || validateJsonSchemaDefinition(tool.outputSchema)) return [];
       ids.add(tool.id);
@@ -75,6 +76,8 @@ export function listToolRegistryOptions(): ToolRegistryOptionType[] {
     action: tool.action,
     scope: tool.scope,
     risk: tool.risk,
+    ...(tool.businessIdempotency !== undefined ? { businessIdempotency: tool.businessIdempotency } : {}),
+    ...(tool.businessIdempotencyRetentionMs !== undefined ? { businessIdempotencyRetentionMs: tool.businessIdempotencyRetentionMs } : {}),
     inputSchema: tool.inputSchema,
     outputSchema: tool.outputSchema,
   }));

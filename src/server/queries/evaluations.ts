@@ -4,6 +4,7 @@ import { agentVersions, evaluationCaseResults, evaluationCases, evaluationRuns }
 import { db } from "@/lib/db";
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
 import { redactCredentialData, redactCredentialText } from "@/server/domain/security/redact-sensitive";
+import { evaluationResultSchemaIssue } from "@/server/domain/evaluation-result-schema";
 
 export async function listEvaluationCases(
   agentId: string,
@@ -24,6 +25,9 @@ export async function listEvaluationCases(
     .orderBy(desc(evaluationCases.createdAt), desc(evaluationCases.id))
     .limit(limit)
     .offset(offset);
+  if (rows.some((row) => evaluationResultSchemaIssue(row.resultSchema))) {
+    throw new Error("验收结果字段规则无效，请核对后重试");
+  }
   return parseQueryRows("验收样例列表", EvaluationCaseView, rows.map((row) => ({
     ...row,
     input: redactCredentialData(row.input),

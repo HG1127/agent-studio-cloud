@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkflowNode } from "@/contracts/workflow";
 
 const mocks = vi.hoisted(() => ({
-  persistStep: vi.fn(), appendTrace: vi.fn(), invokeHttpTool: vi.fn(), getToolRegistration: vi.fn(), attempt: 1, stepId: "step-1",
+  persistStep: vi.fn(), appendTrace: vi.fn(), invokeHttpTool: vi.fn(), invokeToolOperation: vi.fn(), getToolRegistration: vi.fn(), attempt: 1, stepId: "step-1",
 }));
 vi.mock("workflow", async (importOriginal) => ({
   ...(await importOriginal<typeof import("workflow")>()),
@@ -11,6 +11,7 @@ vi.mock("workflow", async (importOriginal) => ({
 vi.mock("@/server/steps/run-state", () => ({ persistStep: mocks.persistStep }));
 vi.mock("@/server/steps/trace-step", () => ({ appendTrace: mocks.appendTrace }));
 vi.mock("@/server/tools/invoke-http-tool", () => ({ invokeHttpTool: mocks.invokeHttpTool }));
+vi.mock("@/server/services/tool-operation", () => ({ invokeToolOperation: mocks.invokeToolOperation }));
 vi.mock("@/server/tools/tool-registry", () => ({ getToolRegistration: mocks.getToolRegistration }));
 
 import { runToolStep } from "@/server/steps/tool-step";
@@ -30,6 +31,20 @@ const registration = {
 };
 
 describe("真实工具步骤", () => {
+  it("显式防重节点复用持久业务回执而不走普通外部调用", async () => {
+    const protectedNode = WorkflowNode.parse({ ...node, toolOperation: { scope: "crm-update", key: { kind: "input", path: ["customerId"] } } });
+    mocks.invokeToolOperation.mockResolvedValue({ ok: true, output: { receiptId: "receipt-1" }, operationId: "00000000-0000-4000-8000-000000000123", reused: true });
+    await expect(runToolStep({ runId: "run-1", node: protectedNode, input: { customerId: "c1" }, outputs: {} }))
+      .resolves.toEqual({ receipt: { ok: true, receiptId: "receipt-1" } });
+    expect(mocks.invokeHttpTool).not.toHaveBeenCalled();
+    expect(mocks.appendTrace).toHaveBeenCalledWith(expect.objectContaining({ kind: "tool.operation_reused" }));
+  });
+  it("并发业务操作使用服务给出的等待时间并保留 SDK 重试", async () => {
+    const protectedNode = WorkflowNode.parse({ ...node, toolOperation: { scope: "crm-update", key: { kind: "literal", value: "c1" } } });
+    mocks.invokeToolOperation.mockResolvedValue({ ok: false, error: "正在处理", retryable: true, retryAfterMs: 60_000 });
+    await expect(runToolStep({ runId: "run-1", node: protectedNode, input: {}, outputs: {} })).rejects.toMatchObject({ name: "RetryableError" });
+    expect(mocks.invokeHttpTool).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.attempt = 1;
@@ -52,6 +67,17 @@ describe("真实工具步骤", () => {
       data: { ok: true },
     }));
     expect(JSON.stringify(mocks.appendTrace.mock.calls)).not.toContain("receipt-1");
+  });
+
+  it("下游工具取得内部业务字段，不发送冻结定位或未选择成果", async () => {
+    const mapped = WorkflowNode.parse({ ...node, inputMapping: { fields: [{ target: ["customerId"], source: { kind: "output", nodeId: "group.extract", path: ["id"] } }] } });
+    mocks.invokeHttpTool.mockResolvedValue({ ok: true, output: { receiptId: "receipt-1" } });
+    await expect(runToolStep({ runId: "run-1", node: mapped, input: {}, outputs: { group: { status: "completed", steps: [{ output: { id: "001", other: "not-selected" } }] } },
+      inlineReferences: { "group.extract": { kind: "subflow", ownerNodeId: "group", stepIndex: 0 } },
+    })).resolves.toEqual({ receipt: { ok: true, receiptId: "receipt-1" } });
+    expect(mocks.invokeHttpTool).toHaveBeenCalledWith(expect.objectContaining({ input: { customerId: "001" }, outputs: {} }));
+    expect(JSON.stringify(mocks.invokeHttpTool.mock.calls)).not.toContain("ownerNodeId");
+    expect(JSON.stringify(mocks.invokeHttpTool.mock.calls)).not.toContain("not-selected");
   });
 
   it("不把业务系统显式失败的回执记录成成功步骤", async () => {

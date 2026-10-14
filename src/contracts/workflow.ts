@@ -1,10 +1,13 @@
 import { z } from "zod";
 import { JsonStorageValue } from "./json";
 import { ModelOutputConfig } from "./model-output";
-import { InputMapping } from "./input-mapping";
+import { InputMapping, InputSourcePath } from "./input-mapping";
+import { ToolOperationConfig } from "./tool-operation";
+import { RUN_DELIVERY_INTENT_KEY } from "./run-delivery-config";
 
 const RESERVED_FIELD_NAMES: ReadonlySet<string> = new Set(["__proto__", "prototype", "constructor"]);
 const RESERVED_WORKFLOW_NODE_IDS: ReadonlySet<string> = new Set([
+  RUN_DELIVERY_INTENT_KEY,
   ...RESERVED_FIELD_NAMES,
   ...Object.getOwnPropertyNames(Object.prototype),
 ]);
@@ -118,6 +121,7 @@ export const WorkflowNode = z.object({
   modelClass: z.string().optional(),
   modelOutput: ModelOutputConfig.optional(),
   inputMapping: InputMapping.optional(),
+  toolOperation: ToolOperationConfig.optional(),
   purpose: z.string().optional(),
   approval: z.object({ role: z.string(), reason: z.string() }).optional(),
   tool: ToolSpec.optional(),
@@ -153,16 +157,30 @@ export const WorkflowNode = z.object({
   contract: HandoffContract.optional(),
   businessSpec: z.record(z.string(), z.unknown()).nullable().default(null),
 }).superRefine((node, context) => {
-  if (node.inputMapping && !["tool", "ai", "agent_call", "handoff"].includes(node.type) && !(node.type === "rule" && node.rule?.kind === "business_rule" && !node.quality)) {
-    context.addIssue({ code: "custom", path: ["inputMapping"], message: "只有智能处理、业务判断、工具和助手协作步骤可以配置输入映射" });
+  if (node.toolOperation && (node.type !== "tool" || node.tool?.registryToolId === "demo" || node.tool?.protocol === "demo")) {
+    context.addIssue({ code: "custom", path: ["toolOperation"], message: "只有真实业务工具步骤可以配置跨运行操作防重" });
   }
-  if (node.inputMapping?.includeUpstreamOutputs && ["agent_call", "handoff"].includes(node.type)) {
-    context.addIssue({ code: "custom", path: ["inputMapping", "includeUpstreamOutputs"], message: "助手协作请逐项映射需要的上游字段，不能额外携带全部成果" });
+  if (node.inputMapping && !["tool", "ai", "knowledge", "agent_call", "handoff"].includes(node.type) && !(node.type === "rule" && node.rule?.kind === "business_rule" && !node.quality)) {
+    context.addIssue({ code: "custom", path: ["inputMapping"], message: "只有智能处理、业务判断、知识检索、工具和助手协作步骤可以配置输入映射" });
+  }
+  if (node.inputMapping?.includeUpstreamOutputs && ["knowledge", "agent_call", "handoff"].includes(node.type)) {
+    context.addIssue({ code: "custom", path: ["inputMapping", "includeUpstreamOutputs"], message: "知识检索与助手协作请逐项映射需要的上游字段，不能额外携带全部成果" });
   }
   if (node.modelOutput && node.type !== "ai" && !(node.type === "rule" && node.rule?.kind === "business_rule" && !node.quality)) {
     context.addIssue({ code: "custom", path: ["modelOutput"], message: "只有智能处理和业务判断步骤可以配置模型结果字段" });
   }
 }).transform(omitUndefined);
+export const WorkflowOutputField = z.object({
+  path: z.string().min(1).max(200),
+  label: z.string().max(200).optional(),
+  required: z.boolean().default(true),
+  sourceNodeId: z.string().min(1).max(200).optional(),
+  sourcePath: InputSourcePath.optional(),
+}).superRefine((field, context) => {
+  if (field.sourcePath !== undefined && !field.sourceNodeId) context.addIssue({ code: "custom", path: ["sourcePath"], message: "选择交付来源字段时必须明确业务步骤" });
+});
+export type WorkflowOutputField = z.infer<typeof WorkflowOutputField>;
+
 export const WorkflowDraft = z.object({
   id: z.string(), versionId: z.string().nullable().default(null),
   startNodeId: z.string().default("start"),
@@ -180,12 +198,7 @@ export const WorkflowDraft = z.object({
   complexityProfile: z.record(z.string(), z.unknown()).optional(),
   runtimePolicy: z.record(z.string(), z.unknown()).optional(),
   outputContract: z.object({
-    fields: z.array(z.object({
-      path: z.string().min(1).max(200),
-      label: z.string().max(200).optional(),
-      required: z.boolean().default(true),
-      sourceNodeId: z.string().min(1).max(200).optional(),
-    })).max(MAX_WORKFLOW_OUTPUT_FIELDS).default([]),
+    fields: z.array(WorkflowOutputField).max(MAX_WORKFLOW_OUTPUT_FIELDS).default([]),
   }).optional(),
   ui: z.object({ positions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })).default({}) }).default({ positions: {} }),
 }).superRefine((draft, ctx) => {
