@@ -41,6 +41,16 @@ describe("业务操作防重共享契约", () => {
       connector: "演示", action: "record", scope: "demo", registryToolId: "demo", protocol: "demo",
     } }).success).toBe(false);
   });
+  it.each(["http-json", "mcp-streamable-http"])("真实 %s 工具标识 demo 不等于演示模式", (protocol) => {
+    expect(WorkflowNode.safeParse({ id: "write", title: "登记", type: "tool", toolOperation: config, tool: {
+      connector: "业务系统", action: "record", scope: "business", registryToolId: "demo", protocol,
+    } }).success).toBe(true);
+  });
+  it.each(["another-id", null])("显式演示协议不因标识不同而获得业务防重 %#", (registryToolId) => {
+    expect(WorkflowNode.safeParse({ id: "write", title: "登记", type: "tool", toolOperation: config, tool: {
+      connector: "演示", action: "record", scope: "demo", registryToolId, protocol: "demo",
+    } }).success).toBe(false);
+  });
   it.each(["", "x y", "中", "a".repeat(101)])("范围 %s 不能为空或包含不安全字符", (scope) => {
     expect(ToolOperationConfig.safeParse({ ...config, scope }).success).toBe(false);
   });

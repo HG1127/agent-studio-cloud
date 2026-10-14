@@ -71,7 +71,7 @@ export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Re
   if (!tool || tool.unresolved === true) {
     return reject(`步骤「${node.title}」的工具未绑定，无法执行`);
   }
-  const demo = tool.registryToolId === "demo" || tool.protocol === "demo";
+  const demo = tool.protocol === "demo";
   const resolvedInput = resolveNodeInput({ node, input: args.input, outputs: args.outputs, inlineReferences: args.inlineReferences });
   if (!resolvedInput.ok) return reject(resolvedInput.error);
   let receipt: Record<string, unknown>;

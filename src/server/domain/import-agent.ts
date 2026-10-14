@@ -156,7 +156,7 @@ function rebindToolNode(
 ): Record<string, unknown> {
   if (node.type !== "tool" || !isRecord(node.tool)) return node;
   const tool = node.tool as ToolSnapshot;
-  if (tool.registryToolId === "demo" || tool.protocol === "demo" || isToolBindingValid(tool)) return node;
+  if (tool.protocol === "demo" || isToolBindingValid(tool)) return node;
   return {
     ...node,
     tool: { ...node.tool, registryToolId: null, protocol: "unbound", unresolved: true },

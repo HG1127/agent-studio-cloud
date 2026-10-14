@@ -157,7 +157,7 @@ export const WorkflowNode = z.object({
   contract: HandoffContract.optional(),
   businessSpec: z.record(z.string(), z.unknown()).nullable().default(null),
 }).superRefine((node, context) => {
-  if (node.toolOperation && (node.type !== "tool" || node.tool?.registryToolId === "demo" || node.tool?.protocol === "demo")) {
+  if (node.toolOperation && (node.type !== "tool" || node.tool?.protocol === "demo")) {
     context.addIssue({ code: "custom", path: ["toolOperation"], message: "只有真实业务工具步骤可以配置跨运行操作防重" });
   }
   if (node.inputMapping && !["tool", "ai", "knowledge", "agent_call", "handoff"].includes(node.type) && !(node.type === "rule" && node.rule?.kind === "business_rule" && !node.quality)) {

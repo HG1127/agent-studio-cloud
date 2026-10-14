@@ -62,21 +62,21 @@ export function boundedJsonStorageValue(maxBytes: number, label: string) {
   }, JsonStorageValue);
 }
 
-export function isPassiveJsonData(value: unknown, maxChars: number): boolean {
+export function isPassiveJsonData(value: unknown, maxChars: number, maxDepth = 32, maxEntries = 50_000): boolean {
   const stack: Array<{ value: unknown; depth: number } | { leave: object }> = [{ value, depth: 0 }];
   const ancestors = new Set<object>();
   let entries = 0, chars = 0;
   while (stack.length) {
     const current = stack.pop()!;
     if ("leave" in current) { ancestors.delete(current.leave); continue; }
-    if (++entries > 50_000 || current.depth > 32) return false;
+    if (++entries > maxEntries || current.depth > maxDepth) return false;
     const item = current.value;
     if (item === null || typeof item === "boolean") continue;
     if (typeof item === "number") { if (!Number.isFinite(item)) return false; continue; }
     if (typeof item === "string") { chars += item.length; if (chars > maxChars) return false; continue; }
     if (!item || typeof item !== "object" || !Array.isArray(item) && !isPlainJsonObject(item) || ancestors.has(item)) return false;
     const keys = Reflect.ownKeys(item);
-    if (keys.length > 50_001) return false;
+    if (keys.length > maxEntries + 1) return false;
     ancestors.add(item); stack.push({ leave: item });
     for (const key of keys) {
       if (typeof key !== "string") return false;
@@ -85,7 +85,7 @@ export function isPassiveJsonData(value: unknown, maxChars: number): boolean {
       const descriptor = Object.getOwnPropertyDescriptor(item, key);
       if (!descriptor?.enumerable || !Object.hasOwn(descriptor, "value")) return false;
       chars += key.length;
-      if (chars > maxChars || stack.length > 50_000) return false;
+      if (chars > maxChars || stack.length > maxEntries) return false;
       stack.push({ value: descriptor.value, depth: current.depth + 1 });
     }
   }

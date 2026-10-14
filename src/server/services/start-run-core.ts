@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { start } from "workflow/api";
 import { AgentManifest } from "@/contracts/manifest";
@@ -41,6 +41,8 @@ import { jsonValuesEqual } from "@/server/domain/json-value";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding";
 import { ExecutionResourceRejected, lockExecutionWorkspace, reserveRootExecutionResources } from "@/server/services/execution-resources";
+import { RunExecutionClaim } from "@/contracts/run-execution-binding";
+import { runStartAcknowledgementDisposition } from "@/server/domain/runtime/run-execution-binding";
 
 // 发布快照允许进入运行引擎的完整节点类型；未知类型必须在创建 run 前拒绝。
 const SUPPORTED_NODE_TYPES: ReadonlySet<string> = new Set([
@@ -71,7 +73,7 @@ function runtimeDataPathOk(path: string | null | undefined): boolean {
 function toolExecutionIssue(node: WorkflowNode): string | null {
   const tool = node.tool;
   if (!tool || tool.unresolved === true) return "工具尚未绑定";
-  if (tool.registryToolId === "demo" || tool.protocol === "demo") return null;
+  if (tool.protocol === "demo") return null;
   const registration = getToolRegistration(tool.registryToolId);
   if (!registration) return "绑定的业务工具未在服务端配置";
   if (node.toolOperation && (registration.businessIdempotency !== true || !registration.businessIdempotencyRetentionMs)) return "绑定的业务工具尚未确认支持跨运行操作防重";
@@ -190,7 +192,6 @@ async function markRunStartFailed(
   runId: string,
   token: string,
   error = "运行启动失败，请稍后重试",
-  queuedOnly = false,
 ): Promise<boolean> {
   const updated = await db
     .update(runs)
@@ -204,7 +205,8 @@ async function markRunStartFailed(
     .where(and(
       eq(runs.id, runId),
       eq(runs.workspaceId, DEMO_WORKSPACE_ID),
-      queuedOnly ? eq(runs.status, "queued") : inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"]),
+      eq(runs.status, "queued"),
+      isNull(runs.workflowRunId),
       ownsRunStartLease(token),
     ))
     .returning({ id: runs.id });
@@ -233,38 +235,48 @@ export async function launchClaimedRun(args: {
     // 平台可能已接收运行但只丢了响应；保留租约供旧启动完成或过期后接管。
     return { ok: true, runId: args.runId };
   }
+  const parsedClaim = RunExecutionClaim.safeParse({ sdkRunId: workflowRun.runId, startToken: args.lease.token });
+  if (!parsedClaim.success) {
+    console.error("运行启动返回的执行身份无法确认");
+    return { ok: true, runId: args.runId };
+  }
+  const claim = parsedClaim.data;
   let updated: { id: string }[];
   try {
     updated = await db
       .update(runs)
       .set({
-        workflowRunId: workflowRun.runId,
+        workflowRunId: claim.sdkRunId,
         updatedAt: new Date(),
       })
       .where(and(
         eq(runs.id, args.runId),
         eq(runs.workspaceId, DEMO_WORKSPACE_ID),
         ownsRunStartLease(args.lease.token),
+        inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"]),
+        or(isNull(runs.workflowRunId), eq(runs.workflowRunId, claim.sdkRunId)),
       ))
       .returning({ id: runs.id });
   } catch (error) {
     console.error("运行启动句柄保存失败", safeErrorForLog(error));
-    try {
-      await workflowRun.cancel();
-    } catch (cancelError) {
-      console.error("取消失联的工作流失败", safeErrorForLog(cancelError));
-      return { ok: true, runId: args.runId };
-    }
-    try {
-      const failed = await markRunStartFailed(args.runId, args.lease.token);
-      if (!failed) return { ok: true, runId: args.runId };
-    } catch (markError) {
-      console.error("记录运行启动失败状态时出错", safeErrorForLog(markError));
-      return { ok: true, runId: args.runId };
-    }
-    return { ok: false, error: "运行启动失败，请稍后重试" };
+    // 保存响应丢失不能证明没有提交；只有复读确认取消或其他执行者时才取消本次句柄。
+    updated = [];
   }
   if (updated.length > 0) return { ok: true, runId: args.runId };
+  let disposition: ReturnType<typeof runStartAcknowledgementDisposition>;
+  try {
+    const [current] = await db.select({ status: runs.status, workflowRunId: runs.workflowRunId, stepStates: runs.stepStates })
+      .from(runs).where(and(eq(runs.id, args.runId), eq(runs.workspaceId, DEMO_WORKSPACE_ID))).limit(1);
+    disposition = runStartAcknowledgementDisposition(current ? {
+      status: current.status,
+      sdkRunId: current.workflowRunId,
+      startToken: readRunStartLease(current.stepStates)?.token ?? (Object.hasOwn(current.stepStates, RUN_START_LEASE_KEY) ? undefined : null),
+    } : null, claim);
+  } catch (error) {
+    console.error("运行执行身份暂时无法确认", safeErrorForLog(error));
+    return { ok: true, runId: args.runId };
+  }
+  if (disposition !== "cancel") return { ok: true, runId: args.runId };
   try {
     await workflowRun.cancel();
   } catch (error) {
@@ -315,7 +327,7 @@ export async function resumeQueuedRunStartCore(runId: string): Promise<StartRunR
     const previousLease = readRunStartLease(candidate.stepStates);
     if (previousLease && previousLease.attempt >= MAX_RUN_START_ATTEMPTS) {
       const error = "运行多次启动未获确认，请重新发起";
-      const failed = await markRunStartFailed(candidate.id, previousLease.token, error, true);
+      const failed = await markRunStartFailed(candidate.id, previousLease.token, error);
       return failed ? { ok: false, error } : { ok: true, runId: candidate.id };
     }
     const lease = createRunStartLease(new Date(), (previousLease?.attempt ?? 0) + 1);
@@ -335,7 +347,7 @@ export async function resumeQueuedRunStartCore(runId: string): Promise<StartRunR
     claimedRun = { id: candidate.id, token: lease.token };
     if (!candidate.existingAgentId || candidate.agentArchivedAt) {
       const error = "助手已停用，无法继续启动";
-      await markRunStartFailed(candidate.id, lease.token, error, true);
+      await markRunStartFailed(candidate.id, lease.token, error);
       return { ok: false, error };
     }
     const manifest = AgentManifest.safeParse(candidate.manifest);

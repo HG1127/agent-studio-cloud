@@ -26,6 +26,15 @@ describe("从模板创建真实业务草稿", () => {
       vi.restoreAllMocks();
     }
   });
+  describe.each(["MCP", "HTTP"])("%s 无法完成的必需交付不进入保存", (protocol) => {
+    it.each([{ type: "string", const: "" }, { enum: ["", "  ", null] }, { type: "null" }, { type: "array", maxItems: 0 }, { type: "object", maxProperties: 0 }])("明确空字段 %#", async (definition) => {
+      const action = protocol === "MCP" ? mvpTemplateRegistry[1] : mvpHttpAction;
+      mocks.listTools.mockReturnValue([mvpTemplateRegistry[0], { ...action, outputSchema: { ...action.outputSchema,
+        properties: { ...action.outputSchema.properties, task_id: definition } } }]);
+      expect(await createMvpAgentAction(mvpTemplateInput, requestId)).toEqual({ ok: false, error: "业务回执规则无法提供所选的完整交付内容，暂时无法创建" });
+      expect(mocks.importAgent).not.toHaveBeenCalled();
+    });
+  });
   it.each([0, 1])("已选 MCP 工具 %i 参数定义超容量时不进入保存", async (index) => {
     mocks.listTools.mockReturnValue(mvpTemplateRegistry.map((tool, position) => position === index
       ? { ...tool, inputSchema: { ...tool.inputSchema, description: "汉".repeat(12_000) } } : tool));

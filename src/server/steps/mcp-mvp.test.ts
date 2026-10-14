@@ -28,6 +28,23 @@ async function prepare() {
 }
 
 describe("MVP 后端步骤闭环（真实网络 SDK，无数据库）", () => {
+  it("登记标识 demo 的真实 MCP 取数仍调用远端并返回业务字段", async () => {
+    const { registry, manifest } = await prepare();
+    vi.stubEnv("TOOL_REGISTRY_JSON", JSON.stringify([{ ...registry[0], id: "demo" }, registry[1]]));
+    const node = WorkflowNode.parse({ ...manifest.workflowSnapshot.nodes.lookup, tool: { ...manifest.workflowSnapshot.nodes.lookup.tool!, registryToolId: "demo" } });
+    const { receipt } = await runToolStep({ runId: crypto.randomUUID(), node, input: { customerId: "c1" }, outputs: {} });
+    expect(receipt).toMatchObject({ ok: true, customerId: "c1", amount: 0 });
+    expect(receipt).not.toHaveProperty("summary", "演示工具已执行");
+    expect(mcp!.messages.filter((message) => message.method === "tools/call")).toHaveLength(1);
+  });
+  it("登记标识 demo 的真实 MCP 取数仍受运行策略阻止", async () => {
+    const { registry, manifest } = await prepare();
+    vi.stubEnv("TOOL_REGISTRY_JSON", JSON.stringify([{ ...registry[0], id: "demo" }, registry[1]]));
+    vi.stubEnv("HARNESS_POLICY_JSON", '{"version":1,"rules":[{"id":"hold","effect":"deny","when":{"registryToolId":"demo"}}]}');
+    const node = WorkflowNode.parse({ ...manifest.workflowSnapshot.nodes.lookup, tool: { ...manifest.workflowSnapshot.nodes.lookup.tool!, registryToolId: "demo" } });
+    await expect(runToolStep({ runId: crypto.randomUUID(), node, input: { customerId: "c1" }, outputs: {} })).rejects.toMatchObject({ name: "FatalError" });
+    expect(mcp!.messages).toHaveLength(0);
+  });
   it("MCP 取数 → 映射 → 模型字段修正 → 业务工具 → 精确最终交付", async () => {
     const { manifest, fields } = await prepare(); const outputs: Record<string, unknown> = {};
     const input = { customerId: "c1", private: "not-selected" }, runId = crypto.randomUUID();

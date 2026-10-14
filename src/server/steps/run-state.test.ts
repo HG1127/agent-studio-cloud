@@ -7,7 +7,10 @@ const mocks = vi.hoisted(() => ({
   completeEvaluationForRun: vi.fn(),
   reconcileTerminalEvaluationRun: vi.fn(),
   setValues: vi.fn(),
+  workflowMetadata: vi.fn(),
 }));
+
+vi.mock("workflow", async (original) => ({ ...await original<typeof import("workflow")>(), getWorkflowMetadata: mocks.workflowMetadata }));
 
 vi.mock("@/lib/db", () => ({
   db: (() => {
@@ -73,6 +76,7 @@ describe("运行终态步骤", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.selectRows.mockResolvedValue([]);
+    mocks.workflowMetadata.mockReturnValue({ workflowRunId: "wrun_state_test" });
   });
 
   it("失败终态、轨迹和验收只接收已脱敏的错误", async () => {
@@ -132,20 +136,20 @@ describe("运行终态步骤", () => {
 
   it("新任务首次初始化声明模型及协作关系覆盖", async () => {
     mocks.returning.mockResolvedValue([{ id: "run-1" }]);
-    mocks.selectRows.mockResolvedValue([{ id: "run-1", workspaceId: "workspace-1", status: "queued", stepStates: {} }]);
+    mocks.selectRows.mockResolvedValue([{ id: "run-1", workspaceId: "workspace-1", status: "queued", stepStates: {}, workflowRunId: null }]);
 
     await initializeRun("run-1", draft);
 
     expect(mocks.setValues).toHaveBeenCalledWith(expect.objectContaining({
-      status: "running", modelUsageTrackingVersion: "v1", collaborationTrackingVersion: "v1",
+      status: "running", workflowRunId: "wrun_state_test", modelUsageTrackingVersion: "v1", collaborationTrackingVersion: "v1",
     }));
   });
 
   it("启动状态已提交后重入时补齐启动轨迹", async () => {
     mocks.returning.mockResolvedValue([]);
     mocks.selectRows
-      .mockResolvedValueOnce([{ id: "run-1", workspaceId: "workspace-1", status: "running", stepStates: {} }])
-      .mockResolvedValueOnce([{ status: "running", stepStates: {} }]);
+      .mockResolvedValueOnce([{ id: "run-1", workspaceId: "workspace-1", status: "running", stepStates: {}, workflowRunId: "wrun_state_test" }])
+      .mockResolvedValueOnce([{ status: "running", stepStates: {}, workflowRunId: "wrun_state_test" }]);
 
     await initializeRun("run-1", draft);
 
