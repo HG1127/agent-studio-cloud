@@ -48,6 +48,11 @@ export function parseToolRegistry(raw: string | undefined): ToolRegistration[] {
     if (!parsed.success) return [];
     const ids = new Set<string>();
     for (const tool of parsed.data) {
+      if (tool.protocol === "mcp-streamable-http" && (
+        tool.method !== "POST" || !tool.operationKind
+        || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(tool.action)
+        || tool.operationKind === "action" && tool.businessIdempotency !== true
+      )) return [];
       if (tool.businessIdempotency === true && tool.businessIdempotencyRetentionMs === undefined) return [];
       if (ids.has(tool.id) || !safeHeaders(tool.headers)) return [];
       if (validateJsonSchemaDefinition(tool.inputSchema) || validateJsonSchemaDefinition(tool.outputSchema)) return [];
@@ -76,6 +81,8 @@ export function listToolRegistryOptions(): ToolRegistryOptionType[] {
     action: tool.action,
     scope: tool.scope,
     risk: tool.risk,
+    ...(tool.protocol !== undefined ? { protocol: tool.protocol } : {}),
+    ...(tool.operationKind !== undefined ? { operationKind: tool.operationKind } : {}),
     ...(tool.businessIdempotency !== undefined ? { businessIdempotency: tool.businessIdempotency } : {}),
     ...(tool.businessIdempotencyRetentionMs !== undefined ? { businessIdempotencyRetentionMs: tool.businessIdempotencyRetentionMs } : {}),
     inputSchema: tool.inputSchema,
@@ -93,7 +100,8 @@ export function listToolCompilerCapabilities(): unknown[] {
     source: "connected-registry",
     risk: tool.risk,
     registryToolId: tool.id,
-    protocol: "http-json",
+    protocol: tool.protocol ?? "http-json",
+    ...(tool.operationKind !== undefined ? { operationKind: tool.operationKind } : {}),
     inputSchema: tool.inputSchema,
     outputSchema: tool.outputSchema,
   }));

@@ -7,12 +7,13 @@ import { validateJsonObjectSchema } from "@/server/domain/json-schema";
 import { canRetryStep, MAX_STEP_ATTEMPTS, resolveToolRetryPolicy } from "@/server/domain/runtime/retry-policy";
 import { persistStep } from "@/server/steps/run-state";
 import { appendTrace } from "@/server/steps/trace-step";
-import { invokeHttpTool } from "@/server/tools/invoke-http-tool";
+import { invokeRegisteredTool } from "@/server/tools/invoke-tool";
 import { getToolRegistration } from "@/server/tools/tool-registry";
 import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding";
 import { resolveNodeInput } from "@/server/domain/runtime/input-mapping";
 import { invokeToolOperation } from "@/server/services/tool-operation";
 import { ToolOperationTraceData } from "@/contracts/tool-operation";
+import { enforceHarnessPolicy } from "@/server/steps/harness-policy-step";
 
 export interface RunToolStepInput {
   runId: string;
@@ -66,6 +67,7 @@ export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Re
     status: "running",
   });
   const tool = node.tool;
+  await enforceHarnessPolicy({ runId: args.runId, node });
   if (!tool || tool.unresolved === true) {
     return reject(`步骤「${node.title}」的工具未绑定，无法执行`);
   }
@@ -83,14 +85,15 @@ export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Re
     const compatibilityIssue = toolRegistrationCompatibilityIssue(tool, registration);
     if (compatibilityIssue) return reject(`步骤「${node.title}」${compatibilityIssue}`);
     const requestPayload = { action: tool.action || registration.action, input: resolvedInput.input, outputs: resolvedInput.outputs };
-    const inputSchemaError = validateJsonObjectSchema(requestPayload, tool.inputSchema);
+    const schemaPayload = registration.protocol === "mcp-streamable-http" ? requestPayload.input : requestPayload;
+    const inputSchemaError = validateJsonObjectSchema(schemaPayload, tool.inputSchema);
     if (inputSchemaError) return reject(`工具输入不符合字段契约：${inputSchemaError}`);
-    const currentInputSchemaError = validateJsonObjectSchema(requestPayload, registration.inputSchema);
+    const currentInputSchemaError = validateJsonObjectSchema(schemaPayload, registration.inputSchema);
     if (currentInputSchemaError) return reject(`工具输入不符合当前服务端字段契约：${currentInputSchemaError}`);
     const operationResult = node.toolOperation ? await invokeToolOperation({
       runId: args.runId, node, tool: registration, input: args.input, outputs: args.outputs, payload: requestPayload, inlineReferences: args.inlineReferences,
     }) : undefined;
-    const invoked = operationResult ?? await invokeHttpTool({
+    const invoked = operationResult ?? await invokeRegisteredTool({
       tool: registration,
       // 同一次步骤重试时 stepId 稳定；循环再次调用同一节点时 stepId 会变化。
       idempotencyKey: `${args.runId}:${node.id}:${stepMetadata.stepId}`,

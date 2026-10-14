@@ -268,7 +268,7 @@ function capabilityTool(step: Raw, caps: Cap[] = [], registryTools: RegistryTool
       hints.includes(String(item.scope || "").toLowerCase()) ||
       hints.includes(String(item.capabilityKey || "").toLowerCase()),
   );
-  if (cap?.registryToolId) return registryTools.find((item) => item.id === cap.registryToolId && isExternalTool(item)) || null;
+  if (cap?.registryToolId && cap.source !== "connected-registry") return registryTools.find((item) => item.id === cap.registryToolId && isExternalTool(item)) || null;
   if (cap?.source === "connected-registry") {
     return {
       id: cap.registryToolId,
@@ -282,7 +282,7 @@ function capabilityTool(step: Raw, caps: Cap[] = [], registryTools: RegistryTool
       inputSchema: cap.inputSchema,
       outputSchema: cap.outputSchema,
       status: "active",
-      operationKind: /read|query|list|search/i.test(String(cap.action || "")) ? "read" : "action",
+      operationKind: ["read", "action"].includes(cap.operationKind as string) ? cap.operationKind : /read|query|list|search/i.test(String(cap.action || "")) ? "read" : "action",
       automationPolicy: cap.automationPolicy,
       capabilityKeys: [cap.capabilityKey].filter(Boolean),
     };
@@ -291,6 +291,7 @@ function capabilityTool(step: Raw, caps: Cap[] = [], registryTools: RegistryTool
 }
 
 function operationKind(step: Raw, tool: RegistryTool | null): "read" | "action" {
+  if (tool?.protocol === "mcp-streamable-http" && ["read", "action"].includes(tool.operationKind as string)) return tool.operationKind as "read" | "action";
   const raw = typeof step.tool === "object" ? (step.tool as Raw) : {};
   if (["read", "action"].includes(raw.operationKind as string)) return raw.operationKind as "read" | "action";
   if (["read", "action"].includes(step.operationKind as string)) return step.operationKind as "read" | "action";
