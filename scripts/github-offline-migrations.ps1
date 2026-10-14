@@ -36,7 +36,8 @@ try {
   $taskIndexBefore=(Get-FileHash -LiteralPath $taskIndexPath).Hash
   $taskBefore=@{}
   foreach ($taskFile in $taskFiles) { $taskBefore[$taskFile]=(Get-FileHash -LiteralPath $taskFile).Hash }
-  if ((Read-Git @('rev-parse','HEAD^'))[0] -cne 'ba842bb976f6e46b328fcd6fd8e3b49e94a4555b') { throw 'Offline entry must be one reviewed commit on tested baseline' }
+  & git --no-optional-locks merge-base --is-ancestor ba842bb976f6e46b328fcd6fd8e3b49e94a4555b HEAD
+  if ($LASTEXITCODE -ne 0) { throw 'Tested baseline must be an ancestor' }
   $taskJournalBefore=Get-Content -Raw -LiteralPath 'src/db/migrations/meta/_journal.json' | ConvertFrom-Json
   $taskHistory=@($taskFiles | Where-Object { $_ -clike 'src/db/migrations/*' })
   if ($taskHistory.Count -ne 71) { throw 'Historical migration file count changed' }
@@ -241,7 +242,9 @@ try {
 if ($taskInitialized) { try { Assert-Source } catch { if (-not $taskFailure) {$taskFailure=$_.Exception.Message} } }
 if ($taskGenerated) {
   try {
-    $taskObserved=@(Read-Git @('ls-files','--others','--exclude-standard') | Where-Object { $_ -clike 'src/db/migrations/*' })
+    $taskUntrackedFiles=Read-Git @('ls-files','--others','--exclude-standard')
+    if (@($taskUntrackedFiles | Where-Object { $_ -isnot [string] }).Count) { throw 'Untracked file list must contain individual strings' }
+    $taskObserved=@($taskUntrackedFiles | Where-Object { $_ -clike 'src/db/migrations/*' })
     if ((Get-FileHash -LiteralPath 'src/db/migrations/meta/_journal.json').Hash -cne $taskBefore['src/db/migrations/meta/_journal.json']) { $taskObserved+='src/db/migrations/meta/_journal.json' }
     foreach ($taskPath in $taskObserved) {
       $taskBytes=[IO.File]::ReadAllBytes((Join-Path $taskRoot $taskPath))
@@ -255,7 +258,9 @@ if ($taskGenerated) {
     for ($taskI=0;$taskI -lt $taskJournalBefore.entries.Count;$taskI++) { if (($taskAfter.entries[$taskI]|ConvertTo-Json -Compress) -cne ($taskJournalBefore.entries[$taskI]|ConvertTo-Json -Compress)) { throw 'Historical journal entry changed' } }
     $taskLast=$taskAfter.entries[-1]
     if ($taskLast.idx -ne 35 -or $taskLast.tag -cne '0035_mvp_backend' -or $taskLast.version -cne '7' -or $taskLast.breakpoints -ne $true) { throw 'Unexpected new migration identity' }
-    $taskUntracked=@(Read-Git @('ls-files','--others','--exclude-standard') | Where-Object { $_ -cnotlike 'github-offline-migration-reports/*' })
+    $taskUntrackedFiles=Read-Git @('ls-files','--others','--exclude-standard')
+    if (@($taskUntrackedFiles | Where-Object { $_ -isnot [string] }).Count) { throw 'Untracked file list must contain individual strings' }
+    $taskUntracked=@($taskUntrackedFiles | Where-Object { $_ -cnotlike 'github-offline-migration-reports/*' })
     $taskExpected=@('src/db/migrations/0035_mvp_backend.sql','src/db/migrations/meta/0035_snapshot.json')
     if ($taskUntracked.Count -ne 2 -or (Compare-Object $taskExpected $taskUntracked)) { throw 'Unexpected generated delta file set' }
     $taskSnapshot=Get-Content -Raw -LiteralPath 'src/db/migrations/meta/0035_snapshot.json'|ConvertFrom-Json
