@@ -44,7 +44,8 @@ async function begin(user: ReturnType<typeof userEvent.setup>) {
 function deferred() {
   let resolve!: (result: StartRunResult) => void;
   let reject!: (error: Error) => void;
-  startRun.mockImplementationOnce(() => new Promise<StartRunResult>((done, fail) => { resolve = done; reject = fail; }));
+  const promise = new Promise<StartRunResult>((done, fail) => { resolve = done; reject = fail; });
+  startRun.mockReturnValueOnce(promise);
   return { resolve, reject };
 }
 function CommitReply({ reply }: { reply: () => void }) {
@@ -94,12 +95,12 @@ describe("真实网页工具父组合的资源拒绝回执", () => {
     startRun.mockResolvedValueOnce({ ok: false, error: "本次限额拒绝", resourceLimit: limit });
     const user = userEvent.setup(); render(view()); fill();
     await begin(user); await screen.findByLabelText("本次资源限额回复");
-    const next = deferred(); fill("新的待确认填写");
+    const next = deferred(); fill("新的待确认填写"); const control = input();
     await user.click(screen.getByRole("button", { name: "用这些填写试运行" }));
     expect(screen.getByRole("dialog")).toBeVisible(); expect(startRun).toHaveBeenCalledOnce();
     expect(screen.queryByLabelText("本次资源限额回复")).not.toBeInTheDocument();
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "确认并创建任务" }));
-    expect(input()).toBeDisabled();
+    expect(control).toBeDisabled();
     await act(async () => next.resolve({ ok: false, error: "当前版本不可启动" }));
     expect(screen.getByRole("alert")).toHaveTextContent("当前版本不可启动");
     expect(screen.queryByLabelText("本次资源限额回复")).not.toBeInTheDocument();
@@ -191,13 +192,13 @@ describe("真实网页工具父组合的资源拒绝回执", () => {
     const old = deferred(); await begin(user);
     rendered.rerender(view(other.versionId));
     expect(screen.queryByLabelText("本次资源限额回复")).not.toBeInTheDocument();
-    const current = deferred(); fill("新版本请求");
+    const current = deferred(); fill("新版本请求"); const control = input();
     await user.click(screen.getByRole("button", { name: "用这些填写试运行" }));
     const confirm = within(screen.getByRole("dialog")).getByRole("button", { name: "确认并创建任务" });
     act(() => { fireEvent.click(confirm); fireEvent.click(confirm); });
     expect(startRun).toHaveBeenCalledTimes(3);
     await act(async () => old.resolve({ ok: false, error: "旧限额回复", resourceLimit: limit }));
-    expect(input()).toBeDisabled(); expect(input()).toHaveValue("新版本请求");
+    expect(control).toBeDisabled(); expect(control).toHaveValue("新版本请求");
     expect(screen.queryByLabelText("本次资源限额回复")).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     await act(async () => current.resolve({ ok: false, error: "当前限额回复", resourceLimit: limit }));

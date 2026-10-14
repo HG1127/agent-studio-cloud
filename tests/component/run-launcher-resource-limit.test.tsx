@@ -43,7 +43,8 @@ function fill(value = '{"question":"原文\\n必须保留"}') { fireEvent.change
 function deferred() {
   let resolve!: (result: StartRunResult) => void;
   let reject!: (error: Error) => void;
-  startRun.mockImplementationOnce(() => new Promise<StartRunResult>((done, fail) => { resolve = done; reject = fail; }));
+  const promise = new Promise<StartRunResult>((done, fail) => { resolve = done; reject = fail; });
+  startRun.mockReturnValueOnce(promise);
   return { resolve, reject };
 }
 function CommitReply({ reply }: { reply: () => void }) {

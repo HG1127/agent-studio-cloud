@@ -6,6 +6,7 @@ import { AgentDetailView } from "@/contracts/agent";
 import { AgentManifest } from "@/contracts/manifest";
 import { WorkflowDraft } from "@/contracts/workflow";
 import { EvaluationRunView } from "@/contracts/evaluation";
+import { SectionReadState } from "@/components/ui/SectionReadState";
 
 const mocks = vi.hoisted(() => ({
   detail: vi.fn(), versions: vi.fn(), exportSource: vi.fn(), connections: vi.fn(),
@@ -25,7 +26,12 @@ vi.mock("@/server/domain/audit", () => ({ auditWorkflow: () => ({ status: "passe
 vi.mock("@/features/workflow-canvas/FlowCanvas", () => ({ FlowCanvas: (props: Record<string, unknown>) => { mocks.canvas(props); return <div data-testid="canvas">已读取的真实画布</div>; } }));
 vi.mock("@/features/agents/VersionPanel", () => ({ VersionPanel: (props: Record<string, unknown>) => { mocks.versionPanel(props); return <div data-testid="versions">版本操作</div>; } }));
 vi.mock("@/features/agents/EvaluationPanel", () => ({ EvaluationPanel: (props: Record<string, unknown>) => { mocks.evaluationPanel(props); return <div data-testid="evaluation">验收操作</div>; } }));
-vi.mock("@/features/agents/RunLauncher", () => ({ RunLauncher: (props: Record<string, unknown>) => { mocks.launcher(props); return <div data-testid="launcher">试运行表单</div>; } }));
+vi.mock("@/features/agents/RunLauncher", () => ({ RunLauncher: (props: Record<string, unknown>) => {
+  mocks.launcher(props);
+  return props.sourceUnavailable
+    ? <SectionReadState id="run" title="试运行暂时无法读取" description="正式版本业务字段未知，不能按默认表单启动任务。" />
+    : <div data-testid="launcher">试运行表单</div>;
+} }));
 vi.mock("@/features/agents/AgentMetadataEditor", () => ({ AgentMetadataEditor: () => <div>助手基本信息</div> }));
 vi.mock("@/features/agents/DesignAuditPanel", () => ({ DesignAuditPanel: () => <section id="audit">已读取的设计检查</section> }));
 
@@ -225,7 +231,9 @@ describe("助手工作台分区读取与安全恢复", () => {
     mocks.detail.mockResolvedValueOnce({ ...detail, currentVersion: { id: versionId, manifest: {} } });
     await renderPage();
     expect(screen.getByRole("region", { name: "试运行暂时无法读取" })).toBeInTheDocument();
-    expect(mocks.launcher).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("launcher")).not.toBeInTheDocument();
+    expect(mocks.launcher).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ sourceRefreshPolicy: "preserve-active", sourceUnavailable: true,
+      productionVersionId: versionId, hasProductionVersion: true, inputFields: undefined, inputDefinitions: undefined, outputFields: undefined }));
     expect(screen.getByTestId("canvas")).toBeInTheDocument();
   });
 

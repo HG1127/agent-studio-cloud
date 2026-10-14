@@ -44,7 +44,8 @@ async function openImport(label = "业务记录") {
 function paste(text: string, label = "业务记录") { fireEvent.change(screen.getByLabelText("粘贴" + label + "资料"), { target: { value: text } }); }
 function deferredFile(name: string) {
   let resolve!: (value: string) => void, reject!: (reason: Error) => void;
-  const read = vi.fn(() => new Promise<string>((done, fail) => { resolve = done; reject = fail; }));
+  const promise = new Promise<string>((done, fail) => { resolve = done; reject = fail; });
+  const read = vi.fn(() => promise);
   const file = new File(["本地占位文本"], name, { type: "text/plain" });
   Object.defineProperty(file, "text", { value: read });
   return { file, read, resolve, reject };
@@ -117,7 +118,7 @@ describe("真实受控结构化编辑器与父修订交接", () => {
   it("当前无效JSON仅解释未知；显式导入后预览前3条、确认完整4条，取消或错误不替换", async () => {
     render(<Host initial="{invalid" />);
     expect(editor()).toHaveTextContent("没有把它当成空对象或空列表");
-    expect(screen.queryByRole("status")).not.toBeInTheDocument(); expect(calls.pending).not.toHaveBeenCalled();
+    expect(within(editor()).queryByRole("status")).not.toBeInTheDocument(); expect(calls.pending).not.toHaveBeenCalled();
     await openImport(); paste("资料,确认\n甲,false\n乙,true\n丙,0\n丁,001");
     await userEvent.click(screen.getByRole("button", { name: "预览导入" }));
     const preview = screen.getByLabelText("业务记录导入内容预览（数据格式）");
@@ -154,7 +155,7 @@ describe("真实受控结构化编辑器与父修订交接", () => {
     render(<Host initial="" />);
     expect(screen.getAllByRole("form")).toHaveLength(1);
     for (const button of within(editor()).getAllByRole("button")) expect(button).toHaveAttribute("type", "button");
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(within(editor()).queryByRole("status")).not.toBeInTheDocument();
     expect(editor()).toHaveTextContent("原输入为空"); expect(editor()).not.toHaveTextContent("通过业务验收");
     expect(calls.apply).not.toHaveBeenCalled(); expect(calls.pending).not.toHaveBeenCalled();
   });

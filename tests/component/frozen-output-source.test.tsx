@@ -1,5 +1,6 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { NodeChange } from "@xyflow/react";
 import { describe, expect, it, vi } from "vitest";
 import { FrozenWorkflowViewer } from "@/features/versions/FrozenWorkflowViewer";
 import { frozenWorkflowView } from "@/features/versions/frozen-workflow-view";
@@ -24,9 +25,37 @@ describe("冻结版本真实来源子字段", () => {
     await userEvent.click(within(outputs).getByRole("button", { name: "定位来源：分别核对 / 业务核对 / 记录确认" }));
     expect(screen.getByRole("heading", { name: /^分别核对$/ })).toHaveFocus();
     expect(JSON.stringify(workflow)).toBe(original);
-    expect(flow.props).toMatchObject({ nodesDraggable: false, nodesConnectable: false, edgesReconnectable: false, deleteKeyCode: null });
+    expect(flow.props).toMatchObject({ nodesDraggable: false, nodesConnectable: false, edgesReconnectable: false, deleteKeyCode: null, connectOnClick: false });
     expect(flow.props?.onConnect).toBeUndefined();
-    expect(flow.props?.onNodesChange).toBeUndefined();
+    expect(flow.props?.onEdgesChange).toBeUndefined();
+    const onNodesChange = flow.props?.onNodesChange as (changes: NodeChange[]) => void;
+    expect(onNodesChange).toBeTypeOf("function");
+    const originalGraph = JSON.stringify({ nodes: flow.props?.nodes, edges: flow.props?.edges });
+    const originalEdges = JSON.stringify(flow.props?.edges);
+    const nodeStructure = () => JSON.stringify((flow.props?.nodes as Record<string, unknown>[]).map((node) => {
+      const { selected, ...saved } = node;
+      void selected;
+      return saved;
+    }));
+    const originalNodes = nodeStructure();
+    const replacement = { id: "parallel", position: { x: 4000, y: 4000 }, data: { title: "不可写入的内容" } };
+    const writes: NodeChange[] = [
+      { type: "position", id: "parallel", position: { x: 4000, y: 4000 }, dragging: true },
+      { type: "dimensions", id: "parallel", dimensions: { width: 999, height: 999 }, setAttributes: true },
+      { type: "remove", id: "parallel" },
+      { type: "add", item: { ...replacement, id: "added" } },
+      { type: "replace", id: "parallel", item: replacement },
+    ];
+    act(() => onNodesChange(writes));
+    expect(JSON.stringify({ nodes: flow.props?.nodes, edges: flow.props?.edges })).toBe(originalGraph);
+    expect(screen.getByRole("heading", { name: /^分别核对$/ })).toBeInTheDocument();
+    act(() => onNodesChange([...writes, { type: "select", id: "group", selected: true }]));
+    expect(screen.getByRole("heading", { name: /^整理材料$/ })).toBeInTheDocument();
+    expect(flow.props?.nodes).toHaveLength(Object.keys(workflow.nodes).length);
+    expect(nodeStructure()).toBe(originalNodes);
+    expect(JSON.stringify(flow.props?.edges)).toBe(originalEdges);
+    expect(JSON.stringify(workflow)).toBe(original);
+    expect(within(outputs).getByRole("list", { name: "交付 1 冻结来源层级" })).toHaveTextContent("第 3 层：金额");
   });
   it("冻结输出来源以实际 manifest 参数为准，不拿流程中的另一份字段或当前草稿补造", () => {
     const workflow = frozenWorkflowView(outputSourceWorkflow());

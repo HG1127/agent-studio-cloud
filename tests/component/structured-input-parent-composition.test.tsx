@@ -53,7 +53,14 @@ describe("真实助手与网页父组件挂载共享结构录入", () => {
     expect(editor().getByLabelText("业务清单导入内容预览（数据格式）")).toHaveTextContent("001");
     if (surface === "agent") fireEvent.submit(raw().closest("form")!);
     else fireEvent.click(screen.getByRole("button", { name: "用这些填写试运行" }));
-    expect(screen.getByText(/业务清单还有尚未应用的填写/)).toBeVisible();
+    expect(surface === "agent" ? within(screen.getByRole("alert")).getByText(/业务清单还有尚未应用的填写/)
+      : screen.getByRole("button", { name: "业务清单还有尚未应用的填写。请确认应用或取消该项草稿；没有提交任务。" })).toBeVisible();
+    if (surface === "web") {
+      const control = raw();
+      expect(control).toHaveAttribute("aria-invalid", "true");
+      const descriptions = (control.getAttribute("aria-describedby") ?? "").split(/\s+/).filter(Boolean).map((id) => document.getElementById(id)?.textContent);
+      expect(descriptions).toContain("业务清单还有尚未应用的填写。请确认应用或取消该项草稿；没有提交任务。");
+    }
     expect(raw()).toHaveFocus();
     expect(start).not.toHaveBeenCalled(); expect(crypto.randomUUID).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

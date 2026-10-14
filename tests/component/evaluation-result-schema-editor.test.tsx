@@ -61,8 +61,9 @@ describe("结果结构规则编辑叶子", () => {
   });
   it("重新打开同样例会关闭旧确认，不复活本页编辑", () => {
     render(<Harness />);
+    const reopen = screen.getByRole("button", { name: "重新打开同样例" });
     fireEvent.click(screen.getByRole("button", { name: "明确清除结构规则" }));
-    fireEvent.click(screen.getByRole("button", { name: "重新打开同样例" }));
+    fireEvent.click(reopen);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.queryByText(/本次保存将明确清除/)).not.toBeInTheDocument();
   });

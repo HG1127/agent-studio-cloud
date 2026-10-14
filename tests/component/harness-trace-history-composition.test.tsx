@@ -2,6 +2,7 @@ import { Children, isValidElement, type ComponentProps, type ReactElement, type 
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import HarnessPage from "@/app/(console)/harness/page";
+import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { ExecutionPolicySnapshot } from "@/contracts/execution-resources";
 import { RunSummary, RunStepView, RunView, TraceEventView } from "@/contracts/run";
 import { DiagnosticTrace } from "@/features/harness/DiagnosticTrace";
@@ -10,7 +11,7 @@ import { HarnessNavigation, harnessConsoleHref, harnessReturnNavigation } from "
 import { runReturnHref } from "@/features/runs/run-return-url";
 
 const mocks = vi.hoisted(() => ({ listRuns: vi.fn(), getRunView: vi.fn(), listRunSteps: vi.fn(), getRunContext: vi.fn(),
-  listRecentTrace: vi.fn(), listTrace: vi.fn(), getResources: vi.fn(), getHistory: vi.fn(), refresh: vi.fn(), replace: vi.fn(), fetch: vi.fn() }));
+  listRecentTrace: vi.fn(), listTrace: vi.fn(), getResources: vi.fn(), getHistory: vi.fn(), refresh: vi.fn(), replace: vi.fn(), fetch: vi.fn(), safeReadFailures: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mocks.refresh, replace: mocks.replace }) }));
 vi.mock("@/server/queries/runs", () => ({ listRuns: mocks.listRuns, getRunView: mocks.getRunView, listRunSteps: mocks.listRunSteps, getRunContext: mocks.getRunContext }));
 vi.mock("@/server/queries/trace", () => ({ listRecentTrace: mocks.listRecentTrace, listTrace: mocks.listTrace }));
@@ -18,7 +19,9 @@ vi.mock("@/server/queries/harness-policies", () => ({ getHarnessPolicyQuery: vi.
 vi.mock("@/server/actions/save-harness-policy", () => ({ saveHarnessPolicyAction: vi.fn() }));
 vi.mock("@/server/actions/simulate-harness-policy", () => ({ simulateHarnessPolicyAction: vi.fn() }));
 vi.mock("@/server/queries/execution-resources", () => ({ getExecutionResourcePolicy: mocks.getResources, listExecutionPolicyHistory: mocks.getHistory }));
-vi.mock("@/server/security/query-error", () => ({ withSafeQueryError: (read: () => Promise<unknown>) => read() }));
+vi.mock("@/server/security/query-error", () => ({ withSafeQueryError: async (read: () => Promise<unknown>, stage: string) => {
+  try { return await read(); } catch (error) { mocks.safeReadFailures(stage, error); throw error; }
+} }));
 
 const runId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const otherRun = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -64,7 +67,10 @@ describe("真实 Harness 父页、诊断与选择器历史接线（只替换 I/O
   });
 
   it("默认只读最近五百条；进入历史的真实入口必须手动且不预取", async () => {
-    render(await HarnessPage({ searchParams: Promise.resolve({ run: runId }) }));
+    const page = await HarnessPage({ searchParams: Promise.resolve({ run: runId }) });
+    expect({ failures: mocks.safeReadFailures.mock.calls.filter(([stage]) => stage === "harness-run"), runCalls: mocks.getRunView.mock.calls })
+      .toEqual({ failures: [], runCalls: [[runId, DEMO_WORKSPACE_ID]] });
+    render(page);
     expect(document.querySelectorAll('li[id^="diagnostic-event-"]')).toHaveLength(500);
     expect(mocks.listTrace).not.toHaveBeenCalled();
     const entry = screen.getByRole("link", { name: "核对较早轨迹" });

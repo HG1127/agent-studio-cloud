@@ -1,5 +1,6 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { NodeChange } from "@xyflow/react";
 import { describe, expect, it, vi } from "vitest";
 import { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
 import { FrozenWorkflowViewer } from "@/features/versions/FrozenWorkflowViewer";
@@ -29,14 +30,48 @@ describe("冻结流程只读工作台", () => {
     expect(workflow.nodes.compose.purpose).toBe("execute");
   });
   it("没有编辑运行入口，真实系统检查也在列表和画布，不传入写处理器", () => {
-    render(view());
+    const workflow = frozenWorkflowView(frozenDraft);
+    const original = JSON.stringify(workflow);
+    render(view(workflow));
     expect(screen.getByText(/保存 5 个顶层步骤，包含 1 个系统检查步骤/)).toBeInTheDocument();
     expect(within(screen.getByRole("list", { name: "冻结步骤列表" })).getByRole("button", { name: /已冻结结果检查/ })).toBeInTheDocument();
     expect(flow.props).toMatchObject({ nodesDraggable: false, nodesConnectable: false, edgesReconnectable: false, deleteKeyCode: null, connectOnClick: false });
     expect(flow.props?.onConnect).toBeUndefined();
-    expect(flow.props?.onNodesChange).toBeUndefined();
+    const onNodesChange = flow.props?.onNodesChange as (changes: NodeChange[]) => void;
+    expect(onNodesChange).toBeTypeOf("function");
     expect(flow.props?.onEdgesChange).toBeUndefined();
     expect(screen.queryByRole("button", { name: /保存|发布|开始.*运行|删除/ })).not.toBeInTheDocument();
+    const originalGraph = JSON.stringify({ nodes: flow.props?.nodes, edges: flow.props?.edges });
+    const originalEdges = JSON.stringify(flow.props?.edges);
+    const nodeStructure = () => JSON.stringify((flow.props?.nodes as Record<string, unknown>[]).map((node) => {
+      const { selected, ...saved } = node;
+      void selected;
+      return saved;
+    }));
+    const originalNodes = nodeStructure();
+    const replacement = { id: "compose", position: { x: 4000, y: 4000 }, data: { title: "不可写入的内容" } };
+    const writes: NodeChange[] = [
+      { type: "position", id: "compose", position: { x: 4000, y: 4000 }, dragging: true },
+      { type: "dimensions", id: "compose", dimensions: { width: 999, height: 999 }, setAttributes: true },
+      { type: "remove", id: "start" },
+      { type: "add", item: { ...replacement, id: "added" } },
+      { type: "replace", id: "compose", item: replacement },
+    ];
+    act(() => onNodesChange(writes));
+    expect(JSON.stringify({ nodes: flow.props?.nodes, edges: flow.props?.edges })).toBe(originalGraph);
+    expect(screen.getByRole("heading", { name: "收到客户任务" })).toBeInTheDocument();
+    act(() => onNodesChange([...writes, { type: "select", id: "compose", selected: true }]));
+    expect(screen.getByRole("heading", { name: "冻结的回复方案" })).toBeInTheDocument();
+    expect(flow.props?.nodes).toHaveLength(5);
+    expect(nodeStructure()).toBe(originalNodes);
+    expect(JSON.stringify(flow.props?.edges)).toBe(originalEdges);
+    act(() => onNodesChange([{ type: "select", id: "missing", selected: true }]));
+    expect(screen.getByRole("heading", { name: "冻结的回复方案" })).toBeInTheDocument();
+    act(() => onNodesChange([{ type: "select", id: "compose", selected: false }]));
+    expect(screen.getByRole("status")).toHaveTextContent("从只读画布或步骤列表");
+    expect(nodeStructure()).toBe(originalNodes);
+    expect(JSON.stringify(flow.props?.edges)).toBe(originalEdges);
+    expect(JSON.stringify(workflow)).toBe(original);
   });
   it("查找只缩小列表，不隐藏图或清空已选设置，清除返回真实清单", async () => {
     render(view());

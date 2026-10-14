@@ -1,4 +1,4 @@
-import { Suspense, StrictMode } from "react";
+import { Suspense, StrictMode, type ReactElement } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -53,8 +53,13 @@ const originalScroll = Element.prototype.scrollIntoView;
 const response = (data: unknown) => ({ ok: true, json: async () => data });
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: Error) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
 function canvas(extra = {}) { return <section id="workflow"><FlowCanvas agentId={agentId} draft={draft} draftUpdatedAt={date} agentTargets={[]} knowledgeSources={[]} toolOptions={[]} recentRuns={[manual, second]} {...extra} /></section>; }
-async function openCard() { await userEvent.click(screen.getByText("核对所选步骤的历史执行证据")); return within(screen.getByLabelText("所选步骤的历史执行证据")); }
-function chooseNode() { fireEvent.change(screen.getByRole("combobox", { name: "定位流程步骤" }), { target: { value: "inspect" } }); }
+async function openCard() { await userEvent.click(await screen.findByText("核对所选步骤的历史执行证据")); return within(screen.getByLabelText("所选步骤的历史执行证据")); }
+async function chooseNode() { await act(async () => { fireEvent.change(screen.getByRole("combobox", { name: "定位流程步骤" }), { target: { value: "inspect" } }); }); }
+async function renderComposed(element: ReactElement) {
+  let view!: ReturnType<typeof render>;
+  await act(async () => { view = render(element); });
+  return view;
+}
 async function parent(withEvidence = false) { const sections = loadAgentWorkspaceSections(detail, { ...pages, ...(withEvidence ? { reviewNavigation: navigation } : {}) }); const workflow = await sections.workflow; return { sections, workflow }; }
 
 beforeEach(() => {
@@ -99,8 +104,8 @@ describe("共享报告校验与当前顶层步骤边界", () => {
 describe("真实工作台近期任务读取与所选步骤历史", () => {
   it("近期查询未完成不阻断真实画布；不自动选最新或读取报告", async () => {
     const recent = deferred<RunSummary[]>(); mocks.recent.mockReturnValue(recent.promise);
-    const { workflow } = await parent(); render(workflow);
-    expect(screen.getByRole("button", { name: "保存草稿" })).toBeDisabled(); chooseNode();
+    const { workflow } = await parent(); await renderComposed(workflow);
+    expect(screen.getByRole("button", { name: "保存草稿" })).toBeDisabled(); await chooseNode();
     expect(screen.getByText("正在读取近期任务清单；画布修改仍可继续。")).toBeVisible();
     expect(mocks.fetch).not.toHaveBeenCalled();
     await act(async () => { recent.resolve([manual, second]); });
@@ -112,12 +117,12 @@ describe("真实工作台近期任务读取与所选步骤历史", () => {
   it("近期查询失败保持画布与验收独立可读，数量未知而非无历史", async () => {
     mocks.recent.mockRejectedValue(new Error("private-query-credential"));
     const { sections, workflow } = await parent(); const evaluationSection = await sections.evaluation;
-    render(<>{workflow}{evaluationSection}</>); chooseNode(); const card = await openCard();
+    await renderComposed(<>{workflow}{evaluationSection}</>); await chooseNode(); const card = await openCard();
     expect(card.getByText(/数量未知/)).toBeVisible(); expect(screen.getByRole("button", { name: "运行全部样例" })).toBeEnabled();
     expect(screen.queryByText(/private-query-credential/)).not.toBeInTheDocument(); expect(mocks.fetch).not.toHaveBeenCalled();
   });
   it("真实父卡片仅GET所选报告，保留草稿填写与原保存修订，不显示内部字段", async () => {
-    const { workflow } = await parent(); render(workflow); chooseNode();
+    const { workflow } = await parent(); await renderComposed(workflow); await chooseNode();
     fireEvent.change(screen.getByLabelText("节点名称"), { target: { value: "尚未保存的本页标题" } });
     const card = await openCard(); fireEvent.change(card.getByRole("combobox", { name: "选择近期任务核对步骤" }), { target: { value: runId } });
     await card.findByText("历史步骤产出");
@@ -187,17 +192,17 @@ describe("真实工作台近期任务读取与所选步骤历史", () => {
 describe("真实验收报告与当前画布组合", () => {
   async function composed() {
     mocks.fetch.mockResolvedValue(response(evalReport)); const { sections, workflow } = await parent(true);
-    const evaluationSection = await sections.evaluation; render(<><section id="workflow">{workflow}</section>{evaluationSection}</>);
+    const evaluationSection = await sections.evaluation; await renderComposed(<><section id="workflow">{workflow}</section>{evaluationSection}</>);
     await screen.findByText("历史步骤产出");
   }
   it("样例未通过但已完成不猜失败原因；关闭弹窗后只定位当前顶层步骤，原草稿不保存", async () => {
     mocks.fetch.mockResolvedValue(response(evalReport));
     const initial = await parent(); const initialEvaluation = await initial.sections.evaluation;
-    const view = render(<><section id="workflow">{initial.workflow}</section>{initialEvaluation}</>);
+    const view = await renderComposed(<><section id="workflow">{initial.workflow}</section>{initialEvaluation}</>);
     fireEvent.change(screen.getByLabelText("样例名称"), { target: { value: "尚未提交的真实父填写" } });
-    chooseNode(); fireEvent.change(screen.getByLabelText("节点名称"), { target: { value: "尚未保存的核对标题" } });
+    await chooseNode(); fireEvent.change(screen.getByLabelText("节点名称"), { target: { value: "尚未保存的核对标题" } });
     const next = await parent(true); const nextEvaluation = await next.sections.evaluation;
-    view.rerender(<><section id="workflow">{next.workflow}</section>{nextEvaluation}</>);
+    await act(async () => { view.rerender(<><section id="workflow">{next.workflow}</section>{nextEvaluation}</>); });
     await screen.findByText("历史步骤产出"); const dialog = within(screen.getByRole("dialog"));
     expect(dialog.getByText("任务执行完成，但样例检查未通过。")).toBeVisible();
     await userEvent.click(dialog.getAllByRole("button", { name: "在当前草稿中查找此步骤" })[0]);

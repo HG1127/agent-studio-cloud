@@ -21,7 +21,7 @@ export function LoopPathOverview({ nodeId, nodes, mode = "draft", onFocusNode }:
         {path.steps.map((step, index) => <li key={step.nodeId} className="flex min-w-0 items-start gap-2">
           <span className="shrink-0 text-slate-500">{index + 1}.</span>
           {onFocusNode ? <button type="button" onClick={() => onFocusNode(step.nodeId)} className="min-w-0 break-words text-left font-semibold text-indigo-700 underline decoration-indigo-200 underline-offset-2 hover:decoration-indigo-600">
-            {step.title}<span className="ml-1 font-normal text-slate-500">· 定位步骤</span>
+            {step.title}{" "}<span className="ml-1 font-normal text-slate-500">· 定位步骤</span>
           </button> : <span className="min-w-0 break-words text-slate-700">{step.title}</span>}
         </li>)}
       </ol> : <p className="mt-2 text-xs leading-5 text-slate-600">当前未列出内部步骤，请先核对下方原因。</p>}

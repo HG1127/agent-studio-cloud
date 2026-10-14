@@ -64,6 +64,7 @@ describe("控制台读取模块初始化失败", () => {
     expect(screen.getByRole("heading", { name: "运行控制台" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "诊断详情暂时无法读取" })).toBeVisible();
     expect(screen.getByText(/最近运行列表读取失败/)).toBeVisible();
+    fireEvent.click(screen.getByRole("tab", { name: "资源限额" }));
     expect(screen.getByText(/资源摘要暂时无法读取，当前上限与可用名额未知/)).toBeVisible();
     expect(screen.getByText(/资源设置历史暂时无法读取，不能按空记录显示/)).toBeVisible();
     expect(screen.queryByRole("heading", { name: "找不到这次运行" })).not.toBeInTheDocument();

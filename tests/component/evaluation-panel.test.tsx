@@ -55,13 +55,16 @@ describe("EvaluationPanel", () => {
       if (revision > 0) use(response);
       return null;
     }
-    function Workbench() {
+    function Workbench({ running }: { running: boolean }) {
       const [revision, setRevision] = useState(0);
       refreshMock.mockImplementation(() => setRevision((value) => value + 1));
-      return <Suspense fallback={<p>正在读取页面</p>}><ReadBoundary revision={revision} /><EvaluationPanel agentId={AGENT_ID} cases={CASES} runs={[]} evaluationRunning /></Suspense>;
+      return <Suspense fallback={<p>正在读取页面</p>}><ReadBoundary revision={revision} /><EvaluationPanel agentId={AGENT_ID} cases={CASES} runs={[]} evaluationRunning={running} /></Suspense>;
     }
-    const { unmount } = render(<Workbench />);
+    const { rerender, unmount } = render(<Workbench running={false} />);
     fireEvent.change(screen.getByLabelText("样例名称"), { target: { value: "刷新中保留的草稿" } });
+    expect(screen.getByLabelText("样例名称")).toHaveValue("刷新中保留的草稿");
+    rerender(<Workbench running />);
+    expect(screen.getByLabelText("样例名称")).toBeDisabled();
     await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
     expect(refreshMock).toHaveBeenCalledTimes(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
@@ -73,6 +76,9 @@ describe("EvaluationPanel", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(refreshMock).toHaveBeenCalledTimes(2);
     expect(screen.getByLabelText("样例名称")).toHaveValue("刷新中保留的草稿");
+    expect(createMock).not.toHaveBeenCalled();
+    expect(updateMock).not.toHaveBeenCalled();
+    expect(startMock).not.toHaveBeenCalled();
     unmount();
   });
   it("汇总结束或离开分区后停止自动读取，不发起验收写操作", async () => {
@@ -279,13 +285,16 @@ describe("EvaluationPanel", () => {
     await user.click(screen.getByRole("button", { name: "添加样例" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("暂时无法确认样例是否保存成功");
-    expect(screen.getByLabelText("样例名称")).toHaveAttribute("readonly");
-    expect(screen.getByLabelText("运行输入")).toHaveAttribute("readonly");
+    expect(screen.getByLabelText("样例名称")).toBeDisabled();
+    expect(screen.getByLabelText("运行输入")).toBeDisabled();
+    expect(screen.getByLabelText("样例名称")).toHaveValue("续约核对");
+    expect(screen.getByLabelText("运行输入")).toHaveValue('{"brief":"真实测试输入"}');
     expect(screen.getByRole("button", { name: "从流程生成样例" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "核对上次保存" }));
 
     await waitFor(() => expect(createMock).toHaveBeenCalledTimes(2));
     expect(createMock.mock.calls[1][0]).toEqual(createMock.mock.calls[0][0]);
+    expect(createMock.mock.calls[1][0]).toBe(createMock.mock.calls[0][0]);
     expect(screen.getByLabelText("运行输入")).toHaveValue("{}");
   });
 

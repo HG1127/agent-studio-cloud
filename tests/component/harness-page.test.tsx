@@ -1,6 +1,7 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import HarnessPage from "@/app/(console)/harness/page";
+import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 
 const mocks = vi.hoisted(() => ({
   listRuns: vi.fn(),
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   replace: vi.fn(),
   getExecutionResourcePolicy: vi.fn(),
   listExecutionPolicyHistory: vi.fn(),
+  safeReadFailures: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mocks.refresh, replace: mocks.replace }) }));
@@ -26,7 +28,9 @@ vi.mock("@/server/queries/harness-policies", () => ({ getHarnessPolicyQuery: vi.
 vi.mock("@/server/actions/save-harness-policy", () => ({ saveHarnessPolicyAction: vi.fn() }));
 vi.mock("@/server/actions/simulate-harness-policy", () => ({ simulateHarnessPolicyAction: vi.fn() }));
 vi.mock("@/server/queries/execution-resources", () => ({ getExecutionResourcePolicy: mocks.getExecutionResourcePolicy, listExecutionPolicyHistory: mocks.listExecutionPolicyHistory }));
-vi.mock("@/server/security/query-error", () => ({ withSafeQueryError: (query: () => Promise<unknown>) => query() }));
+vi.mock("@/server/security/query-error", () => ({ withSafeQueryError: async (query: () => Promise<unknown>, stage: string) => {
+  try { return await query(); } catch (error) { mocks.safeReadFailures(stage, error); throw error; }
+} }));
 
 const runId = "00000000-0000-4000-8000-000000000051";
 const agentId = "00000000-0000-4000-8000-000000000052";
@@ -35,6 +39,7 @@ import { harnessNavigation, harnessConsoleHref } from "@/features/harness/harnes
 
 describe("运行控制台局部证据失败", () => {
   beforeEach(() => {
+    mocks.safeReadFailures.mockReset();
     mocks.listRuns.mockReset().mockResolvedValue([{
       id: runId, agentId, agentName: "合同助手", version: 1, status: "failed",
       sourceType: "manual", agentArchived: false, startedAt: null, finishedAt: null,
@@ -61,7 +66,10 @@ describe("运行控制台局部证据失败", () => {
       { id: agentId, seq: 1, nodeId: null, kind: "harness.policy", level: "info", title: "合同读取通过运行策略检查", detail: null, at: "2026-10-09T01:00:00.000Z" },
       { id: runId, seq: 2, nodeId: null, kind: "harness.context", level: "warn", title: "合同整理超出运行边界", detail: "本次上下文超过服务端限制", at: "2026-10-09T01:01:00.000Z" },
     ]);
-    render(await HarnessPage({ searchParams: Promise.resolve({ run: runId }) }));
+    const page = await HarnessPage({ searchParams: Promise.resolve({ run: runId }) });
+    expect({ failures: mocks.safeReadFailures.mock.calls.filter(([stage]) => stage === "harness-run"), runCalls: mocks.getRunView.mock.calls })
+      .toEqual({ failures: [], runCalls: [[runId, DEMO_WORKSPACE_ID]] });
+    render(page);
     expect(screen.getByText("合同读取通过运行策略检查")).toBeInTheDocument();
     expect(screen.getByText("合同整理超出运行边界")).toBeInTheDocument();
     expect(screen.getByText(/这里可查看已保存的运行策略、上下文检查事件，并核对资源限额和变更记录/)).toBeInTheDocument();
@@ -93,9 +101,10 @@ describe("运行控制台局部证据失败", () => {
       limits: { maxConcurrentChains: 60, maxModelCalls: 300, maxChildRuns: 0 }, reason: "试点核对", createdAt: "2026-10-09T01:00:00.000Z",
     }], nextBeforeRevision: null });
     render(await HarnessPage({ searchParams: Promise.resolve({ run: runId }) }));
+    expect(screen.getByRole("region", { name: "本次证据读取" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "资源限额" }));
     expect(screen.getByText(/当前上限与可用名额未知/)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "资源设置第 1 版" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "本次证据读取" })).toBeInTheDocument();
     expect(screen.queryByText(/服务端默认设置|private-resource-query/)).not.toBeInTheDocument();
     expect(mocks.listExecutionPolicyHistory).toHaveBeenCalledExactlyOnceWith(expect.any(String), { limit: 20 });
   });
@@ -103,9 +112,10 @@ describe("运行控制台局部证据失败", () => {
   it("资源历史读取失败独立保留摘要和任务，不显示无变更", async () => {
     mocks.listExecutionPolicyHistory.mockRejectedValueOnce(new Error("private-resource-history"));
     render(await HarnessPage({ searchParams: Promise.resolve({ run: runId }) }));
+    expect(screen.getByRole("region", { name: "本次证据读取" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "资源限额" }));
     expect(screen.getByText(/资源设置历史暂时无法读取，不能按空记录显示/)).toBeInTheDocument();
     expect(screen.getByText("服务端默认设置")).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "本次证据读取" })).toBeInTheDocument();
     expect(screen.queryByText("本页没有已读取的变更记录。")).not.toBeInTheDocument();
     expect(screen.queryByText(/private-resource-history/)).not.toBeInTheDocument();
   });
@@ -116,9 +126,10 @@ describe("运行控制台局部证据失败", () => {
       capacity: { reservedChains: 1, untrackedActiveRuns: 0, availableSlots: 50 }, assessedAt: "2026-10-09T01:00:00.000Z",
     });
     render(await HarnessPage({ searchParams: Promise.resolve({ run: runId }) }));
+    expect(screen.getByRole("region", { name: "本次证据读取" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "资源限额" }));
     expect(screen.getByText(/当前上限与可用名额未知/)).toBeInTheDocument();
     expect(screen.queryByText("服务端默认设置")).not.toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "本次证据读取" })).toBeInTheDocument();
   });
 
   it("概览区分读取失败和已读取空范围，所有定位入口均有目标", async () => {

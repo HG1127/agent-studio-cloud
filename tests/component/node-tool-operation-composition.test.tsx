@@ -74,14 +74,30 @@ describe("真实画布工具防重父接线", () => {
     expect(saved).toEqual({ ...workflow, nodes: { ...workflow.nodes, [id]: expected } }); expect(fetch).not.toHaveBeenCalled();
   });
   it("仅清除已接受的防重填写，输入映射填写仍保留且不会被保存", async () => {
-    const { workflow } = canvas(), editor = await panel(); fixed(editor);
+    const { workflow, tool } = canvas(), editor = await panel(); fixed(editor);
     fireEvent.click(editor.getByRole("button", { name: "开始配置输入映射" })); fireEvent.click(editor.getByRole("button", { name: "添加字段映射" }));
     const row = within(editor.getByRole("group", { name: "字段映射 1" }));
     fireEvent.change(row.getByLabelText("目标路径第 1 层"), { target: { value: "核对值" } }); fireEvent.change(row.getByLabelText("字段来源"), { target: { value: "literal" } }); fireEvent.change(row.getByLabelText("固定值（数据格式）"), { target: { value: "false" } });
     expect(screen.getByLabelText("未应用配置提醒")).toHaveTextContent("2 处");
     fireEvent.click(editor.getByRole("button", { name: "应用到当前草稿" }));
     expect(screen.getByLabelText("未应用配置提醒")).toHaveTextContent("1 处"); expect(row.getByLabelText("固定值（数据格式）")).toHaveValue("false");
-    const saved = await save(); expect(saved.nodes.top).not.toHaveProperty("inputMapping"); expect(saved.nodes.top.tool).toEqual(workflow.nodes.top.tool); expect(screen.getByLabelText("未应用配置提醒")).toHaveTextContent("1 处");
+    const saveButton = screen.getByRole("button", { name: "保存草稿" });
+    expect(saveButton).toBeDisabled();
+    await userEvent.click(saveButton);
+    expect(saveWorkflowAction).not.toHaveBeenCalled();
+    expect(row.getByLabelText("固定值（数据格式）")).toHaveValue("false");
+    const mapping = within(editor.getByRole("region", { name: "步骤输入字段映射" }));
+    fireEvent.click(mapping.getByRole("button", { name: "重新读取当前草稿" }));
+    expect(screen.getByLabelText("未应用配置提醒")).toHaveTextContent("1 处");
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "明确确认本次修改" }));
+    expect(screen.queryByLabelText("未应用配置提醒")).not.toBeInTheDocument();
+    expect(editor.getByRole("checkbox", { name: "设置业务操作防重" })).toBeChecked();
+    expect(screen.getByRole("button", { name: "保存草稿" })).toBeEnabled();
+    const saved = await save();
+    expect(saved.nodes.top).not.toHaveProperty("inputMapping");
+    expect(saved.nodes.top.tool).toEqual(workflow.nodes.top.tool);
+    expect(saved).toEqual({ ...workflow, nodes: { ...workflow.nodes, top: { ...workflow.nodes.top, toolOperation: { scope: tool.scope, key: { kind: "literal", value: 0 } } } } });
+    expect(fetch).not.toHaveBeenCalled();
   });
   it("真实父回调拒绝不显示成功，保留填写和原组内数据", async () => {
     const tool = nodeToolOperationTestOption(), workflow = nodeToolOperationWorkflow(tool), rejected = vi.fn(() => false);

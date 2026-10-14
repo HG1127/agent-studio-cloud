@@ -33,7 +33,7 @@ function view(selectedVersionId = versionId, targets: AgentTargetOption[] = [tar
   return <WebToolReadiness sourceStatus="production" targets={targets} selectedVersionId={selectedVersionId} />;
 }
 const input = () => screen.getByRole("textbox", { name: /客户需求/ });
-function fill(value = "  原始需求\n保留原文  ") { fireEvent.change(input(), { target: { value } }); }
+function fill(value = "  原始需求\n保留原文  ", control = input()) { fireEvent.change(control, { target: { value } }); }
 async function review(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "用这些填写试运行" }));
   return within(screen.getByRole("dialog", { name: "确认创建真实试运行？" })).getByRole("button", { name: "确认并创建任务" });
@@ -42,7 +42,8 @@ async function begin(user: ReturnType<typeof userEvent.setup>) { await user.clic
 function deferred() {
   let resolve!: (result: StartRunResult) => void;
   let reject!: (error: Error) => void;
-  boundary.start.mockImplementationOnce(() => new Promise<StartRunResult>((done, fail) => { resolve = done; reject = fail; }));
+  const promise = new Promise<StartRunResult>((done, fail) => { resolve = done; reject = fail; });
+  boundary.start.mockReturnValueOnce(promise);
   return { resolve, reject };
 }
 function CommitReply({ reply }: { reply: () => void }) { useLayoutEffect(reply, [reply]); return null; }
@@ -156,9 +157,10 @@ describe("真实网页父组合的指定版本启动边界（作者规格，未�
 
   it("同批确认、改填和重复确认仅提交一次固定版本请求，首次真实限额拒绝恢复编辑", async () => {
     const current = deferred(); const user = userEvent.setup(); render(view()); fill();
+    const control = input();
     const confirm = await review(user);
-    act(() => { fireEvent.click(confirm); fill("不能同批夹带"); fireEvent.click(confirm); });
-    expect(input()).toHaveValue("  原始需求\n保留原文  "); expect(input()).toBeDisabled();
+    act(() => { fireEvent.click(confirm); fill("不能同批夹带", control); fireEvent.click(confirm); });
+    expect(control).toHaveValue("  原始需求\n保留原文  "); expect(control).toBeDisabled();
     expect(boundary.start).toHaveBeenCalledExactlyOnceWith({ agentId, versionId, requestId, input: { need: "  原始需求\n保留原文  " } });
     await act(async () => current.resolve({ ok: false, error: "服务端真实限额拒绝", resourceLimit: { kind: "model-calls", current: 2, maximum: 2 } }));
     expect(screen.getByRole("alert")).toHaveTextContent("服务端真实限额拒绝");
@@ -177,8 +179,8 @@ describe("真实网页父组合的指定版本启动边界（作者规格，未�
     expect(screen.queryByRole("alert")).not.toBeInTheDocument(); expect(boundary.push).not.toHaveBeenCalled();
     expect(screen.queryByRole("link", { name: "打开本次任务详情" })).not.toBeInTheDocument();
     vi.mocked(crypto.randomUUID).mockReturnValue(nextRequestId);
-    const current = deferred(); await begin(user);
-    expect(input()).toBeDisabled(); expect(input()).toHaveValue("A新实例填写");
+    const current = deferred(); const control = input(); await begin(user);
+    expect(control).toBeDisabled(); expect(control).toHaveValue("A新实例填写");
     expect(boundary.start.mock.calls.map((call) => call[0])).toEqual([
       { agentId, versionId, requestId, input: { need: "A旧请求" } },
       { agentId, versionId, requestId: nextRequestId, input: { need: "A新实例填写" } },

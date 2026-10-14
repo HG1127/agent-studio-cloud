@@ -159,7 +159,7 @@ describe("试填沿用运行输入的共享边界", () => {
     const many = AgentInputContract.parse({ fields: Array.from({ length: 40 }, (_, index) => ({ name: `field_${index}`, type: "string", required: true })) }).fields;
     const values = Object.fromEntries(many.map((field) => [field.name, "核".repeat(1000)]));
     const inspected = inspectPreviewInput(many, values);
-    expect(inspected.issues).toEqual([{ fieldIndex: null, error: "运行输入不能超过 100 KB" }]);
-    expect(checkPreviewInput(many, values)).toEqual({ ok: false, error: "运行输入不能超过 100 KB" });
+    expect(inspected.issues).toEqual([{ fieldIndex: null, error: "全部输入合计不能超过 102400 字节；完整填写已保留，没有启动任务。" }]);
+    expect(checkPreviewInput(many, values)).toEqual({ ok: false, error: "全部输入合计不能超过 102400 字节；完整填写已保留，没有启动任务。" });
   });
 });

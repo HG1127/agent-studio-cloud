@@ -39,6 +39,7 @@ const source = { agentName: target.agentName, version: target.version, status: "
 async function resolveServerLeaves(node: ReactNode): Promise<ReactNode> {
   if (Array.isArray(node)) return Promise.all(node.map(resolveServerLeaves));
   if (!isValidElement<{ children?: ReactNode }>(node)) return node;
+  if (typeof node.type === "function" && node.type.name === "PublishedTools") return resolveServerLeaves(await Reflect.apply(node.type, undefined, []));
   if (node.type === WebToolSources) return WebToolSources(node.props as unknown as Parameters<typeof WebToolSources>[0]);
   if (node.type === WebToolTrialResult) return WebToolTrialResult(node.props as unknown as Parameters<typeof WebToolTrialResult>[0]);
   return cloneElement(node, undefined, await resolveServerLeaves(node.props.children));
@@ -46,6 +47,7 @@ async function resolveServerLeaves(node: ReactNode): Promise<ReactNode> {
 async function page(version = historicalId, run = webToolSourceRun.id) {
   return resolveServerLeaves(await WebToolsPage({ searchParams: Promise.resolve({ version, trial: run }) }));
 }
+function targetReads() { return io.targets.mock.calls.slice().sort((left, right) => left.length - right.length); }
 
 beforeEach(() => {
   vi.clearAllMocks(); vi.spyOn(crypto, "randomUUID").mockReturnValue(requestId);
@@ -58,10 +60,10 @@ afterEach(() => vi.restoreAllMocks());
 describe("真实网页父页的历史来源与保存结果组合", () => {
   it("大写合法导航在实际父页内核对同一UUID，不把同版本报成错配", async () => {
     const id = "abcdef04-abcd-4abc-8abc-abcdefabcdef";
-    io.targets.mockResolvedValueOnce([current, { ...target, versionId: id }]);
+    io.targets.mockImplementation((...args: unknown[]) => Promise.resolve(Array.isArray(args[2]) && args[2].includes(id) ? [current, { ...target, versionId: id }] : [current, target]));
     io.run.mockResolvedValueOnce(RunView.parse({ ...webToolSourceRun, versionId: id }));
     render(await page(id.toUpperCase()));
-    expect(io.targets).toHaveBeenCalledExactlyOnceWith(DEMO_WORKSPACE_ID, "", [id]);
+    expect(targetReads()).toEqual([[DEMO_WORKSPACE_ID, ""], [DEMO_WORKSPACE_ID, "", [id]]]);
     expect(io.source.mock.calls.every((call) => call[1] === id)).toBe(true);
     expect(within(screen.getByRole("region", { name: "内部运行结果" })).queryByText(/本页核对的是版本/)).not.toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "用于核对的助手版本" })).toHaveValue(id);
@@ -69,7 +71,7 @@ describe("真实网页父页的历史来源与保存结果组合", () => {
   });
   it("旧UUID重新打开及读取保留历史字段说明，保存结果仍按实际运行契约，读取不写业务", async () => {
     const view = render(await page());
-    expect(io.targets).toHaveBeenCalledExactlyOnceWith(DEMO_WORKSPACE_ID, "", [historicalId]);
+    expect(targetReads()).toEqual([[DEMO_WORKSPACE_ID, ""], [DEMO_WORKSPACE_ID, "", [historicalId]]]);
     expect(screen.getByRole("region", { name: "核对所选历史版本" })).toBeVisible();
     expect(screen.getByRole("textbox", { name: "历史材料（必填）" })).toHaveAccessibleDescription("文字，可以分行填写 只属于历史版本的填写说明");
     const saved = screen.getByRole("region", { name: "内部运行结果" });
@@ -80,7 +82,7 @@ describe("真实网页父页的历史来源与保存结果组合", () => {
     expect(within(saved).getByRole("link", { name: "移除本次关联" })).toHaveAttribute("href", `/web-tools?version=${historicalId}`);
     fireEvent.click(within(saved).getByRole("button", { name: "重新读取状态" }));
     expect(io.refresh).toHaveBeenCalledOnce(); view.rerender(await page());
-    expect(io.targets.mock.calls.map((call) => call[2])).toEqual([[historicalId], [historicalId]]);
+    expect(targetReads()).toEqual([[DEMO_WORKSPACE_ID, ""], [DEMO_WORKSPACE_ID, ""], [DEMO_WORKSPACE_ID, "", [historicalId]], [DEMO_WORKSPACE_ID, "", [historicalId]]]);
     expect(screen.getByRole("combobox", { name: "用于核对的助手版本" })).toHaveValue(historicalId);
     expect(io.start).not.toHaveBeenCalled();
   });
@@ -101,7 +103,7 @@ describe("真实网页父页的历史来源与保存结果组合", () => {
   });
 
   it("停用助手不在有效来源清单，仍独立保留已核归属的历史结果，不开放新任务", async () => {
-    io.targets.mockResolvedValueOnce([current]); io.run.mockResolvedValueOnce(RunView.parse({ ...webToolSourceRun, agentArchived: true }));
+    io.targets.mockImplementation((...args: unknown[]) => Promise.resolve(Array.isArray(args[2]) && args[2].includes(historicalId) ? [current] : [current, target])); io.run.mockResolvedValueOnce(RunView.parse({ ...webToolSourceRun, agentArchived: true }));
     render(await page());
     expect(screen.queryByRole("region", { name: "内部试运行" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "内部运行结果" })).toHaveTextContent("这位助手已停用");
@@ -109,7 +111,7 @@ describe("真实网页父页的历史来源与保存结果组合", () => {
   });
 
   it("来源清单读取失败不吞成零版本，不影响已核对的历史结果", async () => {
-    io.targets.mockRejectedValueOnce(new Error("private-source-list"));
+    io.targets.mockImplementation((...args: unknown[]) => Array.isArray(args[2]) && args[2].includes(historicalId) ? Promise.reject(new Error("private-source-list")) : Promise.resolve([current, target]));
     const { container } = render(await page());
     expect(screen.getByRole("heading", { name: "版本来源清单暂时无法读取" })).toBeVisible();
     expect(screen.getByText("核对后的业务内容")).toBeVisible();

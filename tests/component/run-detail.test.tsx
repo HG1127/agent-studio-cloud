@@ -475,7 +475,9 @@ describe("运行详情步骤数据", () => {
 
     render(await RunDetail({ runId: "00000000-0000-4000-8000-000000000001" }));
 
-    expect(screen.getByRole("status")).toHaveTextContent("已由员工取消");
+    const cancellationStatus = screen.getByText("停止原因").closest('[role="status"]');
+    expect(cancellationStatus).toBeVisible();
+    expect(cancellationStatus).toHaveTextContent("已由员工取消");
   });
 
   it("失联的排队运行展示继续启动入口", async () => {

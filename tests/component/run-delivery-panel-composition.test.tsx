@@ -1,4 +1,5 @@
 import { StrictMode } from "react";
+import { flushSync } from "react-dom";
 import Link from "next/link";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -115,14 +116,14 @@ describe("实际运行详情的成果投递面板", () => {
     expect(request).toHaveBeenCalledTimes(2); expect(posts()).toHaveLength(0);
   });
 
-  it("导出来源变化清除旧反馈、回收旧下载地址，同来源重绘保留反馈与触发焦点", async () => {
+  it("导出来源变化清除旧反馈、回收旧下载地址，同来源重绘保留反馈与触发焦点", () => {
     vi.useFakeTimers();
     try {
       const downloads = exportIo();
-      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       const view = render(<BusinessResultExportButtons markdown="原成果正文" csv="原成果清单" />);
       const trigger = screen.getByRole("button", { name: "导出业务成果文档" });
-      await user.click(trigger);
+      trigger.focus();
+      fireEvent.click(trigger);
       expect(screen.getByText(/已发起下载，请查看浏览器下载记录/)).toBeInTheDocument();
       expect(trigger).toHaveFocus();
       view.rerender(<BusinessResultExportButtons markdown="原成果正文" csv="原成果清单" />);
@@ -133,7 +134,7 @@ describe("实际运行详情的成果投递面板", () => {
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
       expect(downloads.revoke).toHaveBeenCalledExactlyOnceWith("blob:delivery-first");
       expect(screen.getByRole("button", { name: "导出业务成果文档" })).toBe(trigger); expect(trigger).toHaveFocus();
-      await user.click(screen.getByRole("button", { name: "导出交付内容清单" }));
+      fireEvent.click(screen.getByRole("button", { name: "导出交付内容清单" }));
       expect(downloads.create).toHaveBeenCalledTimes(2); expect(downloads.click).toHaveBeenCalledTimes(2);
       expect(screen.getByText(/本页不能确认文件是否已保存/)).toBeInTheDocument();
       view.unmount();
@@ -143,18 +144,17 @@ describe("实际运行详情的成果投递面板", () => {
     } finally { cleanup(); vi.useRealTimers(); }
   });
 
-  it("下载原生点击期间成果换源，旧操作不登记新来源反馈，地址仍只回收一次", async () => {
+  it("下载原生点击期间成果换源，旧操作不登记新来源反馈，地址仍只回收一次", () => {
     vi.useFakeTimers();
     try {
       const downloads = exportIo();
-      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       const view = render(<BusinessResultExportButtons markdown="原成果正文" csv="原成果清单" />);
-      downloads.click.mockImplementationOnce(() => view.rerender(<BusinessResultExportButtons markdown="新成果正文" csv="新成果清单" />));
-      await user.click(screen.getByRole("button", { name: "导出业务成果文档" }));
+      downloads.click.mockImplementationOnce(() => flushSync(() => view.rerender(<BusinessResultExportButtons markdown="新成果正文" csv="新成果清单" />)));
+      fireEvent.click(screen.getByRole("button", { name: "导出业务成果文档" }));
       expect(screen.queryByText(/已发起下载，请查看浏览器下载记录/)).not.toBeInTheDocument();
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
       expect(downloads.revoke).toHaveBeenCalledExactlyOnceWith("blob:delivery-first");
-      await user.click(screen.getByRole("button", { name: "导出交付内容清单" }));
+      fireEvent.click(screen.getByRole("button", { name: "导出交付内容清单" }));
       expect(screen.getByText(/已发起下载，请查看浏览器下载记录/)).toBeInTheDocument();
       view.unmount();
       act(() => { vi.advanceTimersByTime(1000); });
