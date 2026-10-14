@@ -58,7 +58,7 @@ try {
     @{Name='frozen-install';Heap=768;Gate=1792;Args=@($taskCorepack,'install','--frozen-lockfile')},
     @{Name='fresh-audit';Heap=768;Gate=1792;Args=@($taskCorepack,'audit','--prod','--audit-level','high')},
     @{Name='typegen';Heap=1536;Gate=2048;Args=@($taskCorepack,'exec','next','typegen')},
-    @{Name='tsc';Heap=1536;Gate=2048;Args=@($taskCorepack,'exec','tsc','--noEmit')},
+    @{Name='tsc';Heap=4096;Gate=6144;Args=@($taskCorepack,'exec','tsc','--noEmit')},
     @{Name='lint';Heap=768;Gate=2048;Args=@($taskCorepack,'exec','eslint','.','--no-cache','--max-warnings=0')},
     @{Name='full-unit';Heap=768;Gate=2176;Args=@($taskCorepack,'exec','vitest','run','--pool=forks','--maxWorkers=1','--isolate','--no-file-parallelism','--no-cache','--no-fsModuleCache','--retry=0','--execArgv=--max-old-space-size=384','--reporter=default','--reporter=json','--outputFile=github-frontend-basic-reports/unit-results.json')},
     @{Name='helper2';Heap=768;Gate=2176;Args=@($taskCorepack,'exec','vitest','run','--config','tests/helpers/mvp-acceptance-recovery.config.mts','--pool=forks','--maxWorkers=1','--isolate','--no-file-parallelism','--no-cache','--retry=0','--execArgv=--max-old-space-size=384','--reporter=default','--reporter=json','--outputFile=github-frontend-basic-reports/helper-results.json')},
