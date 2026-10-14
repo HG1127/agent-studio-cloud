@@ -4,6 +4,9 @@ import { WorkflowDraft } from "@/contracts/workflow";
 import { validateJsonObjectSchema, validateJsonSchemaDefinition } from "@/server/domain/json-schema";
 import { importedWorkflowIssue } from "@/server/domain/import-agent";
 import { mcpToolInputDefinitionIssue } from "@/server/domain/runtime/mcp-tool";
+import { hasMeaningfulResult } from "@/server/domain/runtime/result-content";
+import { projectWorkflowResult } from "@/server/domain/runtime/output-contract";
+import { validateToolOperationReceipt } from "@/server/domain/runtime/tool-operation";
 
 type Schema = Record<string, unknown>;
 function readInputTypeMatches(declared: unknown, inputType: MvpTemplateInput["inputs"][number]["type"]): boolean {
@@ -42,6 +45,34 @@ function derivedPlanIssue(actionSchema: Schema, planSchema: Schema, fields: stri
     && validateJsonObjectSchema(value as Schema, planSchema) === null)) {
     return "工具允许的固定方案无法包含完整操作参数，暂时无法创建";
   }
+  return null;
+}
+
+function fixedSchemaValues(schema: Schema): unknown[] | null {
+  return Object.hasOwn(schema, "const") ? [schema.const] : Array.isArray(schema.enum) ? schema.enum : null;
+}
+
+function forbidsMeaningfulDelivery(schema: Schema): boolean {
+  const choices = fixedSchemaValues(schema);
+  if (choices) return !choices.some((value) => validateJsonObjectSchema({ value }, {
+    type: "object", properties: { value: schema }, required: ["value"],
+  }) === null && hasMeaningfulResult(value));
+  const types = Array.isArray(schema.type) ? schema.type : schema.type ? [schema.type] : [];
+  return types.length > 0 && types.every((type) => type === "null"
+    || type === "string" && schema.maxLength === 0
+    || type === "array" && schema.maxItems === 0
+    || type === "object" && schema.maxProperties === 0);
+}
+
+function receiptDeliveryIssue(schema: Schema, receiptFields: Record<string, Schema>, names: string[]): string | null {
+  const error = "业务回执规则无法提供所选的完整交付内容，暂时无法创建";
+  if (names.some((name) => forbidsMeaningfulDelivery(receiptFields[name]))) return error;
+  const choices = fixedSchemaValues(schema);
+  const fields = names.map((name) => ({ path: name, required: true, sourceNodeId: "execute", sourcePath: [name] }));
+  if (choices && !choices.some((value) => {
+    const receipt = validateToolOperationReceipt(value, schema, schema);
+    return receipt.ok && projectWorkflowResult({ execute: { ok: true, ...receipt.value } }, fields).ok;
+  })) return error;
   return null;
 }
 
@@ -127,6 +158,8 @@ export function buildMvpTemplate(input: unknown, registry: unknown):
   if (spec.deliverables.some(({ field }) => !Object.hasOwn(receiptFields, field) || !requiredReceipt.includes(field))) {
     return { ok: false, error: "最终交付必须选择业务工具明确保证返回的字段" };
   }
+  const deliveryIssue = receiptDeliveryIssue(action.outputSchema, receiptFields, spec.deliverables.map(({ field }) => field));
+  if (deliveryIssue) return { ok: false, error: deliveryIssue };
   const snapshot = (tool: ToolRegistryOption) => ({
     connector: tool.id, registryToolId: tool.id, action: tool.action, scope: tool.scope,
     risk: tool.risk, protocol: tool.protocol ?? "http-json",
