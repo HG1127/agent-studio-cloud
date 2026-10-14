@@ -62,7 +62,7 @@ try {
     @{Name='lint';Heap=768;Gate=2048;Args=@($taskCorepack,'exec','eslint','.','--no-cache','--max-warnings=0')},
     @{Name='full-unit';Heap=768;Gate=2176;Args=@($taskCorepack,'exec','vitest','run','--pool=forks','--maxWorkers=1','--isolate','--no-file-parallelism','--no-cache','--no-fsModuleCache','--retry=0','--execArgv=--max-old-space-size=384','--reporter=default','--reporter=json','--outputFile=github-frontend-basic-reports/unit-results.json')},
     @{Name='helper2';Heap=768;Gate=2176;Args=@($taskCorepack,'exec','vitest','run','--config','tests/helpers/mvp-acceptance-recovery.config.mts','--pool=forks','--maxWorkers=1','--isolate','--no-file-parallelism','--no-cache','--retry=0','--execArgv=--max-old-space-size=384','--reporter=default','--reporter=json','--outputFile=github-frontend-basic-reports/helper-results.json')},
-    @{Name='build';Heap=1536;Gate=8192;Args=@($taskCorepack,'build')}
+    @{Name='build';Heap=4096;Gate=8192;Args=@($taskCorepack,'build')}
   )
   foreach ($taskDefinition in $taskDefinitions) {
     Assert-Source
