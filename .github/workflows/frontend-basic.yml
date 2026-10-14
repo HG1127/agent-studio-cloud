@@ -1,0 +1,56 @@
+name: 前端独立基础检查（不是完整验收）
+on:
+  push:
+    branches: [codex/ci-github-frontend-basic]
+permissions:
+  contents: read
+jobs:
+  basic:
+    if: github.event.repository.private == false && github.repository == 'HG1127/agent-studio-cloud'
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.23.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: 原平台全量基础检查与证据捕获（无数据库集成）
+        id: basic
+        run: |
+          Write-Output "GitHub source SHA=$env:GITHUB_SHA Ref=$env:GITHUB_REF"
+          & ./scripts/github-frontend-basic.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: 汇总真实状态与完整验收未覆盖项
+        if: always()
+        env:
+          BASIC_OUTCOME: ${{ steps.basic.outcome }}
+        run: |
+          $message = '基础检查失败、未完成或报告归属未知，不算通过'
+          if ($env:BASIC_OUTCOME -ceq 'success' -and (Test-Path -LiteralPath github-frontend-basic-reports/result.json)) {
+            try {
+              $result = Get-Content -Raw -LiteralPath github-frontend-basic-reports/result.json | ConvertFrom-Json
+              if ($result.BasicPassed -ceq $true -and
+                  $result.TriggeredSha -ceq $env:GITHUB_SHA -and
+                  $result.Head -ceq $env:GITHUB_SHA -and
+                  $result.RunId -ceq $env:GITHUB_RUN_ID -and
+                  $result.RunAttempt -ceq $env:GITHUB_RUN_ATTEMPT -and
+                  $result.TriggeredRef -ceq $env:GITHUB_REF) {
+                $message = '基础检查实际通过'
+              }
+            } catch { $message = '基础检查报告无法读取；结果未知，不算通过' }
+          }
+          "$message；完整数据库/Workflow/41/E2E/严格清理/预览/真实供应商未验收。" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      - name: 免费证据保存说明
+        if: always()
+        run: |
+          '本次仅用标准公开执行器与作业日志；不上传制品或远端缓存。原始证据以 FRONTEND_EVIDENCE 分块及哈希保存；完整验收仍未执行。' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+
