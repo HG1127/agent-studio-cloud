@@ -40,7 +40,7 @@ function Invoke-Checked {
 }
 
 if (-not $BasicsOnly) {
-foreach ($name in @("NEON_PROJECT_ID", "NEON_API_KEY")) {
+foreach ($name in @("NEON_PROJECT_ID")) {
   if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name, "Process"))) {
     throw "缺少 $name；完整验收未执行。请配置专用测试项目，不使用共享数据库。"
   }
@@ -61,13 +61,18 @@ $creationAttempted = $false
 $failure = $null
 $cleanupFailed = $false
 $neonArgs = @()
-if (-not $BasicsOnly) { $neonArgs = @("--project-id", $env:NEON_PROJECT_ID, "--config-dir", (Join-Path $reports "neon-config"), "--no-analytics") }
+if (-not $BasicsOnly) {
+  $neonArgs = @("--project-id", $env:NEON_PROJECT_ID, "--no-analytics")
+  if (-not [string]::IsNullOrWhiteSpace($env:NEON_API_KEY)) {
+    $neonArgs += @("--config-dir", (Join-Path $reports "neon-config"))
+  }
+}
 $head = (& git rev-parse HEAD) -join ""
 if ($LASTEXITCODE -ne 0) { throw "不能确认验收提交。" }
 Write-Host "验收提交：$head；报告目录：$reports"
 
 try {
-  $env:NEON_PROFILE = $null
+  if (-not [string]::IsNullOrWhiteSpace($env:NEON_API_KEY)) { $env:NEON_PROFILE = $null }
   $env:DATABASE_URL = "postgresql://ci:ci@127.0.0.1:1/unavailable"
   $env:DATABASE_URL_POOLED = $env:DATABASE_URL
   $env:MODEL_MOCK = "1"
