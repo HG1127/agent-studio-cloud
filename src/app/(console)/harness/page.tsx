@@ -24,21 +24,29 @@ export default async function HarnessPage({ searchParams }: { searchParams: Prom
   const contextFilters = parsedNavigation.context;
   const hasRequested = params.run !== undefined;
   const requestedId = parsedNavigation.state.runId ?? null;
+  // 仅在本次页面读取中共用模块加载，不缓存业务查询结果。
+  let runsQueries: Promise<typeof import("@/server/queries/runs")> | undefined;
+  let traceQueries: Promise<typeof import("@/server/queries/trace")> | undefined;
+  let executionResourceQueries: Promise<typeof import("@/server/queries/execution-resources")> | undefined;
+  const loadRunsQueries = () => runsQueries ??= import("@/server/queries/runs");
+  const loadTraceQueries = () => traceQueries ??= import("@/server/queries/trace");
+  const loadExecutionResourceQueries = () => executionResourceQueries ??= import("@/server/queries/execution-resources");
+
   const [runsResult, requestedRunResult, resourceReadResult, resourceHistoryResult, safetyPolicyResult] = await Promise.allSettled([
     withSafeQueryError(async () => {
-      const { listRuns } = await import("@/server/queries/runs");
+      const { listRuns } = await loadRunsQueries();
       return listRuns(DEMO_WORKSPACE_ID, {}, { limit: 30 });
     }, "harness-runs"),
     requestedId ? withSafeQueryError(async () => {
-      const { getRunView } = await import("@/server/queries/runs");
+      const { getRunView } = await loadRunsQueries();
       return getRunView(requestedId, DEMO_WORKSPACE_ID);
     }, "harness-run") : Promise.resolve(null),
     withSafeQueryError(async () => {
-      const { getExecutionResourcePolicy } = await import("@/server/queries/execution-resources");
+      const { getExecutionResourcePolicy } = await loadExecutionResourceQueries();
       return ExecutionPolicySnapshot.parse(await getExecutionResourcePolicy(DEMO_WORKSPACE_ID));
     }, "harness-resources"),
     withSafeQueryError(async () => {
-      const { listExecutionPolicyHistory } = await import("@/server/queries/execution-resources");
+      const { listExecutionPolicyHistory } = await loadExecutionResourceQueries();
       return ExecutionPolicyHistoryResult.parse(await listExecutionPolicyHistory(DEMO_WORKSPACE_ID, { limit: 20 }));
     }, "harness-resource-history"),
     withSafeQueryError(async () => {
@@ -56,7 +64,7 @@ export default async function HarnessPage({ searchParams }: { searchParams: Prom
   const selectedId = hasRequested ? requestedId : recentRuns?.find((run) => ["failed", "waiting_approval", "waiting_event"].includes(run.status))?.id ?? recentRuns?.[0]?.id ?? null;
   const runResult = !hasRequested && selectedId
     ? (await Promise.allSettled([withSafeQueryError(async () => {
-      const { getRunView } = await import("@/server/queries/runs");
+      const { getRunView } = await loadRunsQueries();
       return getRunView(selectedId, DEMO_WORKSPACE_ID);
     }, "harness-run")]))[0]
     : requestedRunResult;
@@ -70,19 +78,19 @@ export default async function HarnessPage({ searchParams }: { searchParams: Prom
     && requestedId !== null && run !== null && run.id.toLowerCase() === requestedId.toLowerCase();
   const [stepsResult, traceResult, contextResult, historyTraceResult] = run ? await Promise.allSettled([
     withSafeQueryError(async () => {
-      const { listRunSteps } = await import("@/server/queries/runs");
+      const { listRunSteps } = await loadRunsQueries();
       return listRunSteps(run.id, DEMO_WORKSPACE_ID);
     }, "harness-steps"),
     withSafeQueryError(async () => {
-      const { listRecentTrace } = await import("@/server/queries/trace");
+      const { listRecentTrace } = await loadTraceQueries();
       return listRecentTrace(run.id, DEMO_WORKSPACE_ID);
     }, "harness-trace"),
     contextFilters.success ? withSafeQueryError(async () => {
-      const { getRunContext } = await import("@/server/queries/runs");
+      const { getRunContext } = await loadRunsQueries();
       return RunReportFile.shape.context.parse(await getRunContext(run.id, DEMO_WORKSPACE_ID));
     }, "harness-context") : Promise.resolve(null),
     historyAllowed ? withSafeQueryError(async () => {
-      const { listTrace } = await import("@/server/queries/trace");
+      const { listTrace } = await loadTraceQueries();
       return listTrace(run.id, DEMO_WORKSPACE_ID);
     }, "harness-trace-history") : Promise.resolve(null),
   ]) : [null, null, null, null];

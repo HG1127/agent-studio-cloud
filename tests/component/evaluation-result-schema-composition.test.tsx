@@ -223,18 +223,31 @@ describe("真实验收父组件的结果结构规则保存边界", () => {
     expect(screen.getByRole("button", { name: "编辑" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "运行全部样例" })).toBeDisabled();
     const lockedName = screen.getByLabelText("样例名称");
-    lockedName.removeAttribute("disabled");
-    fireEvent.change(lockedName, { target: { value: "失败核对后另写的名称" } });
-    expect(lockedName).toHaveValue(kind === "update" ? "续约样例" : "新结构样例");
+    const originalDisabled = lockedName.getAttribute("disabled");
+    expect(originalDisabled).not.toBeNull();
+    try {
+      lockedName.removeAttribute("disabled");
+      fireEvent.change(lockedName, { target: { value: "失败核对后另写的名称" } });
+      expect(lockedName).toHaveValue(kind === "update" ? "续约样例" : "新结构样例");
+    } finally {
+      if (originalDisabled !== null) lockedName.setAttribute("disabled", originalDisabled);
+    }
     fireEvent.click(screen.getByRole("button", { name: "核对上次保存" }));
     expect(action).toHaveBeenCalledTimes(3);
     expect(action.mock.calls[2][0]).toBe(originalPayload);
     if (kind === "update") expect(action.mock.calls[2][0].expectedUpdatedAt).toBe(updatedAt);
     expect(screen.getByRole("status", { name: "样例保存状态" })).toHaveTextContent("正在保存");
+    expect(screen.getByLabelText("样例名称")).toBeDisabled();
+    expect(screen.getByLabelText("结果结构规则（开发者格式）")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "编辑" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "运行全部样例" })).toBeDisabled();
     await act(async () => { retry.resolve({ ok: false, error: "再次核对仍失败" }); await retry.promise; });
     expect(screen.getByLabelText("样例名称")).toBeDisabled();
     expect(screen.getByLabelText("结果结构规则（开发者格式）")).toBeDisabled();
     expect(screen.getByLabelText("结果结构规则（开发者格式）")).toHaveValue(JSON.stringify(replacement));
+    expect(screen.getByRole("status", { name: "样例保存状态" })).toHaveTextContent("上次样例保存结果待核对");
+    expect(screen.getByRole("button", { name: "编辑" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "运行全部样例" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "核对上次保存" })).toBeEnabled();
     expect(screen.queryByText(/验收样例已保存/)).not.toBeInTheDocument();
   });

@@ -488,9 +488,9 @@ describe("实际运行详情的成果投递面板", () => {
     const next = deferred<Response>();
     request.mockResolvedValueOnce(readResponse()).mockReturnValueOnce(next.promise);
     render(<RunDeliveryPanel runId={A} />);
+    const refresh = within(panel()).getByRole("button", { name: "重新读取投递状态" });
     await prepare(user);
     const stale = screen.getByRole("button", { name: "确认申请补投" });
-    const refresh = within(panel()).getByRole("button", { name: "重新读取投递状态" });
     act(() => { refresh.click(); stale.click(); });
     expect(posts()).toHaveLength(0);
     expect(screen.queryByRole("dialog", { name: "确认申请补投？" })).not.toBeInTheDocument();

@@ -163,9 +163,11 @@ describe("真实工作台近期任务读取与所选步骤历史", () => {
   it("可序列化thenable不必是原生Promise，仅读取完成后展示真实选项", async () => {
     const pending = deferred<RunSummary[] | null>();
     const thenable: Promise<RunSummary[] | null> = { then: pending.promise.then.bind(pending.promise), catch: pending.promise.catch.bind(pending.promise), finally: pending.promise.finally.bind(pending.promise), [Symbol.toStringTag]: "Promise" };
-    render(<Suspense fallback={<p>仅历史卡等待</p>}><NodeExecutionEvidence agentId={agentId} nodeId="inspect" recentRuns={thenable} /></Suspense>);
+    await renderComposed(<Suspense fallback={<p>仅历史卡等待</p>}><NodeExecutionEvidence agentId={agentId} nodeId="inspect" recentRuns={thenable} /></Suspense>);
     expect(screen.getByText("仅历史卡等待")).toBeVisible();
     await act(async () => { pending.resolve([manual]); }); const card = await openCard();
+    expect(screen.queryByText("仅历史卡等待")).not.toBeInTheDocument();
+    expect(card.getByRole("option", { name: "近期任务 1 · 手动任务 · 版本 V4 · 2026/10/09 09:00" })).toHaveValue(runId);
     expect(card.getByRole("combobox", { name: "选择近期任务核对步骤" })).toHaveValue(""); expect(mocks.fetch).not.toHaveBeenCalled();
   });
   it("完整保存记录分页与失败过滤不删数据，未知状态不冒充失败", () => {
