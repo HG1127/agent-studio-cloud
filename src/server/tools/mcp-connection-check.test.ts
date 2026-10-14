@@ -21,6 +21,21 @@ function transport(listResult: unknown = { tools: [{ name: "lookup", inputSchema
   return { fetchImpl: fetchImpl as typeof fetch, methods };
 }
 describe("官方 SDK 只读连接检查（模拟传输，无外部请求）", () => {
+  const rejectedHeaders: Array<Record<string, string>> = [
+    { Cookie: "header-private" }, { "SET-cookie": "header-private" },
+    { Authorization: "header-private", authorization: "other-private" },
+    { "bad header": "header-private" }, { Authorization: "header-private\r\ninjection" },
+    Object.fromEntries(Array.from({ length: 21 }, (_, index) => [`X-Fixture-${index}`, "header-private"])),
+    { Authorization: "x".repeat(4001) },
+  ];
+  it.each(rejectedHeaders)("直接检查入口也在握手前拒绝非法请求头 %#", async (headers) => {
+    const fetchImpl = vi.fn(async () => { throw new Error("不允许网络调用"); });
+    const result = await checkMcpConnection({ ...registration, headers }, fetchImpl);
+    expect(result).toEqual({ status: "configuration-error", message: "连接配置无效，请管理员检查", tools: [] });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain("header-private");
+    expect(JSON.stringify(result)).not.toContain("other-private");
+  });
   it("只握手和读取目录，绝不调用工具", async () => {
     const { fetchImpl, methods } = transport();
     expect((await checkMcpConnection(registration, fetchImpl)).status).toBe("available");

@@ -7,6 +7,18 @@ import { MAX_MCP_SESSION_BYTES } from "@/contracts/mcp-tool";
 import { mcpToolDefinitionIssue, mcpToolInputDefinitionIssue } from "@/server/domain/runtime/mcp-tool";
 const forbiddenHeaders = new Set(["connection", "content-length", "host", "cookie", "set-cookie", "proxy-authorization", "proxy-authenticate", "keep-alive", "te", "trailer", "transfer-encoding", "upgrade"]);
 
+export function mcpHeadersAreValid(headers: McpConnectionRegistration["headers"]): boolean {
+  const entries = Object.entries(headers), names = new Set<string>();
+  if (entries.length > 20) return false;
+  for (const [name, value] of entries) {
+    const normalized = name.toLowerCase();
+    if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) || typeof value !== "string" || value.length > 4000
+      || /[\r\n]/.test(value) || forbiddenHeaders.has(normalized) || names.has(normalized)) return false;
+    names.add(normalized);
+  }
+  return true;
+}
+
 export function parseMcpConnections(raw: string | undefined): McpConnectionRegistration[] | null {
   if (!raw?.trim()) return [];
   if (new TextEncoder().encode(raw).byteLength > 1024 * 1024) return null;
@@ -16,13 +28,7 @@ export function parseMcpConnections(raw: string | undefined): McpConnectionRegis
     for (const registration of registrations) {
       if (ids.has(registration.id)) return null;
       ids.add(registration.id);
-      const headers = Object.entries(registration.headers), names = new Set<string>();
-      if (headers.length > 20) return null;
-      for (const [name, value] of headers) {
-        const normalized = name.toLowerCase();
-        if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) || /[\r\n]/.test(value) || forbiddenHeaders.has(normalized) || names.has(normalized)) return null;
-        names.add(normalized);
-      }
+      if (!mcpHeadersAreValid(registration.headers)) return null;
       const actions = new Set<string>();
       for (const tool of registration.tools) {
         if (toolIds.has(tool.registryToolId) || actions.has(tool.action) || mcpToolInputDefinitionIssue(tool.inputSchema)

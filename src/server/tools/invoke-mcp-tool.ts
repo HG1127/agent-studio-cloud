@@ -2,6 +2,7 @@ import { createMCPClient, MCPClientError, type MCPClient } from "@ai-sdk/mcp";
 import { McpToolArguments, MAX_MCP_ARGUMENT_BYTES, MAX_MCP_DIRECTORY_PAGES, MAX_MCP_DIRECTORY_PAGE_TOOLS, MAX_MCP_RESPONSE_BYTES, MAX_MCP_SESSION_BYTES, MAX_MCP_TRANSPORT_REQUESTS } from "@/contracts/mcp-tool";
 import { isPassiveJsonData } from "@/contracts/json";
 import { validateJsonObjectSchema } from "@/server/domain/json-schema";
+import { mcpHeadersAreValid } from "@/server/domain/mcp-connection";
 import { mcpToolDefinitionIssue, mcpToolInputDefinitionIssue, normalizeMcpToolResult } from "@/server/domain/runtime/mcp-tool";
 import type { ToolRegistration } from "@/server/tools/tool-registry";
 import type { ToolInvocationResult } from "@/server/tools/invoke-http-tool";
@@ -18,6 +19,7 @@ export async function invokeMcpTool(args: {
     || tool.operationKind === "action" && (tool.businessIdempotency !== true || !tool.businessIdempotencyRetentionMs)) {
     return fail("远端工具尚未确认操作性质或重复调用防重保证");
   }
+  if (!mcpHeadersAreValid(tool.headers)) return fail("远端工具连接配置无效，请检查服务端登记");
   const definitionIssue = mcpToolInputDefinitionIssue(tool.inputSchema);
   if (definitionIssue) return fail(definitionIssue);
   if (!isPassiveJsonData(args.input, MAX_MCP_ARGUMENT_BYTES)) return fail("工具参数无效或超过容量限制");
@@ -39,6 +41,7 @@ export async function invokeMcpTool(args: {
   const boundedFetch: typeof fetch = async (url, options) => {
     if (String(url) !== endpoint || ++requestCount > MAX_MCP_TRANSPORT_REQUESTS) { boundaryFailure = true; throw new McpBoundaryError(); }
     const headers = new Headers(options?.headers);
+    headers.delete("cookie");
     headers.delete("idempotency-key");
     if (typeof options?.body === "string") {
       if (new TextEncoder().encode(options.body).byteLength > MAX_MCP_ARGUMENT_BYTES + 1024) { boundaryFailure = true; throw new McpBoundaryError(); }
@@ -48,7 +51,7 @@ export async function invokeMcpTool(args: {
     }
     let response: Response;
     try {
-      response = await (args.fetchImpl ?? fetch)(url, { ...options, headers, redirect: "error",
+      response = await (args.fetchImpl ?? fetch)(url, { ...options, headers, redirect: "error", credentials: "omit",
         signal: options?.signal ? AbortSignal.any([controller.signal, options.signal]) : controller.signal });
     } catch (error) { networkFailure = true; throw error; }
     const declared = Number(response.headers.get("content-length") ?? 0);

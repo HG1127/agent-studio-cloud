@@ -19,6 +19,41 @@ async function fixture(options: Parameters<typeof startMcpTestServer>[0] = {}) {
 }
 
 describe("真实 MCP SDK 对本地 Streamable HTTP 服务", () => {
+  const rejectedHeaders: Array<Record<string, string>> = [
+    { Cookie: "header-private" }, { "SET-cookie": "header-private" },
+    { Authorization: "header-private", authorization: "other-private" },
+    { "bad header": "header-private" }, { Authorization: "header-private\r\ninjection" },
+    Object.fromEntries(Array.from({ length: 21 }, (_, index) => [`X-Fixture-${index}`, "header-private"])),
+    { Authorization: "x".repeat(4001) },
+  ];
+  it.each(rejectedHeaders)("非法请求头在发现和业务调用前拒绝，不泄露凭据 %#", async (headers) => {
+    const tool = parseToolRegistry(JSON.stringify([{
+      id: "lookup", name: "读取资料", action: "lookup", scope: "read", protocol: "mcp-streamable-http",
+      operationKind: "read", endpoint: "https://fixture.example/mcp", inputSchema: { type: "object" },
+    }]))[0];
+    expect(tool).toBeDefined();
+    const fetchImpl = vi.fn(async () => { throw new Error("不允许网络调用"); });
+    const result = await invokeMcpTool({ tool: { ...tool, headers }, action: tool.action, idempotencyKey: "fixture-key", input: {}, outputs: {}, fetchImpl });
+    expect(result).toEqual({ ok: false, error: "远端工具连接配置无效，请检查服务端登记", retryable: false });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain("header-private");
+    expect(JSON.stringify(result)).not.toContain("other-private");
+  });
+  it("合法认证仍执行，发现与业务请求都禁用环境 Cookie", async () => {
+    const { server, tool } = await fixture();
+    const fetchImpl = vi.fn(async (url: Parameters<typeof fetch>[0], options?: RequestInit) => {
+      expect(options?.credentials).toBe("omit");
+      expect(options?.redirect).toBe("error");
+      expect(new Headers(options?.headers).get("cookie")).toBeNull();
+      expect(new Headers(options?.headers).get("authorization")).toBe("Bearer test-only");
+      return fetch(url, options);
+    });
+    await expect(invokeMcpTool({ tool, action: tool.action, idempotencyKey: "fixture-key", input: { customerId: "c1" }, outputs: {}, fetchImpl }))
+      .resolves.toEqual({ ok: true, output: { customerId: "c1", amount: 0, active: false } });
+    expect(fetchImpl).toHaveBeenCalled();
+    expect(server.messages.filter((message) => message.method === "tools/call")).toHaveLength(1);
+    expect(server.wasClosed()).toBe(true);
+  });
   it.each([
     { type: "object", description: "汉".repeat(12_000) },
     { type: "object", description: "x".repeat(32 * 1024 - 20) },
