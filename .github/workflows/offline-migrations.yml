@@ -1,0 +1,38 @@
+name: 后端离线生成迁移（不是数据库验收）
+on:
+  push:
+    branches: [codex/ci-backend-migrations-offline]
+permissions:
+  contents: read
+jobs:
+  generate:
+    if: github.repository == 'HG1127/agent-studio-cloud' && github.event.repository.private == false
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: 只准备锁定依赖并离线生成文件
+        id: generate
+        run: |
+          & ./scripts/github-offline-migrations.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: 核对真实生成结果，不声称数据库已验收
+        if: always()
+        env:
+          GENERATION_OUTCOME: ${{ steps.generate.outcome }}
+        run: |
+          $taskPath='github-offline-migration-reports/result.json'
+          if (-not (Test-Path -LiteralPath $taskPath)) { throw 'Missing generation report' }
+          $taskResult=Get-Content -Raw -LiteralPath $taskPath | ConvertFrom-Json
+          if ($taskResult.Head -cne $env:GITHUB_SHA -or $taskResult.TriggeredSha -cne $env:GITHUB_SHA -or $taskResult.RunId -cne $env:GITHUB_RUN_ID -or $taskResult.RunAttempt -cne $env:GITHUB_RUN_ATTEMPT -or $taskResult.TriggeredRef -cne $env:GITHUB_REF) { throw 'Report identity mismatch' }
+          if ($env:GENERATION_OUTCOME -cne 'success' -or $taskResult.GenerationPassed -isnot [bool] -or -not $taskResult.GenerationPassed) { throw 'Offline generation did not pass' }
+          '仅完成离线文件生成；未连接数据库、未应用迁移、未做完整验收。原文件通过本作业日志帧传回，须本地复审。' >> $env:GITHUB_STEP_SUMMARY
