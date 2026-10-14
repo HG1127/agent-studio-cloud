@@ -240,7 +240,7 @@ describe("真实验收父组件的结果结构规则保存边界", () => {
     expect(screen.getByLabelText("样例名称")).toBeDisabled();
     expect(screen.getByLabelText("结果结构规则（开发者格式）")).toBeDisabled();
     expect(screen.getByRole("button", { name: "编辑" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "运行全部样例" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "正在处理…" })).toBeDisabled();
     await act(async () => { retry.resolve({ ok: false, error: "再次核对仍失败" }); await retry.promise; });
     expect(screen.getByLabelText("样例名称")).toBeDisabled();
     expect(screen.getByLabelText("结果结构规则（开发者格式）")).toBeDisabled();
