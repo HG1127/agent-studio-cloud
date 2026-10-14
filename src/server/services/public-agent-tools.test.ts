@@ -52,7 +52,7 @@ describe("公开工具事务服务 mock", () => {
     const token = result.token;
     const values = mocks.values.mock.calls.map(([value]) => value);
     expect(values.some((value) => value.tokenHash === publicToolHash(token))).toBe(true);
-    expect(JSON.stringify(values)).not.toContain(result.token);
+    expect(JSON.stringify(values)).not.toContain(token);
     expect(JSON.stringify(result.key)).not.toContain("tokenHash");
   });
   it("同一管理请求键序重排仍回放原记录，Unicode 文字保留且不依赖地区比较", async () => {

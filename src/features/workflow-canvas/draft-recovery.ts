@@ -23,19 +23,42 @@ function fingerprint(draft: WorkflowDraftType): string {
   return `${serialized.length}:${(hash >>> 0).toString(16).padStart(8, "0")}`;
 }
 
+export function draftsEquivalent(left: WorkflowDraftType, right: WorkflowDraftType): boolean {
+  return fingerprint(left) === fingerprint(right);
+}
+
 export function draftRecoveryKey(agentId: string): string {
   return `${DRAFT_RECOVERY_KEY_PREFIX}${agentId}`;
 }
 
-export function serializeDraftRecovery(savedDraft: WorkflowDraftType, localDraft: WorkflowDraftType): string {
-  return JSON.stringify({ formatVersion: FORMAT_VERSION, savedFingerprint: fingerprint(savedDraft), draft: localDraft });
+export function serializeDraftRecovery(savedDraft: WorkflowDraftType, localDraft: WorkflowDraftType, submittedDraft?: WorkflowDraftType | null): string {
+  return JSON.stringify({
+    formatVersion: FORMAT_VERSION,
+    savedFingerprint: fingerprint(savedDraft),
+    submittedFingerprint: submittedDraft ? fingerprint(submittedDraft) : undefined,
+    draft: localDraft,
+  });
+}
+
+export function readDraftRecoveryCopy(raw: string | null): Record<string, unknown> | null {
+  if (!raw) return null;
+  try {
+    const record = JSON.parse(raw) as Record<string, unknown>;
+    if (record.formatVersion !== FORMAT_VERSION) return null;
+    const copy = record.draft;
+    return copy && typeof copy === "object" && !Array.isArray(copy) ? copy as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
 }
 
 export function restoreDraftRecovery(raw: string | null, savedDraft: WorkflowDraftType): WorkflowDraftType | null {
   if (!raw) return null;
   try {
     const record = JSON.parse(raw) as Record<string, unknown>;
-    if (record.formatVersion !== FORMAT_VERSION || record.savedFingerprint !== fingerprint(savedDraft)) return null;
+    if (record.formatVersion !== FORMAT_VERSION) return null;
+    const currentFingerprint = fingerprint(savedDraft);
+    if (record.savedFingerprint !== currentFingerprint && record.submittedFingerprint !== currentFingerprint) return null;
     const parsed = WorkflowDraft.safeParse(record.draft);
     return parsed.success ? parsed.data : null;
   } catch {
