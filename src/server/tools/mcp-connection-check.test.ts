@@ -3,6 +3,8 @@ import { once } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import { McpConnectionRegistration } from "@/contracts/mcp-connection";
 import { checkMcpConnection } from "./mcp-connection-check";
+import { inspectMcpConnection, listMcpConnections } from "@/server/queries/mcp-connections";
+import { POST } from "@/app/api/mcp/connections/check/route";
 const registration = McpConnectionRegistration.parse({ id: "service", name: "查询服务", workspaceId: "00000000-0000-4000-8000-000000000001", endpoint: "https://service.example/mcp", headers: { Authorization: "Bearer server-secret" }, tools: [{ registryToolId: "lookup", name: "查询记录", action: "lookup", inputSchema: { type: "object" } }] });
 function transport(listResult: unknown = { tools: [{ name: "lookup", inputSchema: { type: "object" } }] }, expectedEndpoint = registration.endpoint) {
   const methods: string[] = [];
@@ -133,11 +135,9 @@ it("本机真实 HTTP 假服务经登记查询和 API 检查入口，只握手�
     if (!address || typeof address === "string") throw new Error("本机测试端口无效");
     const endpoint = `http://127.0.0.1:${address.port}/mcp?server=fake`;
     vi.stubEnv("TOOL_REGISTRY_JSON", JSON.stringify([{ id: "local-lookup", name: "本机查询", action: "lookup", scope: "local-test", operationKind: "read", protocol: "mcp-streamable-http", endpoint, headers: { Authorization: "Bearer local-test-secret" }, inputSchema: { type: "object" }, outputSchema: { type: "object" } }]));
-    const { inspectMcpConnection, listMcpConnections } = await import("@/server/queries/mcp-connections");
     expect(listMcpConnections()).toEqual([{ id: "local-lookup", name: "本机查询" }]);
     const first = await inspectMcpConnection("local-lookup");
     expect(first.status).toBe("available");
-    const { POST } = await import("@/app/api/mcp/connections/check/route");
     const response = await POST(new Request("https://studio.example/api/mcp/connections/check", { method: "POST", headers: { origin: "https://studio.example", "content-type": "application/json" }, body: JSON.stringify({ connectionId: "local-lookup" }) }));
     expect(response.status).toBe(200);
     const data = await response.json(); expect(data.status).toBe("available");

@@ -9,6 +9,53 @@ const script = readFileSync(new URL("../../acceptance.ps1", import.meta.url), "u
 const guard = readFileSync(new URL("../../scripts/check-local-acceptance.mjs", import.meta.url), "utf8");
 
 describe("完整本地验收入口", () => {
+  it.runIf(process.platform === "win32").each(["cli-session", "api-key"])("真实入口的%s认证选择保留隔离与清理", (mode) => {
+    const directory = mkdtempSync(path.join(tmpdir(), "neon-auth-entry-"));
+    try {
+      const entry = path.join(directory, "acceptance.ps1");
+      writeFileSync(entry, script);
+      const command = `
+$ErrorActionPreference = 'Stop'
+$global:neonCalls = @()
+function git { $global:LASTEXITCODE = 0; if ($args[0] -eq 'rev-parse') { 'mock-frozen-head' } }
+function pnpm { $global:LASTEXITCODE = 0 }
+function npx {
+  $global:neonCalls += ,@{ args=@($args); profile=$env:NEON_PROFILE }
+  $global:LASTEXITCODE = if ($args -contains 'create') { 7 } else { 0 }
+  if ($args -contains 'list') { '[]' }
+}
+$env:NEON_PROJECT_ID = 'dedicated-test-project'
+$env:NEON_API_KEY = if ('${mode}' -eq 'api-key') { 'dummy-test-key' } else { '' }
+$env:NEON_PROFILE = 'owned-cli-profile'
+$env:DATABASE_URL = 'original-unconfirmed-value'
+$failed = $false
+try { & '${entry.replaceAll("'", "''")}' } catch { $failed = $true }
+Write-Output ('RESULT:' + (@{ failed=$failed; calls=$global:neonCalls; profile=$env:NEON_PROFILE; restored=($env:DATABASE_URL -eq 'original-unconfirmed-value') } | ConvertTo-Json -Depth 5 -Compress))
+`;
+      const result = spawnSync("pwsh", ["-NoProfile", "-Command", command], { encoding: "utf8", timeout: 10_000 });
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stdout + result.stderr).not.toContain("dummy-test-key");
+      const record = JSON.parse(result.stdout.split("RESULT:")[1].trim());
+      expect(record.failed).toBe(true);
+      expect(record.restored).toBe(true);
+      expect(record.profile).toBe("owned-cli-profile");
+      expect(record.calls).toHaveLength(3);
+      const branchNames = record.calls.map((call: { args: string[] }) => {
+        expect(call.args).toContain("--project-id");
+        expect(call.args).toContain("dedicated-test-project");
+        expect(call.args).not.toContain("--api-key");
+        expect(call.args.includes("--config-dir")).toBe(mode === "api-key");
+        return call.args.find((arg: string) => arg.startsWith("local-acceptance-"));
+      });
+      expect(branchNames[0]).toMatch(/^local-acceptance-[a-f0-9]{32}$/);
+      expect(branchNames[1]).toBe(branchNames[0]);
+      expect(record.calls[0].args).toContain("create");
+      expect(record.calls[1].args).toContain("delete");
+      expect(record.calls[2].args).toContain("list");
+      for (const call of record.calls) expect(call.profile ?? "").toBe(mode === "api-key" ? "" : "owned-cli-profile");
+    } finally { rmSync(directory, { recursive: true }); }
+  }, 15_000);
   it.runIf(process.platform === "win32").each(["success", "audit-failure", "dirty", "env-file"])("实际基础入口%s不需要Neon且绝不进入库路径", (scenario) => {
     const directory = mkdtempSync(path.join(tmpdir(), "basic-entry-test-"));
     try {
@@ -88,7 +135,7 @@ Write-Output ('RESULT:' + (@{ rejected=$rejected; stage=$stage; category=$failur
     expect(record.rejected).toBe(true);
     expect(record.stage).toBe(label);
     expect(record.exitCode).toBe(code);
-  });
+  }, 15_000);
   it.runIf(process.platform === "win32")("真实PowerShell入口在缺配置时立即失败，不启动数据库或测试", () => {
     const result = spawnSync("pwsh", ["-NoProfile", "-File", "acceptance.ps1"], {
       encoding: "utf8", timeout: 10_000,
@@ -98,7 +145,7 @@ Write-Output ('RESULT:' + (@{ rejected=$rejected; stage=$stage; category=$failur
     expect(result.status).not.toBe(0);
     expect(result.stdout + result.stderr).toContain("NEON_PROJECT_ID");
     expect(result.stdout).not.toContain("锁定依赖安装");
-  });
+  }, 15_000);
   it.each(["passed", "skipped", "failed", "missing"])("本地真实守卫拒绝新增两项的%s异常", (status) => {
     const directory = mkdtempSync(path.join(tmpdir(), "local-guard-test-"));
     try {
@@ -141,7 +188,9 @@ Write-Output ('RESULT:' + (@{ rejected=$rejected; stage=$stage; category=$failur
     expect(script).not.toMatch(/skipTests|skipDatabase|passWithNoTests|testNamePattern/);
   });
   it("配置缺失时在任何执行前失败，拒绝加载共享环境文件", () => {
-    expect(script.indexOf('foreach ($name in @("NEON_PROJECT_ID", "NEON_API_KEY"))')).toBeLessThan(script.indexOf('Invoke-Checked "锁定依赖安装"'));
+    const projectPreflight = script.indexOf('foreach ($name in @("NEON_PROJECT_ID"))');
+    expect(projectPreflight).toBeGreaterThanOrEqual(0);
+    expect(projectPreflight).toBeLessThan(script.indexOf('Invoke-Checked "锁定依赖安装"'));
     expect(script).toContain('Test-Path -LiteralPath $file');
     expect(script).toContain('postgresql://ci:ci@127.0.0.1:1/unavailable');
   });
