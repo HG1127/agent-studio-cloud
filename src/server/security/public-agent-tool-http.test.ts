@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   MAX_PUBLIC_TOOL_RECEIPT_BYTES, PublicToolCallResult, PublicToolListResult, PublicToolManageResult, PublicToolReadResult,
 } from "@/contracts/public-agent-tool";
+import { PublicToolKeyManagementResult } from "@/contracts/public-tool-key-management";
 import { publicToolTestView, PUBLIC_TOOL_TEST_IDS as ids } from "../../../tests/fixtures/public-agent-tool";
 import { publicToolHttpCredential, publicToolHttpResponse, publicToolHttpUnavailable, readPublicToolHttpBody } from "./public-agent-tool-http";
 
@@ -35,6 +36,10 @@ describe("公开工具HTTP契约映射", () => {
     { name: "管理", status: 201, result: PublicToolManageResult.parse({ ok: true, tool: publicToolTestView(), recordedRevision: 2 }) },
     { name: "列表", status: 200, result: PublicToolListResult.parse({ ok: true, tools: [publicToolTestView()], truncated: false }) },
     { name: "读取", status: 200, result: PublicToolReadResult.parse({ ok: true, tool: publicToolTestView() }) },
+    { name: "凭据元数据", status: 200, result: PublicToolKeyManagementResult.parse({
+      ok: true, tool: publicToolTestView(), keys: [{ keyId: ids.key, name: "业务调用方", expiresAt: null,
+        revokedAt: null, createdAt: "2026-10-12T00:00:00.000Z" }], truncated: false,
+    }) },
     { name: "异步接收", status: 202, result: callResult() },
   ])("已有$name成功契约按$status返回，不添加业务或送达声明", async ({ result, status }) => {
     const response = publicToolHttpResponse(result, status);
