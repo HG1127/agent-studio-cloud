@@ -38,7 +38,7 @@ function launch(): WorkflowAcceptanceProcessLifecycle["launch"] {
 }
 function fixture() {
   const observed = launch(), listeners: Array<(code: number) => void> = [], originalFailure = new Error("simulated-native-exit");
-  const nativeExit = vi.fn((..._args: Parameters<typeof process.exit>): never => { throw originalFailure; });
+  const nativeExit = vi.fn((..._args: Parameters<typeof process.exit>): never => { void _args; throw originalFailure; });
   const runtime = { pid: process.pid, exitCode: undefined as typeof process.exitCode, exit: nativeExit,
     once: vi.fn((event: "exit", listener: (code: number) => void) => { if (event !== "exit") throw new Error(); listeners.push(listener); }) };
   const sources = { lifecycleFingerprint: observed.lifecycleFingerprint!, assertUnchanged: vi.fn(() => {}), close: vi.fn(() => {}) };

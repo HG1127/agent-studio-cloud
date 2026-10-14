@@ -153,7 +153,7 @@ export function createCoreWorldAdapter(original, hub = requireOwnedWorkflowHub()
       hub.assertDispatchOpen(); assertCaches();
       const world = await invoke("createWorld", []); hub.assertRuntimeProfile(); hub.assertObservedWorld(world); return world;
     },
-    createWorldFromModule(_module) { return hub.recordFailure(); },
+    createWorldFromModule(_module) { void _module; return hub.recordFailure(); },
     getWorld() { return get("getWorld"); },
     getWorldHandlers() { return get("getWorldHandlers"); },
     setWorld(world) {

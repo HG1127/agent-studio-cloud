@@ -246,9 +246,8 @@ describe("owned workflow lifecycle memory recorder", () => {
   });
 
   it.each(["clock", "uuid"] as const)("rejects a swallowed synchronous %s reentry before any factory", (mode) => {
-    let recorder: ReturnType<typeof createOwnedWorkflowProcessLifecycle>;
     const reenter = () => { try { recorder.reserveSubject("esbuild-service"); } catch { /* 模拟提供方吞掉异常，不能让外层工厂继续。 */ } };
-    recorder = fixture({
+    const recorder: ReturnType<typeof createOwnedWorkflowProcessLifecycle> = fixture({
       now: () => { if (mode === "clock") reenter(); return start; },
       uuid: () => { if (mode === "uuid") reenter(); return otherRuntimeId; },
     }).recorder;
@@ -369,8 +368,8 @@ describe("owned workflow lifecycle memory recorder", () => {
   });
 
   it("rechecks allocation after an onEnter clock swallows reentry while preserving existing settlement", () => {
-    let recorder: ReturnType<typeof createOwnedWorkflowProcessLifecycle>, reenter = false;
-    recorder = fixture({ phase: "business", now: () => {
+    let reenter = false;
+    const recorder: ReturnType<typeof createOwnedWorkflowProcessLifecycle> = fixture({ phase: "business", now: () => {
       if (reenter) {
         reenter = false;
         try { recorder.reserveSubject("esbuild-service"); } catch { /* 提供方吞掉重入错误，进入提交仍必须拒绝。 */ }

@@ -18,16 +18,16 @@ function fixture() {
   const allTests = vi.fn(function* () { yield test; });
   const testModule = { type: "module", moduleId: entry, state: vi.fn(() => moduleState), errors: vi.fn(() => []), children: { allTests } };
   test.module = testModule;
-  const initialize = vi.fn((_scope: object) => { order.push("initialize"); });
-  const imports = vi.fn(async (_file: string) => { order.push("import"); return { initializeAcceptanceObservedRealm: initialize }; });
+  const initialize = vi.fn((_scope: object) => { void _scope; order.push("initialize"); });
+  const imports = vi.fn(async (_file: string) => { void _file; order.push("import"); return { initializeAcceptanceObservedRealm: initialize }; });
   const result = { testModules: [testModule], unhandledErrors: runErrors };
-  const start = vi.fn(async (_filters: string[]) => { order.push("start"); return result; });
+  const start = vi.fn(async (_filters: string[]) => { void _filters; order.push("start"); return result; });
   const close = vi.fn(async () => { order.push("close"); });
   const getUnhandledErrors = vi.fn(() => errors), getTestModules = vi.fn(() => [testModule]);
   const context = { import: imports, start, close, exit: vi.fn(), state: { getUnhandledErrors, getTestModules },
     config: { root, watch: false, pool: "owned-workflow-forks", maxWorkers: 1, fileParallelism: false, isolate: true,
       testTimeout: 240_000, hookTimeout: 240_000, poolRunner: { name: "owned-workflow-forks", createPoolWorker: vi.fn() } } };
-  const createVitest = vi.fn(async (_options: object) => { order.push("create"); return context; });
+  const createVitest = vi.fn(async (_options: object) => { void _options; order.push("create"); return context; });
   const collect = vi.fn(async () => { order.push("collect"); });
   const readExitCode = vi.fn(() => exit.code);
   const markFailure = vi.fn(() => { if (exit.code === undefined || exit.code === 0) exit.code = 1; });

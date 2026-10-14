@@ -244,10 +244,10 @@ describe("原生参数只按自有数据描述符读取（模拟API）", () => {
     const current = fixture();
     class Script { runInContext() { return undefined; } }
     const api = { vm: { createContext: vi.fn(() => ({})), runInContext: vi.fn(() => ({})), Script,
-      compileFunction: vi.fn((_code: string, _params?: string[], _options?: Record<string, unknown>) => "compiled") },
+      compileFunction: vi.fn((_code: string, _params?: string[], _options?: Record<string, unknown>) => { void _code; void _params; void _options; return "compiled"; }) },
       workers: { Worker: class {} }, children: { fork: vi.fn((_entry: string, _args: string[], _options: {
         env: Record<string, string>; execArgv: string[]; stdio?: string[];
-      }) => "forked"), spawn: vi.fn(), spawnSync: vi.fn(), exec: vi.fn(), execSync: vi.fn(), execFile: vi.fn(), execFileSync: vi.fn() },
+      }) => { void _entry; void _args; void _options; return "forked"; }), spawn: vi.fn(), spawnSync: vi.fn(), exec: vi.fn(), execSync: vi.fn(), execFile: vi.fn(), execFileSync: vi.fn() },
       syncBuiltins: vi.fn() };
     const compile = api.vm.compileFunction, fork = api.children.fork, createContext = api.vm.createContext;
     const options = { forkEntry: path.resolve("fixtures/forks.js"), preloadUrl: "file:///fixture/owned-workflow-preload.mjs",

@@ -64,14 +64,14 @@ class MockChild extends EventEmitter {
   stdout = new MockPipe();
   stderr = null;
   ref = vi.fn<() => void>();
-  kill = vi.fn((_signal?: string) => true);
+  kill = vi.fn((_signal?: string) => { void _signal; return true; });
 }
 function collectorFixture() {
   const current = profileFixture(), profile = current.build(), child = new MockChild();
   const originalKill = child.kill, originalEnd = child.stdin.end, originalRef = child.ref;
   const originalStdinRef = child.stdin.ref, originalStdoutRef = child.stdout.ref, originalDestroy = child.stdout.destroy;
   const environment: Record<string, string> = Object.assign(Object.create(null), { SystemRoot: "C:/Windows", WINDIR: "C:/Windows", DATABASE_URL: "fixture-do-not-copy", MODEL_SECRET: "fixture-do-not-copy" });
-  const nativeSpawn = vi.fn((_command: string, _args: string[], _options: object) => child);
+  const nativeSpawn = vi.fn((_command: string, _args: string[], _options: object) => { void _command; void _args; void _options; return child; });
   const assertCreationAllowed = vi.fn<() => void>(), onFailure = vi.fn<(error: Error) => void>();
   const configuration = { profile, cwd: current.cwd, temporaryDirectory: current.temporaryDirectory, environment, nativeSpawn, assertCreationAllowed, onFailure, io: current.io };
   const collector = createOwnedBuildServiceCollector(configuration);

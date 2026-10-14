@@ -461,7 +461,7 @@ describe("固定本地 profile 的 core world 缓存与懒加载入口", () => {
 describe("mock 原生 Node 创建入口，不启动真实 VM 或工作进程", () => {
   function native() {
     const globals = new WeakMap<object, object>();
-    class Script { runInContext(..._args: unknown[]): unknown { return undefined; } }
+    class Script { runInContext(..._args: unknown[]): unknown { void _args; return undefined; } }
     Object.defineProperty(Script.prototype, "runInContext", { value: vi.fn(), writable: true, configurable: true });
     const factory = vi.fn(() => { const context = {}, scope = {}; globals.set(context, scope); return context; });
     const run = vi.fn((_code: string, context: object) => globals.get(context));
