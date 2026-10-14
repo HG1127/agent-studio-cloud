@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, rm, realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +10,8 @@ vi.mock("postgres", () => ({ default: mocks.factory }));
 import { observeEmptyOwnedDatabase, runWorkflowAcceptanceBridge } from "../../scripts/workflow-acceptance-case-bridge";
 
 let directory: string;
+let fixtureParent: string;
+let ownedFixture = false;
 const domain = "11111111-1111-4111-8111-111111111111";
 function fixture() {
   const context = WorkflowAcceptanceContext.parse({ version: 1, batchId: "22222222-2222-4222-8222-222222222222",
@@ -26,7 +28,12 @@ function fixture() {
 }
 
 beforeEach(async () => {
-  directory = await mkdtemp(path.join(os.tmpdir(), "owned-bridge-mock-"));
+  ownedFixture = false;
+  directory = "";
+  fixtureParent = "";
+  fixtureParent = await realpath(os.tmpdir());
+  directory = await mkdtemp(path.join(fixtureParent, "owned-bridge-mock-"));
+  ownedFixture = true;
   vi.useFakeTimers(); vi.setSystemTime(new Date("2026-01-01T00:01:00Z"));
   mocks.query.mockReset().mockResolvedValue([{ user_relations: "0" }]);
   mocks.end.mockReset().mockResolvedValue(undefined);
@@ -36,9 +43,11 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   vi.useRealTimers(); vi.unstubAllEnvs(); vi.restoreAllMocks();
+  if (!ownedFixture) return;
   const absolute = path.resolve(directory);
-  if (!path.isAbsolute(directory) || path.dirname(absolute) !== path.resolve(os.tmpdir())
+  if (!path.isAbsolute(directory) || !path.isAbsolute(fixtureParent) || path.dirname(absolute) !== path.resolve(fixtureParent)
     || !path.basename(absolute).startsWith("owned-bridge-mock-")) throw new Error("拒绝清理非自建样本目录");
+  ownedFixture = false;
   await rm(absolute, { recursive: true, force: false });
 });
 
