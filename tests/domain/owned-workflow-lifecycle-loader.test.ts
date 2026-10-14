@@ -103,7 +103,7 @@ function failedClose(session: Session, model: ReturnType<typeof memoryFs>) {
   expect(model.closes).toHaveLength(count);
 }
 
-beforeEach(() => native.strip.mockReset().mockImplementation((source) => source));
+beforeEach(() => { native.strip.mockReset().mockImplementation((source) => source); });
 
 describe("owned lifecycle finite source session", () => {
   it("uses twelve sorted raw sources, seven TS values, and no type-only observation edge", () => {

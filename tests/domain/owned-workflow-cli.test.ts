@@ -73,7 +73,11 @@ describe("自有 CLI 的纯内存编排，不加载 SDK/数据库或创建进程
     if (kind === "thenable") namespace = { initializeAcceptanceObservedRealm: () => ({ get then() { trap(); return undefined; } }) };
     if (kind === "non-void") namespace = { initializeAcceptanceObservedRealm: () => true };
     if (kind === "ordinary-getter") namespace = Object.defineProperty({}, "initializeAcceptanceObservedRealm", { get: trap });
-    if (kind === "namespace-proxy") namespace = new Proxy(namespace, { get: trap, getOwnPropertyDescriptor: trap, getPrototypeOf: trap, ownKeys: trap });
+    // 原生 Promise 交付样本必须读取 then；其他访问仍由 trap 检测。
+    if (kind === "namespace-proxy") namespace = new Proxy(namespace, {
+      get: (target, key) => { void target; return key === "then" ? undefined : trap(); },
+      getOwnPropertyDescriptor: trap, getPrototypeOf: trap, ownKeys: trap,
+    });
     const dependencies = { ...current.dependencies, createVitest: async () => ({ ...current.context, import: async () => namespace }) };
     await expect(runOwnedWorkflowCli(dependencies)).rejects.toThrow(); expect(current.start).not.toHaveBeenCalled();
     expect(current.close).toHaveBeenCalledTimes(1); expect(current.collect).toHaveBeenCalledTimes(1); expect(trap).not.toHaveBeenCalled();

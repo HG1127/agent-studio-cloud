@@ -106,7 +106,8 @@ beforeEach(() => {
     return { executable: file, fingerprint: sha(io.readFileSync(file)) };
   });
   dependencies.opendir.mockImplementation(async (directory: string) => {
-    onEnumeration?.(++enumerationCount);
+    enumerationCount += 1;
+    onEnumeration?.(enumerationCount);
     const names = [...table.keys()].filter((file) => path.dirname(file) === fileKey(directory)).map((file) => path.basename(file));
     if (enumerationCount % 2 === 0) names.reverse();
     return { async *[Symbol.asyncIterator]() {

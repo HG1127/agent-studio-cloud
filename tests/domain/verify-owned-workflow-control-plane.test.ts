@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, rm, realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,6 +9,8 @@ import { verifyOwnedWorkflowControlPlane } from "../helpers/verify-owned-workflo
 const pg = vi.hoisted(() => vi.fn(() => { throw new Error("终结不应构造PG"); }));
 vi.mock("postgres", () => ({ default: pg }));
 let directory: string, request: Extract<WorkflowAcceptanceBridgeRequest, { operation: "finalize" }>;
+let fixtureParent: string;
+let ownedFixture = false;
 let observed: WorkflowAcceptanceObservedRecord, environment: NodeJS.ProcessEnv;
 const pins = [
   ["creation-provenance.json", "MVP_WORKFLOW_ACCEPTANCE_CREATION_SHA256"],
@@ -22,7 +24,12 @@ async function pin(file: string, key: string, value: unknown) {
 }
 const absentFetch = () => vi.fn<typeof fetch>().mockImplementation(async () => new Response(null, { status: 404 }));
 beforeEach(async () => {
-  directory = await mkdtemp(path.join(os.tmpdir(), "owned-control-mock-"));
+  ownedFixture = false;
+  directory = "";
+  fixtureParent = "";
+  fixtureParent = await realpath(os.tmpdir());
+  directory = await mkdtemp(path.join(fixtureParent, "owned-control-mock-"));
+  ownedFixture = true;
   const domain = "11111111-1111-4111-8111-111111111111";
   const context = { version: 1, batchId: "22222222-2222-4222-8222-222222222222", caseId: "harness-retry",
     sourceCommit: "a".repeat(40), sourceFingerprint: "b".repeat(64), executionDomainId: domain,
@@ -56,9 +63,11 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   expect(pg).not.toHaveBeenCalled(); vi.restoreAllMocks();
+  if (!ownedFixture) return;
   const absolute = path.resolve(directory);
-  if (!path.isAbsolute(directory) || path.dirname(absolute) !== path.resolve(os.tmpdir())
+  if (!path.isAbsolute(directory) || !path.isAbsolute(fixtureParent) || path.dirname(absolute) !== path.resolve(fixtureParent)
     || !path.basename(absolute).startsWith("owned-control-mock-")) throw new Error("拒绝清理非自建样本目录");
+  ownedFixture = false;
   await rm(absolute, { recursive: true, force: false });
 });
 
