@@ -1,4 +1,5 @@
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { WorkflowAcceptanceRuntimeInventory, type WorkflowAcceptanceRuntimeLaunch } from "@/contracts/workflow-runtime-inventory";
 import type { AcceptancePoolCloseReceipt } from "@/contracts/workflow-execution-lifecycle";
@@ -342,5 +343,122 @@ describe("独占有界原始事实文件", () => {
     expect(() => writeOwnedRuntimeInventory(directory, current.hub.snapshot(), files as unknown as typeof import("node:fs"))).toThrow();
     if (["hardlink", "write-error"].includes(kind)) expect(files.closeSync).toHaveBeenCalledWith(10);
     else expect(files.writeFileSync).not.toHaveBeenCalled();
+  });
+
+  type Written = NonNullable<Parameters<typeof writeOwnedRuntimeInventory>[3]>;
+  function writtenFixture() {
+    const files = io(), inventory = fixture().hub.snapshot(), directory = path.resolve("fixtures/raw-facts");
+    const written = vi.fn<Written>();
+    const invoke = (onWritten: Written = written) => writeOwnedRuntimeInventory(directory, inventory,
+      files as unknown as typeof import("node:fs"), onWritten);
+    const bytes = () => {
+      const value = files.writeFileSync.mock.calls[0]?.[1];
+      if (!Buffer.isBuffer(value)) throw new Error("模拟写盘缺少原Buffer");
+      return value;
+    };
+    return { files, inventory, directory, written, invoke, bytes };
+  }
+
+  it("同次回执只引用实际写入Buffer的启动标识与SHA，旧路径返回不变", () => {
+    const current = writtenFixture(), result = current.invoke(), bytes = current.bytes();
+    const actual = current.written.mock.calls[0]?.[0];
+    expect(result).toBe(path.join(current.directory, `${launch().launchId}.json`));
+    expect(current.written).toHaveBeenCalledTimes(1);
+    expect(actual).toEqual({ launchId: launch().launchId, sha256: createHash("sha256").update(bytes).digest("hex") });
+    expect(JSON.parse(bytes.toString("utf8")).launch.launchId).toBe(actual?.launchId);
+    expect(current.files.openSync).toHaveBeenCalledWith(result, "wx", 0o600);
+    expect(current.files.closeSync).toHaveBeenCalledTimes(1);
+  });
+
+  it("回执在write/fsync/close都完成后同步发布且不可变，不暴露Buffer或额外输入", () => {
+    const current = writtenFixture(), order: string[] = [];
+    current.inventory.privateDetail = "simulated-private-field";
+    current.files.writeFileSync.mockImplementation(() => { order.push("write"); });
+    current.files.fsyncSync.mockImplementation(() => { order.push("fsync"); });
+    current.files.closeSync.mockImplementation(() => { order.push("close"); });
+    current.written.mockImplementation((reference) => {
+      order.push("written"); expect(Object.isFrozen(reference)).toBe(true);
+      expect(Object.keys(reference).sort()).toEqual(["launchId", "sha256"]);
+      expect(Reflect.set(reference, "sha256", "e".repeat(64))).toBe(false);
+      expect(JSON.stringify(reference)).not.toContain("simulated-private-field");
+      expect(reference).not.toHaveProperty("bytes"); expect(reference).not.toHaveProperty("cleanupPermitted");
+    });
+    current.invoke(); expect(order).toEqual(["write", "fsync", "close", "written"]);
+  });
+
+  it("输入收集时刻或启动标识随后改变也不重新编码库存或派生另一份回执", () => {
+    const current = writtenFixture(), stringify = vi.spyOn(JSON, "stringify");
+    try {
+      current.files.writeFileSync.mockImplementation(() => {
+        current.inventory.collectedAt = "2026-10-13T00:00:01.000Z";
+        current.inventory.launch.launchId = poolId;
+      });
+      current.invoke();
+      const actual = JSON.parse(current.bytes().toString("utf8"));
+      expect(actual.collectedAt).toBe(time); expect(actual.launch.launchId).toBe(launch().launchId);
+      expect(current.written.mock.calls[0]?.[0]).toEqual({ launchId: launch().launchId,
+        sha256: createHash("sha256").update(current.bytes()).digest("hex") });
+      expect(stringify.mock.calls.filter(([value]) => value !== null && typeof value === "object"
+        && Object.hasOwn(value, "collectedAt"))).toHaveLength(1);
+    } finally { stringify.mockRestore(); }
+  });
+
+  it.each(["write", "fsync", "close"])("模拟%s抛错没有成功回执且未知关闭不重试", (stage) => {
+    const current = writtenFixture(), fault = () => { throw new Error("simulated-io-failure"); };
+    if (stage === "write") current.files.writeFileSync.mockImplementation(fault);
+    if (stage === "fsync") current.files.fsyncSync.mockImplementation(fault);
+    if (stage === "close") current.files.closeSync.mockImplementation(fault);
+    expect(() => current.invoke()).toThrow(); expect(current.written).not.toHaveBeenCalled();
+    expect(current.files.openSync).toHaveBeenCalledTimes(1); expect(current.files.closeSync).toHaveBeenCalledTimes(1);
+    expect(current.files.writeFileSync).toHaveBeenCalledTimes(1);
+    expect(current.files.fsyncSync).toHaveBeenCalledTimes(stage === "write" ? 0 : 1);
+  });
+
+  it.each(["write", "fsync", "close"])("模拟%s返回未知值没有成功回执且不重复关闭", (stage) => {
+    const current = writtenFixture();
+    if (stage === "write") current.files.writeFileSync.mockReturnValue(true);
+    if (stage === "fsync") current.files.fsyncSync.mockReturnValue(true);
+    if (stage === "close") current.files.closeSync.mockReturnValue(true);
+    expect(() => current.invoke()).toThrow(); expect(current.written).not.toHaveBeenCalled();
+    expect(current.files.closeSync).toHaveBeenCalledTimes(1); expect(current.files.openSync).toHaveBeenCalledTimes(1);
+  });
+
+  it("模拟close返回Promise不是同步关闭事实，不发布回执或重试", () => {
+    const current = writtenFixture(); current.files.closeSync.mockReturnValue(Promise.resolve());
+    expect(() => current.invoke()).toThrow("原始事实文件关闭结果未确认");
+    expect(current.written).not.toHaveBeenCalled(); expect(current.files.closeSync).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["write", "fsync", "close"])("模拟%s修改实际Buffer不能重新hash接受漂移", (stage) => {
+    const current = writtenFixture(), mutate = () => { current.bytes()[0] = 0; };
+    if (stage === "write") current.files.writeFileSync.mockImplementation(mutate);
+    if (stage === "fsync") current.files.fsyncSync.mockImplementation(mutate);
+    if (stage === "close") current.files.closeSync.mockImplementation(mutate);
+    expect(() => current.invoke()).toThrow("原始事实写入字节已变化"); expect(current.written).not.toHaveBeenCalled();
+    expect(current.files.writeFileSync).toHaveBeenCalledTimes(1); expect(current.files.fsyncSync).toHaveBeenCalledTimes(1);
+    expect(current.files.closeSync).toHaveBeenCalledTimes(1); expect(current.files.openSync).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["throw", "non-void", "promise"])("回执接收器%s导致失败但不重新写入或关闭已存原件", (kind) => {
+    const current = writtenFixture();
+    current.written.mockImplementation(() => {
+      if (kind === "throw") throw new Error("simulated-private-callback-error");
+      return kind === "promise" ? Promise.resolve() : true;
+    });
+    expect(() => current.invoke()).toThrow("原始事实写盘回执未确认");
+    expect(current.written).toHaveBeenCalledTimes(1); expect(current.files.writeFileSync).toHaveBeenCalledTimes(1);
+    expect(current.files.fsyncSync).toHaveBeenCalledTimes(1); expect(current.files.closeSync).toHaveBeenCalledTimes(1);
+    expect(WorkflowAcceptanceRuntimeInventory.safeParse(JSON.parse(current.bytes().toString("utf8"))).success).toBe(true);
+  });
+
+  it.each(["null", "object", "proxy"])("未知回执入口%s在文件IO或代理trap之前被拒绝", (kind) => {
+    const current = writtenFixture(), trap = vi.fn();
+    const callback = kind === "null" ? null : kind === "object" ? {} : new Proxy(current.written, {
+      apply: trap, get: trap, getOwnPropertyDescriptor: trap, getPrototypeOf: trap,
+    });
+    expect(() => Reflect.apply(writeOwnedRuntimeInventory, undefined,
+      [current.directory, current.inventory, current.files, callback])).toThrow("原始事实写盘回执入口未确认");
+    expect(current.files.lstatSync).not.toHaveBeenCalled(); expect(current.files.openSync).not.toHaveBeenCalled();
+    expect(current.written).not.toHaveBeenCalled(); expect(trap).not.toHaveBeenCalled();
   });
 });

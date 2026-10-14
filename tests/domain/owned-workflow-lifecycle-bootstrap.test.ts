@@ -1,9 +1,12 @@
 import * as fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WORKFLOW_PROCESS_LIFECYCLE_DIRECTORY, WorkflowAcceptanceProcessLifecycle } from "../../src/contracts/workflow-process-lifecycle";
-import { installOwnedWorkflowLifecycleExit } from "../helpers/owned-workflow-preload.mjs";
+import { WorkflowAcceptanceRuntimeInventory, type WorkflowAcceptanceRuntimeLaunch } from "../../src/contracts/workflow-runtime-inventory";
+import { createOwnedWorkflowRuntimeCollector, installOwnedWorkflowLifecycleExit } from "../helpers/owned-workflow-preload.mjs";
+import { createOwnedWorkflowInstrumentation } from "../helpers/owned-workflow-instrumentation.mjs";
 import { createOwnedWorkflowProcessLifecycle } from "../workflow/owned-workflow-process-lifecycle";
 import { createOwnedWorkflowProcessLifecycleWriter } from "../helpers/write-owned-workflow-process-lifecycle";
 
@@ -46,6 +49,30 @@ function fixture() {
   const final = () => WorkflowAcceptanceProcessLifecycle.parse(JSON.parse(fs.readFileSync(file(), "utf8")));
   const emit = (code = 0) => { if (listeners.length !== 1) throw new Error("模拟监听数量错误"); listeners[0](code); };
   return { observed, runtime, sources, io, nativeExit, originalFailure, listeners, install, file, final, emit };
+}
+
+function collectionFixture() {
+  const current = fixture(); current.observed.phase = "business"; current.observed.runtimeLaunchId = id(3);
+  const lifecycle = current.install(), runtimeDirectory = path.join(fixtureRoot, "runtime-inventory");
+  fs.mkdirSync(runtimeDirectory, { mode: 0o700 });
+  const runtimeLaunch: WorkflowAcceptanceRuntimeLaunch = { version: 1, context: current.observed.context,
+    launchId: id(3), processId: process.pid, threadId: 0, startedAt: current.observed.startedAt,
+    adapterFingerprint: "d".repeat(64), sdkFactoryFingerprint: "e".repeat(64), configuredVm: "node" };
+  const host = {}, instrumentation = createOwnedWorkflowInstrumentation(runtimeLaunch, { host });
+  instrumentation.captureNativeRealm("host", null, () => host); instrumentation.publish(host);
+  const closeReceipt = () => ({ ownerId: runtimeLaunch.context.executionDomainId, state: "callbacks_completed",
+    poolIds: [], completedIds: [], failedIds: [], unknownIds: [], cleanupPermitted: false });
+  instrumentation.hub.attachNativeRegistry(host, Object.freeze({ snapshot: closeReceipt, close: async () => closeReceipt() }));
+  const hub = { shutdown: vi.fn(async () => { await instrumentation.hub.shutdown(); }),
+    assertCollectionReady: vi.fn(() => instrumentation.hub.assertCollectionReady()),
+    snapshot: vi.fn(() => instrumentation.hub.snapshot()) };
+  const build = { close: vi.fn(async () => {}), assertClosed: vi.fn(() => {}) };
+  const receiver = { recordRuntimeInventory: vi.fn((reference: NonNullable<WorkflowAcceptanceProcessLifecycle["runtimeInventoryRef"]>) => lifecycle.recordRuntimeInventory(reference)),
+    observeFailure: vi.fn((failure: Parameters<typeof lifecycle.observeFailure>[0]) => lifecycle.observeFailure(failure)) };
+  const collect = createOwnedWorkflowRuntimeCollector(hub, build, receiver, runtimeDirectory, current.runtime, current.io);
+  const runtimeFile = path.join(runtimeDirectory, runtimeLaunch.launchId + ".json");
+  const readRuntime = () => WorkflowAcceptanceRuntimeInventory.parse(JSON.parse(fs.readFileSync(runtimeFile, "utf8")));
+  return { ...current, lifecycle, runtimeDirectory, runtimeFile, readRuntime, hub, build, receiver, collect };
 }
 
 describe("早期生命周期同步退出监听（模拟事件，不证明实际Node终态）", () => {
@@ -141,5 +168,217 @@ describe("早期生命周期同步退出监听（模拟事件，不证明实际N
     expect(hooks).toBeGreaterThanOrEqual(0); expect(contract).toBeGreaterThan(hooks); expect(recorder).toBeGreaterThan(contract);
     expect(listener).toBeGreaterThan(recorder); expect(native).toBeGreaterThan(listener); expect(profile).toBeGreaterThan(native);
     expect(source).not.toMatch(/^import\s.*(?:write-owned-workflow-process-lifecycle|\.\.\/workflow\/owned-workflow-process-lifecycle)/m);
+  });
+});
+
+describe("同次运行原文件与退出记录接线（模拟收尾，不证明实际SDK停止）", () => {
+  it("最终退出记录只关联同次实际写入字节，不重新收集另一份库存", async () => {
+    const current = collectionFixture(); await current.collect();
+    const bytes = fs.readFileSync(current.runtimeFile), reference = { launchId: id(3), sha256: createHash("sha256").update(bytes).digest("hex") };
+    expect(current.lifecycle.inspect().runtimeInventoryRef).toEqual(reference);
+    expect(current.receiver.recordRuntimeInventory).toHaveBeenCalledExactlyOnceWith(reference);
+    expect(current.hub.snapshot).toHaveBeenCalledTimes(1); expect(current.readRuntime().cleanupPermitted).toBe(false);
+    current.emit(); expect(current.final().runtimeInventoryRef).toEqual(reference);
+    expect(current.final().cleanupPermitted).toBe(false); expect(current.final()).not.toHaveProperty("natural");
+    expect(current.final().failures).not.toContain("runtime-collection");
+    expect(fs.readFileSync(current.runtimeFile)).toEqual(bytes);
+  });
+  it.each([undefined, 0, 2, "3"] as const)("成功收集保留原退出状态%s，不把已有失败改为成功", async (code) => {
+    const current = collectionFixture(); current.runtime.exitCode = code;
+    await current.collect(); expect(current.runtime.exitCode).toBe(code ?? 0);
+  });
+  it("关闭与复核完成后才写入，并在实际文件关闭后登记引用", async () => {
+    const current = collectionFixture(), order: string[] = [];
+    const shutdown = current.hub.shutdown.getMockImplementation()!, snapshot = current.hub.snapshot.getMockImplementation()!;
+    current.hub.shutdown.mockImplementation(async () => { order.push("shutdown"); await shutdown(); });
+    current.build.close.mockImplementation(async () => { order.push("build-close"); });
+    current.build.assertClosed.mockImplementation(() => { order.push("build-assert"); });
+    const assertReady = current.hub.assertCollectionReady.getMockImplementation()!;
+    current.hub.assertCollectionReady.mockImplementation(() => { order.push("ready"); assertReady(); });
+    current.hub.snapshot.mockImplementation(() => { order.push("snapshot"); return snapshot(); });
+    vi.spyOn(current.io, "writeFileSync").mockImplementation((fd, bytes) => { order.push("write"); fs.writeFileSync(fd, bytes); });
+    vi.spyOn(current.io, "fsyncSync").mockImplementation((fd) => { order.push("fsync"); fs.fsyncSync(fd); });
+    vi.spyOn(current.io, "closeSync").mockImplementation((fd) => { order.push("close"); fs.closeSync(fd); });
+    current.receiver.recordRuntimeInventory.mockImplementation((reference) => {
+      order.push("reference"); expect(fs.readFileSync(current.runtimeFile).byteLength).toBeGreaterThan(0);
+      current.lifecycle.recordRuntimeInventory(reference);
+    });
+    await current.collect(); expect(order).toEqual(["shutdown", "build-close", "build-assert", "ready", "snapshot", "write", "fsync", "close", "reference"]);
+  });
+  it("并发及后续重复收集复用唯一任务，不二次写盘", async () => {
+    const current = collectionFixture(); let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const shutdown = current.hub.shutdown.getMockImplementation()!;
+    current.hub.shutdown.mockImplementation(async () => { await gate; await shutdown(); });
+    const first = current.collect(), second = current.collect(); expect(second).toBe(first);
+    await Promise.resolve(); expect(fs.readdirSync(current.runtimeDirectory)).toEqual([]);
+    release(); await first; expect(current.collect()).toBe(first); await current.collect();
+    expect(current.hub.shutdown).toHaveBeenCalledTimes(1); expect(current.build.close).toHaveBeenCalledTimes(1);
+    expect(current.hub.snapshot).toHaveBeenCalledTimes(1); expect(current.receiver.recordRuntimeInventory).toHaveBeenCalledTimes(1);
+    expect(fs.readdirSync(current.runtimeDirectory)).toEqual([id(3) + ".json"]);
+  });
+  it.each([1, 7, "13"] as const)("收尾等待期间出现失败码%s仍保留，不由旧成功状态覆盖", async (code) => {
+    const current = collectionFixture(); current.runtime.exitCode = 0; let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; }), shutdown = current.hub.shutdown.getMockImplementation()!;
+    current.hub.shutdown.mockImplementation(async () => { await gate; await shutdown(); });
+    const pending = current.collect(); await Promise.resolve();
+    expect(current.runtime.exitCode).toBe(0); expect(current.receiver.recordRuntimeInventory).not.toHaveBeenCalled();
+    current.runtime.exitCode = code; release(); await pending;
+    expect(current.runtime.exitCode).toBe(code); expect(current.receiver.recordRuntimeInventory).toHaveBeenCalledTimes(1);
+    expect(current.receiver.observeFailure).not.toHaveBeenCalled(); expect(current.readRuntime().cleanupPermitted).toBe(false);
+    current.emit(Number(code)); expect(current.final().runtimeInventoryRef).not.toBeNull();
+    expect(current.final().events.at(-1)).toMatchObject({ type: "node-exit", code: Number(code) });
+    expect(current.final().cleanupPermitted).toBe(false);
+  });
+  it("开始前已失败而等待期间有人清零时仍保留原失败码", async () => {
+    const current = collectionFixture(); current.runtime.exitCode = 2; let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; }), shutdown = current.hub.shutdown.getMockImplementation()!;
+    current.hub.shutdown.mockImplementation(async () => { await gate; await shutdown(); });
+    const pending = current.collect(); await Promise.resolve(); current.runtime.exitCode = 0; release(); await pending;
+    expect(current.runtime.exitCode).toBe(2); expect(current.receiver.recordRuntimeInventory).toHaveBeenCalledTimes(1);
+  });
+  it("模拟exit发生在收集未结算时仍写失败诊断，晚到回执不能改写最终原件", async () => {
+    const current = collectionFixture(); current.runtime.exitCode = 0; let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; }), shutdown = current.hub.shutdown.getMockImplementation()!;
+    current.hub.shutdown.mockImplementation(async () => { await gate; await shutdown(); });
+    const pending = current.collect(); await Promise.resolve(); current.emit(0);
+    const original = fs.readFileSync(current.file());
+    expect(current.runtime.exitCode).toBe(1); expect(current.final().runtimeInventoryRef).toBeNull();
+    expect(current.final().failures).toContain("runtime-collection");
+    expect(current.final().events.at(-1)).toMatchObject({ type: "node-exit", code: 0 });
+    release(); await expect(pending).rejects.toThrow(); expect(fs.readFileSync(current.file())).toEqual(original);
+    expect(current.final().cleanupPermitted).toBe(false); expect(current.runtime.exitCode).toBe(1);
+  });
+});
+
+describe("运行原文件收集失败保持阻断且不重复写入", () => {
+  it.each(["shutdown", "build-close", "build-assert", "ready", "snapshot", "reference"] as const)("%s失败保留诊断，不返回成功或重新收集", async (stage) => {
+    const current = collectionFixture(), fail = () => { throw new Error("simulated-private-collection-fault"); };
+    if (stage === "shutdown") current.hub.shutdown.mockImplementation(async () => fail());
+    if (stage === "build-close") current.build.close.mockImplementation(async () => fail());
+    if (stage === "build-assert") current.build.assertClosed.mockImplementation(fail);
+    if (stage === "ready") current.hub.assertCollectionReady.mockImplementation(fail);
+    if (stage === "snapshot") current.hub.snapshot.mockImplementation(fail);
+    if (stage === "reference") current.receiver.recordRuntimeInventory.mockImplementation(fail);
+    const first = current.collect(); await expect(first).rejects.toThrow("原始收集失败或未知");
+    expect(current.collect()).toBe(first); await expect(current.collect()).rejects.toThrow();
+    expect(current.runtime.exitCode).toBe(1);
+    expect(current.lifecycle.inspect().failures).toContain("runtime-collection");
+    expect(current.receiver.observeFailure).toHaveBeenCalledExactlyOnceWith("runtime-collection");
+    expect(current.hub.shutdown).toHaveBeenCalledTimes(1); expect(current.build.close).toHaveBeenCalledTimes(1);
+    expect(current.hub.snapshot).toHaveBeenCalledTimes(1);
+    if (stage === "snapshot") {
+      expect(fs.readdirSync(current.runtimeDirectory)).toEqual([]); expect(current.receiver.recordRuntimeInventory).not.toHaveBeenCalled();
+    } else {
+      expect(current.readRuntime().cleanupPermitted).toBe(false); expect(fs.readdirSync(current.runtimeDirectory)).toHaveLength(1);
+    }
+    current.emit(1); expect(current.final().failures).toContain("runtime-collection"); expect(current.final().cleanupPermitted).toBe(false);
+  });
+  it.each(["write", "fsync", "close"] as const)("%s抛错不发布引用、保留残件且未知关闭不重试", async (stage) => {
+    const current = collectionFixture(), close = vi.spyOn(current.io, "closeSync");
+    if (stage === "write") vi.spyOn(current.io, "writeFileSync").mockImplementation(() => { throw new Error("simulated-write-fault"); });
+    if (stage === "fsync") vi.spyOn(current.io, "fsyncSync").mockImplementation(() => { throw new Error("simulated-fsync-fault"); });
+    if (stage === "close") close.mockImplementation((fd) => { fs.closeSync(fd); throw new Error("simulated-unknown-close"); });
+    const first = current.collect(); await expect(first).rejects.toThrow();
+    expect(current.collect()).toBe(first); await expect(first).rejects.toThrow(); expect(close).toHaveBeenCalledTimes(1);
+    expect(current.receiver.recordRuntimeInventory).not.toHaveBeenCalled(); expect(current.lifecycle.inspect().runtimeInventoryRef).toBeNull();
+    expect(current.lifecycle.inspect().failures).toContain("runtime-collection"); expect(current.runtime.exitCode).toBe(1);
+    expect(fs.existsSync(current.runtimeFile)).toBe(true);
+  });
+  it("接收器拒绝重复引用后保留首份引用，不能覆盖为新原文件", async () => {
+    const current = collectionFixture(), previous = { launchId: id(3), sha256: "f".repeat(64) };
+    current.lifecycle.recordRuntimeInventory(previous); await expect(current.collect()).rejects.toThrow();
+    expect(current.lifecycle.inspect().runtimeInventoryRef).toEqual(previous);
+    expect(current.lifecycle.inspect().failures).toContain("runtime-collection"); expect(current.runtime.exitCode).toBe(1);
+    expect(current.receiver.recordRuntimeInventory).toHaveBeenCalledTimes(1);
+    expect(createHash("sha256").update(fs.readFileSync(current.runtimeFile)).digest("hex")).not.toBe(previous.sha256);
+  });
+  it("同次引用启动标识不符被真实记录器拒绝，不能补成成功", async () => {
+    const current = collectionFixture();
+    const snapshot = current.hub.snapshot.getMockImplementation()!;
+    current.hub.snapshot.mockImplementation(() => { const actual = snapshot(); actual.launch.launchId = id(4); return actual; });
+    await expect(current.collect()).rejects.toThrow(); expect(current.lifecycle.inspect().runtimeInventoryRef).toBeNull();
+    expect(current.lifecycle.inspect().failures).toContain("runtime-collection"); expect(current.runtime.exitCode).toBe(1);
+    expect(fs.existsSync(path.join(current.runtimeDirectory, id(4) + ".json"))).toBe(true);
+  });
+  it("失败登记本身抛错也保持拒绝，不重试已失败的收集", async () => {
+    const current = collectionFixture(); current.build.assertClosed.mockImplementation(() => { throw new Error("simulated-close-fault"); });
+    current.receiver.observeFailure.mockImplementation(() => { throw new Error("simulated-diagnostic-fault"); });
+    const first = current.collect(); await expect(first).rejects.toThrow(); expect(current.collect()).toBe(first);
+    expect(current.receiver.observeFailure).toHaveBeenCalledTimes(1); expect(current.runtime.exitCode).toBe(1);
+  });
+});
+
+describe("运行原文件收集重入与实际入口关联", () => {
+  it.each(["get", "restore-set"] as const)("退出状态%s吞重入也拒绝成功，唯一任务先于属性回调固定", async (stage) => {
+    const current = collectionFixture(); let code: typeof process.exitCode = 0;
+    const nested: Array<Promise<void>> = [], callbacks = vi.fn(() => {
+      try { nested.push(current.collect()); } catch { /* 模拟退出状态访问器吞掉重入异常。 */ }
+    });
+    Object.defineProperty(current.runtime, "exitCode", { configurable: true, get: () => {
+      if (stage === "get") callbacks(); return code;
+    }, set: (value: typeof process.exitCode) => {
+      code = value;
+      if (stage === "restore-set" && value === 0) callbacks();
+    } });
+    const first = current.collect(); await expect(first).rejects.toThrow("原始收集失败或未知");
+    expect(current.collect()).toBe(first); expect(callbacks).toHaveBeenCalled(); expect(nested).toEqual([]);
+    expect(code).toBe(1); expect(current.lifecycle.inspect().failures).toContain("runtime-collection");
+    expect(current.hub.shutdown).toHaveBeenCalledTimes(1); expect(current.hub.snapshot).toHaveBeenCalledTimes(1);
+    expect(current.receiver.recordRuntimeInventory).toHaveBeenCalledTimes(1);
+    expect(fs.readdirSync(current.runtimeDirectory)).toEqual([id(3) + ".json"]);
+  });
+  it.each(["get", "restore-set"] as const)("退出状态%s抛错仍留失败登记，不返回成功", async (stage) => {
+    const current = collectionFixture(); let code: typeof process.exitCode = 0;
+    Object.defineProperty(current.runtime, "exitCode", { configurable: true, get: () => {
+      if (stage === "get") throw new Error("simulated-exit-get-fault"); return code;
+    }, set: (value: typeof process.exitCode) => {
+      code = value;
+      if (stage === "restore-set" && value === 0) throw new Error("simulated-exit-set-fault");
+    } });
+    const first = current.collect(); await expect(first).rejects.toThrow("原始收集失败或未知");
+    expect(current.collect()).toBe(first); expect(current.lifecycle.inspect().failures).toContain("runtime-collection");
+    expect(current.receiver.observeFailure).toHaveBeenCalledExactlyOnceWith("runtime-collection");
+    expect(code).toBe(1); expect(current.hub.shutdown).toHaveBeenCalledTimes(1); expect(current.hub.snapshot).toHaveBeenCalledTimes(1);
+  });
+  it.each(["shutdown", "build-close", "build-assert", "ready", "snapshot", "write", "reference"] as const)("%s吞掉同步重入异常也保持失败，不能开启第二次任务", async (stage) => {
+    const current = collectionFixture();
+    const reenter = () => { try { current.collect(); } catch { /* 模拟依赖吞掉递归收集异常。 */ } };
+    if (stage === "shutdown") {
+      const original = current.hub.shutdown.getMockImplementation()!;
+      current.hub.shutdown.mockImplementation(async () => { reenter(); await original(); });
+    }
+    if (stage === "build-close") current.build.close.mockImplementation(async () => { reenter(); });
+    if (stage === "build-assert") current.build.assertClosed.mockImplementation(reenter);
+    if (stage === "ready") {
+      const original = current.hub.assertCollectionReady.getMockImplementation()!;
+      current.hub.assertCollectionReady.mockImplementation(() => { reenter(); original(); });
+    }
+    if (stage === "snapshot") {
+      const original = current.hub.snapshot.getMockImplementation()!;
+      current.hub.snapshot.mockImplementation(() => { reenter(); return original(); });
+    }
+    if (stage === "write") vi.spyOn(current.io, "writeFileSync").mockImplementation((fd, bytes) => { reenter(); fs.writeFileSync(fd, bytes); });
+    if (stage === "reference") {
+      const original = current.receiver.recordRuntimeInventory.getMockImplementation()!;
+      current.receiver.recordRuntimeInventory.mockImplementation((reference) => { reenter(); original(reference); });
+    }
+    const first = current.collect(); await expect(first).rejects.toThrow("原始收集失败或未知");
+    expect(current.collect()).toBe(first); await expect(first).rejects.toThrow();
+    expect(current.runtime.exitCode).toBe(1); expect(current.lifecycle.inspect().failures).toContain("runtime-collection");
+    expect(current.hub.shutdown).toHaveBeenCalledTimes(1); expect(current.build.close).toHaveBeenCalledTimes(1);
+    expect(current.hub.snapshot).toHaveBeenCalledTimes(1); expect(current.receiver.recordRuntimeInventory).toHaveBeenCalledTimes(1);
+    expect(fs.readdirSync(current.runtimeDirectory)).toEqual([id(3) + ".json"]); expect(current.readRuntime().cleanupPermitted).toBe(false);
+  });
+  it("真实入口把安装产生的记录器交给唯一收集任务，断连和beforeExit沿用该任务", () => {
+    const source = fs.readFileSync(new URL("../helpers/owned-workflow-preload.mjs", import.meta.url), "utf8");
+    const bootstrap = source.slice(source.indexOf("export async function bootstrapOwnedWorkflowPreload"));
+    const install = bootstrap.indexOf("lifecycle = installOwnedWorkflowLifecycleExit(runtime");
+    const collect = bootstrap.indexOf("createOwnedWorkflowRuntimeCollector(instrumentation.hub, buildServices, lifecycle, runtimeDirectory, runtime, io)");
+    expect(install).toBeGreaterThanOrEqual(0); expect(collect).toBeGreaterThan(install);
+    expect(bootstrap).toContain("runtimeCollector = collect");
+    expect(bootstrap).toContain('runtime.once("disconnect", observe)');
+    expect(bootstrap).toContain('runtime.once("beforeExit", observe)');
+    expect(bootstrap).not.toContain("writeOwnedRuntimeInventory(runtimeDirectory, instrumentation.hub.snapshot()");
   });
 });

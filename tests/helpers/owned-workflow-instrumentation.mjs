@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import * as fs from "node:fs";
 import path from "node:path";
@@ -357,19 +357,36 @@ export function requireOwnedWorkflowHub(globalObject = globalThis) {
   return descriptor.value;
 }
 
-export function writeOwnedRuntimeInventory(directory, inventory, io = fs) {
+/**
+ * @param {string} directory
+ * @param {unknown} inventory
+ * @param {typeof fs} [io]
+ * @param {((reference: NonNullable<import("../../src/contracts/workflow-process-lifecycle").WorkflowAcceptanceProcessLifecycle["runtimeInventoryRef"]>) => void)} [onWritten]
+ * @returns {string}
+ */
+export function writeOwnedRuntimeInventory(directory, inventory, io = fs, onWritten) {
+  if (onWritten !== undefined && (typeof onWritten !== "function" || types.isProxy(onWritten))) throw failure("原始事实写盘回执入口未确认");
   const key = (value) => process.platform === "win32" ? path.resolve(value).toLowerCase() : path.resolve(value);
   if (!path.isAbsolute(directory)) throw failure("原始事实目录必须是独占绝对路径");
   const stat = io.lstatSync(directory);
   if (!stat.isDirectory() || stat.isSymbolicLink() || key(io.realpathSync(directory)) !== key(directory)) throw failure("原始事实目录身份未知");
   const data = passive(inventory), bytes = Buffer.from(JSON.stringify(data), "utf8");
   if (bytes.byteLength > LIMITS.bytes) throw failure("原始事实文件超过有界预算");
-  const file = path.join(directory, `${identity(data.launch.launchId)}.json`);
+  const launchId = identity(data.launch.launchId), sha256 = createHash("sha256").update(bytes).digest("hex");
+  const file = path.join(directory, `${launchId}.json`);
   const fd = io.openSync(file, "wx", 0o600);
   try {
     const created = io.fstatSync(fd);
     if (!created.isFile() || created.nlink !== 1) throw failure("原始事实文件不是独占普通文件");
-    io.writeFileSync(fd, bytes); io.fsyncSync(fd);
-  } finally { io.closeSync(fd); }
+    if (io.writeFileSync(fd, bytes) !== undefined || io.fsyncSync(fd) !== undefined) throw failure("原始事实写盘结果未确认");
+  } finally {
+    if (io.closeSync(fd) !== undefined) throw failure("原始事实文件关闭结果未确认");
+  }
+  if (createHash("sha256").update(bytes).digest("hex") !== sha256) throw failure("原始事实写入字节已变化");
+  if (onWritten !== undefined) {
+    try {
+      if (onWritten(Object.freeze({ launchId, sha256 })) !== undefined) throw failure("原始事实写盘回执未确认");
+    } catch { throw failure("原始事实写盘回执未确认"); }
+  }
   return file;
 }

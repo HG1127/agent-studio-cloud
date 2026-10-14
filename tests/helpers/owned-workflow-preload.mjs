@@ -77,7 +77,9 @@ export function installOwnedWorkflowLifecycleExit(runtime, sources, launch, crea
     if (state !== "finalizing") sourceFailed = true;
     try {
       if (sourceFailed) lifecycle.observeFailure("source-observation");
-      write(lifecycle.onNodeExit(code));
+      const final = lifecycle.onNodeExit(code);
+      write(final);
+      if (final.failures.includes("runtime-collection")) runtime.exitCode = 1;
     } catch { rejectFinal(); }
     if (sourceFailed || state !== "finalizing") rejectFinal();
     state = "done";
@@ -92,6 +94,65 @@ export function installOwnedWorkflowLifecycleExit(runtime, sources, launch, crea
   try { runtime.exit = explicitExit; runtime.once("exit", onExit); }
   catch { rejectFinal(); }
   return lifecycle;
+}
+
+/** @typedef {Pick<ReturnType<typeof createOwnedWorkflowInstrumentation>["hub"], "shutdown" | "assertCollectionReady" | "snapshot">} OwnedRuntimeCollectionHub */
+/** @typedef {Pick<ReturnType<typeof createOwnedBuildServiceCollector>, "close" | "assertClosed">} OwnedRuntimeCollectionBuildServices */
+/**
+ * @param {OwnedRuntimeCollectionHub} hub
+ * @param {OwnedRuntimeCollectionBuildServices} buildServices
+ * @param {Pick<OwnedProcessLifecycle, "recordRuntimeInventory" | "observeFailure">} lifecycle
+ * @param {string} directory
+ * @param {Pick<typeof process, "exitCode">} runtime
+ * @param {Parameters<typeof writeOwnedRuntimeInventory>[2]} [io]
+ * @returns {()=>Promise<void>}
+ */
+export function createOwnedWorkflowRuntimeCollector(hub, buildServices, lifecycle, directory, runtime, io = fs) {
+  /** @type {Promise<void> | undefined} */
+  let collecting;
+  let inDependency = false, failed = false;
+  const collectionFailure = () => new Error("自有运行空间原始收集失败或未知，保留资源");
+  const invoke = (operation) => {
+    inDependency = true;
+    try { return operation(); } finally { inDependency = false; }
+  };
+  return () => {
+    if (inDependency) { failed = true; throw collectionFailure(); }
+    if (collecting) return collecting;
+    // 先固定唯一任务，再允许依赖同步回调，避免重入开启第二次写盘。
+    collecting = Promise.resolve().then(async () => {
+      let previousExitCode;
+      try {
+        previousExitCode = invoke(() => runtime.exitCode);
+      } catch { failed = true; }
+      try { await invoke(() => hub.shutdown()); } catch { failed = true; }
+      try { await invoke(() => buildServices.close()); invoke(() => buildServices.assertClosed()); } catch { failed = true; }
+      try { invoke(() => hub.assertCollectionReady()); } catch { failed = true; }
+      let received = false;
+      try {
+        invoke(() => writeOwnedRuntimeInventory(directory, hub.snapshot(), io, (reference) => {
+          if (received || lifecycle.recordRuntimeInventory(reference) !== undefined) throw collectionFailure();
+          received = true;
+        }));
+        if (!received) failed = true;
+      } catch { failed = true; }
+      if (!failed) {
+        try {
+          const currentExitCode = invoke(() => runtime.exitCode);
+          const nonzero = (value) => value !== undefined && Number(value) !== 0;
+          const finalExitCode = nonzero(currentExitCode) ? currentExitCode
+            : nonzero(previousExitCode) ? previousExitCode : currentExitCode ?? previousExitCode ?? 0;
+          invoke(() => { runtime.exitCode = finalExitCode; });
+        } catch { failed = true; }
+      }
+      if (failed) {
+        try { invoke(() => lifecycle.observeFailure("runtime-collection")); } catch { /* 诊断登记失败也不能恢复收集成功。 */ }
+        try { invoke(() => { runtime.exitCode = 1; }); } catch { /* 退出状态未知仍拒绝收集，不返回成功。 */ }
+        throw collectionFailure();
+      }
+    });
+    return collecting;
+  };
 }
 
 function combineOwnedWorkflowModuleHooks(sources, sdkHooks) {
@@ -358,6 +419,8 @@ export async function bootstrapOwnedWorkflowPreload(runtime = process, io = fs) 
     startedAt: new NativeDate(NativeDate.now()).toISOString(), adapterFingerprint: hash(adapterBytes.join("\n")),
     sdkFactoryFingerprint: hash(`${profile.sdkFactoryFingerprint}\n${buildProfile.fingerprint}`), configuredVm: "node" };
   const lifecycleSources = createOwnedWorkflowLifecycleSourceSession(io);
+  /** @type {OwnedProcessLifecycle} */
+  let lifecycle;
   try {
     if (typeof registerHooks !== "function") fail();
     registerHooks(combineOwnedWorkflowModuleHooks(lifecycleSources,
@@ -368,7 +431,7 @@ export async function bootstrapOwnedWorkflowPreload(runtime = process, io = fs) 
     try { io.mkdirSync(lifecycleDirectory, { mode: 0o700 }); }
     catch (error) { if (error?.code !== "EEXIST") throw error; }
     privateDirectory(lifecycleDirectory, io);
-    installOwnedWorkflowLifecycleExit(runtime, lifecycleSources,
+    lifecycle = installOwnedWorkflowLifecycleExit(runtime, lifecycleSources,
       { context, lifecycleId: randomUUID(), processId: runtime.pid, phase: "business", startedAt: launch.startedAt,
         lifecycleFingerprint: lifecycleSources.lifecycleFingerprint, runtimeLaunchId: launch.launchId },
       lifecycleModule.createOwnedWorkflowProcessLifecycle, writerModule.createOwnedWorkflowProcessLifecycleWriter, lifecycleDirectory, io);
@@ -399,22 +462,7 @@ export async function bootstrapOwnedWorkflowPreload(runtime = process, io = fs) 
   runtime.env.WORKFLOW_LOCAL_DATA_DIR = path.join(context.sdkDirectory, "data");
   runtime.env.WORKFLOW_LOCAL_RECOVER_ACTIVE_RUNS = "false";
   runtime.env.MVP_WORKFLOW_ACCEPTANCE_RUNTIME_PROFILE = PROFILE;
-  let collecting;
-  const collect = () => {
-    if (collecting) return collecting;
-    const previousExitCode = runtime.exitCode;
-    runtime.exitCode = 1;
-    collecting = (async () => {
-      let failed = false;
-      try { await instrumentation.hub.shutdown(); } catch { failed = true; }
-      try { await buildServices.close(); buildServices.assertClosed(); } catch { failed = true; }
-      try { instrumentation.hub.assertCollectionReady(); } catch { failed = true; }
-      try { writeOwnedRuntimeInventory(runtimeDirectory, instrumentation.hub.snapshot(), io); } catch { failed = true; }
-      if (failed) throw new Error("自有运行空间原始收集失败或未知，保留资源");
-      runtime.exitCode = previousExitCode ?? 0;
-    })();
-    return collecting;
-  };
+  const collect = createOwnedWorkflowRuntimeCollector(instrumentation.hub, buildServices, lifecycle, runtimeDirectory, runtime, io);
   runtimeCollector = collect;
   const observe = () => { void collect().catch(() => { runtime.exitCode = 1; }); };
   runtime.once("disconnect", observe);
