@@ -46,7 +46,9 @@ try {
   if (Test-Path -LiteralPath 'node_modules') { throw 'Own clean VM installation required' }
   if ((Read-Git @('rev-parse','HEAD:package.json'))[0] -cne '9f06b679b994bc9fd5a5d771a4aa6f42f5c29dce' -or
       (Read-Git @('rev-parse','HEAD:pnpm-lock.yaml'))[0] -cne 'd6b822d7355b8eabf5112a32662b40c6097b1856') { throw 'Approved package or lock Git blob changed' }
-  $taskNode=(Get-Command node.exe -CommandType Application).Source
+  $taskNodeCommand=Get-Command node.exe -CommandType Application | Select-Object -First 1
+  $taskNode=[string]$taskNodeCommand.Source
+  if ([string]::IsNullOrWhiteSpace($taskNode) -or -not [IO.Path]::IsPathFullyQualified($taskNode) -or -not (Test-Path -LiteralPath $taskNode -PathType Leaf)) { throw 'First Node application path is invalid; no process started' }
   $taskCorepack=Join-Path (Split-Path -Parent $taskNode) 'node_modules/corepack/dist/pnpm.js'
   if (-not (Test-Path -LiteralPath $taskCorepack)) { throw 'Corepack missing; no install attempted' }
   $taskDefinitions=@(
