@@ -23,6 +23,8 @@ jobs:
       - run: pnpm exec tsc --noEmit
       - run: pnpm lint
       - run: pnpm test
+      - name: MVP 恢复假服务回归
+        run: pnpm exec vitest run --config tests/helpers/mvp-acceptance-recovery.config.mts --maxWorkers=1
       - run: pnpm build
         env:
           # 构建期仅要求变量存在（db 模块导入即校验），占位值不发起真实连接
@@ -32,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: ci
     # 隔离数据库和真实 Workflow 顺序执行，扩展回归已超过 30 分钟。
-    timeout-minutes: 45
+    timeout-minutes: 60
     permissions:
       contents: read
     env:
@@ -73,7 +75,7 @@ jobs:
           CRON_SECRET=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')
           echo "::add-mask::$CRON_SECRET"
           echo "CRON_SECRET=$CRON_SECRET" >> "$GITHUB_ENV"
-      - name: 迁移 + 集成测试 + E2E
+      - name: 迁移本次临时空库
         env:
           DATABASE_URL: ${{ env.BRANCH_URL }}
           DATABASE_URL_POOLED: ${{ env.BRANCH_URL }}
@@ -81,8 +83,49 @@ jobs:
         run: |
           pnpm db:migrate
           pnpm exec next typegen
-          pnpm test:integration
-          pnpm test:workflow
+      - name: 隔离数据库完整集成验收
+        env:
+          DATABASE_URL: ${{ env.BRANCH_URL }}
+          DATABASE_URL_POOLED: ${{ env.BRANCH_URL }}
+          MODEL_MOCK: "1"
+          MVP_ACCEPTANCE_ISOLATED_DB: "1"
+        run: pnpm exec vitest run --config vitest.integration.config.mts --maxWorkers=1 --reporter=default --reporter=json --outputFile=integration-results.json
+      - name: 实际 Workflow 完整验收
+        env:
+          DATABASE_URL: ${{ env.BRANCH_URL }}
+          DATABASE_URL_POOLED: ${{ env.BRANCH_URL }}
+          MODEL_MOCK: "1"
+          MVP_ACCEPTANCE_ISOLATED_DB: "1"
+        run: pnpm exec vitest run --config vitest.workflow.config.mts --maxWorkers=1 --reporter=default --reporter=json --outputFile=workflow-results.json
+      - name: 核对 MVP 真实断言未缺失或跳过
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const expected = [
+            ['integration-results.json', 'tests/integration/mvp-acceptance-template-persistence.test.ts', 5],
+            ['workflow-results.json', 'tests/workflow/mvp-acceptance-runtime.test.ts', 11],
+            ['workflow-results.json', 'tests/workflow/mvp-acceptance-production-template.test.ts', 13],
+            ['workflow-results.json', 'tests/workflow/mvp-acceptance-template-recovery.test.ts', 4],
+            ['integration-results.json', 'tests/integration/mcp-registered-tool-names.test.ts', 3],
+            ['workflow-results.json', 'tests/workflow/mcp-registered-tool-names.test.ts', 3],
+            ['workflow-results.json', 'tests/workflow/mvp-acceptance-zero-argument-read.test.ts', 2],
+          ];
+          for (const [report, file, count] of expected) {
+            const results = JSON.parse(fs.readFileSync(report, 'utf8'));
+            const suites = results.testResults.filter(suite => suite.name.replaceAll('\\', '/').endsWith('/' + file));
+            const assertions = suites.flatMap(suite => suite.assertionResults);
+            if (!results.success || assertions.length !== count || assertions.some(test => test.status !== 'passed')) {
+              throw new Error(file + ': 真实断言缺失、跳过或失败');
+            }
+            console.log(file + ': ' + count + ' 项实际通过');
+          }
+          NODE
+      - name: 浏览器完整验收
+        env:
+          DATABASE_URL: ${{ env.BRANCH_URL }}
+          DATABASE_URL_POOLED: ${{ env.BRANCH_URL }}
+          MODEL_MOCK: "1"
+        run: |
           pnpm exec playwright install --with-deps chromium
           pnpm test:e2e
       - name: 删除临时分支
@@ -90,6 +133,5 @@ jobs:
         # neonctl v5 删除分支无交互确认（源码直连 API），没有 --force 选项
         # 守卫不看 BRANCH_URL：分支名由 run_id 与 run_attempt 确定，create 成功但取 URL 失败时同样要能清理
         run: |
-          # 容忍分支不存在（create 被跳过或取 URL 前已失败），清理失败不应挂红 job
           CI_BRANCH="ci-${{ github.run_id }}-${{ github.run_attempt }}"
-          npx --yes neonctl@5 branches delete "$CI_BRANCH" --project-id ${{ vars.NEON_PROJECT_ID }} --api-key "$NEON_API_KEY" || true
+          npx --yes neonctl@5 branches delete "$CI_BRANCH" --project-id ${{ vars.NEON_PROJECT_ID }} --api-key "$NEON_API_KEY"

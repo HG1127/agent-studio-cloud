@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { startMcpTestServer } from "../../../tests/fixtures/mcp-server";
 import { invokeMcpTool } from "./invoke-mcp-tool";
 import { parseToolRegistry } from "./tool-registry";
@@ -19,6 +19,18 @@ async function fixture(options: Parameters<typeof startMcpTestServer>[0] = {}) {
 }
 
 describe("真实 MCP SDK 对本地 Streamable HTTP 服务", () => {
+  it.each([
+    { type: "object", description: "汉".repeat(12_000) },
+    { type: "object", description: "x".repeat(32 * 1024 - 20) },
+    {}, { type: ["object", "null"] }, { type: "string" },
+  ])("登记定义不可执行时永久拒绝，连发现请求也不能发送 %#", async (inputSchema) => {
+    const tool = parseToolRegistry(JSON.stringify([{ id: "lookup", name: "读取资料", action: "lookup", scope: "read", protocol: "mcp-streamable-http", operationKind: "read", endpoint: "https://fixture.example/mcp", inputSchema }]))[0];
+    expect(tool).toBeDefined();
+    const fetchImpl = vi.fn(async () => { throw new Error("虚构输送不允许网络访问"); });
+    const result = await invokeMcpTool({ tool, action: tool.action, idempotencyKey: "fixture-key", input: {}, outputs: {}, fetchImpl });
+    expect(result).toMatchObject({ ok: false, retryable: false, error: expect.stringContaining("参数定义") });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
   it.each([
     { name: "根地址不带尾斜线", endpoint: (value: string) => new URL(value).origin },
     { name: "协议大小写等价", endpoint: (value: string) => value.replace("http:", "HTTP:") },

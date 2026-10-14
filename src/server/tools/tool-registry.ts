@@ -1,8 +1,9 @@
 import { z } from "zod";
-import { ToolRegistryOption, type ToolRegistryOption as ToolRegistryOptionType } from "@/contracts/tool-registry";
-import { validateJsonSchemaDefinition } from "@/server/domain/json-schema";
+import { ToolRegistryOption, type ToolRegistryOption as ToolRegistryOptionType, type ToolRegistryConfigurationStatus } from "@/contracts/tool-registry";
+import { isToolSchemaSafeToExpose } from "@/server/domain/tool-schema-visibility";
+import { redactCredentialText } from "@/server/domain/security/redact-sensitive";
 
-const ToolRegistration = ToolRegistryOption.extend({
+const ToolRegistration = ToolRegistryOption.safeExtend({
   endpoint: z.string().url().refine((value) => {
     const url = new URL(value);
     return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password;
@@ -13,7 +14,7 @@ const ToolRegistration = ToolRegistryOption.extend({
 export type ToolRegistration = z.infer<typeof ToolRegistration>;
 
 let cachedRaw: string | undefined;
-let cachedRegistry: ToolRegistration[] = [];
+let cachedSnapshot: { status: ToolRegistryConfigurationStatus; registry: ToolRegistration[] } = { status: "not-configured", registry: [] };
 
 const FORBIDDEN_TOOL_HEADER_NAMES = new Set([
   "connection",
@@ -41,36 +42,45 @@ function safeHeaders(headers: Record<string, string>): boolean {
   }
 }
 
-export function parseToolRegistry(raw: string | undefined): ToolRegistration[] {
-  if (!raw?.trim()) return [];
+function parseToolRegistrySnapshot(raw: string | undefined): typeof cachedSnapshot {
+  if (!raw?.trim()) return { status: "not-configured", registry: [] };
   try {
     const parsed = z.array(ToolRegistration).max(50).safeParse(JSON.parse(raw));
-    if (!parsed.success) return [];
+    if (!parsed.success) return { status: "configuration-error", registry: [] };
     const ids = new Set<string>();
     for (const tool of parsed.data) {
       if (tool.protocol === "mcp-streamable-http" && (
         tool.method !== "POST" || !tool.operationKind
-        || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(tool.action)
         || tool.operationKind === "action" && tool.businessIdempotency !== true
-      )) return [];
-      if (tool.businessIdempotency === true && tool.businessIdempotencyRetentionMs === undefined) return [];
-      if (ids.has(tool.id) || !safeHeaders(tool.headers)) return [];
-      if (validateJsonSchemaDefinition(tool.inputSchema) || validateJsonSchemaDefinition(tool.outputSchema)) return [];
+      )) return { status: "configuration-error", registry: [] };
+      if (tool.businessIdempotency === true && tool.businessIdempotencyRetentionMs === undefined) return { status: "configuration-error", registry: [] };
+      if (ids.has(tool.id) || !safeHeaders(tool.headers)) return { status: "configuration-error", registry: [] };
+      if (!isToolSchemaSafeToExpose(tool.inputSchema) || !isToolSchemaSafeToExpose(tool.outputSchema)) return { status: "configuration-error", registry: [] };
+      tool.name = redactCredentialText(tool.name).slice(0, 60);
+      tool.description = redactCredentialText(tool.description).slice(0, 200);
       ids.add(tool.id);
     }
-    return parsed.data;
+    return { status: parsed.data.length === 0 ? "not-configured" : "configured", registry: parsed.data };
   } catch {
-    return [];
+    return { status: "configuration-error", registry: [] };
   }
 }
 
-export function loadToolRegistry(): ToolRegistration[] {
+export function parseToolRegistry(raw: string | undefined): ToolRegistration[] {
+  return parseToolRegistrySnapshot(raw).registry;
+}
+
+export function loadToolRegistrySnapshot() {
   const raw = process.env.TOOL_REGISTRY_JSON;
-  if (raw === cachedRaw) return cachedRegistry;
+  if (raw === cachedRaw) return cachedSnapshot;
+  cachedSnapshot = parseToolRegistrySnapshot(raw);
   cachedRaw = raw;
-  cachedRegistry = parseToolRegistry(raw);
-  if (raw?.trim() && cachedRegistry.length === 0) console.error("[tool-registry] 工具注册表配置无效");
-  return cachedRegistry;
+  if (cachedSnapshot.status === "configuration-error") console.error("[tool-registry] 工具注册表配置无效");
+  return cachedSnapshot;
+}
+
+export function loadToolRegistry(): ToolRegistration[] {
+  return loadToolRegistrySnapshot().registry;
 }
 
 export function listToolRegistryOptions(): ToolRegistryOptionType[] {
