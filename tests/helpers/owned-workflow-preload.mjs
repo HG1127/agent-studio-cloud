@@ -10,8 +10,11 @@ import { types } from "node:util";
 import { createOwnedWorkflowInstrumentation, writeOwnedRuntimeInventory } from "./owned-workflow-instrumentation.mjs";
 import { createOwnedWorldFacadeSource, createOwnedQuickJsFacadeSource, createOwnedCoreWorldFacadeSource, assertUninitializedSdkWorldGlobals } from "./owned-workflow-world-adapter.mjs";
 import { buildOwnedNativeBuildProfile, createOwnedBuildServiceCollector } from "./owned-workflow-build-services.mjs";
+import { createOwnedWorkflowLifecycleSourceSession } from "./owned-workflow-lifecycle-loader.mjs";
 
 const NativeDate = Date;
+const nativeNow = NativeDate.now;
+const lifecycleExitOwners = new WeakSet();
 const ownUrl = import.meta.url;
 const helperDirectory = path.dirname(fileURLToPath(ownUrl));
 const PROFILE = "node-sdk5-v1";
@@ -42,6 +45,65 @@ const PINNED = Object.freeze({
 function key(file) { return process.platform === "win32" ? path.resolve(file).toLowerCase() : path.resolve(file); }
 function hash(bytes) { return createHash("sha256").update(bytes).digest("hex"); }
 function fail() { throw new Error("自有执行空间预加载条件未确认，保留资源"); }
+
+/** @typedef {ReturnType<typeof import("../workflow/owned-workflow-process-lifecycle").createOwnedWorkflowProcessLifecycle>} OwnedProcessLifecycle */
+/** @typedef {Pick<ReturnType<typeof import("./owned-workflow-lifecycle-loader.mjs").createOwnedWorkflowLifecycleSourceSession>, "lifecycleFingerprint" | "assertUnchanged" | "close">} OwnedLifecycleExitSources */
+/** @typedef {Pick<typeof process, "pid" | "exitCode" | "exit"> & {once:(event:"exit",listener:(code:number)=>void)=>unknown}} OwnedLifecycleExitRuntime */
+/**
+ * @param {OwnedLifecycleExitRuntime} runtime
+ * @param {OwnedLifecycleExitSources} sources
+ * @param {import("../../src/contracts/workflow-process-lifecycle").WorkflowAcceptanceProcessLifecycle["launch"]} launch
+ * @param {typeof import("../workflow/owned-workflow-process-lifecycle").createOwnedWorkflowProcessLifecycle} createLifecycle
+ * @param {typeof import("./write-owned-workflow-process-lifecycle").createOwnedWorkflowProcessLifecycleWriter} createWriter
+ * @param {string} directory
+ * @param {Parameters<typeof import("./write-owned-workflow-process-lifecycle").createOwnedWorkflowProcessLifecycleWriter>[2]} [io]
+ * @returns {OwnedProcessLifecycle}
+ */
+export function installOwnedWorkflowLifecycleExit(runtime, sources, launch, createLifecycle, createWriter, directory, io = fs) {
+  if (!runtime || types.isProxy(runtime) || lifecycleExitOwners.has(runtime) || runtime.pid !== process.pid
+    || launch.processId !== runtime.pid || launch.lifecycleFingerprint !== sources.lifecycleFingerprint) fail();
+  const originalExit = runtime.exit;
+  if (typeof originalExit !== "function" || types.isProxy(originalExit)) fail();
+  const lifecycle = createLifecycle({ launch, now: () => Reflect.apply(nativeNow, NativeDate, []), uuid: randomUUID });
+  const write = createWriter(directory, lifecycle.inspect().launch, io);
+  let state = "open";
+  const rejectFinal = () => { state = "failed"; runtime.exitCode = 1; fail(); };
+  const onExit = (code) => {
+    if (state !== "open") rejectFinal();
+    state = "finalizing";
+    let sourceFailed = false;
+    try { sources.assertUnchanged(); } catch { sourceFailed = true; }
+    try { sources.close(); } catch { sourceFailed = true; }
+    if (state !== "finalizing") sourceFailed = true;
+    try {
+      if (sourceFailed) lifecycle.observeFailure("source-observation");
+      write(lifecycle.onNodeExit(code));
+    } catch { rejectFinal(); }
+    if (sourceFailed || state !== "finalizing") rejectFinal();
+    state = "done";
+  };
+  /** @type {typeof process.exit} */
+  const explicitExit = (...args) => {
+    if (state !== "open") rejectFinal();
+    try { lifecycle.observeFailure("explicit-exit"); } catch { rejectFinal(); }
+    return Reflect.apply(originalExit, runtime, args);
+  };
+  lifecycleExitOwners.add(runtime);
+  try { runtime.exit = explicitExit; runtime.once("exit", onExit); }
+  catch { rejectFinal(); }
+  return lifecycle;
+}
+
+function combineOwnedWorkflowModuleHooks(sources, sdkHooks) {
+  return Object.freeze({
+    resolve(specifier, context, nextResolve) {
+      return sources.hooks.resolve(specifier, context, (nextSpecifier, nextContext) => sdkHooks.resolve(nextSpecifier, nextContext, nextResolve));
+    },
+    load(url, context, nextLoad) {
+      return sources.hooks.load(url, context, (nextUrl, nextContext) => sdkHooks.load(nextUrl, nextContext, nextLoad));
+    },
+  });
+}
 function regular(file, io) {
   const stat = io.lstatSync(file);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size < 1 || stat.size > 32 * 1024 * 1024
@@ -295,6 +357,25 @@ export async function bootstrapOwnedWorkflowPreload(runtime = process, io = fs) 
   const launch = { version: 1, context, launchId: randomUUID(), processId: runtime.pid, threadId: workers.threadId,
     startedAt: new NativeDate(NativeDate.now()).toISOString(), adapterFingerprint: hash(adapterBytes.join("\n")),
     sdkFactoryFingerprint: hash(`${profile.sdkFactoryFingerprint}\n${buildProfile.fingerprint}`), configuredVm: "node" };
+  const lifecycleSources = createOwnedWorkflowLifecycleSourceSession(io);
+  try {
+    if (typeof registerHooks !== "function") fail();
+    registerHooks(combineOwnedWorkflowModuleHooks(lifecycleSources,
+      createOwnedModuleHooks(profile, pathToFileURL(path.join(helperDirectory, "owned-workflow-world-adapter.mjs")).href, io)));
+    const lifecycleContract = await import(lifecycleSources.lifecycleContractUrl);
+    const lifecycleModule = await import(lifecycleSources.recorderUrl), writerModule = await import(lifecycleSources.writerUrl);
+    const lifecycleDirectory = path.join(context.sdkDirectory, lifecycleContract.WORKFLOW_PROCESS_LIFECYCLE_DIRECTORY);
+    try { io.mkdirSync(lifecycleDirectory, { mode: 0o700 }); }
+    catch (error) { if (error?.code !== "EEXIST") throw error; }
+    privateDirectory(lifecycleDirectory, io);
+    installOwnedWorkflowLifecycleExit(runtime, lifecycleSources,
+      { context, lifecycleId: randomUUID(), processId: runtime.pid, phase: "business", startedAt: launch.startedAt,
+        lifecycleFingerprint: lifecycleSources.lifecycleFingerprint, runtimeLaunchId: launch.launchId },
+      lifecycleModule.createOwnedWorkflowProcessLifecycle, writerModule.createOwnedWorkflowProcessLifecycleWriter, lifecycleDirectory, io);
+  } catch {
+    try { lifecycleSources.close(); } catch { /* 原始失败已阻断后续工厂，不重试未知句柄。 */ }
+    fail();
+  }
   const instrumentation = createOwnedWorkflowInstrumentation(launch, { host: globalThis, assertProfile: () => {
     if (runtime.env.MVP_WORKFLOW_ACCEPTANCE_RUNTIME_PROFILE !== PROFILE || runtime.env.MVP_WORKFLOW_ACCEPTANCE_CONTEXT !== contextRaw
       || runtime.env.WORKFLOW_VM !== "node" || runtime.env.WORKFLOW_TARGET_WORLD !== "local"
@@ -314,8 +395,6 @@ export async function bootstrapOwnedWorkflowPreload(runtime = process, io = fs) 
     } });
   installOwnedNativeFactories(instrumentation, { vm, workers, children, syncBuiltins: syncBuiltinESMExports, host: globalThis },
     { forkEntry: path.join(vitestDist, "workers/forks.js"), preloadUrl: ownUrl, warningsFile, contextRaw, io, buildServices });
-  if (typeof registerHooks !== "function") fail();
-  registerHooks(createOwnedModuleHooks(profile, pathToFileURL(path.join(helperDirectory, "owned-workflow-world-adapter.mjs")).href, io));
   runtime.env.WORKFLOW_VM = "node"; runtime.env.WORKFLOW_TARGET_WORLD = "local";
   runtime.env.WORKFLOW_LOCAL_DATA_DIR = path.join(context.sdkDirectory, "data");
   runtime.env.WORKFLOW_LOCAL_RECOVER_ACTIVE_RUNS = "false";
