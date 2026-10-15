@@ -183,19 +183,49 @@ describe("网页工具页面设计与真实管理分区", () => {
     await user.selectOptions(screen.getByRole("combobox", { name: "谁可以使用" }), "domain_sites");
     await user.click(screen.getByRole("button", { name: "检查草稿" }));
     expect(screen.getByRole("alert")).toHaveTextContent("请至少填写一个指定网站");
+    const domains = screen.getByRole("textbox", { name: "指定网站来源" });
+    expect(domains).toHaveFocus();
+    expect(domains).toHaveAttribute("aria-invalid", "true");
+    expect(domains).toHaveAttribute("aria-describedby", screen.getByRole("alert").id);
     await user.type(screen.getByRole("textbox", { name: "指定网站来源" }), "https://example.com/path");
+    expect(domains).not.toHaveAttribute("aria-invalid");
     await user.click(screen.getByRole("button", { name: "检查草稿" }));
     expect(screen.getByRole("alert")).toHaveTextContent("不含路径");
     fireEvent.change(screen.getByRole("textbox", { name: "指定网站来源" }), { target: { value: "https://example.com" } });
     fireEvent.change(screen.getByRole("spinbutton", { name: "每天次数上限" }), { target: { value: "10" } });
     await user.click(screen.getByRole("button", { name: "检查草稿" }));
     expect(screen.getByRole("alert")).toHaveTextContent("每天上限不能小于每小时上限");
+    expect(screen.getByRole("spinbutton", { name: "每天次数上限" })).toHaveFocus();
+    expect(screen.getByRole("spinbutton", { name: "每天次数上限" })).toHaveAttribute("aria-describedby", screen.getByRole("alert").id);
     fireEvent.change(screen.getByRole("spinbutton", { name: "每天次数上限" }), { target: { value: "100" } });
     await user.click(screen.getByRole("button", { name: "检查草稿" }));
     expect(screen.getByRole("status")).toHaveTextContent("尚未保存或发布");
     expect(screen.getByRole("button", { name: "保存页面配置（待接入）" })).toBeDisabled();
     await user.click(screen.getByRole("tab", { name: "接入说明" }));
     expect(screen.getByText(/不会生成可用链接、嵌入代码或统计数据/)).toBeVisible();
+  });
+
+  it.each(["每小时次数上限", "每天次数上限", "最大并发数", "最长运行时间（秒）", "成本额度上限"])("清空%s后聚焦实际输入，修正后清除错误且保留其他填写", async (label) => {
+    const user = userEvent.setup();
+    render(<WebToolDesignStudio targets={[]} />);
+    await user.type(screen.getByRole("textbox", { name: "工具展示名称" }), "保留访问设计");
+    await user.click(screen.getByRole("button", { name: "4. 访问与发布" }));
+    const input = screen.getByRole("spinbutton", { name: label });
+    await user.clear(input);
+    await user.click(screen.getByRole("button", { name: "检查全部草稿" }));
+    expect(input).toHaveFocus();
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveAttribute("aria-describedby", screen.getByRole("alert").id);
+    expect(input).toHaveClass("aria-invalid:border-red-400");
+    fireEvent.change(input, { target: { value: "50" } });
+    expect(input).not.toHaveAttribute("aria-invalid");
+    expect(input).not.toHaveAttribute("aria-describedby");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "检查全部草稿" }));
+    expect(screen.getByRole("status")).toHaveTextContent("尚未保存或发布");
+    await user.click(screen.getByRole("button", { name: "1. 基本信息" }));
+    expect(screen.getByRole("textbox", { name: "工具展示名称" })).toHaveValue("保留访问设计");
+    for (const action of [io.list, io.manage, io.keys, io.read, io.call, io.receipt]) expect(action).not.toHaveBeenCalled();
   });
 
   it("专业编辑有效应用与向导同步，无效不覆盖，未应用离开需确认", async () => {

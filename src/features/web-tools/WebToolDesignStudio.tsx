@@ -12,7 +12,7 @@ import { WEB_TOOL_AUDIENCES, WEB_TOOL_LAYOUTS, WEB_TOOL_MODULES, WEB_TOOL_STEPS,
   createWebToolDesignDraft, designFieldsFromTarget, readWebToolDesignJson, reorderDesignItem,
   type WebToolDesignDraft, type WebToolDesignField, type WebToolDesignModule } from "./web-tool-design-draft";
 
-const control = "w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus-visible:border-indigo-400 focus-visible:ring-2 focus-visible:ring-indigo-100";
+const control = "w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus-visible:border-indigo-400 focus-visible:ring-2 focus-visible:ring-indigo-100 aria-invalid:border-red-400";
 const section = "min-w-0 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm";
 type Confirmation = { action: "clear" | "replace-inputs" | "remove-field" | "remove-module" | "discard-editor"; id?: string; name?: string };
 
@@ -55,9 +55,9 @@ export function WebToolDesignStudio({ targets }: { targets: AgentTargetOption[] 
     const field = String(issue.path?.[0] ?? "");
     const index = typeof issue.path?.[1] === "number" ? issue.path[1] : 0;
     const property = String(issue.path?.[2] ?? "label");
-    const key = field === "fields" ? "field-" + index + "-" + (["name", "label", "rows", "type"].includes(property) ? property : "label")
-      : field === "modules" ? "module-" + index + "-" + (property === "source" ? "source" : "title")
-        : field === "name" || field === "slug" || field === "versionId" ? field : "step-" + issue.step;
+    const key = field === "fields" ? "field-" + index + "-" + (["name", "label", "rows", "type", "placeholder", "description"].includes(property) ? property : "label")
+      : field === "modules" ? "module-" + index + "-" + (["source", "description"].includes(property) ? property : "title")
+        : ["name", "slug", "versionId", "description", "targetAudience", "audienceType", "accessMode", "domains", "maxPerHour", "maxPerDay", "maxConcurrent", "maxRuntimeSeconds", "maxCostUnits", "allowWriteScopes"].includes(field) ? field : "step-" + issue.step;
     setProblem({ key, text: issue.message });
   }
   function problemAttributes(key: string) {
@@ -196,9 +196,9 @@ export function WebToolDesignStudio({ targets }: { targets: AgentTargetOption[] 
           {step === 0 ? <section className={section} aria-label="基本信息配置" tabIndex={-1} data-design-field="step-0">
             <div><h3 className="font-bold text-slate-900">第一步：基本信息</h3><p className="mt-1 text-xs leading-5 text-slate-500">明确给谁用、收集什么和如何交付；不会自动生成或推断业务内容。</p></div>
             <label className="block space-y-1.5 text-sm font-semibold text-slate-700">工具展示名称<input {...problemAttributes("name")} className={control} value={draft.name} onChange={(event) => updateDraft("name", event.target.value)} placeholder="填写工具名称，最多 200 字" /></label>
-            <label className="block space-y-1.5 text-sm font-semibold text-slate-700">工具说明<textarea rows={3} className={control} value={draft.description} onChange={(event) => updateDraft("description", event.target.value)} placeholder="说明使用者需要提供的信息与期望交付物" /></label>
+            <label className="block space-y-1.5 text-sm font-semibold text-slate-700">工具说明<textarea {...problemAttributes("description")} rows={3} className={control} value={draft.description} onChange={(event) => updateDraft("description", event.target.value)} placeholder="说明使用者需要提供的信息与期望交付物" /></label>
             <div className="grid min-w-0 gap-3 2xl:grid-cols-2">
-              <label className="block space-y-1.5 text-sm font-semibold text-slate-700">目标使用受众<input className={control} value={draft.targetAudience} onChange={(event) => updateDraft("targetAudience", event.target.value)} placeholder="例如：部门团队成员" /></label>
+              <label className="block space-y-1.5 text-sm font-semibold text-slate-700">目标使用受众<input {...problemAttributes("targetAudience")} className={control} value={draft.targetAudience} onChange={(event) => updateDraft("targetAudience", event.target.value)} placeholder="例如：部门团队成员" /></label>
               <label className="block space-y-1.5 text-sm font-semibold text-slate-700">访问路径草案<input {...problemAttributes("slug")} className={control} value={draft.slug} onChange={(event) => updateDraft("slug", event.target.value)} placeholder="小写字母、数字与短横线，可暂留空" /></label>
             </div>
             <label className="block space-y-1.5 text-sm font-semibold text-slate-700">关联正式助手版本<select {...problemAttributes("versionId")} className={control} value={draft.versionId} onChange={(event) => updateDraft("versionId", event.target.value)}>
@@ -226,8 +226,8 @@ export function WebToolDesignStudio({ targets }: { targets: AgentTargetOption[] 
               }}><option value="string">文本</option><option value="number">数字</option><option value="boolean">是或否</option><option value="object">结构化对象</option><option value="array">结构化列表</option></select></label>
                 {field.type === "string" ? <label className="block space-y-1 text-sm text-slate-700">文本显示行数<input {...problemAttributes("field-" + index + "-rows")} type="number" min={1} max={12} className={control} value={Number.isFinite(field.rows) ? field.rows : ""} onChange={(event) => updateField(field.id, { rows: event.target.valueAsNumber })} /></label> : null}</div>
               <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={field.required} onChange={(event) => updateField(field.id, { required: event.target.checked })} />设为必填</label>
-              <label className="block space-y-1 text-sm text-slate-700">填写提示<input className={control} value={field.placeholder} onChange={(event) => updateField(field.id, { placeholder: event.target.value })} /></label>
-              <label className="block space-y-1 text-sm text-slate-700">补充说明<textarea rows={2} className={control} value={field.description} onChange={(event) => updateField(field.id, { description: event.target.value })} /></label>
+              <label className="block space-y-1 text-sm text-slate-700">填写提示<input {...problemAttributes("field-" + index + "-placeholder")} className={control} value={field.placeholder} onChange={(event) => updateField(field.id, { placeholder: event.target.value })} /></label>
+              <label className="block space-y-1 text-sm text-slate-700">补充说明<textarea {...problemAttributes("field-" + index + "-description")} rows={2} className={control} value={field.description} onChange={(event) => updateField(field.id, { description: event.target.value })} /></label>
               <details className="min-w-0 text-xs text-slate-500"><summary className="cursor-pointer font-semibold">字段映射（开发者）</summary><label className="mt-2 block space-y-1">输入字段标识<input {...problemAttributes("field-" + index + "-name")} className={control} value={field.name} onChange={(event) => updateField(field.id, { name: event.target.value })} /></label></details>
               <div className="flex flex-wrap gap-1"><Button type="button" variant="ghost" size="sm" aria-label={"上移输入项 " + (index + 1)} disabled={index === 0} onClick={() => updateDraft("fields", reorderDesignItem(draft.fields, index, -1))}><ArrowUp aria-hidden="true" className="size-4" />上移</Button>
                 <Button type="button" variant="ghost" size="sm" aria-label={"下移输入项 " + (index + 1)} disabled={index === draft.fields.length - 1} onClick={() => updateDraft("fields", reorderDesignItem(draft.fields, index, 1))}><ArrowDown aria-hidden="true" className="size-4" />下移</Button>
@@ -249,7 +249,7 @@ export function WebToolDesignStudio({ targets }: { targets: AgentTargetOption[] 
                 const chosen = WEB_TOOL_MODULES.find((item) => item.value === event.target.value);
                 if (chosen) updateModule(module.id, { component: chosen.value });
               }}>{WEB_TOOL_MODULES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
-              <label className="block space-y-1 text-sm text-slate-700">模块说明<textarea rows={2} className={control} value={module.description} onChange={(event) => updateModule(module.id, { description: event.target.value })} /></label>
+              <label className="block space-y-1 text-sm text-slate-700">模块说明<textarea {...problemAttributes("module-" + index + "-description")} rows={2} className={control} value={module.description} onChange={(event) => updateModule(module.id, { description: event.target.value })} /></label>
               <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={module.enabled} onChange={(event) => updateModule(module.id, { enabled: event.target.checked })} />显示此模块</label>
               <details className="text-xs text-slate-500"><summary className="cursor-pointer font-semibold">结果映射（开发者）</summary><label className="mt-2 block space-y-1">结果来源字段<input {...problemAttributes("module-" + index + "-source")} className={control} value={module.source} onChange={(event) => updateModule(module.id, { source: event.target.value })} /></label></details>
               <div className="flex flex-wrap gap-1"><Button type="button" variant="ghost" size="sm" aria-label={"上移结果模块 " + (index + 1)} disabled={index === 0} onClick={() => updateDraft("modules", reorderDesignItem(draft.modules, index, -1))}><ArrowUp aria-hidden="true" className="size-4" />上移</Button>
@@ -259,18 +259,18 @@ export function WebToolDesignStudio({ targets }: { targets: AgentTargetOption[] 
           </section> : null}
           {step === 3 ? <section className={section} aria-label="访问与发布配置" tabIndex={-1} data-design-field="step-3">
             <div><h3 className="font-bold text-slate-900">第四步：访问与发布</h3><p className="mt-1 text-xs leading-5 text-slate-500">以下只是访问方案，没有授权任何网站或用户，没有执行限额。</p></div>
-            <label className="block space-y-1 text-sm text-slate-700">谁可以使用<select className={control} value={draft.audienceType} onChange={(event) => {
+            <label className="block space-y-1 text-sm text-slate-700">谁可以使用<select {...problemAttributes("audienceType")} className={control} value={draft.audienceType} onChange={(event) => {
               const chosen = WEB_TOOL_AUDIENCES.find((item) => item.value === event.target.value);
               if (chosen) updateDraft("audienceType", chosen.value);
             }}>{WEB_TOOL_AUDIENCES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
-            <label className="block space-y-1 text-sm text-slate-700">访问凭据方案<select className={control} value={draft.accessMode} onChange={(event) => updateDraft("accessMode", event.target.value === "credential" ? "credential" : "anonymous")}><option value="credential">需要专用凭据</option><option value="anonymous">不要求凭据（方案）</option></select></label>
-            <label className="block space-y-1 text-sm text-slate-700">指定网站来源<textarea rows={3} className={control} value={draft.domains} onChange={(event) => updateDraft("domains", event.target.value)} placeholder="每行一个完整网站地址，不含访问路径" /></label>
+            <label className="block space-y-1 text-sm text-slate-700">访问凭据方案<select {...problemAttributes("accessMode")} className={control} value={draft.accessMode} onChange={(event) => updateDraft("accessMode", event.target.value === "credential" ? "credential" : "anonymous")}><option value="credential">需要专用凭据</option><option value="anonymous">不要求凭据（方案）</option></select></label>
+            <label className="block space-y-1 text-sm text-slate-700">指定网站来源<textarea {...problemAttributes("domains")} rows={3} className={control} value={draft.domains} onChange={(event) => updateDraft("domains", event.target.value)} placeholder="每行一个完整网站地址，不含访问路径" /></label>
             <p className="text-xs leading-5 text-slate-500">留空不代表已允许所有网站。站点授权、跨域和登录控制均待接口接入。</p>
             <div className="grid min-w-0 grid-cols-2 gap-3">
               {([{ key: "maxPerHour", label: "每小时次数上限" }, { key: "maxPerDay", label: "每天次数上限" },
-                { key: "maxConcurrent", label: "最大并发数" }, { key: "maxRuntimeSeconds", label: "最长运行时间（秒）" }, { key: "maxCostUnits", label: "成本额度上限" }] as const).map((item) => <label key={item.key} className="block min-w-0 space-y-1 text-sm text-slate-700">{item.label}<input type="number" min={item.key === "maxCostUnits" ? 0 : 1} step={item.key === "maxCostUnits" ? "any" : 1} className={control} value={Number.isFinite(draft[item.key]) ? draft[item.key] : ""} onChange={(event) => updateDraft(item.key, event.target.valueAsNumber)} /></label>)}
+                { key: "maxConcurrent", label: "最大并发数" }, { key: "maxRuntimeSeconds", label: "最长运行时间（秒）" }, { key: "maxCostUnits", label: "成本额度上限" }] as const).map((item) => <label key={item.key} className="block min-w-0 space-y-1 text-sm text-slate-700">{item.label}<input {...problemAttributes(item.key)} type="number" min={item.key === "maxCostUnits" ? 0 : 1} step={item.key === "maxCostUnits" ? "any" : 1} className={control} value={Number.isFinite(draft[item.key]) ? draft[item.key] : ""} onChange={(event) => updateDraft(item.key, event.target.valueAsNumber)} /></label>)}
             </div>
-            <label className="block space-y-1 text-sm text-slate-700">允许的写入或发送权限<textarea rows={3} className={control} value={draft.allowWriteScopes} onChange={(event) => updateDraft("allowWriteScopes", event.target.value)} placeholder="逐行填写权限名称；这里只记录设计，不授予执行权限" /></label>
+            <label className="block space-y-1 text-sm text-slate-700">允许的写入或发送权限<textarea {...problemAttributes("allowWriteScopes")} rows={3} className={control} value={draft.allowWriteScopes} onChange={(event) => updateDraft("allowWriteScopes", event.target.value)} placeholder="逐行填写权限名称；这里只记录设计，不授予执行权限" /></label>
             <CapabilityNotice mode="draft" title="保存与公开发布待接入">页面配置保存、公开展示与嵌入、访问控制和工具统计需要后端接口；本页检查不等于安全审查通过或发布完成。</CapabilityNotice>
           </section> : null}
           <div className="flex flex-wrap justify-between gap-2 rounded-xl border border-slate-200 bg-white p-3">
