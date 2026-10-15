@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkflowNode } from "@/contracts/workflow";
 
 const mocks = vi.hoisted(() => ({
-  persistStep: vi.fn(), appendTrace: vi.fn(), invokeHttpTool: vi.fn(), invokeToolOperation: vi.fn(), getToolRegistration: vi.fn(), attempt: 1, stepId: "step-1",
+  persistStep: vi.fn(), appendTrace: vi.fn(), invokeHttpTool: vi.fn(), invokeMcpTool: vi.fn(), invokeToolOperation: vi.fn(), getToolRegistration: vi.fn(), attempt: 1, stepId: "step-1",
 }));
 vi.mock("workflow", async (importOriginal) => ({
   ...(await importOriginal<typeof import("workflow")>()),
@@ -12,6 +12,7 @@ vi.mock("@/server/steps/run-state", () => ({ persistStep: mocks.persistStep }));
 vi.mock("@/server/services/harness-policies", () => ({ readRunHarnessPolicy: async () => ({ workspaceId: "00000000-0000-4000-8000-000000000001", snapshot: null }) }));
 vi.mock("@/server/steps/trace-step", () => ({ appendTrace: mocks.appendTrace }));
 vi.mock("@/server/tools/invoke-http-tool", () => ({ invokeHttpTool: mocks.invokeHttpTool }));
+vi.mock("@/server/tools/invoke-mcp-tool", () => ({ invokeMcpTool: mocks.invokeMcpTool }));
 vi.mock("@/server/services/tool-operation", () => ({ invokeToolOperation: mocks.invokeToolOperation }));
 vi.mock("@/server/tools/tool-registry", () => ({ getToolRegistration: mocks.getToolRegistration }));
 
@@ -36,6 +37,53 @@ const registration: ToolRegistration = {
 };
 
 describe("真实工具步骤", () => {
+  it("MCP写步骤默认进入持久账本，同一步骤重试保持原外部键且不走直连", async () => {
+    const mcp = WorkflowNode.parse({ ...node, tool: { ...node.tool!, protocol: "mcp-streamable-http", operationKind: "action" } });
+    mocks.getToolRegistration.mockReturnValue({ ...registration, protocol: "mcp-streamable-http", operationKind: "action", businessIdempotency: true, businessIdempotencyRetentionMs: 600_000 });
+    mocks.invokeToolOperation.mockResolvedValue({ ok: true, output: { receiptId: "saved" }, operationId: "00000000-0000-4000-8000-000000000123", reused: true });
+    for (const attempt of [1, 2]) {
+      mocks.attempt = attempt;
+      await expect(runToolStep({ runId: "run-1", node: mcp, input: {}, outputs: {} })).resolves.toEqual({ receipt: { ok: true, receiptId: "saved" } });
+    }
+    expect(mocks.invokeToolOperation.mock.calls.map(([call]) => call.stepInvocation)).toEqual([
+      { idempotencyKey: "run-1:update_customer:step-1", mayCreate: true, startedAt: expect.any(Date) },
+      { idempotencyKey: "run-1:update_customer:step-1", mayCreate: false, startedAt: expect.any(Date) },
+    ]);
+    expect(mocks.invokeToolOperation.mock.calls[0][0].node.toolOperation).toEqual({ scope: "studio.mcp-step.v1", key: { kind: "literal", value: '["run-1","step-1"]' } });
+    expect(mcp.toolOperation).toBeUndefined();
+    expect(mocks.invokeMcpTool).not.toHaveBeenCalled(); expect(mocks.invokeHttpTool).not.toHaveBeenCalled();
+  });
+  it("MCP只读保持真实调用路径，不擅自生成业务防重配置", async () => {
+    const mcp = WorkflowNode.parse({ ...node, tool: { ...node.tool!, protocol: "mcp-streamable-http", operationKind: "read" } });
+    mocks.getToolRegistration.mockReturnValue({ ...registration, protocol: "mcp-streamable-http", operationKind: "read" });
+    mocks.invokeMcpTool.mockResolvedValue({ ok: true, output: { receiptId: "read" } });
+    await expect(runToolStep({ runId: "run-1", node: mcp, input: {}, outputs: {} })).resolves.toMatchObject({ receipt: { receiptId: "read" } });
+    expect(mocks.invokeMcpTool).toHaveBeenCalledOnce(); expect(mocks.invokeToolOperation).not.toHaveBeenCalled();
+  });
+  it("MCP写步骤显式业务配置不被自动步骤账本替换", async () => {
+    const mcp = WorkflowNode.parse({ ...node, tool: { ...node.tool!, protocol: "mcp-streamable-http", operationKind: "action" },
+      toolOperation: { scope: "orders", key: { kind: "input", path: ["orderId"] } } });
+    mocks.getToolRegistration.mockReturnValue({ ...registration, protocol: "mcp-streamable-http", operationKind: "action", businessIdempotency: true, businessIdempotencyRetentionMs: 600_000 });
+    mocks.invokeToolOperation.mockResolvedValue({ ok: true, output: { receiptId: "saved" }, operationId: "00000000-0000-4000-8000-000000000123", reused: true });
+    await runToolStep({ runId: "run-1", node: mcp, input: { orderId: "o1" }, outputs: {} });
+    expect(mocks.invokeToolOperation.mock.calls[0][0].node.toolOperation).toEqual(mcp.toolOperation);
+    expect(mocks.invokeToolOperation.mock.calls[0][0].stepInvocation).toBeUndefined();
+    expect(mocks.invokeMcpTool).not.toHaveBeenCalled();
+  });
+  it("MCP写步骤账本需要等待时保留重试但不能退回直连", async () => {
+    const mcp = WorkflowNode.parse({ ...node, tool: { ...node.tool!, protocol: "mcp-streamable-http", operationKind: "action" } });
+    mocks.getToolRegistration.mockReturnValue({ ...registration, protocol: "mcp-streamable-http", operationKind: "action", businessIdempotency: true, businessIdempotencyRetentionMs: 600_000 });
+    mocks.invokeToolOperation.mockResolvedValue({ ok: false, retryable: true, retryAfterMs: 60_000, error: "正在处理" });
+    await expect(runToolStep({ runId: "run-1", node: mcp, input: {}, outputs: {} })).rejects.toMatchObject({ name: "RetryableError" });
+    expect(mocks.invokeMcpTool).not.toHaveBeenCalled(); expect(mocks.invokeHttpTool).not.toHaveBeenCalled();
+  });
+  it("MCP写步骤缺执行定位时停止，不退回无账本直连", async () => {
+    const mcp = WorkflowNode.parse({ ...node, tool: { ...node.tool!, protocol: "mcp-streamable-http", operationKind: "action" } });
+    mocks.getToolRegistration.mockReturnValue({ ...registration, protocol: "mcp-streamable-http", operationKind: "action", businessIdempotency: true, businessIdempotencyRetentionMs: 600_000 });
+    mocks.stepId = "";
+    await expect(runToolStep({ runId: "run-1", node: mcp, input: {}, outputs: {} })).rejects.toThrow("执行标识无效");
+    expect(mocks.invokeToolOperation).not.toHaveBeenCalled(); expect(mocks.invokeMcpTool).not.toHaveBeenCalled();
+  });
   it("真实 HTTP 登记标识 demo 不会返回固定演示回执", async () => {
     const real = WorkflowNode.parse({ ...node, tool: { ...node.tool!, registryToolId: "demo" } });
     mocks.getToolRegistration.mockReturnValue({ ...registration, id: "demo" });

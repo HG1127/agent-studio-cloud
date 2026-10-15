@@ -14,6 +14,7 @@ import { resolveNodeInput } from "@/server/domain/runtime/input-mapping";
 import { invokeToolOperation } from "@/server/services/tool-operation";
 import { ToolOperationTraceData } from "@/contracts/tool-operation";
 import { enforceHarnessPolicy } from "@/server/steps/harness-policy-step";
+import { resolveStepToolOperation } from "@/server/domain/runtime/tool-operation";
 
 export interface RunToolStepInput {
   runId: string;
@@ -90,8 +91,12 @@ export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Re
     if (inputSchemaError) return reject(`工具输入不符合字段契约：${inputSchemaError}`);
     const currentInputSchemaError = validateJsonObjectSchema(schemaPayload, registration.inputSchema);
     if (currentInputSchemaError) return reject(`工具输入不符合当前服务端字段契约：${currentInputSchemaError}`);
-    const operationResult = node.toolOperation ? await invokeToolOperation({
-      runId: args.runId, node, tool: registration, input: args.input, outputs: args.outputs, payload: requestPayload, inlineReferences: args.inlineReferences,
+    const operation = resolveStepToolOperation({ node, runId: args.runId, stepId: stepMetadata.stepId, attempt: stepMetadata.attempt, startedAt: stepMetadata.stepStartedAt });
+    if (!operation.ok) return reject(operation.error);
+    const operationResult = operation.config ? await invokeToolOperation({
+      runId: args.runId, node: { ...node, toolOperation: operation.config }, tool: registration,
+      input: args.input, outputs: args.outputs, payload: requestPayload, inlineReferences: args.inlineReferences,
+      stepInvocation: operation.stepInvocation,
     }) : undefined;
     const invoked = operationResult ?? await invokeRegisteredTool({
       tool: registration,

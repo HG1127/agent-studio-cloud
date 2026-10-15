@@ -1,0 +1,62 @@
+import { randomUUID } from "node:crypto";
+import { eq, inArray } from "drizzle-orm";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { start } from "workflow/api";
+import { AgentManifest } from "@/contracts/manifest";
+import { runs, runSteps, toolOperations, traceEvents } from "@/db/schema";
+import { db } from "@/lib/db";
+import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
+import { agentRunWorkflow } from "@/server/workflows/agent-run";
+import { startMcpTestServer } from "../fixtures/mcp-server";
+
+let server: Awaited<ReturnType<typeof startMcpTestServer>> | undefined;
+const runIds: string[] = [];
+afterEach(async () => {
+  await server?.close(); server = undefined;
+  vi.unstubAllEnvs();
+  if (runIds.length) {
+    await db.delete(toolOperations).where(inArray(toolOperations.sourceRunId, runIds));
+    await db.delete(traceEvents).where(inArray(traceEvents.runId, runIds));
+    await db.delete(runSteps).where(inArray(runSteps.runId, runIds));
+    await db.delete(runs).where(inArray(runs.id, runIds));
+  }
+  runIds.length = 0;
+});
+async function run(loseFirstResponse: boolean) {
+  server = await startMcpTestServer({ inputSchema: { type: "object" }, output: { receiptId: "receipt-1" }, loseFirstResponse });
+  const inputSchema = server.schema, outputSchema = { type: "object", required: ["receiptId"], properties: { receiptId: { type: "string" } } };
+  const tool = { id: "workflow.mcp-write", name: "登记", endpoint: server.endpoint, action: "lookup_customer", scope: "write", risk: "low",
+    protocol: "mcp-streamable-http", operationKind: "action", businessIdempotency: true, businessIdempotencyRetentionMs: 600_000, inputSchema, outputSchema };
+  vi.stubEnv("TOOL_REGISTRY_JSON", JSON.stringify([tool]));
+  const manifest = AgentManifest.parse({ schemaVersion: "4.0", workflowFingerprint: "mcp-step-ledger-test", inputContract: { fields: [] },
+    resourceSelection: { model: { modelId: "mock", mock: true } }, designAudit: { status: "passed", issueCount: 0, criticalCount: 0 },
+    workflowSnapshot: { id: "test", startNodeId: "start", rootAgent: { id: randomUUID(), name: "登记助手", role: "登记" }, memoryPolicy: { taskContext: true, longTerm: false },
+      nodes: {
+        start: { id: "start", title: "收到任务", type: "trigger", next: "write" },
+        write: { id: "write", title: "登记", type: "tool", next: "done", retry: { maxAttempts: 3, backoffMs: 50 },
+          tool: { connector: "本机服务", action: tool.action, scope: tool.scope, risk: tool.risk, registryToolId: tool.id,
+            protocol: tool.protocol, operationKind: tool.operationKind, inputSchema, outputSchema } },
+        done: { id: "done", title: "完成", type: "end" },
+      },
+    },
+  });
+  const [row] = await db.insert(runs).values({ workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID,
+    agentId: manifest.workflowSnapshot.rootAgent.id, versionId: randomUUID(), status: "queued", input: {} }).returning({ id: runs.id });
+  runIds.push(row.id);
+  return start(agentRunWorkflow, [row.id, manifest, {}]);
+}
+describe("真实持久工作流MCP写步骤默认账本", () => {
+  it.each([false, true])("未配置跨运行键也持久保护写步骤，首次回执丢失 %s", async (loseFirstResponse) => {
+    const pending = await run(loseFirstResponse);
+    await expect(pending.returnValue).resolves.toEqual({ status: "completed" });
+    const calls = server!.messages.filter((message) => message.method === "tools/call");
+    expect(calls).toHaveLength(loseFirstResponse ? 2 : 1);
+    expect(new Set(calls.map((message) => message.key)).size).toBe(1);
+    expect(calls[0].key).toMatch(new RegExp(`^${runIds[0]}:write:`));
+    expect(server!.effectCount()).toBe(1);
+    const operations = await db.select().from(toolOperations).where(eq(toolOperations.sourceRunId, runIds[0]));
+    expect(operations).toHaveLength(1);
+    expect(operations[0]).toMatchObject({ status: "completed", receipt: { receiptId: "receipt-1" } });
+    expect(operations[0].retryDeadline.getTime()).toBeGreaterThan(operations[0].createdAt.getTime());
+  }, 240_000);
+});

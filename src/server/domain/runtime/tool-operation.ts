@@ -7,6 +7,24 @@ import { redactCredentialData } from "@/server/domain/security/redact-sensitive"
 import { resolveInputValue } from "./input-mapping";
 
 export const TOOL_OPERATION_LEASE_MS = 120_000;
+export function resolveStepToolOperation(args: {
+  node: Pick<WorkflowNode, "id" | "tool" | "toolOperation">;
+  runId: string; stepId: string; attempt: number; startedAt: Date;
+}): { ok: true; config?: ToolOperationConfig; stepInvocation?: { idempotencyKey: string; mayCreate: boolean; startedAt: Date } }
+  | { ok: false; error: string } {
+  if (args.node.toolOperation) return { ok: true, config: args.node.toolOperation };
+  if (args.node.tool?.protocol !== "mcp-streamable-http" || args.node.tool.operationKind !== "action") return { ok: true };
+  const value = canonicalJson([args.runId, args.stepId]);
+  if (!args.runId.trim() || !args.node.id.trim() || !args.stepId.trim() || value.length > 256
+    || !Number.isSafeInteger(args.attempt) || args.attempt < 1 || !Number.isFinite(args.startedAt?.getTime())) {
+    return { ok: false, error: "工具步骤的执行标识无效，已阻止重复写入" };
+  }
+  return { ok: true, config: { scope: "studio.mcp-step.v1", key: { kind: "literal", value } }, stepInvocation: {
+    // 保留旧外部键；缺账本的旧重试不能被当作新的首次写入。
+    idempotencyKey: `${args.runId}:${args.node.id}:${args.stepId}`, mayCreate: args.attempt === 1, startedAt: args.startedAt,
+  } };
+}
+
 export function toolOperationKeyMaterial(args: {
   node: Pick<WorkflowNode, "title" | "toolOperation">;
   workspaceId: string; toolId: string; action: string;

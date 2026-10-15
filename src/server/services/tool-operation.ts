@@ -6,7 +6,7 @@ import { runs, toolOperations } from "@/db/schema";
 import { db } from "@/lib/db";
 import { canonicalJson } from "@/server/domain/canonical-json";
 import { validateJsonObjectSchema } from "@/server/domain/json-schema";
-import { toolOperationDecision, toolOperationKeyMaterial, TOOL_OPERATION_LEASE_MS, validateToolOperationReceipt } from "@/server/domain/runtime/tool-operation";
+import { type resolveStepToolOperation, toolOperationDecision, toolOperationKeyMaterial, TOOL_OPERATION_LEASE_MS, validateToolOperationReceipt } from "@/server/domain/runtime/tool-operation";
 import { withSafeWorkflowError } from "@/server/security/workflow-error";
 import { invokeRegisteredTool } from "@/server/tools/invoke-tool";
 import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding";
@@ -22,10 +22,16 @@ export async function invokeToolOperation(args: {
   runId: string; node: WorkflowNode; tool: ToolRegistration;
   input: Record<string, unknown>; outputs: Record<string, unknown>;
   inlineReferences?: InlineOutputReferences;
+  stepInvocation?: Extract<ReturnType<typeof resolveStepToolOperation>, { ok: true }>["stepInvocation"];
   payload: { action: string; input: Record<string, unknown>; outputs: Record<string, unknown> };
 }): Promise<ToolOperationInvocation> {
   if (!args.node.tool || !args.node.toolOperation || args.tool.businessIdempotency !== true || !args.tool.businessIdempotencyRetentionMs) {
     return failure("业务工具尚未确认支持跨运行操作防重");
+  }
+  if (args.stepInvocation && (args.tool.protocol !== "mcp-streamable-http" || args.tool.operationKind !== "action"
+    || !args.stepInvocation.idempotencyKey || !Number.isFinite(args.stepInvocation.startedAt?.getTime())
+    || typeof args.stepInvocation.mayCreate !== "boolean")) {
+    return failure("工具步骤的执行标识无效，已阻止重复写入");
   }
   const bindingIssue = toolRegistrationCompatibilityIssue(args.node.tool, args.tool);
   if (bindingIssue) return failure(bindingIssue);
@@ -41,6 +47,7 @@ export async function invokeToolOperation(args: {
       ...(args.tool.protocol === "mcp-streamable-http" ? [args.tool.protocol, args.tool.operationKind] : []),
       args.tool.endpoint, args.tool.method, [...new Headers(args.tool.headers).entries()],
       args.tool.businessIdempotencyRetentionMs, payload.data,
+      ...(args.stepInvocation ? [["workflow-step:v1", args.stepInvocation.idempotencyKey]] : []),
     ]));
     const claim = await db.transaction(async (tx) => {
       const [run] = await tx.select({ workspaceId: runs.workspaceId, createdBy: runs.createdBy, status: runs.status })
@@ -56,13 +63,16 @@ export async function invokeToolOperation(args: {
       const keyHash = hash(key.material);
       const now = new Date();
       const leaseExpiresAt = new Date(now.getTime() + TOOL_OPERATION_LEASE_MS);
+      const legacyRetry = args.stepInvocation?.mayCreate === false;
+      const startedAt = args.stepInvocation ? Math.min(now.getTime(), args.stepInvocation.startedAt.getTime()) : now.getTime();
       const [inserted] = await tx.insert(toolOperations).values({
         workspaceId: run.workspaceId, createdBy: run.createdBy, sourceRunId: args.runId,
         nodeTitle: args.node.title, toolId: args.tool.id, action: args.tool.action,
-        keyHash, requestHash, status: "pending", leaseOwner: owner, leaseExpiresAt,
-        retryDeadline: new Date(now.getTime() + args.tool.businessIdempotencyRetentionMs! - TOOL_OPERATION_LEASE_MS),
+        keyHash, requestHash, status: legacyRetry ? "blocked" : "pending", leaseOwner: legacyRetry ? null : owner, leaseExpiresAt: legacyRetry ? null : leaseExpiresAt,
+        ...(legacyRetry ? { error: "旧工具步骤缺少持久防重记录，必须先核对业务系统结果" } : {}),
+        retryDeadline: new Date(startedAt + args.tool.businessIdempotencyRetentionMs! - TOOL_OPERATION_LEASE_MS),
       }).onConflictDoNothing().returning();
-      if (inserted) return { kind: "execute" as const, row: inserted };
+      if (inserted) return legacyRetry ? { kind: "blocked" as const, row: inserted } : { kind: "execute" as const, row: inserted };
       const [existing] = await tx.select().from(toolOperations).where(and(
         eq(toolOperations.workspaceId, run.workspaceId), eq(toolOperations.keyHash, keyHash),
       )).for("update").limit(1);
@@ -99,7 +109,7 @@ export async function invokeToolOperation(args: {
       return failure("业务工具防重有效期已过，必须先核对业务系统结果");
     }
     const invoked = await invokeRegisteredTool({
-      tool: args.tool, idempotencyKey: `studio-operation:v1:${claim.row.keyHash}`, ...payload.data,
+      tool: args.tool, idempotencyKey: args.stepInvocation?.idempotencyKey ?? `studio-operation:v1:${claim.row.keyHash}`, ...payload.data,
     });
     const validated = invoked.ok
       ? validateToolOperationReceipt(invoked.output, args.node.tool!.outputSchema, args.tool.outputSchema) : null;
