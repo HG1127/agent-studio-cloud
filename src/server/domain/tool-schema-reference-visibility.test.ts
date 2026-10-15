@@ -39,6 +39,7 @@ describe("复用字段定义的公开凭据边界", () => {
       const properties = Object.fromEntries(Array.from({ length: 100 }, (_, index) => [`field${index}`, { $ref: "#/$defs/Options" }]));
       const defaults = Object.fromEntries(Array.from({ length: 1000 }, (_, index) => [`option${index}`, "business-code"]));
       expect(isToolSchemaSafeToExpose({ type: "object", properties, $defs: { Options: { default: defaults } } })).toBe(true);
+      expect(redact).toHaveBeenCalledWith("option999");
       expect(redact.mock.calls.length).toBeLessThan(5_000);
     } finally { redact.mockRestore(); }
   });
