@@ -1,7 +1,7 @@
 import { McpToolInputDefinition, McpToolOutput, McpToolTextContent, McpToolTextOutput, MAX_MCP_DEFINITION_BYTES, MAX_MCP_RESPONSE_BYTES } from "@/contracts/mcp-tool";
 import { isPassiveJsonData } from "@/contracts/json";
 import type { ToolRegistryOption } from "@/contracts/tool-registry";
-import { canonicalJson } from "@/server/domain/canonical-json";
+import { jsonValuesEqual } from "@/server/domain/json-value";
 import { validateJsonObjectSchema, validateJsonSchemaDefinition } from "@/server/domain/json-schema";
 
 export function mcpToolInputDefinitionIssue(definition: unknown): string | null {
@@ -13,7 +13,7 @@ export function mcpToolInputDefinitionIssue(definition: unknown): string | null 
 
 export function mcpToolDefinitionIssue(actual: Record<string, unknown>, expected: Record<string, unknown>): string | null {
   if (mcpToolInputDefinitionIssue(actual) || mcpToolInputDefinitionIssue(expected)
-    || canonicalJson(actual) !== canonicalJson(expected)) return "远端工具参数规则已变化，请核对并重新发布助手";
+    || !jsonValuesEqual(actual, expected)) return "远端工具参数规则已变化，请核对并重新发布助手";
   return null;
 }
 
@@ -39,7 +39,7 @@ export function mcpToolOutputDefinitionIssue(actual: unknown, expected: Record<s
   }
   const definition = actual as Record<string, unknown>;
   return definition.type !== "object" || validateJsonSchemaDefinition(definition)
-    || validateJsonSchemaDefinition(expected) || canonicalJson(definition) !== canonicalJson(expected) ? error : null;
+    || validateJsonSchemaDefinition(expected) || !jsonValuesEqual(definition, expected) ? error : null;
 }
 
 export function normalizeMcpToolResult(result: unknown, schema: Record<string, unknown>, context?: {

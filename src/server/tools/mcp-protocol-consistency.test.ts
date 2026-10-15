@@ -70,6 +70,35 @@ async function fixture(options: {
 }
 
 describe("连接检查与实际执行使用同一 MCP 协议语义（本机 SDK）", () => {
+  it.each((["modern", "legacy-rpc"] as const).flatMap((discovery) => (["none", "input", "output"] as const).map((drift) => ({ discovery, drift }))))("$discovery 的 Unicode 字段重排与 $drift 实质漂移在检查和调用中一致", async ({ discovery, drift }) => {
+    const first = "\u00e9", second = "e\u0301";
+    const expected = { type: "object", required: [first, second], additionalProperties: false, properties: { [first]: { type: "string" }, [second]: { type: "number" } } };
+    const reordered = { ...expected, properties: { [second]: { type: "number" }, [first]: { type: "string" } } };
+    const changed = { ...reordered, properties: { ...reordered.properties, [first]: { type: "number" } } };
+    const output = { [first]: "原文", [second]: 0 }, before = JSON.stringify([expected, reordered, changed, output]);
+    const server = await fixture({ discovery, inputSchema: expected, outputSchema: expected, output, pages: [{ tools: [{ name: "lookup",
+      inputSchema: drift === "input" ? changed : reordered, outputSchema: drift === "output" ? changed : reordered,
+    }] }] });
+    const checked = await checkMcpConnection({ ...server.registration, tools: server.registration.tools.map((tool) => ({ ...tool, outputSchema: expected })) });
+    expect(checked.status).toBe(drift === "none" ? "available" : "definition-changed");
+    expect(server.messages.some((message) => message.method === "tools/call")).toBe(false);
+    const called = await server.invoke(output);
+    if (drift === "none") {
+      expect(called).toEqual({ ok: true, output });
+      if (!called.ok) throw new Error("本机业务回执未通过 Unicode 字段检查");
+      const fields = [first, second].map((name, index) => WorkflowOutputField.parse({ path: index ? "second" : "first", label: "业务成果", required: true, sourceNodeId: "lookup", sourcePath: [name] }));
+      const projected = projectWorkflowResult({ lookup: called.output }, fields);
+      expect(projected).toEqual({ ok: true, result: { first: "原文", second: 0 } });
+      if (!projected.ok) throw new Error("本机业务回执无法精确选择 Unicode 来源字段");
+      const runId = "123e4567-e89b-42d3-a456-426614174000";
+      const frozen = freezeDefaultResultFrame({ runId, status: "completed", outcome: "completed", finishedAt: "2026-10-15T10:00:00.000Z", result: projected.result });
+      expect(presentRunTaskResult({ runId, status: "completed", result: frozen.frame.result, error: null, outputContract: { fields } }).result).toEqual(projected.result);
+    } else expect(called).toMatchObject({ ok: false, retryable: false });
+    expect(server.messages.filter((message) => message.method === "tools/call")).toHaveLength(drift === "none" ? 1 : 0);
+    expect(server.violations).toEqual([]);
+    expect(JSON.stringify([expected, reordered, changed, output])).toBe(before);
+  });
+
   it.each(["modern", "legacy-rpc"] as const)("%s SDK 的分词与用量回执可以选取、冻结并展示，不被误判为凭据", async (discovery) => {
     const outputSchema = { type: "object", properties: { tokenizer: { type: "string" }, tokenUnit: { type: "string" }, tokenBudget: { type: "number" }, active: { type: "boolean" } } };
     const output = { tokenizer: "algorithm-a", tokenUnit: "characters", tokenBudget: 0, active: false };

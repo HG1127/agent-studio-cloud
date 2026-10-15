@@ -9,7 +9,7 @@ type ToolSnapshot = NonNullable<WorkflowNode["tool"]>;
 function canonicalJson(value: unknown): string {
   return JSON.stringify(value, (_key, item) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) return item;
-    return Object.fromEntries(Object.entries(item).sort(([left], [right]) => left.localeCompare(right)));
+    return Object.fromEntries(Object.entries(item).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0));
   });
 }
 

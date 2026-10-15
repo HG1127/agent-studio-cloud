@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { McpConnectionRegistration, McpToolDirectory, type McpConnectionStatus, type McpConnectionCheckResult } from "@/contracts/mcp-connection";
-import { canonicalJson } from "@/server/domain/canonical-json";
+import { jsonValuesEqual } from "@/server/domain/json-value";
 import { validateJsonSchemaDefinition } from "@/server/domain/json-schema";
 import { isPassiveJsonData } from "@/contracts/json";
 import { MAX_MCP_SESSION_BYTES } from "@/contracts/mcp-tool";
@@ -58,7 +58,7 @@ export function compareMcpDirectory(registration: McpConnectionRegistration, dir
   const tools = registration.tools.map((expected) => {
     const actual = byName.get(expected.action);
     const status = !actual ? "missing" as const
-      : mcpToolDefinitionIssue(actual.inputSchema, expected.inputSchema) || expected.outputSchema !== undefined && canonicalJson(actual.outputSchema ?? null) !== canonicalJson(expected.outputSchema)
+      : mcpToolDefinitionIssue(actual.inputSchema, expected.inputSchema) || expected.outputSchema !== undefined && !jsonValuesEqual(actual.outputSchema ?? null, expected.outputSchema)
         ? "definition-changed" as const : "available" as const;
     return { registryToolId: expected.registryToolId, name: expected.name, status };
   });
