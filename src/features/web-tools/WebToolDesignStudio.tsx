@@ -8,13 +8,14 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { notifyDraftState } from "@/lib/draft-state";
 import { WebToolLayoutPreview } from "./WebToolLayoutPreview";
+import { planWebToolInputCommand } from "./web-tool-input-command";
 import { WEB_TOOL_AUDIENCES, WEB_TOOL_LAYOUTS, WEB_TOOL_MODULES, WEB_TOOL_STEPS, checkWebToolDesign,
   createWebToolDesignDraft, designFieldsFromTarget, readWebToolDesignJson, reorderDesignItem,
   type WebToolDesignDraft, type WebToolDesignField, type WebToolDesignModule } from "./web-tool-design-draft";
 
 const control = "w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus-visible:border-indigo-400 focus-visible:ring-2 focus-visible:ring-indigo-100 aria-invalid:border-red-400";
 const section = "min-w-0 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm";
-type Confirmation = { action: "clear" | "replace-inputs" | "remove-field" | "remove-module" | "discard-editor"; id?: string; name?: string };
+type Confirmation = { action: "clear" | "replace-inputs" | "remove-field" | "remove-module" | "discard-editor"; id?: string; name?: string; viaCommand?: boolean };
 
 export function WebToolDesignStudio({ targets }: { targets: AgentTargetOption[] | null }) {
   const instanceId = useId();
@@ -28,18 +29,23 @@ export function WebToolDesignStudio({ targets }: { targets: AgentTargetOption[] 
   const [feedback, setFeedback] = useState<{ error: boolean; text: string } | null>(null);
   const [problem, setProblem] = useState<{ key: string; text: string } | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [inputCommand, setInputCommand] = useState("");
+  const [commandTarget, setCommandTarget] = useState("");
   const nextItemRef = useRef(0);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const previewRef = useRef<HTMLDivElement | null>(null);
   const addFieldRef = useRef<HTMLButtonElement | null>(null);
   const addModuleRef = useRef<HTMLButtonElement | null>(null);
+  const commandApplyRef = useRef<HTMLButtonElement | null>(null);
   const designRootRef = useRef<HTMLDivElement | null>(null);
   const serialized = JSON.stringify(draft, null, 2);
   const editorDirty = editor !== null && editor !== serialized;
+  const commandDirty = inputCommand.length > 0;
+  const commandPlan = planWebToolInputCommand(inputCommand, draft.fields, commandTarget);
   const selectedTarget = targets?.find((target) => target.versionId === draft.versionId);
   const draftKey = "web-tool-design:" + instanceId;
   const feedbackId = instanceId + "-design-feedback";
-  useLayoutEffect(() => { notifyDraftState({ agentId: draftKey, dirty: dirty || editorDirty }); }, [draftKey, dirty, editorDirty]);
+  useLayoutEffect(() => { notifyDraftState({ agentId: draftKey, dirty: dirty || editorDirty || commandDirty }); }, [draftKey, dirty, editorDirty, commandDirty]);
   useLayoutEffect(() => () => notifyDraftState({ agentId: draftKey, dirty: false }), [draftKey]);
   useLayoutEffect(() => {
     if (!problem) return;
@@ -83,13 +89,24 @@ export function WebToolDesignStudio({ targets }: { targets: AgentTargetOption[] 
     while (draft.fields.some((field) => field.id === id) || draft.modules.some((module) => module.id === id));
     return id;
   }
-  function addField() {
+  function addField(label = "新输入项", required = true) {
     if (draft.fields.length >= 100) { setFeedback({ error: true, text: "最多可设计 100 个输入项。" }); return; }
     const id = nextItemId("input");
     let name = "input_" + nextItemRef.current;
     while (draft.fields.some((field) => field.name === name)) name += "_";
-    updateDraft("fields", [...draft.fields, { id, name, label: "新输入项",
-      type: "string", required: true, rows: 3, placeholder: "", description: "" }]);
+    updateDraft("fields", [...draft.fields, { id, name, label,
+      type: "string", required, rows: 3, placeholder: "", description: "" }]);
+  }
+  function applyInputCommand(trigger: HTMLElement) {
+    if (commandPlan.state !== "ready") return;
+    if (commandPlan.command.kind === "remove" && commandPlan.field) {
+      requestConfirmation({ action: "remove-field", id: commandPlan.field.id, name: commandPlan.field.label, viaCommand: true }, trigger);
+      return;
+    }
+    if (commandPlan.command.kind === "add") addField(commandPlan.command.label, false);
+    else if (commandPlan.command.kind === "required" && commandPlan.field) updateField(commandPlan.field.id, { required: commandPlan.command.required });
+    setInputCommand(""); setCommandTarget("");
+    setFeedback({ error: false, text: "已应用到本页草稿：" + commandPlan.message + " 尚未保存或发布。" });
   }
   function addModule() {
     if (draft.modules.length >= 100) { setFeedback({ error: true, text: "最多可设计 100 个结果模块。" }); return; }
@@ -107,6 +124,7 @@ export function WebToolDesignStudio({ targets }: { targets: AgentTargetOption[] 
       setDraft(createWebToolDesignDraft()); setDirty(false); setEditor(null); setMode("smart"); setStep(0);
       setPreviewValues({}); setPreviewSession((current) => current + 1); setFeedback(null);
       setProblem(null);
+      setInputCommand(""); setCommandTarget("");
     } else if (confirmation.action === "discard-editor") {
       setEditor(null); setMode("smart"); setFeedback(null); setProblem(null);
     } else if (confirmation.action === "replace-inputs") {
@@ -121,6 +139,7 @@ export function WebToolDesignStudio({ targets }: { targets: AgentTargetOption[] 
       updateDraft("fields", draft.fields.filter((field) => field.id !== confirmation.id));
       setPreviewValues((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== confirmation.id)));
       setPreviewSession((current) => current + 1);
+      if (confirmation.viaCommand) { setInputCommand(""); setCommandTarget(""); }
     } else if (confirmation.action === "remove-module") {
       returnFocusRef.current = addModuleRef.current;
       updateDraft("modules", draft.modules.filter((module) => module.id !== confirmation.id));
@@ -213,9 +232,18 @@ export function WebToolDesignStudio({ targets }: { targets: AgentTargetOption[] 
           </section> : null}
           {step === 1 ? <section className={section} aria-label="输入项配置" tabIndex={-1} data-design-field="step-1">
             <div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="font-bold text-slate-900">第二步：输入项</h3><p className="mt-1 text-xs text-slate-500">可添加、编辑、调整顺序和必填项。</p></div>
-              <button ref={addFieldRef} type="button" className={buttonVariants({ size: "sm" })} onClick={addField}><Plus aria-hidden="true" className="size-4" />添加输入项</button></div>
+              <button ref={addFieldRef} type="button" className={buttonVariants({ size: "sm" })} onClick={() => addField()}><Plus aria-hidden="true" className="size-4" />添加输入项</button></div>
             <Button type="button" variant="secondary" disabled={!selectedTarget} onClick={(event) => requestConfirmation({ action: "replace-inputs" }, event.currentTarget)}>按正式输入生成表单</Button>
             <p className="text-xs leading-5 text-slate-500">手动编辑只改变页面设计，不改变正式助手的输入契约；之后接入保存时还须核对字段映射。</p>
+            <section aria-label="中文快捷编辑输入项" className="min-w-0 space-y-3 rounded-xl border border-indigo-100 bg-indigo-50/50 p-4">
+              <div><h4 className="text-sm font-semibold text-indigo-950">中文快捷编辑</h4><p id={instanceId + "-command-help"} className="mt-1 text-xs leading-5 text-slate-600">使用本页固定规则，不调用模型。支持“添加「本周收获」”“删除「下周计划」”“把「下周计划」设为必填”，也可设为选填。先核对变更，再明确应用。</p></div>
+              <label className="block space-y-1 text-sm font-medium text-slate-700">用中文调整输入项<input className={control} value={inputCommand} maxLength={240} aria-describedby={instanceId + "-command-help"} onChange={(event) => { setInputCommand(event.target.value); setCommandTarget(""); }} onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); commandApplyRef.current?.focus(); }
+              }} placeholder="例如：加一个本周最大的收获" /></label>
+              {commandPlan.choices.length > 1 || commandTarget ? <label className="block space-y-1 text-sm text-slate-700">选择要调整的输入项<select className={control} value={commandTarget} onChange={(event) => setCommandTarget(event.target.value)}><option value="">请明确选择，不会批量修改</option>{commandPlan.choices.map((choice) => <option key={choice.id} value={choice.id}>输入项 {choice.position} · {choice.label}</option>)}</select></label> : null}
+              <p id={instanceId + "-command-result"} className="break-words text-xs leading-5 text-slate-700">{commandPlan.state === "ready" ? "待应用的变更：" : ""}{commandPlan.message}</p>
+              <button ref={commandApplyRef} type="button" className={buttonVariants({ size: "sm", variant: "secondary" })} disabled={commandPlan.state !== "ready"} aria-describedby={instanceId + "-command-result"} onClick={(event) => applyInputCommand(event.currentTarget)}>确认应用到本页</button>
+            </section>
             {draft.fields.length === 0 ? <p className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">还没有输入项。可从真实正式版本读取字段，或手动添加。</p> : null}
             {draft.fields.map((field, index) => <fieldset key={field.id} className="min-w-0 space-y-3 rounded-xl border border-slate-200 bg-slate-50/40 p-3">
               <legend className="px-1 text-xs font-semibold text-slate-500">输入项 {index + 1}</legend>
