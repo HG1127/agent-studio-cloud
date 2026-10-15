@@ -19,7 +19,7 @@ async function openInputs(user: ReturnType<typeof userEvent.setup>) {
 }
 async function addManual(user: ReturnType<typeof userEvent.setup>, label: string) {
   await user.click(inputs().getByRole("button", { name: "添加输入项" }));
-  const groups = inputs().getAllByRole("group");
+  const groups = inputs().getAllByRole("group", { name: /^输入项 \d+$/ });
   const name = within(groups[groups.length - 1]).getByRole("textbox", { name: "显示名称" });
   await user.clear(name); await user.type(name, label);
 }
@@ -97,7 +97,7 @@ describe("网页工具中文快捷编辑的真实设计组件", () => {
       await instruct(user, instruction);
       expect(inputs().getByText(new RegExp(message))).toBeVisible();
       expect(applyButton()).toBeDisabled();
-      expect(inputs().getAllByRole("group")).toHaveLength(1);
+      expect(inputs().getAllByRole("group", { name: /^输入项 \d+$/ })).toHaveLength(1);
       expect(within(inputs().getByRole("group", { name: "输入项 1" })).getByRole("textbox", { name: "显示名称" })).toHaveValue("下周计划");
     }
   });
@@ -138,6 +138,6 @@ describe("网页工具中文快捷编辑的真实设计组件", () => {
     await instruct(user, "添加新项目");
     expect(inputs().getByText(/最多可设计 100 个输入项/)).toBeVisible();
     expect(applyButton()).toBeDisabled();
-    expect(inputs().getAllByRole("group")).toHaveLength(100);
+    expect(inputs().getAllByRole("group", { name: /^输入项 \d+$/ })).toHaveLength(100);
   });
 });
