@@ -16,7 +16,9 @@ function registeredConnections(workspaceId: string) {
       id: tool.id, name: tool.name, workspaceId: DEMO_WORKSPACE_ID, endpoint: tool.endpoint, headers: tool.headers,
       tools: [{ registryToolId: tool.id, name: tool.name, action: tool.action, inputSchema: tool.inputSchema }],
     }]));
-    return { id: tool.id, name: tool.name, registration: mcpToolLocalOutputDefinitionIssue(tool.outputSchema) ? null : registrations?.[0] ?? null };
+    // 执行回执定义单独核对，不能挤入64KB登记字段或强制旧服务公布定义。
+    return { id: tool.id, name: tool.name, registration: mcpToolLocalOutputDefinitionIssue(tool.outputSchema) ? null : registrations?.[0] ?? null,
+      executionOutputDefinitions: new Map([[tool.id, tool.outputSchema]]) };
   });
   return { status, connections };
 }
@@ -38,5 +40,5 @@ export async function inspectMcpConnection(connectionId: string, workspaceId = D
   const item = registrations.connections.find((connection) => connection.id === connectionId);
   if (!item) return mcpCheckFailure("not-found");
   if (!item.registration) return mcpCheckFailure("configuration-error");
-  return checkMcpConnection(item.registration);
+  return checkMcpConnection(item.registration, fetch, item.executionOutputDefinitions);
 }

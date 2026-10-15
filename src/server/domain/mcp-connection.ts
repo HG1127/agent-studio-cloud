@@ -4,8 +4,22 @@ import { toolDefinitionsEqual } from "@/server/domain/tool-definition-equality";
 import { validateJsonSchemaDefinition } from "@/server/domain/json-schema";
 import { isPassiveJsonData } from "@/contracts/json";
 import { MAX_MCP_SESSION_BYTES } from "@/contracts/mcp-tool";
-import { mcpToolDefinitionIssue, mcpToolInputDefinitionIssue } from "@/server/domain/runtime/mcp-tool";
+import type { ToolRegistryOption } from "@/contracts/tool-registry";
+import { mcpToolDefinitionIssue, mcpToolInputDefinitionIssue, mcpToolLocalOutputDefinitionIssue, mcpToolOutputDefinitionIssue } from "@/server/domain/runtime/mcp-tool";
 const forbiddenHeaders = new Set(["connection", "content-length", "host", "cookie", "set-cookie", "proxy-authorization", "proxy-authenticate", "keep-alive", "te", "trailer", "transfer-encoding", "upgrade"]);
+
+type McpExecutionOutputDefinitions = ReadonlyMap<McpConnectionRegistration["tools"][number]["registryToolId"], ToolRegistryOption["outputSchema"]>;
+
+export function mcpExecutionOutputDefinitionsAreValid(registration: McpConnectionRegistration, definitions?: McpExecutionOutputDefinitions): boolean {
+  if (definitions === undefined) return true;
+  if (definitions.size > registration.tools.length) return false;
+  for (const [id, definition] of definitions) {
+    const tool = registration.tools.find((tool) => tool.registryToolId === id);
+    if (!tool || mcpToolLocalOutputDefinitionIssue(definition)
+      || tool.outputSchema !== undefined && !toolDefinitionsEqual(tool.outputSchema, definition)) return false;
+  }
+  return true;
+}
 
 export function mcpHeadersAreValid(headers: McpConnectionRegistration["headers"]): boolean {
   const entries = Object.entries(headers), names = new Set<string>();
@@ -49,7 +63,8 @@ export function mcpCheckFailure(status: McpConnectionStatus): McpConnectionCheck
   return { status, message: messages[status], tools: [] };
 }
 
-export function compareMcpDirectory(registration: McpConnectionRegistration, directory: unknown): McpConnectionCheckResult {
+export function compareMcpDirectory(registration: McpConnectionRegistration, directory: unknown, executionOutputDefinitions?: McpExecutionOutputDefinitions): McpConnectionCheckResult {
+  if (!mcpExecutionOutputDefinitionsAreValid(registration, executionOutputDefinitions)) return mcpCheckFailure("configuration-error");
   if (!isPassiveJsonData(directory, MAX_MCP_SESSION_BYTES)) return mcpCheckFailure("protocol-error");
   const parsed = McpToolDirectory.safeParse(directory);
   if (!parsed.success) return mcpCheckFailure("protocol-error");
@@ -58,7 +73,9 @@ export function compareMcpDirectory(registration: McpConnectionRegistration, dir
   const tools = registration.tools.map((expected) => {
     const actual = byName.get(expected.action);
     const status = !actual ? "missing" as const
-      : mcpToolDefinitionIssue(actual.inputSchema, expected.inputSchema) || expected.outputSchema !== undefined && !toolDefinitionsEqual(actual.outputSchema ?? null, expected.outputSchema)
+      : mcpToolDefinitionIssue(actual.inputSchema, expected.inputSchema)
+        || expected.outputSchema !== undefined && !toolDefinitionsEqual(actual.outputSchema ?? null, expected.outputSchema)
+        || executionOutputDefinitions?.has(expected.registryToolId) && mcpToolOutputDefinitionIssue(actual.outputSchema, executionOutputDefinitions.get(expected.registryToolId)!)
         ? "definition-changed" as const : "available" as const;
     return { registryToolId: expected.registryToolId, name: expected.name, status };
   });

@@ -1,14 +1,14 @@
 import { createMCPClient, type MCPClient } from "@ai-sdk/mcp";
 import { McpPingResponse, McpToolDirectory, type McpConnectionRegistration, type McpConnectionCheckResult } from "@/contracts/mcp-connection";
-import { compareMcpDirectory, mcpCheckFailure, mcpHeadersAreValid } from "@/server/domain/mcp-connection";
+import { compareMcpDirectory, mcpCheckFailure, mcpHeadersAreValid, mcpExecutionOutputDefinitionsAreValid } from "@/server/domain/mcp-connection";
 import { MAX_MCP_DIRECTORY_PAGES, MAX_MCP_DIRECTORY_PAGE_TOOLS, MAX_MCP_RESPONSE_BYTES, MAX_MCP_SESSION_BYTES, MAX_MCP_TRANSPORT_REQUESTS } from "@/contracts/mcp-tool";
 
 const TIMEOUT_MS = 10_000;
 const allowedMethods = new Set(["server/discover", "initialize", "notifications/initialized", "tools/list"]);
 class CheckBoundaryError extends Error {}
 
-export async function checkMcpConnection(registration: McpConnectionRegistration, fetchImpl: typeof fetch = fetch): Promise<McpConnectionCheckResult> {
-  if (!mcpHeadersAreValid(registration.headers)) return mcpCheckFailure("configuration-error");
+export async function checkMcpConnection(registration: McpConnectionRegistration, fetchImpl: typeof fetch = fetch, executionOutputDefinitions?: Parameters<typeof compareMcpDirectory>[2]): Promise<McpConnectionCheckResult> {
+  if (!mcpHeadersAreValid(registration.headers) || !mcpExecutionOutputDefinitionsAreValid(registration, executionOutputDefinitions)) return mcpCheckFailure("configuration-error");
   const endpoint = new URL(registration.endpoint).href;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -85,7 +85,7 @@ export async function checkMcpConnection(registration: McpConnectionRegistration
       if (!parsed.success || parsed.data.length > MAX_MCP_DIRECTORY_PAGE_TOOLS) return mcpCheckFailure("protocol-error");
       definitions.push(...parsed.data);
       cursor = list.nextCursor;
-      if (!cursor) return compareMcpDirectory(registration, definitions);
+      if (!cursor) return compareMcpDirectory(registration, definitions, executionOutputDefinitions);
       if (cursor.length > 1000 || cursors.has(cursor) || page === MAX_MCP_DIRECTORY_PAGES - 1) return mcpCheckFailure("protocol-error");
       cursors.add(cursor);
     }

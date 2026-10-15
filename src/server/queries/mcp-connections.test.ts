@@ -26,6 +26,8 @@ describe("已登记连接查询", () => {
   it("仅检查已登记且有效的 MCP 工具", async () => {
     await inspectMcpConnection("lookup", DEMO_WORKSPACE_ID);
     expect(mocks.check.mock.calls[0][0].endpoint).toBe(tool.endpoint);
+    expect(mocks.check.mock.calls[0][2].get("lookup")).toEqual(tool.outputSchema);
+    expect(mocks.check.mock.calls[0][2].size).toBe(1);
     mocks.load.mockReturnValue([{ ...tool, protocol: "http-json" }]); expect(listMcpConnections()).toEqual([]);
     mocks.load.mockReturnValue([{ ...tool, endpoint: "ftp://service.example/mcp" }]);
     expect((await inspectMcpConnection("lookup")).status).toBe("configuration-error");
@@ -80,4 +82,5 @@ it("连接诊断保留超过32KB的合法本地回执定义，不将它当作远
   await inspectMcpConnection("lookup");
   expect(mocks.check).toHaveBeenCalledOnce();
   expect(mocks.check.mock.calls[0][0].tools[0]).not.toHaveProperty("outputSchema");
+  expect(mocks.check.mock.calls[0][2].get("lookup")).toEqual({ type: "object", description: "汉".repeat(12_000) });
 });
