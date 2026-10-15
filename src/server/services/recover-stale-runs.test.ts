@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 
 const mocks = vi.hoisted(() => ({ select: vi.fn(), resume: vi.fn() }));
 
@@ -17,6 +19,29 @@ const staleRows = (ids: string[]) => ({
 });
 
 describe("过期排队运行接管", () => {
+  it("在排序和限额之前排除内联子任务，避免它们挤占主任务恢复名额", async () => {
+    let filter: SQL | undefined;
+    const now = new Date("2026-10-15T00:00:00.000Z");
+    const orderBy = vi.fn(() => ({ limit: vi.fn(async () => []) }));
+    mocks.select.mockReturnValueOnce({ from: () => ({ where: (value: SQL) => {
+      filter = value;
+      return { orderBy };
+    } }) });
+
+    await recoverStaleQueuedRuns(now);
+
+    expect(filter).toBeDefined();
+    const query = new PgDialect().sqlToQuery(filter!);
+    expect(query.sql).toContain('"runs"."source_type" in (\'manual\', \'schedule\', \'evaluation\')');
+    expect(query.sql).toContain('"runs"."parent_run_id" is null');
+    expect(query.sql).toContain('"runs"."execution_root_run_id" is null or "runs"."execution_root_run_id" = "runs"."id"');
+    expect(query.sql).toContain('"runs"."workflow_run_id" is null');
+    expect(query.params).toContain("queued");
+    expect(query.params).toContain("2026-10-14T23:58:00.000Z");
+    expect(orderBy).toHaveBeenCalledOnce();
+    expect(mocks.resume).not.toHaveBeenCalled();
+  });
+
   it("数据库不可用时向调用方抛错，日志只保留脱敏信息", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const error = new Error("authorization: Bearer private-recovery-token");
