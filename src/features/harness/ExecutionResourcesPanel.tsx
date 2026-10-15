@@ -1,12 +1,13 @@
 "use client";
 
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import {
   ExecutionPolicyInput, ExecutionResourceLimits,
   type ExecutionPolicyReadResult, type ExecutionPolicyHistoryResult,
   type ExecutionPolicyWriteResult, type ExecutionPolicyChangeView,
 } from "@/contracts/execution-resources";
 import { readExecutionResources, readExecutionResourceHistory, writeExecutionResources } from "./execution-resource-client";
+import { notifyDraftState } from "@/lib/draft-state";
 
 const fields = [
   { key: "maxConcurrentChains", label: "同时保留的执行链名额", min: 1, max: 2000 },
@@ -33,6 +34,8 @@ export function ExecutionResourcesPanel({ initialRead, initialHistory }: {
   initialRead: ExecutionPolicyReadResult;
   initialHistory: ExecutionPolicyHistoryResult;
 }) {
+  const draftId = useId();
+  const draftKey = `harness-execution-resources:${draftId}`;
   const [readSource, setReadSource] = useState(initialRead);
   const [read, setRead] = useState(initialRead);
   const [historySource, setHistorySource] = useState(initialHistory);
@@ -44,6 +47,7 @@ export function ExecutionResourcesPanel({ initialRead, initialHistory }: {
   const readSequence = useRef(0);
   const historySequence = useRef(0);
   const [draft, setDraft] = useState(() => draftFrom(initialRead));
+  const [draftBaseline, setDraftBaseline] = useState(() => draftFrom(initialRead));
   const [draftRevision, setDraftRevision] = useState<number | null>(initialRead.ok ? initialRead.snapshot.policy.revision : null);
   const [reason, setReason] = useState("");
   const [confirmed, setConfirmed] = useState(false);
@@ -56,6 +60,17 @@ export function ExecutionResourcesPanel({ initialRead, initialHistory }: {
   const [checked, setChecked] = useState(false);
   const [checking, setChecking] = useState(false);
   const [matchedRecord, setMatchedRecord] = useState<ExecutionPolicyChangeView | null>(null);
+  const dirty = fields.some((field) => draft[field.key] !== draftBaseline[field.key]) || reason.length > 0 || confirmed;
+  const protectedDraft = saving || (frozen !== null ? outcome?.ok !== true && matchedRecord === null : dirty);
+
+  useLayoutEffect(() => { notifyDraftState({ agentId: draftKey, dirty: protectedDraft }); }, [draftKey, protectedDraft]);
+  useLayoutEffect(() => () => { notifyDraftState({ agentId: draftKey, dirty: false }); }, [draftKey]);
+  useEffect(() => {
+    if (!protectedDraft) return;
+    function warn(event: BeforeUnloadEvent) { event.preventDefault(); event.returnValue = ""; }
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [protectedDraft]);
 
   if (readSource !== initialRead) {
     setReadSource(initialRead);
@@ -92,6 +107,7 @@ export function ExecutionResourcesPanel({ initialRead, initialHistory }: {
     if (request && recent.ok) {
       const record = recent.items.find((item) => item.requestId === request.requestId);
       if (record && record.revision === request.expectedRevision + 1
+        && record.reason === request.reason
         && fields.every((field) => record.limits[field.key] === request.limits[field.key])) setMatchedRecord(record);
     }
     setChecked(current.ok && recent.ok);
@@ -142,9 +158,12 @@ export function ExecutionResourcesPanel({ initialRead, initialHistory }: {
   }
   function beginNew() {
     if (!read.ok || reading || saving || checking || (frozen && !checked)) return;
+    if (protectedDraft && !window.confirm("当前填写或保留的原请求将被替换，确定按当前设置重新填写吗？")) return;
+    const nextDraft = draftFrom(read);
     frozenRef.current = null;
     setFrozen(null);
-    setDraft(draftFrom(read));
+    setDraft(nextDraft);
+    setDraftBaseline(nextDraft);
     setDraftRevision(read.snapshot.policy.revision);
     setReason("");
     setConfirmed(false);
@@ -201,7 +220,7 @@ export function ExecutionResourcesPanel({ initialRead, initialHistory }: {
         <p className="mt-2 text-xs leading-5 text-slate-500">{cursor === undefined ? "当前读取最近一页，最多二十条。" : "当前读取第 " + cursor + " 版之前的一页，最多二十条。"}记录缺失或本页为空不能证明某次保存没有发生。</p>
         {readingHistory ? <p role="status" className="mt-3 text-sm text-slate-600">正在读取本页变更历史…</p> : !history.ok ? <p role="alert" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">资源设置历史暂时无法读取，不能按空记录显示。资源摘要如可读仍可核对。</p> : history.items.length ? <ol className="mt-3 space-y-3">{history.items.map((item) => <li key={item.id} className="rounded-xl border border-slate-200 p-3">
           <h4 className="text-sm font-semibold text-slate-900">资源设置第 {item.revision} 版</h4><p className="mt-1 text-xs text-slate-500">{resourceTime(item.createdAt)} · 北京时间</p>
-          {frozen && item.requestId === frozen.requestId && item.revision === frozen.expectedRevision + 1 && fields.every((field) => item.limits[field.key] === frozen.limits[field.key]) ? <p className="mt-2 text-xs font-semibold text-emerald-800">对应当前页面保留的原请求</p> : null}
+          {frozen && item.requestId === frozen.requestId && item.revision === frozen.expectedRevision + 1 && item.reason === frozen.reason && fields.every((field) => item.limits[field.key] === frozen.limits[field.key]) ? <p className="mt-2 text-xs font-semibold text-emerald-800">对应当前页面保留的原请求</p> : null}
           <dl className="mt-2 space-y-1 text-xs leading-5">{fields.map((field) => <div key={field.key}><dt className="inline text-slate-600">{field.label}：</dt><dd className="inline text-slate-800">{item.previousLimits[field.key]} → {item.limits[field.key]}</dd></div>)}</dl>
           <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">修改原因：{item.reason}</p>
         </li>)}</ol> : <p role="status" className="mt-3 rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">本页没有已读取的变更记录。</p>}
