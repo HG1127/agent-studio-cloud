@@ -1,28 +1,38 @@
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { start } from "workflow/api";
+import { start, type Run } from "workflow/api";
 import { AgentManifest } from "@/contracts/manifest";
 import { runs, runSteps, toolOperations, traceEvents } from "@/db/schema";
 import { db } from "@/lib/db";
 import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { agentRunWorkflow } from "@/server/workflows/agent-run";
 import { startMcpTestServer } from "../fixtures/mcp-server";
+import { cleanupMcpStepToolRun } from "../helpers/mcp-step-tool-operation-cleanup";
 
 let server: Awaited<ReturnType<typeof startMcpTestServer>> | undefined;
 const runIds: string[] = [];
+const handles: Array<Run<unknown>> = [];
+const pendingStartRunIds = new Set<string>();
+let cleanupFailed = false;
 afterEach(async () => {
-  await server?.close(); server = undefined;
-  vi.unstubAllEnvs();
-  if (runIds.length) {
-    await db.delete(toolOperations).where(inArray(toolOperations.sourceRunId, runIds));
-    await db.delete(traceEvents).where(inArray(traceEvents.runId, runIds));
-    await db.delete(runSteps).where(inArray(runSteps.runId, runIds));
-    await db.delete(runs).where(inArray(runs.id, runIds));
-  }
-  runIds.length = 0;
+  try {
+    await cleanupMcpStepToolRun({ handles, pendingStartRunIds: [...pendingStartRunIds],
+      deleteOwnedRecords: async () => {
+        if (!runIds.length) return;
+        await db.delete(toolOperations).where(inArray(toolOperations.sourceRunId, runIds));
+        await db.delete(traceEvents).where(inArray(traceEvents.runId, runIds));
+        await db.delete(runSteps).where(inArray(runSteps.runId, runIds));
+        await db.delete(runs).where(inArray(runs.id, runIds));
+      },
+      closeService: async () => { await server?.close(); }, restoreEnvironment: () => vi.unstubAllEnvs(),
+    });
+    runIds.length = 0; handles.length = 0; pendingStartRunIds.clear();
+  } catch (error) { cleanupFailed = true; throw error; }
+  finally { server = undefined; }
 });
 async function run(loseFirstResponse: boolean) {
+  if (cleanupFailed) throw new Error("上次验收清理未完成，不能启动新的工作流");
   server = await startMcpTestServer({ inputSchema: { type: "object" }, output: { receiptId: "receipt-1" }, loseFirstResponse });
   const inputSchema = server.schema, outputSchema = { type: "object", required: ["receiptId"], properties: { receiptId: { type: "string" } } };
   const tool = { id: "workflow.mcp-write", name: "登记", endpoint: server.endpoint, action: "lookup_customer", scope: "write", risk: "low",
@@ -43,7 +53,11 @@ async function run(loseFirstResponse: boolean) {
   const [row] = await db.insert(runs).values({ workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID,
     agentId: manifest.workflowSnapshot.rootAgent.id, versionId: randomUUID(), status: "queued", input: {} }).returning({ id: runs.id });
   runIds.push(row.id);
-  return start(agentRunWorkflow, [row.id, manifest, {}]);
+  pendingStartRunIds.add(row.id);
+  const handle = await start(agentRunWorkflow, [row.id, manifest, {}]);
+  handles.push(handle);
+  pendingStartRunIds.delete(row.id);
+  return handle;
 }
 describe("真实持久工作流MCP写步骤默认账本", () => {
   it.each([false, true])("未配置跨运行键也持久保护写步骤，首次回执丢失 %s", async (loseFirstResponse) => {
