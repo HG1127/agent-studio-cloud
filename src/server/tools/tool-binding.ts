@@ -2,7 +2,7 @@ import type { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
 import { prepareParallelBranches } from "@/server/domain/runtime/parallel-runtime";
 import { prepareSubflow } from "@/server/domain/runtime/subflow-runtime";
 import type { ToolRegistration } from "@/server/tools/tool-registry";
-import { mcpToolInputDefinitionIssue } from "@/server/domain/runtime/mcp-tool";
+import { mcpToolInputDefinitionIssue, mcpToolLocalOutputDefinitionIssue } from "@/server/domain/runtime/mcp-tool";
 
 type ToolSnapshot = NonNullable<WorkflowNode["tool"]>;
 
@@ -28,7 +28,8 @@ export function toolRegistrationCompatibilityIssue(
     return "绑定的业务工具配置已变化，请重新发布助手";
   }
   if (registration.protocol === "mcp-streamable-http") {
-    const issue = mcpToolInputDefinitionIssue(snapshot.inputSchema) ?? mcpToolInputDefinitionIssue(registration.inputSchema);
+    const issue = mcpToolInputDefinitionIssue(snapshot.inputSchema) ?? mcpToolInputDefinitionIssue(registration.inputSchema)
+      ?? mcpToolLocalOutputDefinitionIssue(snapshot.outputSchema) ?? mcpToolLocalOutputDefinitionIssue(registration.outputSchema);
     if (issue) return issue;
   }
   if (canonicalJson(snapshot.inputSchema) !== canonicalJson(registration.inputSchema)

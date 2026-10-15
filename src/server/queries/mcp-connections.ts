@@ -5,6 +5,7 @@ import { parseMcpConnections, mcpCheckFailure } from "@/server/domain/mcp-connec
 import { buildMcpConnectionConfiguration } from "@/server/domain/mcp-configuration";
 import { loadToolRegistrySnapshot } from "@/server/tools/tool-registry";
 import { checkMcpConnection } from "@/server/tools/mcp-connection-check";
+import { mcpToolLocalOutputDefinitionIssue } from "@/server/domain/runtime/mcp-tool";
 
 function registeredConnections(workspaceId: string) {
   if (workspaceId !== DEMO_WORKSPACE_ID) return { status: "not-configured" as ToolRegistryConfigurationStatus, connections: [] };
@@ -15,7 +16,7 @@ function registeredConnections(workspaceId: string) {
       id: tool.id, name: tool.name, workspaceId: DEMO_WORKSPACE_ID, endpoint: tool.endpoint, headers: tool.headers,
       tools: [{ registryToolId: tool.id, name: tool.name, action: tool.action, inputSchema: tool.inputSchema }],
     }]));
-    return { id: tool.id, name: tool.name, registration: registrations?.[0] ?? null };
+    return { id: tool.id, name: tool.name, registration: mcpToolLocalOutputDefinitionIssue(tool.outputSchema) ? null : registrations?.[0] ?? null };
   });
   return { status, connections };
 }

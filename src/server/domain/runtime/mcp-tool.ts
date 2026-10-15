@@ -17,10 +17,21 @@ export function mcpToolDefinitionIssue(actual: Record<string, unknown>, expected
   return null;
 }
 
+export function mcpToolLocalOutputDefinitionIssue(definition: unknown): string | null {
+  const error = "工具回执定义无效或超过容量，请检查服务端配置";
+  if (!isPassiveJsonData(definition, MAX_MCP_RESPONSE_BYTES)) return error;
+  const parsed = McpToolOutput.safeParse(definition);
+  if (!parsed.success || validateJsonSchemaDefinition(parsed.data)) return error;
+  const type = parsed.data.type;
+  if (type !== undefined && !(Array.isArray(type) ? type.includes("object") : type === "object")) return error;
+  return null;
+}
+
 export function mcpToolOutputDefinitionIssue(actual: unknown, expected: Record<string, unknown>): string | null {
+  const error = "远端工具回执规则已变化或无效，请核对并重新发布助手";
+  if (mcpToolLocalOutputDefinitionIssue(expected)) return error;
   // 旧服务可不公布回执定义，实际回执仍须通过本地契约。
   if (actual === undefined) return null;
-  const error = "远端工具回执规则已变化或无效，请核对并重新发布助手";
   if (!isPassiveJsonData(actual, MAX_MCP_RESPONSE_BYTES) || !isPassiveJsonData(expected, MAX_MCP_RESPONSE_BYTES)
     || !actual || typeof actual !== "object" || Array.isArray(actual)) return error;
   for (const definition of [actual, expected]) {
@@ -35,6 +46,8 @@ export function normalizeMcpToolResult(result: unknown, schema: Record<string, u
   operationKind?: ToolRegistryOption["operationKind"]; hasOutputDefinition?: boolean;
 }) {
   const failure = (error: string) => ({ ok: false as const, error, retryable: false });
+  const definitionIssue = mcpToolLocalOutputDefinitionIssue(schema);
+  if (definitionIssue) return failure(definitionIssue);
   if (!isPassiveJsonData(result, MAX_MCP_RESPONSE_BYTES) || !result || typeof result !== "object" || Array.isArray(result)) {
     return failure("远端工具回执无效或超过容量限制");
   }

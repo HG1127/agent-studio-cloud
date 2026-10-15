@@ -23,6 +23,31 @@ async function fixture(options: Parameters<typeof startMcpTestServer>[0] = {}) {
 }
 
 describe("真实 MCP SDK 对本地 Streamable HTTP 服务", () => {
+  it.each([
+    { outputSchema: { type: "object", properties: [] } },
+    { outputSchema: { type: "object", $ref: "https://private.invalid/receipt" } },
+    { outputSchema: { type: "object", anyOf: [] } },
+    { outputSchema: { type: "string" } },
+  ])("只读和写操作的本地回执定义错误均在握手及业务请求之前拒绝 %#", async ({ outputSchema }) => {
+    const { server, tool } = await fixture();
+    for (const operationKind of ["read", "action"] as const) {
+      const configured = { ...tool, operationKind, outputSchema, businessIdempotency: true, businessIdempotencyRetentionMs: 600_000 };
+      await expect(invokeMcpTool({ tool: configured, action: tool.action, idempotencyKey: "output-preflight", input: { customerId: "c1" }, outputs: {} }))
+        .resolves.toEqual({ ok: false, retryable: false, error: "工具回执定义无效或超过容量，请检查服务端配置" });
+    }
+    expect(server.messages).toHaveLength(0);
+    expect(server.effectCount()).toBe(0);
+  });
+
+  it.each([{ outputSchema: {} }, { outputSchema: { type: ["object", "null"] } },
+    { outputSchema: { type: "object", description: "汉".repeat(12_000) } },
+  ])("旧服务不声明回执定义时仍支持既有对象契约与大定义 %#", async ({ outputSchema }) => {
+    const { server, tool } = await fixture();
+    await expect(invokeMcpTool({ tool: { ...tool, outputSchema }, action: tool.action, idempotencyKey: "output-compatible", input: { customerId: "c1" }, outputs: {} }))
+      .resolves.toEqual({ ok: true, output: { customerId: "c1", amount: 0, active: false } });
+    expect(server.messages.filter((message) => message.method === "tools/call")).toHaveLength(1);
+  });
+
   it.each([null, "c1"])("组合参数与回执通过真实 SDK 发现和调用，保留 %j", async (customerId) => {
     const inputSchema = { type: "object", required: ["customerId"], properties: { customerId: { anyOf: [{ type: "string" }, { type: "null" }] } }, additionalProperties: false };
     const outputSchema = { ...inputSchema, properties: {

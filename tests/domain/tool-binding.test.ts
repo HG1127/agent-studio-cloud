@@ -35,6 +35,50 @@ const registration: ToolRegistration = {
 };
 
 describe("冻结工具绑定", () => {
+  it.each([
+    { type: "object", properties: [] }, { type: "object", $ref: "https://private.invalid/receipt" }, { type: "string" },
+  ])("MCP 本地回执定义即使与冻结一致，也在运行前拒绝 %#", (outputSchema) => {
+    const mcp = { ...registration, protocol: "mcp-streamable-http" as const, operationKind: "read" as const, outputSchema };
+    expect(toolRegistrationCompatibilityIssue({ ...node.tool!, protocol: mcp.protocol, operationKind: mcp.operationKind, outputSchema }, mcp))
+      .toBe("工具回执定义无效或超过容量，请检查服务端配置");
+  });
+
+  it.each([{ type: "object", properties: [] }, { type: "string" }])("HTTP 输出定义维持原有绑定比较规则，不套用 MCP 预检 %#", (outputSchema) => {
+    expect(toolRegistrationCompatibilityIssue({ ...node.tool!, outputSchema }, { ...registration, outputSchema })).toBeNull();
+  });
+
+  it.each(["parallel", "subflow"])("MCP 回执预检覆盖 %s 内联工具", (type) => {
+    const outputSchema = { type: "object", $ref: "https://private.invalid/receipt" };
+    const mcp = { ...registration, protocol: "mcp-streamable-http" as const, operationKind: "read" as const, outputSchema };
+    const step = { ...node, tool: { ...node.tool!, protocol: mcp.protocol, operationKind: mcp.operationKind, outputSchema } };
+    const work = type === "subflow"
+      ? { id: "work", title: "分组处理", type, next: "done", subflow: { name: "读取资料", steps: [step] } }
+      : { id: "work", title: "并行处理", type, next: "done", parallel: { strategy: "all", failurePolicy: "fail_fast", branches: [
+        { id: "left", label: "读取资料", steps: [step] }, { id: "right", label: "整理", steps: [{ id: "organize", title: "整理", type: "ai" }] },
+      ] } };
+    const draft = WorkflowDraft.parse({ id: "workflow", startNodeId: "start", rootAgent: { id: "agent", name: "助手", role: "处理" }, memoryPolicy: { taskContext: true, longTerm: false }, nodes: {
+      start: { id: "start", title: "开始", type: "trigger", next: "work" }, work, done: { id: "done", title: "结束", type: "end", next: null },
+    } });
+    expect(workflowToolRegistrationIssue(draft, () => mcp)).toContain("回执定义");
+  });
+
+  it("导入无效 MCP 回执规则保留可编辑字段并解除执行绑定", () => {
+    const outputSchema = { type: "object", properties: [] };
+    const mcp = { ...registration, protocol: "mcp-streamable-http" as const, operationKind: "read" as const, outputSchema };
+    const draft = WorkflowDraft.parse({ id: "workflow", startNodeId: "start", rootAgent: { id: "agent", name: "助手", role: "处理" }, memoryPolicy: { taskContext: true, longTerm: false }, nodes: {
+      start: { id: "start", title: "开始", type: "trigger", next: "read" },
+      read: { ...node, id: "read", next: "done", tool: { ...node.tool!, protocol: mcp.protocol, operationKind: mcp.operationKind, outputSchema } },
+      done: { id: "done", title: "结束", type: "end", next: null },
+    } });
+    const before = structuredClone(draft);
+    const rebound = rebindImportedWorkflow({ workflow: draft, agentId: "new-agent", agentName: "导入助手",
+      validCollaborationKeys: new Set(), validKnowledgeSourceIds: new Set(),
+      isToolBindingValid: (tool) => !toolRegistrationCompatibilityIssue(tool, mcp) });
+    expect(rebound.nodes.read.tool).toMatchObject({ registryToolId: null, protocol: "unbound", unresolved: true, outputSchema });
+    expect(importedWorkflowIssue(rebound)).toBeNull();
+    expect(draft).toEqual(before);
+  });
+
   it("HTTP 输入定义不受 MCP 输入容量限制", () => {
     const inputSchema = { type: "object", description: "汉".repeat(12_000) };
     expect(toolRegistrationCompatibilityIssue({ ...node.tool!, inputSchema }, { ...registration, inputSchema })).toBeNull();

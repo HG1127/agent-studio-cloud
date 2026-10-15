@@ -3,7 +3,7 @@ import { McpToolArguments, MAX_MCP_ARGUMENT_BYTES, MAX_MCP_DIRECTORY_PAGES, MAX_
 import { isPassiveJsonData } from "@/contracts/json";
 import { validateJsonObjectSchema } from "@/server/domain/json-schema";
 import { mcpHeadersAreValid } from "@/server/domain/mcp-connection";
-import { mcpToolDefinitionIssue, mcpToolInputDefinitionIssue, mcpToolOutputDefinitionIssue, normalizeMcpToolResult } from "@/server/domain/runtime/mcp-tool";
+import { mcpToolDefinitionIssue, mcpToolInputDefinitionIssue, mcpToolLocalOutputDefinitionIssue, mcpToolOutputDefinitionIssue, normalizeMcpToolResult } from "@/server/domain/runtime/mcp-tool";
 import type { ToolRegistration } from "@/server/tools/tool-registry";
 import type { ToolInvocationResult } from "@/server/tools/invoke-http-tool";
 
@@ -20,7 +20,7 @@ export async function invokeMcpTool(args: {
     return fail("远端工具尚未确认操作性质或重复调用防重保证");
   }
   if (!mcpHeadersAreValid(tool.headers)) return fail("远端工具连接配置无效，请检查服务端登记");
-  const definitionIssue = mcpToolInputDefinitionIssue(tool.inputSchema);
+  const definitionIssue = mcpToolInputDefinitionIssue(tool.inputSchema) ?? mcpToolLocalOutputDefinitionIssue(tool.outputSchema);
   if (definitionIssue) return fail(definitionIssue);
   if (!isPassiveJsonData(args.input, MAX_MCP_ARGUMENT_BYTES)) return fail("工具参数无效或超过容量限制");
   const input = McpToolArguments.safeParse(args.input);

@@ -6,8 +6,8 @@ vi.mock("@/server/tools/tool-registry", () => ({ loadToolRegistrySnapshot: () =>
   return { status: registry.length === 0 ? "not-configured" : "configured", registry };
 } }));
 vi.mock("@/server/tools/mcp-connection-check", () => ({ checkMcpConnection: mocks.check }));
-import { listMcpConnections, inspectMcpConnection } from "./mcp-connections";
-const tool = { id: "lookup", name: "查询记录", action: "lookup", endpoint: "https://service.example/mcp", protocol: "mcp-streamable-http", headers: { Authorization: "Bearer secret" }, inputSchema: { type: "object" } };
+import { getMcpConnectionConfiguration, listMcpConnections, inspectMcpConnection } from "./mcp-connections";
+const tool = { id: "lookup", name: "查询记录", action: "lookup", endpoint: "https://service.example/mcp", protocol: "mcp-streamable-http", headers: { Authorization: "Bearer secret" }, inputSchema: { type: "object" }, outputSchema: { type: "object" } };
 beforeEach(() => { vi.clearAllMocks(); mocks.load.mockReturnValue([tool]); mocks.check.mockResolvedValue({ status: "available", message: "连接可用", tools: [] }); });
 afterEach(() => vi.unstubAllEnvs());
 describe("已登记连接查询", () => {
@@ -56,4 +56,28 @@ it("超出执行定义字节边界的配置不报可用，也不触发网络或�
   expect(mocks.check).not.toHaveBeenCalled();
   expect((await inspectMcpConnection("lookup")).status).toBe("available");
   expect(mocks.check).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  { type: "object", properties: [] }, { type: "string" },
+  { type: "object", $ref: "https://private.invalid/receipt" },
+])("本地回执定义不可执行时逐项配置报错，检查零网络且保留其他合法连接 %#", async (outputSchema) => {
+  mocks.load.mockReturnValue([tool, { ...tool, id: "invalid-output", name: "配置待核对", outputSchema }]);
+  expect(listMcpConnections()).toHaveLength(2);
+  expect(getMcpConnectionConfiguration()).toMatchObject({ status: "partially-configured", connections: [
+    { id: "lookup", status: "configured" }, { id: "invalid-output", status: "configuration-error" },
+  ] });
+  expect((await inspectMcpConnection("invalid-output")).status).toBe("configuration-error");
+  expect(mocks.check).not.toHaveBeenCalled();
+  expect((await inspectMcpConnection("lookup")).status).toBe("available");
+  expect(mocks.check).toHaveBeenCalledOnce();
+  expect(JSON.stringify(getMcpConnectionConfiguration())).not.toContain("private.invalid");
+});
+
+it("连接诊断保留超过32KB的合法本地回执定义，不将它当作远端必需定义发送", async () => {
+  mocks.load.mockReturnValue([{ ...tool, outputSchema: { type: "object", description: "汉".repeat(12_000) } }]);
+  expect(getMcpConnectionConfiguration().status).toBe("configured");
+  await inspectMcpConnection("lookup");
+  expect(mocks.check).toHaveBeenCalledOnce();
+  expect(mocks.check.mock.calls[0][0].tools[0]).not.toHaveProperty("outputSchema");
 });
