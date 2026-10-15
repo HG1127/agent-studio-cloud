@@ -18,6 +18,20 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 describe("真实注册解析的配置诊断查询", () => {
+  it("输入和回执格式说明经真实登记和诊断原样保留，不声称远端已可用", () => {
+    const inputSchema = { type: "object", properties: { url: { type: "string", format: "uri" } } };
+    const outputSchema = { type: "object", properties: { date: { type: "string", format: "date-time" }, extra: { format: "vendor-format" } } };
+    vi.stubEnv("TOOL_REGISTRY_JSON", JSON.stringify([{ ...tool, inputSchema, outputSchema }]));
+    const loaded = registry.loadToolRegistrySnapshot();
+    expect(loaded.status).toBe("configured");
+    expect(loaded.registry).toHaveLength(1);
+    expect(loaded.registry[0]).toMatchObject({ inputSchema, outputSchema });
+    const result = getMcpConnectionConfiguration();
+    expect(result).toMatchObject({ status: "configured", connections: [{ id: "lookup", status: "configured" }] });
+    expect(result.message).toContain("尚未检查远端服务");
+    expect(check).not.toHaveBeenCalled();
+  });
+
   it.each([
     { outputSchema: { type: "string" } },
     { outputSchema: { type: ["number", "null"] } },

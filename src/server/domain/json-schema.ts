@@ -22,7 +22,7 @@ function typeMatches(value: unknown, expected: unknown): boolean {
 }
 
 const SUPPORTED_SCHEMA_KEYS = new Set([
-  "$schema", "title", "description", "examples", "default",
+  "$schema", "title", "description", "examples", "default", "format",
   "type", "properties", "required", "items", "enum", "const",
   "minLength", "maxLength", "pattern",
   "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
@@ -31,7 +31,8 @@ const SUPPORTED_SCHEMA_KEYS = new Set([
   "$defs", "definitions", "$ref",
 ]);
 const COMBINATION_KEYS = ["allOf", "anyOf", "oneOf"] as const;
-const REFERENCE_METADATA_KEYS = new Set(["$ref", "$defs", "definitions", "$schema", "title", "description", "examples", "default"]);
+const REFERENCE_METADATA_KEYS = new Set(["$ref", "$defs", "definitions", "$schema", "title", "description", "examples", "default", "format"]);
+const LEGACY_FORMAT_DIALECT = /^https?:\/\/json-schema\.org\/draft-(?:04|06|07)\/schema#?$/;
 const MAX_SCHEMA_FIELDS = 100;
 const MAX_SCHEMA_CHOICES = 100;
 const MAX_SCHEMA_RULES = 10_000;
@@ -44,6 +45,7 @@ type DefinitionBudget = {
   remaining: number; work: ValidationBudget; root: Record<string, unknown>;
   ancestors: Set<object>; referenceDepth: number; references: WeakMap<object, ResolvedSchemaReference>;
   hasReferences: boolean; unsupportedReferenceDialect: boolean;
+  hasFormatAnnotations: boolean; unsupportedFormatDialect: boolean;
 };
 const MAX_VALUE_DEPTH = 32;
 const MAX_VALUE_NODES = 50_000;
@@ -97,7 +99,8 @@ function boundedValuesEqual(left: unknown, right: unknown, budget: ValidationBud
 
 function definitionBudget(root: Record<string, unknown>): DefinitionBudget {
   return { remaining: MAX_SCHEMA_RULES, work: { remaining: MAX_VALIDATION_WORK, keys: new WeakMap() }, root,
-    ancestors: new Set(), referenceDepth: 0, references: new WeakMap(), hasReferences: false, unsupportedReferenceDialect: false };
+    ancestors: new Set(), referenceDepth: 0, references: new WeakMap(), hasReferences: false, unsupportedReferenceDialect: false,
+    hasFormatAnnotations: false, unsupportedFormatDialect: false };
 }
 
 function jsonValueSafetyIssue(value: unknown): string | null {
@@ -173,7 +176,19 @@ function validateSchemaObject(rule: Record<string, unknown>, path: string, depth
   if (!spendKeys(budget.work, ruleKeys, 2)) return VALUE_CHECK_LIMIT_ERROR;
   const unsupported = ruleKeys.find((key) => !SUPPORTED_SCHEMA_KEYS.has(key));
   if (unsupported) return `${path}使用了暂不支持的规则“${unsupported}”`;
-  if (!schemaDialectSupportsLocalReferences(rule)) budget.unsupportedReferenceDialect = true;
+  if (!schemaDialectSupportsLocalReferences(rule)) {
+    budget.unsupportedReferenceDialect = true;
+    const dialect = Object.getOwnPropertyDescriptor(rule, "$schema");
+    if (!dialect || !Object.hasOwn(dialect, "value") || typeof dialect.value !== "string" || !LEGACY_FORMAT_DIALECT.test(dialect.value)) {
+      budget.unsupportedFormatDialect = true;
+    }
+  }
+  const format = Object.getOwnPropertyDescriptor(rule, "format");
+  if (format) {
+    if (!Object.hasOwn(format, "value") || typeof format.value !== "string") return `${path}的 format 必须是文字`;
+    if (!spend(budget.work, format.value.length + 1)) return VALUE_CHECK_LIMIT_ERROR;
+    budget.hasFormatAnnotations = true;
+  }
   if (Object.hasOwn(rule, "$ref")) {
     budget.hasReferences = true;
     if (typeof rule.$ref === "string" && !spend(budget.work, rule.$ref.length * 4 + 1)) return VALUE_CHECK_LIMIT_ERROR;
@@ -424,7 +439,9 @@ function validateValue(value: unknown, schema: unknown, path: string, depth: num
 export function validateJsonSchemaDefinition(schema: Record<string, unknown>): string | null {
   const budget = definitionBudget(schema);
   const error = validateSchemaRule(schema, "消息契约", 0, new Map(), budget);
-  return error ?? (budget.hasReferences && budget.unsupportedReferenceDialect ? "消息契约的本地引用不支持混合或未知字段规则方言" : null);
+  if (error) return error;
+  if (budget.hasReferences && budget.unsupportedReferenceDialect) return "消息契约的本地引用不支持混合或未知字段规则方言";
+  return budget.hasFormatAnnotations && budget.unsupportedFormatDialect ? "消息契约的格式说明不支持未知字段规则方言" : null;
 }
 
 export function validateJsonObjectSchema(payload: Record<string, unknown>, schema: Record<string, unknown>): string | null {
@@ -435,5 +452,6 @@ export function validateJsonObjectSchema(payload: Record<string, unknown>, schem
   const schemaError = validateSchemaRule(schema, "消息契约", 0, patterns, definition);
   if (schemaError) return schemaError;
   if (definition.hasReferences && definition.unsupportedReferenceDialect) return "消息契约的本地引用不支持混合或未知字段规则方言";
+  if (definition.hasFormatAnnotations && definition.unsupportedFormatDialect) return "消息契约的格式说明不支持未知字段规则方言";
   return validateValue(payload, schema, "消息", 0, patterns, { remaining: MAX_VALIDATION_WORK, keys: new WeakMap() }, definition.references);
 }

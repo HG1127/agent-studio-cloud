@@ -26,7 +26,7 @@ describe("本地 MCP 回执定义预检", () => {
     { schema: { type: "object", $ref: "https://remote.invalid/receipt" } },
     { schema: { type: "object", $ref: "#/$defs/Missing" } },
     { schema: { type: "object", anyOf: [] } },
-    { schema: { type: "object", format: "not-supported" } },
+    { schema: { type: "object", format: 17 } },
   ])("损坏、无法返回对象或不支持的规则不能因远端省略定义而放行 %#", ({ schema }) => {
     expect(mcpToolLocalOutputDefinitionIssue(schema)).toBe("工具回执定义无效或超过容量，请检查服务端配置");
     expect(mcpToolOutputDefinitionIssue(undefined, schema as Record<string, unknown>)).not.toBeNull();

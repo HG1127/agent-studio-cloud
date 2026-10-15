@@ -13,9 +13,13 @@ afterEach(async () => { await Promise.all(cleanups.splice(0).map((close) => clos
 
 async function fixture(options: {
   discovery?: "modern" | "legacy-rpc" | 400 | 404 | 405 | 406 | 415;
-  pages?: Array<{ tools: Array<{ name: string; inputSchema: Record<string, unknown>; description?: string }>; nextCursor?: string }>;
+  pages?: Array<{ tools: Array<{ name: string; inputSchema: Record<string, unknown>; outputSchema?: Record<string, unknown>; description?: string }>; nextCursor?: string }>;
+  inputSchema?: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+  output?: Record<string, unknown>;
 } = {}) {
   const discovery = options.discovery ?? "modern";
+  const inputSchema = options.inputSchema ?? schema;
   const messages: Array<{ method: string; version?: string; key?: string }> = [];
   const violations: string[] = [];
   let deletes = 0;
@@ -40,8 +44,8 @@ async function fixture(options: {
       if (discovery === "modern") { violations.push("modern-initialize"); response.writeHead(400); response.end(); }
       else reply({ protocolVersion: "2025-11-25", capabilities: { tools: {} }, serverInfo: { name: "fixture", version: "1" } });
     } else if (rpc.method === "notifications/initialized") { response.writeHead(202); response.end(); }
-    else if (rpc.method === "tools/list") reply(options.pages?.[Number(rpc.params?.cursor ?? 0)] ?? { tools: [registered] });
-    else if (rpc.method === "tools/call") reply({ content: [], structuredContent: { amount: 0, active: false } });
+    else if (rpc.method === "tools/list") reply(options.pages?.[Number(rpc.params?.cursor ?? 0)] ?? { tools: [{ ...registered, inputSchema, ...(options.outputSchema ? { outputSchema: options.outputSchema } : {}) }] });
+    else if (rpc.method === "tools/call") reply({ content: [], structuredContent: options.output ?? { amount: 0, active: false } });
     else { violations.push("unexpected-method"); response.writeHead(400); response.end(); }
   });
   server.listen(0, "127.0.0.1"); await once(server, "listening");
@@ -51,17 +55,48 @@ async function fixture(options: {
   const endpoint = `http://127.0.0.1:${address.port}/mcp?scope=fixture`;
   const registration = McpConnectionRegistration.parse({
     id: "lookup", name: "查询记录", workspaceId: "00000000-0000-4000-8000-000000000001", endpoint,
-    headers: { Authorization: "Bearer fixture-only" }, tools: [{ registryToolId: "lookup", name: "查询记录", action: "lookup", inputSchema: schema }],
+    headers: { Authorization: "Bearer fixture-only" }, tools: [{ registryToolId: "lookup", name: "查询记录", action: "lookup", inputSchema }],
   });
   const tool = parseToolRegistry(JSON.stringify([{
     id: "lookup", name: "查询记录", action: "lookup", scope: "fixture.read", protocol: "mcp-streamable-http", operationKind: "read", endpoint,
-    headers: registration.headers, inputSchema: schema, outputSchema: { type: "object" },
+    headers: registration.headers, inputSchema, outputSchema: options.outputSchema ?? { type: "object" },
   }]))[0];
-  const invoke = () => invokeMcpTool({ tool, action: "lookup", idempotencyKey: "fixture-key", input: {}, outputs: {} });
+  const invoke = (input: Record<string, unknown> = {}) => invokeMcpTool({ tool, action: "lookup", idempotencyKey: "fixture-key", input, outputs: {} });
   return { registration, messages, violations, invoke, deletes: () => deletes };
 }
 
 describe("连接检查与实际执行使用同一 MCP 协议语义（本机 SDK）", () => {
+  it.each(["modern", "legacy-rpc"] as const)("带格式说明的工具经真实登记、%s SDK 检查和执行，格式漂移仍阻止业务调用", async (discovery) => {
+    const inputSchema = { type: "object", required: ["url"], properties: { url: { type: "string", format: "uri" } }, additionalProperties: false };
+    const outputSchema = { type: "object", required: ["date", "amount", "active"], properties: {
+      date: { type: "string", format: "date-time" }, amount: { type: "number" }, active: { type: "boolean" }, extra: { format: "vendor-format" },
+    } };
+    const output = { date: "not-a-date", amount: 0, active: false, extra: "business-value" };
+    const before = JSON.stringify([inputSchema, outputSchema, output]);
+    const remoteInputSchema = structuredClone(inputSchema), remoteOutputSchema = structuredClone(outputSchema);
+    const server = await fixture({ discovery, inputSchema, outputSchema, output,
+      pages: [{ tools: [{ ...registered, inputSchema: remoteInputSchema, outputSchema: remoteOutputSchema }] }],
+    });
+    expect((await checkMcpConnection(server.registration)).status).toBe("available");
+    expect(server.messages.filter((message) => message.method === "tools/call")).toHaveLength(0);
+    expect(server.messages.every((message) => !message.key)).toBe(true);
+    expect(await server.invoke({ url: "not-a-url" })).toEqual({ ok: true, output });
+    expect(server.messages.filter((message) => message.method === "tools/call")).toHaveLength(1);
+    const requestsBeforeBadInput = server.messages.length;
+    expect(await server.invoke({ url: 0 })).toMatchObject({ ok: false, retryable: false });
+    expect(server.messages).toHaveLength(requestsBeforeBadInput);
+    remoteInputSchema.properties.url.format = "uri-reference";
+    expect((await checkMcpConnection(server.registration)).status).toBe("definition-changed");
+    expect(await server.invoke({ url: "not-a-url" })).toMatchObject({ ok: false, retryable: false });
+    expect(server.messages.filter((message) => message.method === "tools/call")).toHaveLength(1);
+    remoteInputSchema.properties.url.format = "uri";
+    remoteOutputSchema.properties.date.format = "date";
+    expect(await server.invoke({ url: "not-a-url" })).toMatchObject({ ok: false, retryable: false });
+    expect(server.messages.filter((message) => message.method === "tools/call")).toHaveLength(1);
+    expect(JSON.stringify([inputSchema, outputSchema, output])).toBe(before);
+    expect(server.violations).toEqual([]);
+  });
+
   it.each(["modern", "legacy-rpc", 400, 404, 405, 406, 415] as const)("只读发现及旧握手回退：%s", async (discovery) => {
     const server = await fixture({ discovery });
     const result = await checkMcpConnection(server.registration);

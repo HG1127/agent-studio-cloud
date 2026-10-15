@@ -35,6 +35,20 @@ const registration: ToolRegistration = {
 };
 
 describe("冻结工具绑定", () => {
+  it("MCP 格式说明保留到冻结绑定，输入或回执说明变化均要求重新发布", () => {
+    const inputSchema = { type: "object", properties: { url: { type: "string", format: "uri" } } };
+    const outputSchema = { type: "object", properties: { date: { type: "string", format: "date-time" } } };
+    const mcp = { ...registration, protocol: "mcp-streamable-http" as const, operationKind: "read" as const, inputSchema, outputSchema };
+    const snapshot = { ...node.tool!, protocol: mcp.protocol, operationKind: mcp.operationKind, inputSchema, outputSchema };
+    const before = JSON.stringify([snapshot, mcp]);
+    expect(toolRegistrationCompatibilityIssue(snapshot, mcp)).toBeNull();
+    expect(toolRegistrationCompatibilityIssue(snapshot, { ...mcp, inputSchema: { ...inputSchema, properties: { url: { type: "string", format: "uri-reference" } } } }))
+      .toContain("配置已变化");
+    expect(toolRegistrationCompatibilityIssue(snapshot, { ...mcp, outputSchema: { ...outputSchema, properties: { date: { type: "string", format: "date" } } } }))
+      .toContain("配置已变化");
+    expect(JSON.stringify([snapshot, mcp])).toBe(before);
+  });
+
   it.each([
     { type: "object", properties: [] }, { type: "object", $ref: "https://private.invalid/receipt" }, { type: "string" },
   ])("MCP 本地回执定义即使与冻结一致，也在运行前拒绝 %#", (outputSchema) => {
