@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import Link from "next/link";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ExecutionPolicySnapshot, type ExecutionPolicyChangeView, type ExecutionPolicyInput,
@@ -41,7 +42,7 @@ function panel(history: ExecutionPolicyHistoryResult = emptyHistory) {
   return <ExecutionResourcesPanel initialRead={{ ok: true, snapshot: initialSnapshot }} initialHistory={history} />;
 }
 function guardedPanel(content = panel(), onNavigate = () => {}) {
-  return <><DraftNavigationGuard /><a href="/agents" onClick={(event) => { event.preventDefault(); onNavigate(); }}>我的助手</a>{content}</>;
+  return <><DraftNavigationGuard /><Link href="/agents" prefetch={false} onClick={(event) => { event.preventDefault(); onNavigate(); }}>我的助手</Link>{content}</>;
 }
 function blocksRefresh() {
   const event = new Event("beforeunload", { cancelable: true });
