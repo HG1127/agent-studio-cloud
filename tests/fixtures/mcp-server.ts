@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 
 export async function startMcpTestServer(args: {
-  inputSchema?: Record<string, unknown>; output?: unknown; isError?: boolean; missing?: boolean; duplicate?: boolean;
+  inputSchema?: Record<string, unknown>; outputSchema?: Record<string, unknown>; output?: unknown; isError?: boolean; missing?: boolean; duplicate?: boolean;
   status?: number; text?: string; paginate?: boolean; cursorCycle?: boolean; drift?: boolean; sse?: boolean; invalidUtf8?: boolean;
 } = {}) {
   const messages: Array<{ method: string; params?: Record<string, unknown>; key?: string }> = [];
@@ -25,7 +25,8 @@ export async function startMcpTestServer(args: {
       instructions: "untrusted remote instruction, never a system prompt",
     };
     else if (message.method === "tools/list") {
-      const tool = { name: "lookup_customer", description: "测试工具", inputSchema: args.drift ? { type: "object" } : schema };
+      const tool = { name: "lookup_customer", description: "测试工具", inputSchema: args.drift ? { type: "object" } : schema,
+        ...(args.outputSchema !== undefined ? { outputSchema: args.outputSchema } : {}) };
       result = { tools: args.missing || args.paginate && !message.params?.cursor ? [] : args.duplicate ? [tool, tool] : [tool],
         ...(args.cursorCycle || args.paginate && !message.params?.cursor ? { nextCursor: "page-2" } : {}) };
     } else if (message.method === "tools/call") {

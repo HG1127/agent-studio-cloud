@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { mcpToolDefinitionIssue, mcpToolInputDefinitionIssue, normalizeMcpToolResult } from "./mcp-tool";
-import { MAX_MCP_DEFINITION_BYTES } from "@/contracts/mcp-tool";
+import { mcpToolDefinitionIssue, mcpToolInputDefinitionIssue, mcpToolOutputDefinitionIssue, normalizeMcpToolResult } from "./mcp-tool";
+import { MAX_MCP_DEFINITION_BYTES, MAX_MCP_RESPONSE_BYTES } from "@/contracts/mcp-tool";
 
 describe("已登记 MCP 参数定义纯预检", () => {
   it.each([{ type: "object" }, { type: "object", properties: {}, additionalProperties: false }, { type: "object", properties: { active: { type: "boolean", default: false }, amount: { type: "number", default: 0 } } }])("接受已支持对象和零参数定义 %#", (definition) => {
@@ -25,6 +25,45 @@ describe("已登记 MCP 参数定义纯预检", () => {
     const cyclic: Record<string, unknown> = { type: "object" }; cyclic.properties = cyclic;
     expect(mcpToolInputDefinitionIssue(cyclic)).not.toBeNull();
     expect(getter).not.toHaveBeenCalled(); expect(toJSON).not.toHaveBeenCalled();
+  });
+});
+
+describe("MCP 已公布回执定义预检", () => {
+  const expected = { type: "object", properties: { id: { type: "string" } }, required: ["id"] };
+  it("旧服务不公布定义时保留实际回执校验", () => {
+    expect(mcpToolOutputDefinitionIssue(undefined, expected)).toBeNull();
+    expect(normalizeMcpToolResult({ structuredContent: { id: 1 } }, expected).ok).toBe(false);
+  });
+  it("允许字段顺序差异，不修改冻结或远端定义", () => {
+    const actual = { required: ["id"], properties: { id: { type: "string" } }, type: "object" };
+    const before = JSON.stringify([actual, expected]);
+    expect(mcpToolOutputDefinitionIssue(actual, expected)).toBeNull();
+    expect(JSON.stringify([actual, expected])).toBe(before);
+  });
+  it.each([null, [], {}, { type: "string" }, { type: "object", properties: { id: { type: "number" } } },
+    { type: "object", additionalProperties: false }, { type: "object", $ref: "fixture-private" }])("变化或不支持的定义不放行 %#", (actual) => {
+    expect(mcpToolOutputDefinitionIssue(actual, expected)).toBe("远端工具回执规则已变化或无效，请核对并重新发布助手");
+  });
+  it("不执行访问器和序列化代码，也不接受循环定义", () => {
+    const getter = vi.fn(() => "object"), toJSON = vi.fn(() => expected);
+    expect(mcpToolOutputDefinitionIssue({ get type() { return getter(); } }, expected)).not.toBeNull();
+    expect(mcpToolOutputDefinitionIssue({ type: "object", toJSON }, expected)).not.toBeNull();
+    expect(mcpToolOutputDefinitionIssue(expected, { get type() { return getter(); } })).not.toBeNull();
+    const cyclic: Record<string, unknown> = { type: "object" }; cyclic.properties = cyclic;
+    expect(mcpToolOutputDefinitionIssue(cyclic, expected)).not.toBeNull();
+    expect(getter).not.toHaveBeenCalled(); expect(toJSON).not.toHaveBeenCalled();
+  });
+  it("按真实回执传输字节上限拒绝超大定义，不截断字段", () => {
+    const definition = { type: "object", description: "" };
+    definition.description = "x".repeat(MAX_MCP_RESPONSE_BYTES - new TextEncoder().encode(JSON.stringify(definition)).byteLength);
+    expect(new TextEncoder().encode(JSON.stringify(definition)).byteLength).toBe(MAX_MCP_RESPONSE_BYTES);
+    expect(mcpToolOutputDefinitionIssue(definition, definition)).toBeNull();
+    for (const description of [`${definition.description}x`, "汉".repeat(MAX_MCP_RESPONSE_BYTES / 2), "\n".repeat(MAX_MCP_RESPONSE_BYTES / 2)]) {
+      const oversized = { type: "object", description };
+      expect(description.length).toBeLessThan(MAX_MCP_RESPONSE_BYTES);
+      expect(new TextEncoder().encode(JSON.stringify(oversized)).byteLength).toBeGreaterThan(MAX_MCP_RESPONSE_BYTES);
+      expect(mcpToolOutputDefinitionIssue(oversized, oversized)).not.toBeNull();
+    }
   });
 });
 

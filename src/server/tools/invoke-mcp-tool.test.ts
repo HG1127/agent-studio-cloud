@@ -128,6 +128,29 @@ describe("真实 MCP SDK 对本地 Streamable HTTP 服务", () => {
     expect(JSON.stringify(server.messages)).not.toContain("not-sent"); expect(server.wasClosed()).toBe(true);
   });
   it("支持有界目录分页", async () => { const { invoke } = await fixture({ paginate: true }); await expect(invoke()).resolves.toMatchObject({ ok: true }); });
+  it("远端已公布回执定义与冻结契约一致时继续调用", async () => {
+    const outputSchema = { type: "object", properties: { customerId: { type: "string" } }, required: ["customerId"] };
+    const { server, tool, invoke } = await fixture({ outputSchema });
+    tool.outputSchema = { required: ["customerId"], properties: { customerId: { type: "string" } }, type: "object" };
+    await expect(invoke()).resolves.toMatchObject({ ok: true });
+    expect(server.messages.filter((message) => message.method === "tools/call")).toHaveLength(1);
+    expect(server.wasClosed()).toBe(true);
+  });
+  it.each(["read", "action"] as const)("远端回执定义变化或非法时，%s 操作在副作用前永久拒绝", async (operationKind) => {
+    const { server, tool, invoke } = await fixture({ outputSchema: { type: "object", properties: { customerId: { type: "number" } }, description: "fixture-private" } });
+    Object.assign(tool, { operationKind, businessIdempotency: true, businessIdempotencyRetentionMs: 600_000 });
+    const result = await invoke();
+    expect(result).toEqual({ ok: false, retryable: false, error: "远端工具回执规则已变化或无效，请核对并重新发布助手" });
+    expect(server.messages.some((message) => message.method === "tools/call")).toBe(false);
+    expect(server.wasClosed()).toBe(true);
+    expect(JSON.stringify(result)).not.toContain("fixture-private");
+  });
+  it("SDK 可解析但不支持的回执定义不执行业务请求", async () => {
+    const { server, invoke } = await fixture({ outputSchema: { type: "object", $ref: "fixture-private" } });
+    await expect(invoke()).resolves.toMatchObject({ ok: false, retryable: false });
+    expect(server.messages.some((message) => message.method === "tools/call")).toBe(false);
+    expect(server.wasClosed()).toBe(true);
+  });
   it("单段对象格式文本兼容旧服务", async () => { const { invoke } = await fixture({ text: '{"customerId":"c1"}' }); await expect(invoke()).resolves.toEqual({ ok: true, output: { customerId: "c1" } }); });
   it.each([{ drift: true }, { missing: true }, { duplicate: true }, { cursorCycle: true }])("目录变化或异常时不执行业务工具 %j", async (options) => {
     const { server, invoke } = await fixture(options);

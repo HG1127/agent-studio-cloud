@@ -16,6 +16,20 @@ export function mcpToolDefinitionIssue(actual: Record<string, unknown>, expected
   return null;
 }
 
+export function mcpToolOutputDefinitionIssue(actual: unknown, expected: Record<string, unknown>): string | null {
+  // 旧服务可不公布回执定义，实际回执仍须通过本地契约。
+  if (actual === undefined) return null;
+  const error = "远端工具回执规则已变化或无效，请核对并重新发布助手";
+  if (!isPassiveJsonData(actual, MAX_MCP_RESPONSE_BYTES) || !isPassiveJsonData(expected, MAX_MCP_RESPONSE_BYTES)
+    || !actual || typeof actual !== "object" || Array.isArray(actual)) return error;
+  for (const definition of [actual, expected]) {
+    if (new TextEncoder().encode(JSON.stringify(definition)).byteLength > MAX_MCP_RESPONSE_BYTES) return error;
+  }
+  const definition = actual as Record<string, unknown>;
+  return definition.type !== "object" || validateJsonSchemaDefinition(definition)
+    || validateJsonSchemaDefinition(expected) || canonicalJson(definition) !== canonicalJson(expected) ? error : null;
+}
+
 export function normalizeMcpToolResult(result: unknown, schema: Record<string, unknown>) {
   const failure = (error: string) => ({ ok: false as const, error, retryable: false });
   if (!isPassiveJsonData(result, MAX_MCP_RESPONSE_BYTES) || !result || typeof result !== "object" || Array.isArray(result)) {

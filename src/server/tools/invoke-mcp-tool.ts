@@ -3,7 +3,7 @@ import { McpToolArguments, MAX_MCP_ARGUMENT_BYTES, MAX_MCP_DIRECTORY_PAGES, MAX_
 import { isPassiveJsonData } from "@/contracts/json";
 import { validateJsonObjectSchema } from "@/server/domain/json-schema";
 import { mcpHeadersAreValid } from "@/server/domain/mcp-connection";
-import { mcpToolDefinitionIssue, mcpToolInputDefinitionIssue, normalizeMcpToolResult } from "@/server/domain/runtime/mcp-tool";
+import { mcpToolDefinitionIssue, mcpToolInputDefinitionIssue, mcpToolOutputDefinitionIssue, normalizeMcpToolResult } from "@/server/domain/runtime/mcp-tool";
 import type { ToolRegistration } from "@/server/tools/tool-registry";
 import type { ToolInvocationResult } from "@/server/tools/invoke-http-tool";
 
@@ -87,20 +87,21 @@ export async function invokeMcpTool(args: {
     });
     let cursor: string | undefined;
     let matched: Record<string, unknown> | undefined;
+    let matchedOutput: Record<string, unknown> | undefined;
     const cursors = new Set<string>();
     for (let page = 0; page < MAX_MCP_DIRECTORY_PAGES; page += 1) {
       const list = await client.listTools({ params: cursor ? { cursor } : undefined, options: { signal: controller.signal, timeout: MCP_TIMEOUT_MS } });
       if (list.tools.length > MAX_MCP_DIRECTORY_PAGE_TOOLS) return fail("远端工具目录超过允许范围");
       const matches = list.tools.filter((definition) => definition.name === tool.action);
       if (matches.length > 1 || matched && matches.length > 0) return fail("远端工具名称重复，已停止调用");
-      if (matches[0]) matched = matches[0].inputSchema;
+      if (matches[0]) { matched = matches[0].inputSchema; matchedOutput = matches[0].outputSchema; }
       cursor = list.nextCursor;
       if (!cursor) break;
       if (cursors.has(cursor) || page === MAX_MCP_DIRECTORY_PAGES - 1) return fail("远端工具目录分页无效或超过允许范围");
       cursors.add(cursor);
     }
     if (!matched) return fail("已登记的工具未在远端目录中找到");
-    const issue = mcpToolDefinitionIssue(matched, tool.inputSchema);
+    const issue = mcpToolDefinitionIssue(matched, tool.inputSchema) ?? mcpToolOutputDefinitionIssue(matchedOutput, tool.outputSchema);
     if (issue) return fail(issue);
     const result = await client.callTool({ name: tool.action, arguments: input.data, options: { signal: controller.signal, timeout: MCP_TIMEOUT_MS } });
     return normalizeMcpToolResult(result, tool.outputSchema);
