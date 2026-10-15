@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { McpConnectionConfigurationResult } from "@/contracts/mcp-connection";
+import { MAX_MCP_RESPONSE_BYTES } from "@/contracts/mcp-tool";
 const check = vi.hoisted(() => vi.fn());
 vi.mock("@/server/tools/mcp-connection-check", () => ({ checkMcpConnection: check }));
 import { getMcpConnectionConfiguration, inspectMcpConnection, listMcpConnections } from "./mcp-connections";
 import * as registry from "@/server/tools/tool-registry";
+import { invokeMcpTool } from "@/server/tools/invoke-mcp-tool";
 
 const tool = { id: "lookup", name: "查询记录", action: "lookup", scope: "record.read", protocol: "mcp-streamable-http", operationKind: "read", endpoint: "https://private.example/mcp", headers: { Authorization: "Bearer private-fake-value" }, inputSchema: { type: "object" } };
 beforeEach(() => {
@@ -16,6 +18,48 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 describe("真实注册解析的配置诊断查询", () => {
+  it.each([
+    { outputSchema: { type: "string" } },
+    { outputSchema: { type: ["number", "null"] } },
+    { outputSchema: { type: "boolean" } },
+  ])("真实登记接受的非对象回执规则在逐项诊断和检查中拒绝，不变成全局空目录 %#", async ({ outputSchema }) => {
+    vi.stubEnv("TOOL_REGISTRY_JSON", JSON.stringify([tool, { ...tool, id: "bad-output", outputSchema }]));
+    expect(registry.loadToolRegistrySnapshot().status).toBe("configured");
+    expect(registry.loadToolRegistrySnapshot().registry).toHaveLength(2);
+    expect(getMcpConnectionConfiguration()).toMatchObject({ status: "partially-configured", connections: [
+      { id: "lookup", status: "configured" }, { id: "bad-output", status: "configuration-error" },
+    ] });
+    expect(listMcpConnections()).toEqual([{ id: "lookup", name: tool.name }, { id: "bad-output", name: tool.name }]);
+    expect((await inspectMcpConnection("bad-output")).status).toBe("configuration-error");
+    expect(check).not.toHaveBeenCalled();
+    const configured = registry.loadToolRegistrySnapshot().registry[1];
+    const fetchImpl = vi.fn(async () => { throw new Error("坏回执配置不允许网络请求"); });
+    await expect(invokeMcpTool({ tool: configured, action: configured.action, idempotencyKey: "output-preflight", input: {}, outputs: {}, fetchImpl }))
+      .resolves.toEqual({ ok: false, retryable: false, error: "工具回执定义无效或超过容量，请检查服务端配置" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("超大回执规则经生产登记解析器保留，但在执行前拒绝且零网络", async () => {
+    const outputSchema = { type: "object", description: "x".repeat(MAX_MCP_RESPONSE_BYTES) };
+    const configured = registry.parseToolRegistry(JSON.stringify([{ ...tool, outputSchema }]));
+    expect(configured).toHaveLength(1);
+    expect(configured[0].outputSchema).toEqual(outputSchema);
+    const fetchImpl = vi.fn(async () => { throw new Error("超大回执配置不允许网络请求"); });
+    await expect(invokeMcpTool({ tool: configured[0], action: configured[0].action, idempotencyKey: "output-preflight", input: {}, outputs: {}, fetchImpl }))
+      .resolves.toEqual({ ok: false, retryable: false, error: "工具回执定义无效或超过容量，请检查服务端配置" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it.each([{ outputSchema: {} }, { outputSchema: { type: ["object", "null"] } },
+    { outputSchema: { type: "object", description: "汉".repeat(12_000) } },
+  ])("真实注册解析保留空规则、可空对象与超过参数容量的回执规则 %#", ({ outputSchema }) => {
+    vi.stubEnv("TOOL_REGISTRY_JSON", JSON.stringify([{ ...tool, outputSchema }]));
+    expect(registry.loadToolRegistrySnapshot().status).toBe("configured");
+    expect(registry.loadToolRegistrySnapshot().registry[0].outputSchema).toEqual(outputSchema);
+    expect(getMcpConnectionConfiguration()).toMatchObject({ status: "configured", connections: [{ id: "lookup", status: "configured" }] });
+    expect(check).not.toHaveBeenCalled();
+  });
+
   it.each([undefined, "", "  ", "[]"])("空配置 %s 返回未登记且未知检查不是配置错误", async (raw) => {
     vi.stubEnv("TOOL_REGISTRY_JSON", raw);
     expect(getMcpConnectionConfiguration()).toEqual({ status: "not-configured", message: "尚未登记连接", connections: [] });
