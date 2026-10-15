@@ -4,6 +4,9 @@ import { startMcpTestServer } from "../../../tests/fixtures/mcp-server";
 import { invokeMcpTool } from "./invoke-mcp-tool";
 import { parseToolRegistry } from "./tool-registry";
 import { toolStepIdempotencyKey } from "@/server/domain/runtime/tool-step-idempotency-key";
+import { InputMapping } from "@/contracts/input-mapping";
+import { MAX_MCP_TEXT_BLOCKS } from "@/contracts/mcp-tool";
+import { resolveNodeInput } from "@/server/domain/runtime/input-mapping";
 
 const servers: Array<Awaited<ReturnType<typeof startMcpTestServer>>> = [];
 afterEach(async () => { await Promise.all(servers.splice(0).map((server) => server.close())); });
@@ -256,5 +259,82 @@ describe("真实 MCP SDK 对本地 Streamable HTTP 服务", () => {
     const { server, tool } = await fixture();
     await expect(invokeMcpTool({ tool, action: tool.action, idempotencyKey: "key", input: {}, outputs: {} })).resolves.toMatchObject({ ok: false });
     expect(server.messages).toHaveLength(0);
+  });
+});
+
+describe("真实 MCP SDK 只读文本及下游字段映射", () => {
+  const textSchema = { type: "object", required: ["text"], properties: { text: { type: "string" } }, additionalProperties: false };
+  it.each([false, true])("普通与事件流文本可送入下游，注解和未选上游不会混入 %s", async (sse) => {
+    const parts = ["# 公开资料\n\n原文甲", "原文乙\n"];
+    const { server, tool, invoke } = await fixture({ sse, content: parts.map((text) => ({ type: "text", text, annotations: { audience: ["assistant"] }, metadata: "非正文" })) });
+    tool.outputSchema = textSchema;
+    const result = await invoke();
+    expect(result).toEqual({ ok: true, output: { text: parts.join("\n\n") } });
+    if (!result.ok) throw new Error("只读文本应成功");
+    const node = { title: "整理资料", inputMapping: InputMapping.parse({ fields: [{ target: ["source"], source: { kind: "output", nodeId: "read", path: ["text"] } }] }) };
+    expect(resolveNodeInput({ node, input: { private: "未选择的输入" }, outputs: { read: result.output, other: { secret: "未选择的上游" } } }))
+      .toEqual({ ok: true, input: { source: parts.join("\n\n") }, outputs: {} });
+    expect(server.messages.filter((message) => message.method === "tools/call")).toEqual([
+      { method: "tools/call", key: "stable-business-key", params: { name: "lookup_customer", arguments: { customerId: "c1" } } },
+    ]);
+    expect(server.wasClosed()).toBe(true);
+  });
+  it.each(["", "普通文字", "0", "false", "null", "[]"])("单段非对象文字保留原文 %s", async (text) => {
+    const { tool, invoke } = await fixture({ text });
+    tool.outputSchema = textSchema;
+    await expect(invoke()).resolves.toEqual({ ok: true, output: { text } });
+  });
+  it("空内容代表空查询结果而非伪造成功业务字段", async () => {
+    const { tool, invoke } = await fixture({ content: [] });
+    tool.outputSchema = textSchema;
+    await expect(invoke()).resolves.toEqual({ ok: true, output: { text: "" } });
+  });
+  it.each([false, true])("文本即使符合本地字段，声明了远端结构化定义仍不能绕过 %s", async (multiple) => {
+    const { server, tool, invoke } = await fixture({ outputSchema: textSchema, content: multiple ? [{ type: "text", text: "甲" }, { type: "text", text: "乙" }] : [{ type: "text", text: "资料" }] });
+    tool.outputSchema = textSchema;
+    await expect(invoke()).resolves.toMatchObject({ ok: false, retryable: false });
+    expect(server.messages.filter((message) => message.method === "tools/call")).toHaveLength(1);
+    expect(server.wasClosed()).toBe(true);
+  });
+  it.each([false, true])("已确认防重的写工具仍不能把普通或多段文字当成功回执 %s", async (multiple) => {
+    const { server, tool } = await fixture({ content: multiple ? [{ type: "text", text: "甲" }, { type: "text", text: "乙" }] : [{ type: "text", text: "已完成" }] });
+    const configured = { ...tool, outputSchema: textSchema, operationKind: "action" as const, businessIdempotency: true, businessIdempotencyRetentionMs: 600_000 };
+    await expect(invokeMcpTool({ tool: configured, action: configured.action, idempotencyKey: "write-key", input: { customerId: "c1" }, outputs: {} }))
+      .resolves.toMatchObject({ ok: false, retryable: false });
+    expect(server.messages.filter((message) => message.method === "tools/call")).toHaveLength(1);
+    expect(server.wasClosed()).toBe(true);
+  });
+  it.each([null, { ok: false }, { text: 1 }])("真实 SDK 结构化错误不能被备用正文掩盖 %#", async (output) => {
+    const { tool, invoke } = await fixture({ output, text: "备用文字" });
+    tool.outputSchema = textSchema;
+    await expect(invoke()).resolves.toMatchObject({ ok: false, retryable: false });
+  });
+  it("单段失败对象 JSON 不重新包装成成功文字", async () => {
+    const { tool, invoke } = await fixture({ text: '{"ok":false,"text":"未完成"}' });
+    tool.outputSchema = textSchema;
+    await expect(invoke()).resolves.toMatchObject({ ok: false, retryable: false });
+  });
+  it("isError 优先于文本适配且不回显远端错误", async () => {
+    const { tool, invoke } = await fixture({ isError: true, text: "fixture-private-secret" });
+    tool.outputSchema = textSchema;
+    const result = await invoke();
+    expect(result).toMatchObject({ ok: false, retryable: false });
+    expect(JSON.stringify(result)).not.toContain("fixture-private-secret");
+  });
+  it.each([
+    [{ type: "text", text: "部分正文" }, { type: "image", data: "AA==", mimeType: "image/png" }],
+    [{ type: "resource_link", uri: "https://fixture.example/private", name: "附件" }],
+    [{ type: "audio", data: "AA==", mimeType: "audio/wav" }],
+    Array.from({ length: MAX_MCP_TEXT_BLOCKS + 1 }, () => ({ type: "text", text: "资料" })),
+  ].map((content) => ({ content })))("真实 SDK 的混合内容和超限块数不静默裁剪 %#", async ({ content }) => {
+    const { server, tool, invoke } = await fixture({ content });
+    tool.outputSchema = textSchema;
+    await expect(invoke()).resolves.toMatchObject({ ok: false, retryable: false });
+    expect(server.wasClosed()).toBe(true);
+  });
+  it.each(["汉".repeat(400_000), "\n".repeat(600_000)])("超限原文仍被真实传输字节边界拒绝 %#", async (text) => {
+    const { tool, invoke } = await fixture({ text });
+    tool.outputSchema = textSchema;
+    await expect(invoke()).resolves.toMatchObject({ ok: false, retryable: false });
   });
 });

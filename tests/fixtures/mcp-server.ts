@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 
 export async function startMcpTestServer(args: {
   inputSchema?: Record<string, unknown>; outputSchema?: Record<string, unknown>; output?: unknown; isError?: boolean; missing?: boolean; duplicate?: boolean;
-  status?: number; text?: string; paginate?: boolean; cursorCycle?: boolean; drift?: boolean; sse?: boolean; invalidUtf8?: boolean; loseFirstResponse?: boolean;
+  status?: number; text?: string; content?: unknown[]; paginate?: boolean; cursorCycle?: boolean; drift?: boolean; sse?: boolean; invalidUtf8?: boolean; loseFirstResponse?: boolean;
 } = {}) {
   const messages: Array<{ method: string; params?: Record<string, unknown>; key?: string }> = [];
   let closed = false;
@@ -38,8 +38,9 @@ export async function startMcpTestServer(args: {
       if (args.loseFirstResponse && !responseLost) { responseLost = true; response.destroy(); return; }
       if (args.status) { response.writeHead(args.status, { "content-type": "application/json" }); response.end('{"secret":"never-log"}'); return; }
       if (args.invalidUtf8) { response.writeHead(200, { "content-type": "application/json" }); response.end(Buffer.from([0xff])); return; }
-      result = { content: [{ type: "text", text: args.text ?? "fallback not selected" }],
-        ...(args.text !== undefined ? {} : { structuredContent: args.output ?? { customerId: "c1", amount: 0, active: false } }),
+      result = { content: args.content ?? [{ type: "text", text: args.text ?? "fallback not selected" }],
+        ...(args.output !== undefined ? { structuredContent: args.output }
+          : args.text !== undefined || args.content !== undefined ? {} : { structuredContent: { customerId: "c1", amount: 0, active: false } }),
         ...(args.isError ? { isError: true } : {}) };
     } else result = {};
     const body = JSON.stringify({ jsonrpc: "2.0", id: message.id, result });

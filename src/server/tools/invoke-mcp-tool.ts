@@ -104,7 +104,7 @@ export async function invokeMcpTool(args: {
     const issue = mcpToolDefinitionIssue(matched, tool.inputSchema) ?? mcpToolOutputDefinitionIssue(matchedOutput, tool.outputSchema);
     if (issue) return fail(issue);
     const result = await client.callTool({ name: tool.action, arguments: input.data, options: { signal: controller.signal, timeout: MCP_TIMEOUT_MS } });
-    return normalizeMcpToolResult(result, tool.outputSchema);
+    return normalizeMcpToolResult(result, tool.outputSchema, { operationKind: tool.operationKind, hasOutputDefinition: matchedOutput !== undefined });
   } catch (error) {
     if (boundaryFailure || error instanceof McpBoundaryError) return fail("远端工具传输内容无效或超过运行边界");
     if (MCPClientError.isInstance(error) && (error.statusCode === 401 || error.statusCode === 403)) return fail("远端工具拒绝访问，请检查服务端凭据");

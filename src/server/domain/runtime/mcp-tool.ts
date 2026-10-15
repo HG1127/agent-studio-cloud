@@ -1,5 +1,6 @@
-import { McpToolInputDefinition, McpToolOutput, MAX_MCP_DEFINITION_BYTES, MAX_MCP_RESPONSE_BYTES } from "@/contracts/mcp-tool";
+import { McpToolInputDefinition, McpToolOutput, McpToolTextContent, McpToolTextOutput, MAX_MCP_DEFINITION_BYTES, MAX_MCP_RESPONSE_BYTES } from "@/contracts/mcp-tool";
 import { isPassiveJsonData } from "@/contracts/json";
+import type { ToolRegistryOption } from "@/contracts/tool-registry";
 import { canonicalJson } from "@/server/domain/canonical-json";
 import { validateJsonObjectSchema, validateJsonSchemaDefinition } from "@/server/domain/json-schema";
 
@@ -30,7 +31,9 @@ export function mcpToolOutputDefinitionIssue(actual: unknown, expected: Record<s
     || validateJsonSchemaDefinition(expected) || canonicalJson(definition) !== canonicalJson(expected) ? error : null;
 }
 
-export function normalizeMcpToolResult(result: unknown, schema: Record<string, unknown>) {
+export function normalizeMcpToolResult(result: unknown, schema: Record<string, unknown>, context?: {
+  operationKind?: ToolRegistryOption["operationKind"]; hasOutputDefinition?: boolean;
+}) {
   const failure = (error: string) => ({ ok: false as const, error, retryable: false });
   if (!isPassiveJsonData(result, MAX_MCP_RESPONSE_BYTES) || !result || typeof result !== "object" || Array.isArray(result)) {
     return failure("远端工具回执无效或超过容量限制");
@@ -40,10 +43,21 @@ export function normalizeMcpToolResult(result: unknown, schema: Record<string, u
   let output: unknown = raw.structuredContent;
   if (output === undefined) {
     const content = raw.content;
-    if (!Array.isArray(content) || content.length !== 1 || content[0]?.type !== "text" || typeof content[0]?.text !== "string") {
-      return failure("远端工具必须返回结构化对象或单段对象格式文本");
+    const singleText = Array.isArray(content) && content.length === 1 && content[0]?.type === "text" && typeof content[0]?.text === "string";
+    if (singleText) {
+      try { output = JSON.parse(content[0].text); } catch { /* 普通文字只允许已登记的只读工具适配。 */ }
     }
-    try { output = JSON.parse(content[0].text); } catch { return failure("远端工具返回的不是有效对象格式文本"); }
+    if (!output || typeof output !== "object" || Array.isArray(output)) {
+      // 已公布结构化回执或写操作不能借文本适配绕过其业务回执。
+      if (context?.operationKind !== "read" || context.hasOutputDefinition) {
+        return failure(singleText ? "远端工具返回的不是有效对象格式文本" : "远端工具必须返回结构化对象或单段对象格式文本");
+      }
+      const textContent = McpToolTextContent.safeParse(content);
+      if (!textContent.success) return failure("只读工具仅支持有限的纯文本结果，请检查远端返回内容");
+      const textOutput = McpToolTextOutput.safeParse({ text: textContent.data.map((block) => block.text).join("\n\n") });
+      if (!textOutput.success) return failure("远端工具文本结果超过容量限制");
+      output = textOutput.data;
+    }
   }
   const parsed = McpToolOutput.safeParse(output);
   if (!parsed.success) return failure("远端工具回执不是有效对象或超过容量限制");
