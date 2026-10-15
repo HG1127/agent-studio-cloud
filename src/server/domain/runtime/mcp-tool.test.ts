@@ -3,6 +3,15 @@ import { mcpToolDefinitionIssue, mcpToolInputDefinitionIssue, mcpToolOutputDefin
 import { MAX_MCP_DEFINITION_BYTES, MAX_MCP_RESPONSE_BYTES } from "@/contracts/mcp-tool";
 
 describe("已登记 MCP 参数定义纯预检", () => {
+  it("组合定义通过参数、远端冻结比对和实际回执校验，漂移仍拒绝", () => {
+    const definition = { type: "object", required: ["id"], properties: { id: { anyOf: [{ type: "string" }, { type: "null" }] } }, not: { required: ["error"] } };
+    expect(mcpToolInputDefinitionIssue(definition)).toBeNull();
+    expect(mcpToolDefinitionIssue(definition, definition)).toBeNull();
+    expect(mcpToolOutputDefinitionIssue(definition, definition)).toBeNull();
+    expect(normalizeMcpToolResult({ structuredContent: { id: null } }, definition)).toEqual({ ok: true, output: { id: null } });
+    expect(normalizeMcpToolResult({ structuredContent: { id: false } }, definition)).toMatchObject({ ok: false, retryable: false });
+    expect(mcpToolDefinitionIssue({ ...definition, not: { required: ["removed"] } }, definition)).not.toBeNull();
+  });
   it.each([{ type: "object" }, { type: "object", properties: {}, additionalProperties: false }, { type: "object", properties: { active: { type: "boolean", default: false }, amount: { type: "number", default: 0 } } }])("接受已支持对象和零参数定义 %#", (definition) => {
     expect(mcpToolInputDefinitionIssue(definition)).toBeNull();
   });

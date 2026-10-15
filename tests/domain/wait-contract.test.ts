@@ -40,6 +40,7 @@ describe("等待步骤契约", () => {
 
   it("拒绝根类型错误或包含不支持规则的消息契约", () => {
     expect(validateWaitContracts(waitNode({ mode: "event", eventKey: "ready", payloadSchema: { type: "array" } }))).toContain("根类型必须包含 object");
-    expect(validateWaitContracts(waitNode({ mode: "event", eventKey: "ready", payloadSchema: { type: "object", allOf: [] } }))).toContain("暂不支持的规则");
+    expect(validateWaitContracts(waitNode({ mode: "event", eventKey: "ready", payloadSchema: { type: "object", $ref: "unsupported" } }))).toContain("暂不支持的规则");
+    expect(validateWaitContracts(waitNode({ mode: "event", eventKey: "ready", payloadSchema: { type: "object", allOf: [] } }))).toContain("allOf 必须包含");
   });
 });

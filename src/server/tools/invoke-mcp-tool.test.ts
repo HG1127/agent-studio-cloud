@@ -20,6 +20,55 @@ async function fixture(options: Parameters<typeof startMcpTestServer>[0] = {}) {
 }
 
 describe("真实 MCP SDK 对本地 Streamable HTTP 服务", () => {
+  it.each([null, "c1"])("组合参数与回执通过真实 SDK 发现和调用，保留 %j", async (customerId) => {
+    const inputSchema = { type: "object", required: ["customerId"], properties: { customerId: { anyOf: [{ type: "string" }, { type: "null" }] } }, additionalProperties: false };
+    const outputSchema = { ...inputSchema, properties: {
+      ...inputSchema.properties,
+      amount: { allOf: [{ type: "number" }, { minimum: 0 }] },
+      active: { oneOf: [{ const: false }, { const: true }] },
+    }, not: { required: ["error"] } };
+    const output = { customerId, amount: 0, active: false };
+    const { server, tool } = await fixture({ inputSchema, outputSchema, output });
+    tool.outputSchema = outputSchema;
+    await expect(invokeMcpTool({ tool, action: tool.action, idempotencyKey: "composition-key", input: { customerId }, outputs: { secret: "not-sent" } }))
+      .resolves.toEqual({ ok: true, output });
+    expect(server.messages.filter((message) => message.method === "tools/call")).toEqual([
+      { method: "tools/call", key: "composition-key", params: { name: tool.action, arguments: { customerId } } },
+    ]);
+    expect(server.wasClosed()).toBe(true);
+    expect(JSON.stringify(server.messages)).not.toContain("not-sent");
+  });
+  it("不匹配的组合参数在发现和副作用前拒绝", async () => {
+    const inputSchema = { type: "object", properties: { customerId: { anyOf: [{ type: "string" }, { type: "null" }] } } };
+    const { server, tool } = await fixture({ inputSchema });
+    await expect(invokeMcpTool({ tool, action: tool.action, idempotencyKey: "composition-key", input: { customerId: false }, outputs: {} }))
+      .resolves.toMatchObject({ ok: false, retryable: false });
+    expect(server.messages).toHaveLength(0);
+    expect(server.effectCount()).toBe(0);
+  });
+  it("组合的未选分支发生远端漂移，仍在业务调用前拒绝", async () => {
+    const inputSchema = { type: "object", properties: { customerId: { anyOf: [{ type: "string" }, { type: "null" }] } } };
+    const { server, tool } = await fixture({ inputSchema });
+    tool.inputSchema = { type: "object", properties: { customerId: { anyOf: [{ type: "string" }, { type: "boolean" }] } } };
+    await expect(invokeMcpTool({ tool, action: tool.action, idempotencyKey: "composition-key", input: { customerId: "c1" }, outputs: {} }))
+      .resolves.toMatchObject({ ok: false, retryable: false });
+    expect(server.messages.some((message) => message.method === "tools/call")).toBe(false);
+    expect(server.effectCount()).toBe(0);
+    expect(server.wasClosed()).toBe(true);
+  });
+  it.each([
+    { anyOf: [{ type: "null" }, { type: "number" }] },
+    { allOf: [{ type: "string" }, { const: "other" }] },
+    { oneOf: [{ type: "string" }, { minLength: 1 }] },
+    { not: { const: "c1" } },
+  ])("真实 SDK 回执不符合组合约束时不冒充成功 %#", async (rule) => {
+    const outputSchema = { type: "object", required: ["customerId"], properties: { customerId: rule } };
+    const { server, tool, invoke } = await fixture({ outputSchema });
+    tool.outputSchema = outputSchema;
+    await expect(invoke()).resolves.toMatchObject({ ok: false, retryable: false });
+    expect(server.messages.filter((message) => message.method === "tools/call")).toHaveLength(1);
+    expect(server.wasClosed()).toBe(true);
+  });
   it.each(["read", "action"] as const)("中文内联%s步骤的安全键仅发送到实际业务调用", async (operationKind) => {
     const { server, tool } = await fixture();
     const idempotencyKey = toolStepIdempotencyKey({ runId: "run-1", nodeId: "work.登记分支.登记", stepId: "step-1" });
