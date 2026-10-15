@@ -9,10 +9,16 @@ import { DraftNavigationGuard } from "@/features/workflow-canvas/DraftNavigation
 import { DRAFT_STATE_EVENT, notifyDraftState, type DraftStateDetail } from "@/lib/draft-state";
 import { RunSummary } from "@/contracts/run";
 import { HarnessPolicyReadResult } from "@/contracts/harness-management";
+import { HarnessNavigation } from "@/features/harness/harness-navigation";
 
 const emptyPolicy = HarnessPolicyReadResult.parse({ ok: true, policy: { revision: 0, source: "unconfigured", policy: null, updatedAt: null } });
 const network = vi.fn();
 const releaseListeners: (() => void)[] = [];
+function preventDocumentNavigationOnce() {
+  const prevent = (event: Event) => event.preventDefault();
+  document.addEventListener("click", prevent, { once: true });
+  releaseListeners.push(() => document.removeEventListener("click", prevent));
+}
 function watchDrafts() {
   const changes: DraftStateDetail[] = [];
   const receive = (event: Event) => { changes.push((event as CustomEvent<DraftStateDetail>).detail); };
@@ -80,6 +86,50 @@ describe("V5.7 Harness 网页端分区与明确本地草稿", () => {
     await user.click(screen.getByRole("tab", { name: "默认运行规则" }));
     expect(screen.getByRole("combobox", { name: "步骤失败时怎么处理" })).toHaveValue("human_first");
     expect(screen.getAllByRole("tabpanel", { hidden: true })).toHaveLength(4);
+    expect(network).not.toHaveBeenCalled();
+  });
+
+  it("待处理入口保留所选任务及诊断范围，切回诊断但不丢分区填写", async () => {
+    const user = userEvent.setup();
+    const navigation = HarnessNavigation.parse({
+      runId: "00000000-0000-4000-8000-000000000081",
+      list: { query: "业务 助手", attention: false },
+      trace: { query: "失败", nodeId: "review", attention: true, range: "history", page: 2 },
+      context: { page: 3, query: "上游结果" },
+    });
+    render(<HarnessWorkspace runs={[]} policy={emptyPolicy} navigation={navigation}
+      diagnostics={<h2>真实诊断区域</h2>} rules={<SlotEditor label="已有安全规则填写" />} resources={<SlotEditor label="已有资源填写" />} />);
+    await user.click(screen.getByRole("tab", { name: "安全规则" }));
+    await user.type(screen.getByRole("textbox", { name: "已有安全规则填写" }), "保留规则填写");
+    const entry = screen.getByRole("link", { name: /最近待处理/ });
+    const destination = new URL(entry.getAttribute("href") ?? "", "https://example.invalid");
+    expect(destination.pathname).toBe("/harness");
+    expect(destination.hash).toBe("#diagnostic-runs-title");
+    expect(Object.fromEntries(destination.searchParams)).toEqual({ run: navigation.runId, runQuery: "业务 助手", runAttention: "1",
+      traceQuery: "失败", traceNode: "review", traceAttention: "1", traceRange: "history", tracePage: "2", contextPage: "3", contextQuery: "上游结果" });
+    preventDocumentNavigationOnce();
+    await user.click(entry);
+    expect(screen.getByRole("tab", { name: "运行诊断" })).toHaveAttribute("aria-selected", "true");
+    await user.click(screen.getByRole("tab", { name: "安全规则" }));
+    expect(screen.getByRole("textbox", { name: "已有安全规则填写" })).toHaveValue("保留规则填写");
+    expect(network).not.toHaveBeenCalled();
+  });
+
+  it("新标签点击待处理入口不改变当前分区；取消草稿离页保持原填写", async () => {
+    const user = userEvent.setup();
+    render(<><DraftNavigationGuard />{workspace()}</>);
+    await user.click(screen.getByRole("tab", { name: "默认运行规则" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "步骤失败时怎么处理" }), "human_first");
+    const entry = screen.getByRole("link", { name: /最近待处理/ });
+    preventDocumentNavigationOnce();
+    fireEvent.click(entry, { ctrlKey: true });
+    expect(screen.getByRole("tab", { name: "默认运行规则" })).toHaveAttribute("aria-selected", "true");
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await user.click(entry);
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(screen.getByRole("tab", { name: "默认运行规则" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("combobox", { name: "步骤失败时怎么处理" })).toHaveValue("human_first");
+    expect(entry).toHaveAttribute("href", "/harness?runAttention=1#diagnostic-runs-title");
     expect(network).not.toHaveBeenCalled();
   });
 

@@ -106,6 +106,7 @@ export default async function HarnessPage({ searchParams }: { searchParams: Prom
     <HarnessWorkspace
       runs={recentRuns}
       policy={safetyPolicy}
+      navigation={navigation}
       rules={<WorkspacePolicyPanel initialRead={safetyPolicy} />}
       resources={<ExecutionResourcesPanel initialRead={resourceRead} initialHistory={resourceHistory} />}
       diagnostics={<div className="space-y-4">
