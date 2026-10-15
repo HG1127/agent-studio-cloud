@@ -222,7 +222,10 @@ export function WebToolDesignStudio({ targets }: { targets: AgentTargetOption[] 
               <label className="block space-y-1 text-sm font-semibold text-slate-700">显示名称<input {...problemAttributes("field-" + index + "-label")} className={control} value={field.label} onChange={(event) => updateField(field.id, { label: event.target.value })} /></label>
               <div className="grid min-w-0 gap-3 2xl:grid-cols-2"><label className="block space-y-1 text-sm text-slate-700">输入类型<select {...problemAttributes("field-" + index + "-type")} className={control} value={field.type} onChange={(event) => {
                 const type = event.target.value;
-                if (type === "string" || type === "number" || type === "boolean" || type === "object" || type === "array") updateField(field.id, { type });
+                if (type === "string" || type === "number" || type === "boolean" || type === "object" || type === "array") {
+                  const invalidHiddenRows = type !== "string" && (!Number.isInteger(field.rows) || field.rows < 1 || field.rows > 12);
+                  updateField(field.id, { type, ...(invalidHiddenRows ? { rows: 1 } : {}) });
+                }
               }}><option value="string">文本</option><option value="number">数字</option><option value="boolean">是或否</option><option value="object">结构化对象</option><option value="array">结构化列表</option></select></label>
                 {field.type === "string" ? <label className="block space-y-1 text-sm text-slate-700">文本显示行数<input {...problemAttributes("field-" + index + "-rows")} type="number" min={1} max={12} className={control} value={Number.isFinite(field.rows) ? field.rows : ""} onChange={(event) => updateField(field.id, { rows: event.target.valueAsNumber })} /></label> : null}</div>
               <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={field.required} onChange={(event) => updateField(field.id, { required: event.target.checked })} />设为必填</label>

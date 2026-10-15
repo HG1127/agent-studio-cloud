@@ -175,6 +175,25 @@ describe("网页工具页面设计与真实管理分区", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "添加结果模块" })).toHaveFocus());
   });
 
+  it.each(["number", "boolean", "object", "array"])("文本行数无效后改为%s，不被隐藏字段阻止检查，其他填写保持", async (type) => {
+    const user = userEvent.setup();
+    render(<WebToolDesignStudio targets={[]} />);
+    await nameAndInputs(user);
+    await user.click(screen.getByRole("button", { name: "添加输入项" }));
+    await user.clear(screen.getByRole("spinbutton", { name: "文本显示行数" }));
+    await user.click(screen.getByRole("button", { name: "检查草稿" }));
+    expect(screen.getByRole("spinbutton", { name: "文本显示行数" })).toHaveFocus();
+    await user.selectOptions(screen.getByRole("combobox", { name: "输入类型" }), type);
+    expect(screen.queryByRole("spinbutton", { name: "文本显示行数" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "检查草稿" }));
+    expect(screen.getByRole("status")).toHaveTextContent("尚未保存或发布");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "显示名称" })).toHaveValue("新输入项");
+    await user.click(screen.getByRole("button", { name: "1. 基本信息" }));
+    expect(screen.getByRole("textbox", { name: "工具展示名称" })).toHaveValue("业务网页工具");
+    for (const action of [io.list, io.manage, io.keys, io.read, io.call, io.receipt]) expect(action).not.toHaveBeenCalled();
+  });
+
   it("访问与上限只更新草稿，校验失败不声称授权或发布", async () => {
     const user = userEvent.setup();
     render(<WebToolDesignStudio targets={[]} />);
