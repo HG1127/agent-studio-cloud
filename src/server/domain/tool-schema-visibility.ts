@@ -2,6 +2,7 @@ import { isPassiveJsonData } from "@/contracts/json";
 import { validateJsonSchemaDefinition } from "@/server/domain/json-schema";
 import { resolveLocalSchemaReference } from "@/server/domain/json-schema-reference";
 import { isCredentialFieldName, redactCredentialText } from "@/server/domain/security/redact-sensitive";
+import { writeOnlySchemaLiteralsAreSafe } from "./tool-schema-write-only";
 
 function isToolCredentialFieldName(name: string): boolean {
   const field = name.replace(/tokeniz(?:er|ation|e|ing)/gi, "");
@@ -31,10 +32,12 @@ export function isToolSchemaSafeToExpose(schema: Record<string, unknown>): boole
   if (!isPassiveJsonData(schema, Number.MAX_SAFE_INTEGER) || validateJsonSchemaDefinition(schema)) return false;
   const pending: Array<{ schema: unknown; credentialField: boolean }> = [{ schema, credentialField: false }];
   const visited = new WeakMap<object, number>();
+  let hasWriteOnly = false;
   while (pending.length) {
     const current = pending.pop()!;
     if (typeof current.schema === "boolean") continue;
     if (!current.schema || typeof current.schema !== "object" || Array.isArray(current.schema)) return false;
+    if (Object.getOwnPropertyDescriptor(current.schema, "writeOnly")?.value === true) hasWriteOnly = true;
     // 同一复用定义最多按普通字段和凭据字段各检查一次，不能互相借用结论。
     const mode = current.credentialField ? 2 : 1, previous = visited.get(current.schema) ?? 0;
     if (previous & mode) continue;
@@ -65,5 +68,5 @@ export function isToolSchemaSafeToExpose(schema: Record<string, unknown>): boole
       }
     }
   }
-  return true;
+  return !hasWriteOnly || writeOnlySchemaLiteralsAreSafe(schema);
 }

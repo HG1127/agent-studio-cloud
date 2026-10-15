@@ -66,6 +66,34 @@ async function fixture(options: {
 }
 
 describe("连接检查与实际执行使用同一 MCP 协议语义（本机 SDK）", () => {
+  it.each(["modern", "legacy-rpc"] as const)("三类字段说明经 %s SDK 原样接入，说明变化后停止业务调用", async (discovery) => {
+    const inputSchema = { type: "object", required: ["value"], properties: {
+      value: { type: "string", writeOnly: true }, reference: { type: "string", readOnly: true }, oldField: { type: "string", deprecated: true },
+    } };
+    const outputSchema = { type: "object", required: ["receipt", "amount", "active"], properties: {
+      receipt: { type: "string", readOnly: true }, amount: { type: "number" }, active: { type: "boolean", deprecated: true },
+    } };
+    const output = { receipt: "business-receipt", amount: 0, active: false };
+    const before = JSON.stringify([inputSchema, outputSchema, output]);
+    const remoteInputSchema = structuredClone(inputSchema), remoteOutputSchema = structuredClone(outputSchema);
+    const server = await fixture({ discovery, inputSchema, outputSchema, output,
+      pages: [{ tools: [{ ...registered, inputSchema: remoteInputSchema, outputSchema: remoteOutputSchema }] }],
+    });
+    expect((await checkMcpConnection(server.registration)).status).toBe("available");
+    expect(server.messages.filter((message) => message.method === "tools/call")).toHaveLength(0);
+    expect(server.messages.every((message) => !message.key)).toBe(true);
+    expect(await server.invoke({ value: "business-value", reference: "business-reference", oldField: "business-legacy" })).toEqual({ ok: true, output });
+    remoteInputSchema.properties.value.writeOnly = false;
+    expect((await checkMcpConnection(server.registration)).status).toBe("definition-changed");
+    expect(await server.invoke({ value: "business-value" })).toMatchObject({ ok: false, retryable: false });
+    remoteInputSchema.properties.value.writeOnly = true;
+    remoteOutputSchema.properties.active.deprecated = false;
+    expect(await server.invoke({ value: "business-value" })).toMatchObject({ ok: false, retryable: false });
+    expect(server.messages.filter((message) => message.method === "tools/call")).toHaveLength(1);
+    expect(JSON.stringify([inputSchema, outputSchema, output])).toBe(before);
+    expect(server.violations).toEqual([]);
+  });
+
   it.each(["modern", "legacy-rpc"] as const)("带格式说明的工具经真实登记、%s SDK 检查和执行，格式漂移仍阻止业务调用", async (discovery) => {
     const inputSchema = { type: "object", required: ["url"], properties: { url: { type: "string", format: "uri" } }, additionalProperties: false };
     const outputSchema = { type: "object", required: ["date", "amount", "active"], properties: {

@@ -35,6 +35,18 @@ const registration: ToolRegistration = {
 };
 
 describe("冻结工具绑定", () => {
+  it.each(["readOnly", "writeOnly", "deprecated"])("MCP %s 字段说明保留到冻结，输入和回执变化均拒绝", (keyword) => {
+    const inputSchema = { type: "object", properties: { value: { type: "string", [keyword]: true } } };
+    const outputSchema = { type: "object", properties: { value: { type: "string", [keyword]: true } } };
+    const mcp = { ...registration, protocol: "mcp-streamable-http" as const, operationKind: "read" as const, inputSchema, outputSchema };
+    const snapshot = { ...node.tool!, protocol: mcp.protocol, operationKind: mcp.operationKind, inputSchema, outputSchema };
+    expect(toolRegistrationCompatibilityIssue(snapshot, mcp)).toBeNull();
+    for (const key of ["inputSchema", "outputSchema"] as const) {
+      expect(toolRegistrationCompatibilityIssue(snapshot, { ...mcp, [key]: { type: "object", properties: { value: { type: "string", [keyword]: false } } } }))
+        .toContain("配置已变化");
+    }
+  });
+
   it("MCP 格式说明保留到冻结绑定，输入或回执说明变化均要求重新发布", () => {
     const inputSchema = { type: "object", properties: { url: { type: "string", format: "uri" } } };
     const outputSchema = { type: "object", properties: { date: { type: "string", format: "date-time" } } };

@@ -18,6 +18,19 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 describe("真实注册解析的配置诊断查询", () => {
+  it("读写及弃用字段说明经真实登记与配置诊断保留，不推导工具性质", () => {
+    const inputSchema = { type: "object", properties: { value: { type: "string", writeOnly: true }, receipt: { type: "string", readOnly: true } } };
+    const outputSchema = { type: "object", properties: { value: { type: "string", deprecated: true } } };
+    vi.stubEnv("TOOL_REGISTRY_JSON", JSON.stringify([{ ...tool, inputSchema, outputSchema }]));
+    const loaded = registry.loadToolRegistrySnapshot();
+    expect(loaded.status).toBe("configured");
+    expect(loaded.registry[0]).toMatchObject({ inputSchema, outputSchema, operationKind: "read" });
+    expect(getMcpConnectionConfiguration()).toMatchObject({ status: "configured", connections: [{ id: "lookup", status: "configured" }] });
+    expect(check).not.toHaveBeenCalled();
+    vi.stubEnv("TOOL_REGISTRY_JSON", JSON.stringify([{ ...tool, operationKind: undefined, inputSchema, outputSchema }]));
+    expect(registry.loadToolRegistrySnapshot().status).toBe("configuration-error");
+  });
+
   it("输入和回执格式说明经真实登记和诊断原样保留，不声称远端已可用", () => {
     const inputSchema = { type: "object", properties: { url: { type: "string", format: "uri" } } };
     const outputSchema = { type: "object", properties: { date: { type: "string", format: "date-time" }, extra: { format: "vendor-format" } } };
