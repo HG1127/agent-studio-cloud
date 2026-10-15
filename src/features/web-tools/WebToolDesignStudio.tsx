@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Check, Eye, FileText, Plus, SlidersHorizontal, Trash2, Wand2 } from "lucide-react";
 import type { AgentTargetOption } from "@/contracts/agent";
 import { CapabilityNotice } from "@/components/ui/CapabilityNotice";
@@ -41,12 +41,19 @@ export function WebToolDesignStudio({ targets }: { targets: AgentTargetOption[] 
   const serialized = JSON.stringify(draft, null, 2);
   const editorDirty = editor !== null && editor !== serialized;
   const commandDirty = inputCommand.length > 0;
+  const protectedDraft = dirty || editorDirty || commandDirty;
   const commandPlan = planWebToolInputCommand(inputCommand, draft.fields, commandTarget);
   const selectedTarget = targets?.find((target) => target.versionId === draft.versionId);
   const draftKey = "web-tool-design:" + instanceId;
   const feedbackId = instanceId + "-design-feedback";
-  useLayoutEffect(() => { notifyDraftState({ agentId: draftKey, dirty: dirty || editorDirty || commandDirty }); }, [draftKey, dirty, editorDirty, commandDirty]);
+  useLayoutEffect(() => { notifyDraftState({ agentId: draftKey, dirty: protectedDraft }); }, [draftKey, protectedDraft]);
   useLayoutEffect(() => () => notifyDraftState({ agentId: draftKey, dirty: false }), [draftKey]);
+  useEffect(() => {
+    if (!protectedDraft) return;
+    const leave = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", leave);
+    return () => window.removeEventListener("beforeunload", leave);
+  }, [protectedDraft]);
   useLayoutEffect(() => {
     if (!problem) return;
     const target = Array.from(designRootRef.current?.querySelectorAll<HTMLElement>("[data-design-field]") ?? [])
@@ -200,7 +207,7 @@ export function WebToolDesignStudio({ targets }: { targets: AgentTargetOption[] 
         <Button type="button" variant={mode === "pro" ? "secondary" : "ghost"} aria-pressed={mode === "pro"} onClick={(event) => switchMode("pro", event.currentTarget)}><SlidersHorizontal aria-hidden="true" className="size-4" />专业配置</Button>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs text-slate-500">{dirty || editorDirty ? "有未保存填写" : "新设计，尚未保存"}</span>
+        <span className="text-xs text-slate-500">{protectedDraft ? "有未保存填写" : "新设计，尚未保存"}</span>
         <Button type="button" variant="ghost" onClick={(event) => requestConfirmation({ action: "clear" }, event.currentTarget)}><Trash2 aria-hidden="true" className="size-4" />清空草稿</Button>
       </div>
     </div>
@@ -319,7 +326,7 @@ export function WebToolDesignStudio({ targets }: { targets: AgentTargetOption[] 
           <div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" onClick={checkDraft}><Check aria-hidden="true" className="size-4" />检查草稿</Button>
             <Button type="button" variant="secondary" onClick={() => { previewRef.current?.focus(); previewRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" }); }}><Eye aria-hidden="true" className="size-4" />预览布局</Button>
             <Button type="button" disabled><FileText aria-hidden="true" className="size-4" />保存页面配置（待接入）</Button></div>
-          <p className="text-xs leading-5 text-slate-500">仅当前页面临时保留。切换上方分区不会清除，关闭或刷新页面会丢失；没有写入浏览器存储、服务器或已发布工具。</p>
+          <p className="text-xs leading-5 text-slate-500">仅当前页面临时保留。切换上方分区不会清除；有未保存填写时，刷新或关闭会请求浏览器确认，确认离开仍会丢失。没有写入浏览器存储、服务器或已发布工具。</p>
         </div>
       </div>
       <div ref={previewRef} tabIndex={-1} className="min-w-0 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 xl:sticky xl:top-5">
