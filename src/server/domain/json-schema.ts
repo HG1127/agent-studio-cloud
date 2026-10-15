@@ -1,5 +1,6 @@
 import { isSafeDataPathSegment } from "@/server/domain/runtime/data-path";
 import { compileSafePattern, safePatternMatches, MAX_PATTERN_LENGTH, MAX_PATTERN_INPUT_LENGTH, type SafePattern } from "@/server/domain/safe-pattern";
+import { resolveLocalSchemaReference, schemaDialectSupportsLocalReferences, MAX_LOCAL_SCHEMA_REFERENCE_HOPS } from "./json-schema-reference";
 
 function valueType(value: unknown): string {
   if (value === null) return "null";
@@ -27,8 +28,10 @@ const SUPPORTED_SCHEMA_KEYS = new Set([
   "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
   "minItems", "maxItems", "minProperties", "maxProperties", "additionalProperties",
   "allOf", "anyOf", "oneOf", "not",
+  "$defs", "definitions", "$ref",
 ]);
 const COMBINATION_KEYS = ["allOf", "anyOf", "oneOf"] as const;
+const REFERENCE_METADATA_KEYS = new Set(["$ref", "$defs", "definitions", "$schema", "title", "description", "examples", "default"]);
 const MAX_SCHEMA_FIELDS = 100;
 const MAX_SCHEMA_CHOICES = 100;
 const MAX_SCHEMA_RULES = 10_000;
@@ -36,7 +39,12 @@ const MAX_SCHEMA_RULES = 10_000;
 const MAX_VALIDATION_WORK = 8 * 1024 * 1024;
 const VALUE_CHECK_LIMIT_ERROR = `消息契约校验工作量超过 ${MAX_VALIDATION_WORK} 单位，请缩小消息或简化字段规则`;
 type ValidationBudget = { remaining: number; keys: WeakMap<object, string[]> };
-type DefinitionBudget = { remaining: number; work: ValidationBudget };
+type ResolvedSchemaReference = { schema: unknown; hasSiblingAssertions: boolean };
+type DefinitionBudget = {
+  remaining: number; work: ValidationBudget; root: Record<string, unknown>;
+  ancestors: Set<object>; referenceDepth: number; references: WeakMap<object, ResolvedSchemaReference>;
+  hasReferences: boolean; unsupportedReferenceDialect: boolean;
+};
 const MAX_VALUE_DEPTH = 32;
 const MAX_VALUE_NODES = 50_000;
 
@@ -87,8 +95,9 @@ function boundedValuesEqual(left: unknown, right: unknown, budget: ValidationBud
   return true;
 }
 
-function definitionBudget(): DefinitionBudget {
-  return { remaining: MAX_SCHEMA_RULES, work: { remaining: MAX_VALIDATION_WORK, keys: new WeakMap() } };
+function definitionBudget(root: Record<string, unknown>): DefinitionBudget {
+  return { remaining: MAX_SCHEMA_RULES, work: { remaining: MAX_VALIDATION_WORK, keys: new WeakMap() }, root,
+    ancestors: new Set(), referenceDepth: 0, references: new WeakMap(), hasReferences: false, unsupportedReferenceDialect: false };
 }
 
 function jsonValueSafetyIssue(value: unknown): string | null {
@@ -153,11 +162,32 @@ function validateSchemaRule(schema: unknown, path: string, depth: number, patter
   if (depth > 8) return `${path}字段结构层级超过 8 层`;
   if (typeof schema === "boolean") return null;
   if (!schema || typeof schema !== "object" || Array.isArray(schema)) return `${path}必须是对象或布尔值`;
-  const rule = schema as Record<string, unknown>;
+  if (budget.ancestors.has(schema)) return `${path}包含递归或循环字段引用，暂不支持`;
+  budget.ancestors.add(schema);
+  try { return validateSchemaObject(schema as Record<string, unknown>, path, depth, patterns, budget); }
+  finally { budget.ancestors.delete(schema); }
+}
+
+function validateSchemaObject(rule: Record<string, unknown>, path: string, depth: number, patterns: Map<string, SafePattern>, budget: DefinitionBudget): string | null {
   const ruleKeys = Object.keys(rule);
   if (!spendKeys(budget.work, ruleKeys, 2)) return VALUE_CHECK_LIMIT_ERROR;
   const unsupported = ruleKeys.find((key) => !SUPPORTED_SCHEMA_KEYS.has(key));
   if (unsupported) return `${path}使用了暂不支持的规则“${unsupported}”`;
+  if (!schemaDialectSupportsLocalReferences(rule)) budget.unsupportedReferenceDialect = true;
+  if (Object.hasOwn(rule, "$ref")) {
+    budget.hasReferences = true;
+    if (typeof rule.$ref === "string" && !spend(budget.work, rule.$ref.length * 4 + 1)) return VALUE_CHECK_LIMIT_ERROR;
+    const target = resolveLocalSchemaReference(budget.root, rule.$ref);
+    if (!target.ok) return `${path}使用了暂不支持的规则“$ref”（仅接受同份现代契约中的有效本地字段引用）`;
+    if (budget.referenceDepth >= MAX_LOCAL_SCHEMA_REFERENCE_HOPS) return `${path}的字段引用不能超过 ${MAX_LOCAL_SCHEMA_REFERENCE_HOPS} 层`;
+    if (!spend(budget.work, ruleKeys.length)) return VALUE_CHECK_LIMIT_ERROR;
+    budget.references.set(rule, { schema: target.schema, hasSiblingAssertions: ruleKeys.some((key) => !REFERENCE_METADATA_KEYS.has(key)) });
+    budget.referenceDepth += 1;
+    try {
+      const error = validateSchemaRule(target.schema, path, depth, patterns, budget);
+      if (error) return error;
+    } finally { budget.referenceDepth -= 1; }
+  }
   if (rule.type !== undefined) {
     const types = Array.isArray(rule.type) ? rule.type : [rule.type];
     if (!spend(budget.work, types.length)) return VALUE_CHECK_LIMIT_ERROR;
@@ -246,6 +276,19 @@ function validateSchemaRule(schema: unknown, path: string, depth: number, patter
     const error = validateSchemaRule(rule.not, `${path}.not`, depth + 1, patterns, budget);
     if (error) return error;
   }
+  for (const keyword of ["$defs", "definitions"] as const) {
+    if (rule[keyword] === undefined) continue;
+    const definitions = rule[keyword];
+    if (!definitions || typeof definitions !== "object" || Array.isArray(definitions)) return `${path}的 ${keyword} 必须是对象`;
+    const entries = Object.entries(definitions as Record<string, unknown>);
+    if (entries.length > MAX_SCHEMA_FIELDS) return `${path}的 ${keyword} 不能超过 ${MAX_SCHEMA_FIELDS} 项字段定义`;
+    for (const [name, child] of entries) {
+      if (!spend(budget.work, name.length + 1)) return VALUE_CHECK_LIMIT_ERROR;
+      if (!isSafeDataPathSegment(name)) return `${path}的 ${keyword} 不能使用保留字段名`;
+      const error = validateSchemaRule(child, `${path}.${keyword}.${name}`, depth + 1, patterns, budget);
+      if (error) return error;
+    }
+  }
   if (rule.properties !== undefined) {
     if (!rule.properties || typeof rule.properties !== "object" || Array.isArray(rule.properties)) return `${path}的 properties 必须是对象`;
     const entries = Object.entries(rule.properties as Record<string, unknown>);
@@ -267,12 +310,18 @@ function validateSchemaRule(schema: unknown, path: string, depth: number, patter
   return null;
 }
 
-function validateValue(value: unknown, schema: unknown, path: string, depth: number, patterns: Map<string, SafePattern>, budget: ValidationBudget): string | null {
+function validateValue(value: unknown, schema: unknown, path: string, depth: number, patterns: Map<string, SafePattern>, budget: ValidationBudget, references: WeakMap<object, ResolvedSchemaReference>): string | null {
   if (!spend(budget)) return VALUE_CHECK_LIMIT_ERROR;
   if (depth > 8) return `${path}字段结构层级超过 8 层`;
   if (schema === false) return `${path}不允许提供此值`;
   if (schema === true || !schema || typeof schema !== "object" || Array.isArray(schema)) return null;
   const rule = schema as Record<string, unknown>;
+  if (Object.hasOwn(rule, "$ref")) {
+    const reference = references.get(rule);
+    if (!reference) return `${path}的字段引用未经校验`;
+    const error = validateValue(value, reference.schema, path, depth, patterns, budget, references);
+    if (error || !reference.hasSiblingAssertions) return error;
+  }
   if (Array.isArray(rule.type) && !spend(budget, rule.type.length)) return VALUE_CHECK_LIMIT_ERROR;
   if (rule.type && !typeMatches(value, rule.type)) {
     return `${path}类型不正确（收到 ${valueType(value)}）`;
@@ -292,7 +341,7 @@ function validateValue(value: unknown, schema: unknown, path: string, depth: num
     if (!Array.isArray(branches)) continue;
     let matches = 0;
     for (const branch of branches) {
-      const error = validateValue(value, branch, path, depth + 1, patterns, budget);
+      const error = validateValue(value, branch, path, depth + 1, patterns, budget, references);
       // 超限是执行失败，不能被可选分支忽略或被 not 反转成成功。
       if (budget.remaining < 0) return VALUE_CHECK_LIMIT_ERROR;
       if (keyword === "allOf" && error) return error;
@@ -305,7 +354,7 @@ function validateValue(value: unknown, schema: unknown, path: string, depth: num
     if (keyword === "oneOf" && matches !== 1) return `${path}必须且只能符合一项可选字段规则`;
   }
   if (rule.not !== undefined) {
-    const error = validateValue(value, rule.not, path, depth + 1, patterns, budget);
+    const error = validateValue(value, rule.not, path, depth + 1, patterns, budget, references);
     if (budget.remaining < 0) return VALUE_CHECK_LIMIT_ERROR;
     if (!error) return `${path}不能符合排除规则`;
   }
@@ -331,7 +380,7 @@ function validateValue(value: unknown, schema: unknown, path: string, depth: num
     if (typeof rule.maxItems === "number" && value.length > rule.maxItems) return `${path}最多允许 ${rule.maxItems} 项`;
     if (rule.items !== undefined) {
       for (let index = 0; index < value.length; index += 1) {
-        const error = validateValue(value[index], rule.items, `${path}[${index}]`, depth + 1, patterns, budget);
+        const error = validateValue(value[index], rule.items, `${path}[${index}]`, depth + 1, patterns, budget, references);
         if (error) return error;
       }
     }
@@ -357,14 +406,14 @@ function validateValue(value: unknown, schema: unknown, path: string, depth: num
     if (declaredKeys.length > 0) {
       for (const [key, childSchema] of Object.entries(declared)) {
         if (!Object.prototype.hasOwnProperty.call(object, key)) continue;
-        const error = validateValue(object[key], childSchema, `${path}.${key}`, depth + 1, patterns, budget);
+        const error = validateValue(object[key], childSchema, `${path}.${key}`, depth + 1, patterns, budget, references);
         if (error) return error;
       }
     }
     for (const key of keys.filter((key) => !Object.prototype.hasOwnProperty.call(declared, key))) {
       if (rule.additionalProperties === false) return `${path}.${key}不是允许的字段`;
       if (rule.additionalProperties && typeof rule.additionalProperties === "object") {
-        const error = validateValue(object[key], rule.additionalProperties, `${path}.${key}`, depth + 1, patterns, budget);
+        const error = validateValue(object[key], rule.additionalProperties, `${path}.${key}`, depth + 1, patterns, budget, references);
         if (error) return error;
       }
     }
@@ -373,14 +422,18 @@ function validateValue(value: unknown, schema: unknown, path: string, depth: num
 }
 
 export function validateJsonSchemaDefinition(schema: Record<string, unknown>): string | null {
-  return validateSchemaRule(schema, "消息契约", 0, new Map(), definitionBudget());
+  const budget = definitionBudget(schema);
+  const error = validateSchemaRule(schema, "消息契约", 0, new Map(), budget);
+  return error ?? (budget.hasReferences && budget.unsupportedReferenceDialect ? "消息契约的本地引用不支持混合或未知字段规则方言" : null);
 }
 
 export function validateJsonObjectSchema(payload: Record<string, unknown>, schema: Record<string, unknown>): string | null {
   const unsafe = jsonValueSafetyIssue(payload);
   if (unsafe) return unsafe;
   const patterns = new Map<string, SafePattern>();
-  const schemaError = validateSchemaRule(schema, "消息契约", 0, patterns, definitionBudget());
+  const definition = definitionBudget(schema);
+  const schemaError = validateSchemaRule(schema, "消息契约", 0, patterns, definition);
   if (schemaError) return schemaError;
-  return validateValue(payload, schema, "消息", 0, patterns, { remaining: MAX_VALIDATION_WORK, keys: new WeakMap() });
+  if (definition.hasReferences && definition.unsupportedReferenceDialect) return "消息契约的本地引用不支持混合或未知字段规则方言";
+  return validateValue(payload, schema, "消息", 0, patterns, { remaining: MAX_VALIDATION_WORK, keys: new WeakMap() }, definition.references);
 }

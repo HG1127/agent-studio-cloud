@@ -338,3 +338,57 @@ describe("真实 MCP SDK 只读文本及下游字段映射", () => {
     await expect(invoke()).resolves.toMatchObject({ ok: false, retryable: false });
   });
 });
+
+describe("真实 MCP SDK 复用本地字段定义", () => {
+  it.each(["$defs", "definitions"].flatMap((keyword) => (["read", "action"] as const).map((operationKind) => ({ keyword, operationKind }))))("$operationKind 工具完整发现并校验 $keyword 的嵌套参数和回执", async ({ keyword, operationKind }) => {
+    const inputSchema = { type: "object", required: ["customer", "lines"], additionalProperties: false, properties: {
+      customer: { $ref: `#/${keyword}/Customer` }, lines: { type: "array", items: { $ref: `#/${keyword}/Line` } },
+    }, [keyword]: {
+      Customer: { type: "object", required: ["id"], properties: { id: { type: "string" } }, additionalProperties: false },
+      Line: { type: "object", required: ["amount", "active"], properties: { amount: { type: "number", minimum: 0 }, active: { type: "boolean" } }, additionalProperties: false },
+    } };
+    const outputSchema = { type: "object", required: ["receipt"], properties: { receipt: { $ref: `#/${keyword}/Receipt` } }, [keyword]: {
+      Receipt: { type: "object", required: ["id", "amount", "active"], properties: { id: { type: "string" }, amount: { type: "number" }, active: { type: "boolean" } }, additionalProperties: false },
+    } };
+    const input = { customer: { id: "c1" }, lines: [{ amount: 0, active: false }] }, output = { receipt: { id: "receipt-1", amount: 0, active: false } };
+    const { server, tool } = await fixture({ inputSchema, outputSchema, output });
+    const configured = { ...tool, outputSchema, operationKind, businessIdempotency: true, businessIdempotencyRetentionMs: 600_000 };
+    expect(parseToolRegistry(JSON.stringify([configured]))).toHaveLength(1);
+    await expect(invokeMcpTool({ tool: configured, action: configured.action, idempotencyKey: "local-definition-key", input, outputs: { private: "not-sent" } }))
+      .resolves.toEqual({ ok: true, output });
+    expect(server.messages.filter((message) => message.method === "tools/call")).toEqual([
+      { method: "tools/call", key: "local-definition-key", params: { name: configured.action, arguments: input } },
+    ]);
+    expect(server.wasClosed()).toBe(true);
+  });
+  it("引用规则不符的参数在连接和业务效果前拒绝", async () => {
+    const inputSchema = { type: "object", properties: { customerId: { $ref: "#/$defs/Id" } }, $defs: { Id: { type: "integer" } } };
+    const { server, tool } = await fixture({ inputSchema });
+    await expect(invokeMcpTool({ tool, action: tool.action, idempotencyKey: "local-definition-key", input: { customerId: false }, outputs: {} })).resolves.toMatchObject({ ok: false, retryable: false });
+    expect(server.messages).toHaveLength(0); expect(server.effectCount()).toBe(0);
+  });
+  it("远端只改变复用输入定义，也须在业务调用前阻止漂移", async () => {
+    const inputSchema = { type: "object", properties: { customerId: { $ref: "#/$defs/Id" } }, $defs: { Id: { type: "string", minLength: 2 } } };
+    const { server, tool, invoke } = await fixture({ inputSchema });
+    tool.inputSchema = { ...inputSchema, $defs: { Id: { type: "string", minLength: 1 } } };
+    await expect(invoke()).resolves.toMatchObject({ ok: false, retryable: false });
+    expect(server.messages.some((message) => message.method === "tools/call")).toBe(false);
+    expect(server.effectCount()).toBe(0); expect(server.wasClosed()).toBe(true);
+  });
+  it("未使用的远端回执定义变化也不能从冻结比对丢掉", async () => {
+    const outputSchema = { type: "object", properties: { customerId: { $ref: "#/$defs/Id" } }, $defs: { Id: { type: "string" }, Unused: { const: "one" } } };
+    const { server, tool, invoke } = await fixture({ outputSchema });
+    tool.outputSchema = { ...outputSchema, $defs: { ...outputSchema.$defs, Unused: { const: "two" } } };
+    await expect(invoke()).resolves.toMatchObject({ ok: false, retryable: false });
+    expect(server.messages.some((message) => message.method === "tools/call")).toBe(false);
+    expect(server.effectCount()).toBe(0); expect(server.wasClosed()).toBe(true);
+  });
+  it("声明与冻结一致仍须检查实际回执的引用字段类型", async () => {
+    const outputSchema = { type: "object", required: ["customerId"], properties: { customerId: { $ref: "#/$defs/Id" } }, $defs: { Id: { type: "string" } } };
+    const { server, tool, invoke } = await fixture({ outputSchema, output: { customerId: 0 } });
+    tool.outputSchema = outputSchema;
+    await expect(invoke()).resolves.toMatchObject({ ok: false, retryable: false });
+    expect(server.messages.filter((message) => message.method === "tools/call")).toHaveLength(1);
+    expect(server.wasClosed()).toBe(true);
+  });
+});
