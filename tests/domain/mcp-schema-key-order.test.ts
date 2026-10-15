@@ -5,6 +5,7 @@ import { compareMcpDirectory } from "@/server/domain/mcp-connection";
 import { mcpToolDefinitionIssue, mcpToolOutputDefinitionIssue, normalizeMcpToolResult } from "@/server/domain/runtime/mcp-tool";
 import { parseToolRegistry } from "@/server/tools/tool-registry";
 import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding";
+import { toolDefinitionsEqual } from "@/server/domain/tool-definition-equality";
 
 const pairs = [["\u00e9", "e\u0301"], ["\u00c5", "A\u030a"], ["\u00f1", "n\u0303"], ["\uac00", "\u1100\u1161"], ["\u1e0b", "d\u0307"]];
 const definition = (first: string, second: string, reversed = false) => ({ type: "object", required: [first, second], additionalProperties: false,
@@ -76,5 +77,17 @@ describe("工具定义的对象键顺序不是业务漂移", () => {
     const tool = registration({ type: "object", properties: { amount: { type: "number", default: 0 } } });
     const frozen = snapshot(tool, { type: "object", properties: { amount: { type: "number", default: -0, description: undefined } } });
     expect(toolRegistrationCompatibilityIssue({ ...frozen, protocol: "http-json" }, { ...tool, protocol: "http-json" })).toBeNull();
+  });
+
+  it.each(["examples", "default", "enum"])("%s 空槽不能跳过真实值，也不改变旧 JSON 空值表示", (keyword) => {
+    const holes = Array<unknown>(1), sparse = { type: "object", [keyword]: holes };
+    const changed = { type: "object", [keyword]: ["changed"] };
+    const empty = { type: "object", [keyword]: [null] };
+    expect(mcpToolOutputDefinitionIssue(changed, changed)).toBeNull();
+    expect(mcpToolOutputDefinitionIssue(empty, empty)).toBeNull();
+    expect(toolDefinitionsEqual(sparse, changed)).toBe(false);
+    expect(mcpToolOutputDefinitionIssue(sparse, changed)).not.toBeNull();
+    expect(toolDefinitionsEqual(sparse, empty)).toBe(true);
+    expect(0 in holes).toBe(false);
   });
 });

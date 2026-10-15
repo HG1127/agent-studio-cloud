@@ -3,15 +3,9 @@ import { prepareParallelBranches } from "@/server/domain/runtime/parallel-runtim
 import { prepareSubflow } from "@/server/domain/runtime/subflow-runtime";
 import type { ToolRegistration } from "@/server/tools/tool-registry";
 import { mcpToolInputDefinitionIssue, mcpToolLocalOutputDefinitionIssue } from "@/server/domain/runtime/mcp-tool";
+import { toolDefinitionsEqual } from "@/server/domain/tool-definition-equality";
 
 type ToolSnapshot = NonNullable<WorkflowNode["tool"]>;
-
-function canonicalJson(value: unknown): string {
-  return JSON.stringify(value, (_key, item) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) return item;
-    return Object.fromEntries(Object.entries(item).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0));
-  });
-}
 
 export function toolRegistrationCompatibilityIssue(
   snapshot: ToolSnapshot,
@@ -32,8 +26,8 @@ export function toolRegistrationCompatibilityIssue(
       ?? mcpToolLocalOutputDefinitionIssue(snapshot.outputSchema) ?? mcpToolLocalOutputDefinitionIssue(registration.outputSchema);
     if (issue) return issue;
   }
-  if (canonicalJson(snapshot.inputSchema) !== canonicalJson(registration.inputSchema)
-    || canonicalJson(snapshot.outputSchema) !== canonicalJson(registration.outputSchema)) {
+  if (!toolDefinitionsEqual(snapshot.inputSchema, registration.inputSchema)
+    || !toolDefinitionsEqual(snapshot.outputSchema, registration.outputSchema)) {
     return "绑定的业务工具配置已变化，请重新发布助手";
   }
   return null;
