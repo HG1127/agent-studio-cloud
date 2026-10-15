@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { boundedJsonStorageValue, type JsonStorageRecord } from "@/contracts/json";
+import { MAX_RUN_RESULT_BYTES, RunReportFile } from "@/contracts/run";
 
 const mocks = vi.hoisted(() => ({
   getRunView: vi.fn(),
@@ -131,6 +133,31 @@ describe("运行报告导出", () => {
     expect(response.body).toBeInstanceOf(ReadableStream);
     expect(response.headers.get("content-length")).toBeNull();
     expect((await response.json()).context.outputs.large).toBe(content);
+  });
+
+  it.each(["input", "result", "step", "context"] as const)("流式下载完整保留 %s 中合法32层成果及零值，不漏出深层敏感信息", async (slot) => {
+    let value: JsonStorageRecord = { amount: 0, approved: false, apiKey: "fixture-deep-export-key", contact: "finance@example.com" };
+    for (let index = 0; index < 31; index += 1) value = { nested: value };
+    expect(boundedJsonStorageValue(MAX_RUN_RESULT_BYTES, "报告业务数据").safeParse(value).success).toBe(true);
+    if (slot === "input" || slot === "result") mocks.getRunView.mockResolvedValueOnce({ ...(await mocks.getRunView()), [slot]: value });
+    else if (slot === "context") mocks.getRunContext.mockResolvedValueOnce({ outputs: { lookup: value } });
+    else mocks.listRunStepsForReport.mockResolvedValueOnce({ steps: [{
+      nodeId: "lookup", nodeTitle: "查询业务", nodeType: "tool", status: "succeeded", attempt: 1,
+      output: value, error: null, startedAt: null, finishedAt: null,
+    }], omittedCount: 0 });
+
+    const response = await GET(new Request("http://localhost"), { params: Promise.resolve({ runId: RUN_ID }) });
+    expect(response.status).toBe(200);
+    expect(response.body).toBeInstanceOf(ReadableStream);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const report = RunReportFile.parse(await response.json());
+    let current = (slot === "input" ? report.run.input : slot === "result" ? report.run.result
+      : slot === "step" ? report.steps[0].output : (report.context!.outputs as Record<string, unknown>).lookup) as JsonStorageRecord;
+    for (let index = 0; index < 31; index += 1) current = current.nested as JsonStorageRecord;
+    expect(current).toEqual({ amount: 0, approved: false, apiKey: "[已隐藏敏感信息]", contact: "[已隐藏敏感信息]" });
+    expect(JSON.stringify(report)).not.toMatch(/已省略|fixture-deep-export-key|finance@example/);
+    expect(report.integrity).toEqual({ omittedSteps: 0, omittedTraceEvents: 0, omittedApprovals: 0, omittedFeedback: 0 });
+    expect(JSON.stringify(value)).toContain("fixture-deep-export-key");
   });
 
   it("找不到运行时返回中文错误", async () => {

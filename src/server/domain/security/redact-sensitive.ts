@@ -1,3 +1,5 @@
+import type { RunReportFile } from "@/contracts/run";
+
 const SENSITIVE_KEY = /(?:password|passcode|secret|token|api[_-]?key|(?:private|access|secret)[_-]?key|authorization|cookie|credential|session[_-]?id|e-?mail|phone|mobile|ssn|social[_-]?security|credit[_-]?card|card[_-]?number|address|street|postal[_-]?code|密码|密钥|令牌|凭据|身份证|银行卡|手机号|邮箱|电话|住址|地址)/i;
 const CREDENTIAL_KEY = /(?:password|passcode|secret|token|api[_-]?key|(?:private|access|secret)[_-]?key|authorization|cookie|credential|session[_-]?id|密码|密钥|令牌|凭据)/i;
 const TOKEN_USAGE_KEY = /^(?:input|output|total|prompt|completion)[_-]?tokens?$/i;
@@ -97,4 +99,9 @@ export function redactStructuredCredentialData(value: unknown): unknown {
 
 export function redactSensitiveData(value: unknown): unknown {
   return redactData(value, isSensitiveFieldName, redactSensitiveText);
+}
+
+export function redactRunReportData(value: RunReportFile): RunReportFile {
+  // 报告固定封套最多占三层，不能挤占业务 JSON 自身的 32 层预算。
+  return redactData(value, isSensitiveFieldName, redactSensitiveText, 0, 35) as RunReportFile;
 }

@@ -1,7 +1,7 @@
 import { RunReportFile, RunStepReport } from "@/contracts/run";
 import { z } from "zod";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
-import { redactSensitiveData } from "@/server/domain/security/redact-sensitive";
+import { redactRunReportData, redactSensitiveData } from "@/server/domain/security/redact-sensitive";
 import { getRunContext, getRunView, listApprovalsForReport, listRunStepsForReport } from "@/server/queries/runs";
 import { getLatestTraceSeq, listTraceSince } from "@/server/queries/trace";
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
@@ -20,7 +20,7 @@ function streamedRunReport(
   maxTraceSeq: number,
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
-  const redacted = redactSensitiveData({ ...report, trace: [] }) as RunReportFile;
+  const redacted = redactRunReportData({ ...report, trace: [] });
   const approvals = redacted.approvals;
   const head = { ...redacted, trace: undefined, approvals: undefined, integrity: undefined };
   let prefix = `${JSON.stringify(head).slice(0, -1)},"trace":[`;
