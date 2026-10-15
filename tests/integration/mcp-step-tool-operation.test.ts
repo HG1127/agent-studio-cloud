@@ -47,6 +47,24 @@ function invoke(runId: string, stepId: string, attempt: number, startedAt = new 
     payload: { action: tool.action, input: {}, outputs: {} }, stepInvocation: operation.stepInvocation });
 }
 describe("MCP 写步骤持久账本", () => {
+  it("历史原始中文键已有账本时不因编码升级覆盖记录或重新发送", async () => {
+    const runId = await createRun();
+    node = WorkflowNode.parse({ ...node, id: "group.登记" });
+    const operation = resolveStepToolOperation({ node, runId, stepId: "legacy-step", attempt: 1, startedAt: new Date() });
+    if (!operation.ok || !operation.config || !operation.stepInvocation) throw new Error("测试步骤配置无效");
+    expect(await invokeToolOperation({ runId, node: { ...node, toolOperation: operation.config }, tool, input: {}, outputs: {},
+      payload: { action: tool.action, input: {}, outputs: {} },
+      stepInvocation: { ...operation.stepInvocation, idempotencyKey: `${runId}:${node.id}:legacy-step` },
+    })).toMatchObject({ ok: false, retryable: false });
+    expect(server.messages.filter((message) => message.method === "tools/call")).toHaveLength(0);
+    const before = await db.select().from(toolOperations).where(eq(toolOperations.sourceRunId, runId));
+    expect(before).toHaveLength(1);
+    expect(before[0].status).toBe("blocked");
+    server.messages.length = 0;
+    expect(await invoke(runId, "legacy-step", 2)).toMatchObject({ ok: false, retryable: false, error: expect.stringContaining("请求内容已变化") });
+    expect(server.messages).toHaveLength(0);
+    expect(await db.select().from(toolOperations).where(eq(toolOperations.sourceRunId, runId))).toEqual(before);
+  });
   it("保留原外部步骤键，已完成回执即使过期也复用而不再调用", async () => {
     const runId = await createRun();
     const first = await invoke(runId, "step-1", 1);

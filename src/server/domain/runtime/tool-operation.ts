@@ -5,6 +5,7 @@ import { canonicalJson } from "@/server/domain/canonical-json";
 import { validateJsonObjectSchema } from "@/server/domain/json-schema";
 import { redactCredentialData } from "@/server/domain/security/redact-sensitive";
 import { resolveInputValue } from "./input-mapping";
+import { toolStepIdempotencyKey } from "./tool-step-idempotency-key";
 
 export const TOOL_OPERATION_LEASE_MS = 120_000;
 export function resolveStepToolOperation(args: {
@@ -21,7 +22,7 @@ export function resolveStepToolOperation(args: {
   }
   return { ok: true, config: { scope: "studio.mcp-step.v1", key: { kind: "literal", value } }, stepInvocation: {
     // 保留旧外部键；缺账本的旧重试不能被当作新的首次写入。
-    idempotencyKey: `${args.runId}:${args.node.id}:${args.stepId}`, mayCreate: args.attempt === 1, startedAt: args.startedAt,
+    idempotencyKey: toolStepIdempotencyKey({ runId: args.runId, nodeId: args.node.id, stepId: args.stepId }), mayCreate: args.attempt === 1, startedAt: args.startedAt,
   } };
 }
 

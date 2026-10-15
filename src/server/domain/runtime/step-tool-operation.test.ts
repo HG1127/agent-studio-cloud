@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { WorkflowNode } from "@/contracts/workflow";
 import { resolveStepToolOperation } from "./tool-operation";
+import { toolStepIdempotencyKey } from "./tool-step-idempotency-key";
 
 describe("MCP 写步骤自动持久防重配置", () => {
   const node = WorkflowNode.parse({ id: "write", title: "写入", type: "tool", tool: {
@@ -18,6 +19,14 @@ describe("MCP 写步骤自动持久防重配置", () => {
   it("显式业务防重配置原样保留，不替换跨运行键或外部防重方式", () => {
     const explicit = WorkflowNode.parse({ ...node, toolOperation: { scope: "orders", key: { kind: "input", path: ["orderId"] } } });
     expect(resolveStepToolOperation({ node: explicit, ...metadata })).toEqual({ ok: true, config: explicit.toolOperation });
+  });
+  it("中文内联写步骤的账本定位不变，所有尝试只使用同一安全外部键", () => {
+    const inline = { ...node, id: "group.登记" };
+    const first = resolveStepToolOperation({ node: inline, ...metadata });
+    const retry = resolveStepToolOperation({ node: inline, ...metadata, attempt: 2 });
+    expect(first.ok && first.config).toEqual(retry.ok && retry.config);
+    expect(first.ok && first.stepInvocation?.idempotencyKey).toBe(toolStepIdempotencyKey({ ...metadata, nodeId: inline.id }));
+    expect(retry.ok && retry.stepInvocation).toEqual({ idempotencyKey: first.ok && first.stepInvocation?.idempotencyKey, mayCreate: false, startedAt: metadata.startedAt });
   });
   it.each([{ protocol: "http-json", operationKind: "action" }, { protocol: "mcp-streamable-http", operationKind: "read" },
     { protocol: "demo" }, { protocol: "mcp-streamable-http" }] as const)("非MCP写步骤保持原调用路径 %#", (tool) => {

@@ -19,6 +19,7 @@ vi.mock("@/server/tools/tool-registry", () => ({ getToolRegistration: mocks.getT
 import { runToolStep } from "@/server/steps/tool-step";
 import { MAX_STEP_OUTPUT_BYTES, stepOutputStorageIssue } from "@/server/domain/runtime/json-storage";
 import { validateToolOperationReceipt } from "@/server/domain/runtime/tool-operation";
+import { toolStepIdempotencyKey } from "@/server/domain/runtime/tool-step-idempotency-key";
 import { FatalError } from "workflow";
 import type { ToolRegistration } from "@/server/tools/tool-registry";
 
@@ -37,6 +38,25 @@ const registration: ToolRegistration = {
 };
 
 describe("真实工具步骤", () => {
+  it.each(["http-json", "mcp-read", "mcp-action"] as const)("中文内联工具的%s路径在重试时复用安全步骤键", async (path) => {
+    const protocol = path === "http-json" ? "http-json" : "mcp-streamable-http";
+    const operationKind = path === "mcp-action" ? "action" : path === "mcp-read" ? "read" : undefined;
+    const inline = WorkflowNode.parse({ ...node, id: "group.登记", tool: { ...node.tool!, protocol, operationKind } });
+    mocks.getToolRegistration.mockReturnValue({ ...registration, protocol, operationKind, businessIdempotency: true, businessIdempotencyRetentionMs: 600_000 });
+    mocks.invokeHttpTool.mockResolvedValue({ ok: true, output: { receiptId: "saved" } });
+    mocks.invokeMcpTool.mockResolvedValue({ ok: true, output: { receiptId: "saved" } });
+    mocks.invokeToolOperation.mockResolvedValue({ ok: true, output: { receiptId: "saved" }, operationId: "00000000-0000-4000-8000-000000000123", reused: true });
+    for (const attempt of [1, 2]) {
+      mocks.attempt = attempt;
+      await expect(runToolStep({ runId: "run-1", node: inline, input: {}, outputs: {} })).resolves.toMatchObject({ receipt: { receiptId: "saved" } });
+    }
+    const calls = path === "mcp-action" ? mocks.invokeToolOperation.mock.calls : path === "mcp-read" ? mocks.invokeMcpTool.mock.calls : mocks.invokeHttpTool.mock.calls;
+    const keys = calls.map(([call]) => path === "mcp-action" ? call.stepInvocation.idempotencyKey : call.idempotencyKey);
+    expect(keys).toEqual(Array(2).fill(toolStepIdempotencyKey({ runId: "run-1", nodeId: inline.id, stepId: "step-1" })));
+    for (const key of keys) expect(new Headers({ "idempotency-key": key }).get("idempotency-key")).toMatch(/^studio-step-header:v1:[a-f0-9]{64}$/);
+    if (path === "mcp-action") { expect(mocks.invokeMcpTool).not.toHaveBeenCalled(); expect(mocks.invokeHttpTool).not.toHaveBeenCalled(); }
+    else expect(mocks.invokeToolOperation).not.toHaveBeenCalled();
+  });
   it("MCP写步骤默认进入持久账本，同一步骤重试保持原外部键且不走直连", async () => {
     const mcp = WorkflowNode.parse({ ...node, tool: { ...node.tool!, protocol: "mcp-streamable-http", operationKind: "action" } });
     mocks.getToolRegistration.mockReturnValue({ ...registration, protocol: "mcp-streamable-http", operationKind: "action", businessIdempotency: true, businessIdempotencyRetentionMs: 600_000 });

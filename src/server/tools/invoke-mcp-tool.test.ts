@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { startMcpTestServer } from "../../../tests/fixtures/mcp-server";
 import { invokeMcpTool } from "./invoke-mcp-tool";
 import { parseToolRegistry } from "./tool-registry";
+import { toolStepIdempotencyKey } from "@/server/domain/runtime/tool-step-idempotency-key";
 
 const servers: Array<Awaited<ReturnType<typeof startMcpTestServer>>> = [];
 afterEach(async () => { await Promise.all(servers.splice(0).map((server) => server.close())); });
@@ -19,6 +20,31 @@ async function fixture(options: Parameters<typeof startMcpTestServer>[0] = {}) {
 }
 
 describe("真实 MCP SDK 对本地 Streamable HTTP 服务", () => {
+  it.each(["read", "action"] as const)("中文内联%s步骤的安全键仅发送到实际业务调用", async (operationKind) => {
+    const { server, tool } = await fixture();
+    const idempotencyKey = toolStepIdempotencyKey({ runId: "run-1", nodeId: "work.登记分支.登记", stepId: "step-1" });
+    const configured = { ...tool, operationKind, businessIdempotency: true, businessIdempotencyRetentionMs: 600_000 };
+    await expect(invokeMcpTool({ tool: configured, action: tool.action, idempotencyKey, input: { customerId: "c1" }, outputs: {} })).resolves.toMatchObject({ ok: true });
+    expect(server.messages.filter((message) => message.method === "tools/call")).toEqual([expect.objectContaining({ key: idempotencyKey })]);
+    expect(server.messages.filter((message) => message.method !== "tools/call").every((message) => message.key === undefined)).toBe(true);
+  });
+  it("中文内联写步骤丢失首次回执后使用相同键，真实SDK只产生一次业务效果", async () => {
+    const { server, tool } = await fixture({ loseFirstResponse: true });
+    const configured = { ...tool, operationKind: "action" as const, businessIdempotency: true, businessIdempotencyRetentionMs: 600_000 };
+    const idempotencyKey = toolStepIdempotencyKey({ runId: "run-1", nodeId: "group.登记", stepId: "step-1" });
+    const invoke = () => invokeMcpTool({ tool: configured, action: tool.action, idempotencyKey, input: { customerId: "c1" }, outputs: {} });
+    await expect(invoke()).resolves.toMatchObject({ ok: false, retryable: true });
+    await expect(invoke()).resolves.toMatchObject({ ok: true });
+    expect(server.messages.filter((message) => message.method === "tools/call").map((message) => message.key)).toEqual([idempotencyKey, idempotencyKey]);
+    expect(server.effectCount()).toBe(1);
+  });
+  it("历史中文原始键在业务调用前失败，不冒充已发送或触发业务副作用", async () => {
+    const { server, tool } = await fixture();
+    await expect(invokeMcpTool({ tool, action: tool.action, idempotencyKey: "run-1:group.登记:step-1", input: { customerId: "c1" }, outputs: {} }))
+      .resolves.toMatchObject({ ok: false, retryable: false });
+    expect(server.messages.filter((message) => message.method === "tools/call")).toHaveLength(0);
+    expect(server.effectCount()).toBe(0);
+  });
   const rejectedHeaders: Array<Record<string, string>> = [
     { Cookie: "header-private" }, { "SET-cookie": "header-private" },
     { Authorization: "header-private", authorization: "other-private" },

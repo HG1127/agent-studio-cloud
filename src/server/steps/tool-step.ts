@@ -15,6 +15,7 @@ import { invokeToolOperation } from "@/server/services/tool-operation";
 import { ToolOperationTraceData } from "@/contracts/tool-operation";
 import { enforceHarnessPolicy } from "@/server/steps/harness-policy-step";
 import { resolveStepToolOperation } from "@/server/domain/runtime/tool-operation";
+import { toolStepIdempotencyKey } from "@/server/domain/runtime/tool-step-idempotency-key";
 
 export interface RunToolStepInput {
   runId: string;
@@ -101,7 +102,7 @@ export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Re
     const invoked = operationResult ?? await invokeRegisteredTool({
       tool: registration,
       // 同一次步骤重试时 stepId 稳定；循环再次调用同一节点时 stepId 会变化。
-      idempotencyKey: `${args.runId}:${node.id}:${stepMetadata.stepId}`,
+      idempotencyKey: toolStepIdempotencyKey({ runId: args.runId, nodeId: node.id, stepId: stepMetadata.stepId }),
       action: requestPayload.action,
       input: requestPayload.input,
       outputs: requestPayload.outputs,
