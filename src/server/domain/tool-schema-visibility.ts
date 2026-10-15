@@ -4,12 +4,6 @@ import { resolveLocalSchemaReference } from "@/server/domain/json-schema-referen
 import { isCredentialFieldName, redactCredentialText } from "@/server/domain/security/redact-sensitive";
 import { writeOnlySchemaLiteralsAreSafe } from "./tool-schema-write-only";
 
-function isToolCredentialFieldName(name: string): boolean {
-  const field = name.replace(/tokeniz(?:er|ation|e|ing)/gi, "");
-  if (/^token[_-]?(?:units?|usage|counts?|limits?|budgets?)$/i.test(field)) return false;
-  return isCredentialFieldName(field);
-}
-
 function containsCredentialLiteral(value: unknown, credentialField: boolean): boolean {
   const pending = [{ value, credentialField }];
   while (pending.length) {
@@ -21,7 +15,7 @@ function containsCredentialLiteral(value: unknown, credentialField: boolean): bo
     } else if (current.value && typeof current.value === "object") {
       for (const [key, item] of Object.entries(current.value)) {
         if (redactCredentialText(key) !== key) return true;
-        pending.push({ value: item, credentialField: current.credentialField || isToolCredentialFieldName(key) });
+        pending.push({ value: item, credentialField: current.credentialField || isCredentialFieldName(key) });
       }
     }
   }
@@ -46,12 +40,12 @@ export function isToolSchemaSafeToExpose(schema: Record<string, unknown>): boole
       if (key === "properties") {
         for (const [field, child] of Object.entries(value as Record<string, Record<string, unknown>>)) {
           if (redactCredentialText(field) !== field) return false;
-          pending.push({ schema: child, credentialField: current.credentialField || isToolCredentialFieldName(field) });
+          pending.push({ schema: child, credentialField: current.credentialField || isCredentialFieldName(field) });
         }
       } else if (key === "$defs" || key === "definitions") {
         for (const [name, child] of Object.entries(value as Record<string, unknown>)) {
           if (redactCredentialText(name) !== name) return false;
-          pending.push({ schema: child, credentialField: current.credentialField || isToolCredentialFieldName(name) });
+          pending.push({ schema: child, credentialField: current.credentialField || isCredentialFieldName(name) });
         }
       } else if (key === "$ref") {
         const target = resolveLocalSchemaReference(schema, value);

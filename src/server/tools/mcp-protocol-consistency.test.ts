@@ -5,6 +5,10 @@ import { McpConnectionRegistration } from "@/contracts/mcp-connection";
 import { checkMcpConnection } from "./mcp-connection-check";
 import { invokeMcpTool } from "./invoke-mcp-tool";
 import { parseToolRegistry } from "./tool-registry";
+import { WorkflowOutputField } from "@/contracts/workflow";
+import { projectWorkflowResult } from "@/server/domain/runtime/output-contract";
+import { freezeDefaultResultFrame } from "@/server/domain/runtime/default-result-stream";
+import { presentRunTaskResult } from "@/server/domain/runtime/run-task";
 
 const schema = { type: "object", additionalProperties: false };
 const registered = { name: "lookup", inputSchema: schema };
@@ -66,6 +70,26 @@ async function fixture(options: {
 }
 
 describe("连接检查与实际执行使用同一 MCP 协议语义（本机 SDK）", () => {
+  it.each(["modern", "legacy-rpc"] as const)("%s SDK 的分词与用量回执可以选取、冻结并展示，不被误判为凭据", async (discovery) => {
+    const outputSchema = { type: "object", properties: { tokenizer: { type: "string" }, tokenUnit: { type: "string" }, tokenBudget: { type: "number" }, active: { type: "boolean" } } };
+    const output = { tokenizer: "algorithm-a", tokenUnit: "characters", tokenBudget: 0, active: false };
+    const server = await fixture({ discovery, outputSchema, output });
+    expect((await checkMcpConnection(server.registration)).status).toBe("available");
+    expect(server.messages.some((message) => message.method === "tools/call")).toBe(false);
+    const called = await server.invoke();
+    expect(called).toEqual({ ok: true, output });
+    if (!called.ok) throw new Error("本机假工具未返回业务回执");
+    const fields = Object.keys(output).map((name) => WorkflowOutputField.parse({ path: name, label: "业务成果", required: true, sourceNodeId: "lookup", sourcePath: [name] }));
+    const projected = projectWorkflowResult({ lookup: called.output }, fields);
+    expect(projected).toEqual({ ok: true, result: output });
+    if (!projected.ok) throw new Error("本机假工具回执无法选择");
+    const runId = "123e4567-e89b-42d3-a456-426614174000";
+    const frozen = freezeDefaultResultFrame({ runId, status: "completed", outcome: "completed", finishedAt: "2026-10-15T10:00:00.000Z", result: projected.result });
+    expect(presentRunTaskResult({ runId, status: "completed", result: frozen.frame.result, error: null, outputContract: { fields } }).result).toEqual(output);
+    expect(server.messages.filter((message) => message.method === "tools/call")).toHaveLength(1);
+    expect(server.violations).toEqual([]);
+  });
+
   it.each(["modern", "legacy-rpc"] as const)("三类字段说明经 %s SDK 原样接入，说明变化后停止业务调用", async (discovery) => {
     const inputSchema = { type: "object", required: ["value"], properties: {
       value: { type: "string", writeOnly: true }, reference: { type: "string", readOnly: true }, oldField: { type: "string", deprecated: true },
