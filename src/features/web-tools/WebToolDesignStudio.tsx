@@ -8,6 +8,8 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { notifyDraftState } from "@/lib/draft-state";
 import { WebToolLayoutPreview } from "./WebToolLayoutPreview";
+import { WebToolQuotaPresetPicker } from "./WebToolQuotaPresetPicker";
+import { WEB_TOOL_QUOTA_FIELDS, applyWebToolQuotaPreset } from "./web-tool-design-quota";
 import { planWebToolInputCommand } from "./web-tool-input-command";
 import { WEB_TOOL_AUDIENCES, WEB_TOOL_LAYOUTS, WEB_TOOL_MODULES, WEB_TOOL_STEPS, checkWebToolDesign,
   createWebToolDesignDraft, designFieldsFromTarget, readWebToolDesignJson, reorderDesignItem,
@@ -38,6 +40,7 @@ export function WebToolDesignStudio({ targets }: { targets: AgentTargetOption[] 
   const addModuleRef = useRef<HTMLButtonElement | null>(null);
   const commandApplyRef = useRef<HTMLButtonElement | null>(null);
   const designRootRef = useRef<HTMLDivElement | null>(null);
+  const quotaInputRef = useRef<HTMLInputElement | null>(null);
   const serialized = JSON.stringify(draft, null, 2);
   const editorDirty = editor !== null && editor !== serialized;
   const commandDirty = inputCommand.length > 0;
@@ -304,9 +307,13 @@ export function WebToolDesignStudio({ targets }: { targets: AgentTargetOption[] 
             <label className="block space-y-1 text-sm text-slate-700">访问凭据方案<select {...problemAttributes("accessMode")} className={control} value={draft.accessMode} onChange={(event) => updateDraft("accessMode", event.target.value === "credential" ? "credential" : "anonymous")}><option value="credential">需要专用凭据</option><option value="anonymous">不要求凭据（方案）</option></select></label>
             <label className="block space-y-1 text-sm text-slate-700">指定网站来源<textarea {...problemAttributes("domains")} rows={3} className={control} value={draft.domains} onChange={(event) => updateDraft("domains", event.target.value)} placeholder="每行一个完整网站地址，不含访问路径" /></label>
             <p className="text-xs leading-5 text-slate-500">留空不代表已允许所有网站。站点授权、跨域和登录控制均待接口接入。</p>
+            <WebToolQuotaPresetPicker draft={draft} manualInputRef={quotaInputRef} onApply={(presetId) => {
+              setDraft((current) => applyWebToolQuotaPreset(current, presetId));
+              setDirty(true); setProblem(null);
+              setFeedback({ error: false, text: "五项用量已替换到本页草稿，尚未保存或执行。" });
+            }} />
             <div className="grid min-w-0 grid-cols-2 gap-3">
-              {([{ key: "maxPerHour", label: "每小时次数上限" }, { key: "maxPerDay", label: "每天次数上限" },
-                { key: "maxConcurrent", label: "最大并发数" }, { key: "maxRuntimeSeconds", label: "最长运行时间（秒）" }, { key: "maxCostUnits", label: "成本额度上限" }] as const).map((item) => <label key={item.key} className="block min-w-0 space-y-1 text-sm text-slate-700">{item.label}<input {...problemAttributes(item.key)} type="number" min={item.key === "maxCostUnits" ? 0 : 1} step={item.key === "maxCostUnits" ? "any" : 1} className={control} value={Number.isFinite(draft[item.key]) ? draft[item.key] : ""} onChange={(event) => updateDraft(item.key, event.target.valueAsNumber)} /></label>)}
+              {WEB_TOOL_QUOTA_FIELDS.map((item) => <label key={item.key} className="block min-w-0 space-y-1 text-sm text-slate-700">{item.label}<input ref={item.key === "maxPerHour" ? quotaInputRef : undefined} {...problemAttributes(item.key)} type="number" min={item.key === "maxCostUnits" ? 0 : 1} step={item.key === "maxCostUnits" ? "any" : 1} className={control} value={Number.isFinite(draft[item.key]) ? draft[item.key] : ""} onChange={(event) => updateDraft(item.key, event.target.valueAsNumber)} /></label>)}
             </div>
             <label className="block space-y-1 text-sm text-slate-700">允许的写入或发送权限<textarea {...problemAttributes("allowWriteScopes")} rows={3} className={control} value={draft.allowWriteScopes} onChange={(event) => updateDraft("allowWriteScopes", event.target.value)} placeholder="逐行填写权限名称；这里只记录设计，不授予执行权限" /></label>
             <CapabilityNotice mode="draft" title="保存与公开发布待接入">页面配置保存、公开展示与嵌入、访问控制和工具统计需要后端接口；本页检查不等于安全审查通过或发布完成。</CapabilityNotice>
