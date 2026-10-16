@@ -14,6 +14,7 @@ const CONDITION_OPERATORS = new Set([
 ]);
 
 type Raw = { [key: string]: unknown };
+const INFERRED_OPERATION_KIND = Symbol("inferred-operation-kind");
 
 interface AgentRef {
   id: string;
@@ -36,6 +37,7 @@ interface RegistryTool {
   inputSchema?: unknown;
   outputSchema?: unknown;
   operationKind?: unknown;
+  [INFERRED_OPERATION_KIND]?: boolean;
   automationPolicy?: unknown;
 }
 
@@ -202,7 +204,7 @@ function node(id: string, title: unknown, type: string, agent: AgentRef, extra: 
 }
 
 function isExternalTool(tool: RegistryTool | null | undefined): boolean {
-  return Boolean(tool?.status === "active" && ["mcp-streamable-http", "rest-http", "sandbox-native", "sandbox-mcp"].includes(tool.protocol as string));
+  return Boolean(tool?.status === "active" && ["mcp-streamable-http", "http-json", "rest-http", "sandbox-native", "sandbox-mcp"].includes((tool.protocol ?? "http-json") as string));
 }
 
 // 旧实现原样保留（当前无调用方）
@@ -283,6 +285,7 @@ function capabilityTool(step: Raw, caps: Cap[] = [], registryTools: RegistryTool
       outputSchema: cap.outputSchema,
       status: "active",
       operationKind: ["read", "action"].includes(cap.operationKind as string) ? cap.operationKind : /read|query|list|search/i.test(String(cap.action || "")) ? "read" : "action",
+      [INFERRED_OPERATION_KIND]: !["read", "action"].includes(cap.operationKind as string),
       automationPolicy: cap.automationPolicy,
       capabilityKeys: [cap.capabilityKey].filter(Boolean),
     };
@@ -291,7 +294,8 @@ function capabilityTool(step: Raw, caps: Cap[] = [], registryTools: RegistryTool
 }
 
 function operationKind(step: Raw, tool: RegistryTool | null): "read" | "action" {
-  if (tool?.protocol === "mcp-streamable-http" && ["read", "action"].includes(tool.operationKind as string)) return tool.operationKind as "read" | "action";
+  if (tool && (tool.protocol === "mcp-streamable-http" || (tool.protocol ?? "http-json") === "http-json" && !tool[INFERRED_OPERATION_KIND])
+    && ["read", "action"].includes(tool.operationKind as string)) return tool.operationKind as "read" | "action";
   const raw = typeof step.tool === "object" ? (step.tool as Raw) : {};
   if (["read", "action"].includes(raw.operationKind as string)) return raw.operationKind as "read" | "action";
   if (["read", "action"].includes(step.operationKind as string)) return step.operationKind as "read" | "action";
@@ -341,7 +345,7 @@ function toToolSpec(step: Raw, tool: RegistryTool | null): ToolSpecOut {
     maxRetries,
     checkpointOnFailure: true,
     registryToolId: tool.id,
-    protocol: tool.protocol,
+    protocol: tool.protocol ?? "http-json",
     inputSchema: tool.inputSchema || { type: "object" },
     outputSchema: tool.outputSchema || { type: "object" },
     argumentsMode: "auto",

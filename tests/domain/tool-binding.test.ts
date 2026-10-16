@@ -35,6 +35,18 @@ const registration: ToolRegistration = {
 };
 
 describe("冻结工具绑定", () => {
+  it.each(["read", "action"] as const)("HTTP 明确登记 %s 时冻结性质必须一致", (operationKind) => {
+    const current = { ...registration, protocol: "http-json" as const, operationKind };
+    expect(toolRegistrationCompatibilityIssue({ ...node.tool!, operationKind }, current)).toBeNull();
+    expect(toolRegistrationCompatibilityIssue({ ...node.tool!, operationKind: undefined }, current)).toContain("配置已变化");
+    expect(toolRegistrationCompatibilityIssue({ ...node.tool!, operationKind: operationKind === "read" ? "action" : "read" }, current)).toContain("配置已变化");
+  });
+
+  it("旧 HTTP 未声明性质保留原兼容，不凭 POST 推断写操作", () => {
+    for (const operationKind of [undefined, "read", "action"] as const) {
+      expect(toolRegistrationCompatibilityIssue({ ...node.tool!, operationKind }, registration)).toBeNull();
+    }
+  });
   it.each(["readOnly", "writeOnly", "deprecated"])("MCP %s 字段说明保留到冻结，输入和回执变化均拒绝", (keyword) => {
     const inputSchema = { type: "object", properties: { value: { type: "string", [keyword]: true } } };
     const outputSchema = { type: "object", properties: { value: { type: "string", [keyword]: true } } };

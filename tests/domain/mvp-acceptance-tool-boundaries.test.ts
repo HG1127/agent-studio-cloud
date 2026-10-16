@@ -5,7 +5,7 @@ vi.mock("workflow", async (original) => ({ ...await original<typeof import("work
 vi.mock("@/server/steps/run-state", () => ({ persistStep: mocks.persist }));
 vi.mock("@/server/steps/trace-step", () => ({ appendTrace: mocks.trace }));
 vi.mock("@/server/tools/invoke-tool", () => ({ invokeRegisteredTool: mocks.invoke }));
-vi.mock("@/server/services/tool-operation", () => ({ invokeToolOperation: vi.fn() }));
+vi.mock("@/server/services/tool-operation", () => ({ invokeToolOperation: vi.fn(), hasDefaultHttpStepOperation: vi.fn().mockResolvedValue(false) }));
 vi.mock("@/server/steps/harness-policy-step", () => ({ enforceHarnessPolicy: vi.fn() }));
 vi.mock("@/server/tools/tool-registry", () => ({ getToolRegistration: mocks.registry }));
 import { runToolStep } from "@/server/steps/tool-step";

@@ -14,7 +14,8 @@ export function toolRegistrationCompatibilityIssue(
   if (
     snapshot.registryToolId !== registration.id
     || snapshot.protocol !== (registration.protocol ?? "http-json")
-    || registration.protocol === "mcp-streamable-http" && snapshot.operationKind !== registration.operationKind
+    || (registration.protocol === "mcp-streamable-http" || registration.operationKind !== undefined)
+      && snapshot.operationKind !== registration.operationKind
     || snapshot.action !== registration.action
     || snapshot.scope !== registration.scope
     || snapshot.risk !== registration.risk

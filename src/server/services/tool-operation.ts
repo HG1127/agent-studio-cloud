@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
+import { FatalError } from "workflow";
+import { isPassiveJsonData } from "@/contracts/json";
 import { ToolOperationPayload, type ToolOperationInvocation } from "@/contracts/tool-operation";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { runs, toolOperations } from "@/db/schema";
@@ -7,6 +9,8 @@ import { db } from "@/lib/db";
 import { canonicalJson } from "@/server/domain/canonical-json";
 import { validateJsonObjectSchema } from "@/server/domain/json-schema";
 import { type resolveStepToolOperation, toolOperationDecision, toolOperationKeyMaterial, TOOL_OPERATION_LEASE_MS, validateToolOperationReceipt } from "@/server/domain/runtime/tool-operation";
+import { defaultHttpStepOperationKey, defaultHttpStepRequestJson, defaultHttpStepRetryDeadline, type DefaultHttpStepIdentity } from "@/server/domain/runtime/default-http-tool-operation";
+import { toolStepIdempotencyKey } from "@/server/domain/runtime/tool-step-idempotency-key";
 import { withSafeWorkflowError } from "@/server/security/workflow-error";
 import { invokeRegisteredTool } from "@/server/tools/invoke-tool";
 import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding";
@@ -14,19 +18,50 @@ import type { ToolRegistration } from "@/server/tools/tool-registry";
 import type { InlineOutputReferences } from "@/contracts/inline-output-reference";
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
+const MAX_DEFAULT_HTTP_REQUEST_BYTES = 512 * 1024;
 const failure = (error: string, retryable = false, retryAfterMs?: number): ToolOperationInvocation => ({
   ok: false, error, retryable, ...(retryAfterMs ? { retryAfterMs } : {}),
 });
+
+export async function hasDefaultHttpStepOperation(args: {
+  runId: string; nodeId: string; toolId: string; action: string; stepId: string;
+}): Promise<boolean> {
+  return withSafeWorkflowError(() => db.transaction(async (tx) => {
+    const [run] = await tx.select({ workspaceId: runs.workspaceId, status: runs.status })
+      .from(runs).where(eq(runs.id, args.runId)).limit(1);
+    if (!run || !["queued", "running", "waiting_approval", "waiting_event"].includes(run.status)) {
+      throw new FatalError("当前运行归属或状态无法确认，不能发起业务操作");
+    }
+    const key = defaultHttpStepOperationKey({ ...args, workspaceId: run.workspaceId });
+    if (!key.ok) throw new FatalError(key.error);
+    const [operation] = await tx.select({
+      sourceRunId: toolOperations.sourceRunId, toolId: toolOperations.toolId, action: toolOperations.action,
+    }).from(toolOperations).where(and(eq(toolOperations.workspaceId, run.workspaceId), eq(toolOperations.keyHash, hash(key.material)))).limit(1);
+    if (!operation) return false;
+    if (operation.sourceRunId !== args.runId || operation.toolId !== args.toolId || operation.action !== args.action) {
+      throw new FatalError("业务操作归属无法确认，不能改用直接调用");
+    }
+    return true;
+  }, { accessMode: "read only" }), "业务操作保护记录暂时无法确认，不能改用直接调用");
+}
 
 export async function invokeToolOperation(args: {
   runId: string; node: WorkflowNode; tool: ToolRegistration;
   input: Record<string, unknown>; outputs: Record<string, unknown>;
   inlineReferences?: InlineOutputReferences;
   stepInvocation?: Extract<ReturnType<typeof resolveStepToolOperation>, { ok: true }>["stepInvocation"];
+  defaultHttpStep?: DefaultHttpStepIdentity;
   payload: { action: string; input: Record<string, unknown>; outputs: Record<string, unknown> };
 }): Promise<ToolOperationInvocation> {
-  if (!args.node.tool || !args.node.toolOperation || args.tool.businessIdempotency !== true || !args.tool.businessIdempotencyRetentionMs) {
+  const defaultHttp = args.defaultHttpStep !== undefined;
+  if (!args.node.tool || args.tool.businessIdempotency !== true || !args.tool.businessIdempotencyRetentionMs
+    || (defaultHttp ? args.node.toolOperation !== undefined || args.stepInvocation !== undefined
+      || (args.tool.protocol ?? "http-json") !== "http-json" || args.tool.operationKind !== "action" : !args.node.toolOperation)) {
     return failure("业务工具尚未确认支持跨运行操作防重");
+  }
+  if (defaultHttp && (!args.defaultHttpStep || typeof args.defaultHttpStep.stepId !== "string"
+    || !Number.isSafeInteger(args.defaultHttpStep.attempt) || args.defaultHttpStep.attempt < 1)) {
+    return failure("工具步骤的执行标识无效，已阻止重复写入");
   }
   if (args.stepInvocation && (args.tool.protocol !== "mcp-streamable-http" || args.tool.operationKind !== "action"
     || !args.stepInvocation.idempotencyKey || !Number.isFinite(args.stepInvocation.startedAt?.getTime())
@@ -35,6 +70,10 @@ export async function invokeToolOperation(args: {
   }
   const bindingIssue = toolRegistrationCompatibilityIssue(args.node.tool, args.tool);
   if (bindingIssue) return failure(bindingIssue);
+  const passiveCharBudget = MAX_DEFAULT_HTTP_REQUEST_BYTES * (String(MAX_DEFAULT_HTTP_REQUEST_BYTES).length + 1);
+  if (defaultHttp && !isPassiveJsonData(args.payload, passiveCharBudget)) {
+    return failure("业务操作请求无法安全保存或超过容量限制");
+  }
   const payload = ToolOperationPayload.safeParse(args.payload);
   if (!payload.success) return failure("业务操作请求无法安全保存或超过容量限制");
   const schemaPayload = args.tool.protocol === "mcp-streamable-http" ? payload.data.input : payload.data;
@@ -43,8 +82,8 @@ export async function invokeToolOperation(args: {
     || validateJsonObjectSchema(schemaPayload, args.tool.inputSchema)) return failure("业务操作请求不符合字段契约");
   return withSafeWorkflowError(async () => {
     const owner = randomUUID();
-    const requestHash = hash(canonicalJson([
-      ...(args.tool.protocol === "mcp-streamable-http" ? [args.tool.protocol, args.tool.operationKind] : []),
+    const requestHash = hash((defaultHttp ? defaultHttpStepRequestJson : canonicalJson)([
+      ...(args.tool.protocol === "mcp-streamable-http" ? [args.tool.protocol, args.tool.operationKind] : defaultHttp ? ["http-json", "action"] : []),
       args.tool.endpoint, args.tool.method, [...new Headers(args.tool.headers).entries()],
       args.tool.businessIdempotencyRetentionMs, payload.data,
       ...(args.stepInvocation ? [["workflow-step:v1", args.stepInvocation.idempotencyKey]] : []),
@@ -55,7 +94,10 @@ export async function invokeToolOperation(args: {
       if (!run || !["queued", "running", "waiting_approval", "waiting_event"].includes(run.status)) {
         return { kind: "rejected" as const, error: "当前运行已经结束，不能发起业务操作" };
       }
-      const key = toolOperationKeyMaterial({
+      const key = args.defaultHttpStep ? defaultHttpStepOperationKey({
+        workspaceId: run.workspaceId, toolId: args.tool.id, action: args.tool.action, runId: args.runId,
+        nodeId: args.node.id, stepId: args.defaultHttpStep.stepId,
+      }) : toolOperationKeyMaterial({
         node: args.node, workspaceId: run.workspaceId, toolId: args.tool.id, action: args.tool.action,
         input: args.input, outputs: args.outputs, inlineReferences: args.inlineReferences,
       });
@@ -63,22 +105,29 @@ export async function invokeToolOperation(args: {
       const keyHash = hash(key.material);
       const now = new Date();
       const leaseExpiresAt = new Date(now.getTime() + TOOL_OPERATION_LEASE_MS);
-      const legacyRetry = args.stepInvocation?.mayCreate === false;
+      const anchored = args.defaultHttpStep
+        ? defaultHttpStepRetryDeadline(args.defaultHttpStep.stepStartedAt, args.tool.businessIdempotencyRetentionMs!, now) : undefined;
+      if (anchored && !anchored.ok) return { kind: "rejected" as const, error: anchored.error };
+      const legacyRetry = args.stepInvocation?.mayCreate === false || (args.defaultHttpStep?.attempt ?? 1) > 1;
       const startedAt = args.stepInvocation ? Math.min(now.getTime(), args.stepInvocation.startedAt.getTime()) : now.getTime();
       const [inserted] = await tx.insert(toolOperations).values({
         workspaceId: run.workspaceId, createdBy: run.createdBy, sourceRunId: args.runId,
         nodeTitle: args.node.title, toolId: args.tool.id, action: args.tool.action,
         keyHash, requestHash, status: legacyRetry ? "blocked" : "pending", leaseOwner: legacyRetry ? null : owner, leaseExpiresAt: legacyRetry ? null : leaseExpiresAt,
         ...(legacyRetry ? { error: "旧工具步骤缺少持久防重记录，必须先核对业务系统结果" } : {}),
-        retryDeadline: new Date(startedAt + args.tool.businessIdempotencyRetentionMs! - TOOL_OPERATION_LEASE_MS),
+        retryDeadline: anchored?.ok ? anchored.deadline : new Date(startedAt + args.tool.businessIdempotencyRetentionMs! - TOOL_OPERATION_LEASE_MS),
       }).onConflictDoNothing().returning();
       if (inserted) return legacyRetry ? { kind: "blocked" as const, row: inserted } : { kind: "execute" as const, row: inserted };
       const [existing] = await tx.select().from(toolOperations).where(and(
         eq(toolOperations.workspaceId, run.workspaceId), eq(toolOperations.keyHash, keyHash),
       )).for("update").limit(1);
       if (!existing) return { kind: "rejected" as const, error: "业务操作领取暂时未确认，请稍后重试" };
+      if (defaultHttp && (existing.sourceRunId !== args.runId || existing.toolId !== args.tool.id || existing.action !== args.tool.action)) {
+        return { kind: "rejected" as const, error: "业务操作归属无法确认，不能发起业务操作" };
+      }
       const decision = toolOperationDecision(existing, requestHash, new Date());
-      if (decision === "execute" && existing.retryDeadline.getTime() <= Date.now()) {
+      const deadline = Math.min(existing.retryDeadline.getTime(), anchored?.ok ? anchored.deadline.getTime() : Infinity);
+      if (decision === "execute" && ((defaultHttp && !Number.isFinite(deadline)) || deadline <= Date.now())) {
         await tx.update(toolOperations).set({
           status: "blocked", error: "业务工具防重有效期已过，必须先核对业务系统结果", updatedAt: new Date(),
         }).where(eq(toolOperations.id, existing.id));
@@ -101,7 +150,10 @@ export async function invokeToolOperation(args: {
         confirmedByHuman: claim.row.resolutions.at(-1)?.kind === "record-receipt",
       } : failure(cached.error);
     }
-    if (!Number.isFinite(claim.row.retryDeadline.getTime()) || claim.row.retryDeadline.getTime() <= Date.now()) {
+    const anchored = args.defaultHttpStep
+      ? defaultHttpStepRetryDeadline(args.defaultHttpStep.stepStartedAt, args.tool.businessIdempotencyRetentionMs!, new Date()) : undefined;
+    const effectiveDeadline = Math.min(claim.row.retryDeadline.getTime(), anchored?.ok ? anchored.deadline.getTime() : defaultHttp ? NaN : Infinity);
+    if (!Number.isFinite(effectiveDeadline) || effectiveDeadline <= Date.now()) {
       await db.update(toolOperations).set({
         status: "blocked", error: "业务工具防重有效期已过，必须先核对业务系统结果", updatedAt: new Date(),
         leaseOwner: null, leaseExpiresAt: null,
@@ -109,7 +161,9 @@ export async function invokeToolOperation(args: {
       return failure("业务工具防重有效期已过，必须先核对业务系统结果");
     }
     const invoked = await invokeRegisteredTool({
-      tool: args.tool, idempotencyKey: args.stepInvocation?.idempotencyKey ?? `studio-operation:v1:${claim.row.keyHash}`, ...payload.data,
+      tool: args.tool, idempotencyKey: args.defaultHttpStep
+        ? toolStepIdempotencyKey({ runId: args.runId, nodeId: args.node.id, stepId: args.defaultHttpStep.stepId })
+        : args.stepInvocation?.idempotencyKey ?? `studio-operation:v1:${claim.row.keyHash}`, ...payload.data,
     });
     const validated = invoked.ok
       ? validateToolOperationReceipt(invoked.output, args.node.tool!.outputSchema, args.tool.outputSchema) : null;

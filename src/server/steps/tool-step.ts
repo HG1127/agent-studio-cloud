@@ -11,7 +11,7 @@ import { invokeRegisteredTool } from "@/server/tools/invoke-tool";
 import { getToolRegistration } from "@/server/tools/tool-registry";
 import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding";
 import { resolveNodeInput } from "@/server/domain/runtime/input-mapping";
-import { invokeToolOperation } from "@/server/services/tool-operation";
+import { hasDefaultHttpStepOperation, invokeToolOperation } from "@/server/services/tool-operation";
 import { ToolOperationTraceData } from "@/contracts/tool-operation";
 import { enforceHarnessPolicy } from "@/server/steps/harness-policy-step";
 import { resolveStepToolOperation } from "@/server/domain/runtime/tool-operation";
@@ -92,12 +92,23 @@ export async function runToolStep(args: RunToolStepInput): Promise<{ receipt: Re
     if (inputSchemaError) return reject(`工具输入不符合字段契约：${inputSchemaError}`);
     const currentInputSchemaError = validateJsonObjectSchema(schemaPayload, registration.inputSchema);
     if (currentInputSchemaError) return reject(`工具输入不符合当前服务端字段契约：${currentInputSchemaError}`);
+    const http = (registration.protocol ?? "http-json") === "http-json";
+    const defaultHttpWrite = !node.toolOperation && http && registration.operationKind === "action"
+      && registration.businessIdempotency === true && Boolean(registration.businessIdempotencyRetentionMs);
+    if (!node.toolOperation && !defaultHttpWrite && http && (registration.operationKind === "action" || tool.operationKind === "action")) {
+      if (await hasDefaultHttpStepOperation({
+        runId: args.runId, nodeId: node.id, toolId: registration.id, action: registration.action, stepId: stepMetadata.stepId,
+      })) return reject("本步骤已有业务操作保护记录，请先核对工具保证，不能改用直接调用");
+    }
     const operation = resolveStepToolOperation({ node, runId: args.runId, stepId: stepMetadata.stepId, attempt: stepMetadata.attempt, startedAt: stepMetadata.stepStartedAt });
     if (!operation.ok) return reject(operation.error);
-    const operationResult = operation.config ? await invokeToolOperation({
-      runId: args.runId, node: { ...node, toolOperation: operation.config }, tool: registration,
+    const operationResult = operation.config || defaultHttpWrite ? await invokeToolOperation({
+      runId: args.runId, node: operation.config ? { ...node, toolOperation: operation.config } : node, tool: registration,
       input: args.input, outputs: args.outputs, payload: requestPayload, inlineReferences: args.inlineReferences,
       stepInvocation: operation.stepInvocation,
+      ...(defaultHttpWrite ? { defaultHttpStep: {
+        stepId: stepMetadata.stepId, stepStartedAt: stepMetadata.stepStartedAt, attempt: stepMetadata.attempt,
+      } } : {}),
     }) : undefined;
     const invoked = operationResult ?? await invokeRegisteredTool({
       tool: registration,
