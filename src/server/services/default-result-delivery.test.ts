@@ -63,6 +63,17 @@ function emptyObservation(): DefaultResultStreamObservation {
     metadata: { done: false, tailIndex: -1 }, readStatus: "verified_snapshot", matchedFrames: 0, conflictingFrames: 0 };
 }
 describe("安全成果故障转持久等待，不消耗原根步骤重试", () => {
+  it.each(["confirmed", "failed"] as const)("%s 后多次核对或恢复只返回原终态，不再次观察、发送、关闭或改业务成果", async (status) => {
+    mocks.delivery = { ...mocks.delivery, status, waitingHookToken: "private-current-hook", waitingHookStepId: "step_one",
+      acknowledgement: status === "confirmed" ? "confirmed" : "none", confirmedAt: status === "confirmed" ? now : null };
+    const original = structuredClone({ run: mocks.run, delivery: mocks.delivery });
+    for (const verifyOnly of [true, false, true]) {
+      await expect(deliverDefaultResult(runId, workspaceId, verifyOnly)).resolves.toEqual({ status, hookToken: "private-current-hook" });
+    }
+    expect({ run: mocks.run, delivery: mocks.delivery }).toEqual(original);
+    expect(mocks.observe).not.toHaveBeenCalled(); expect(mocks.write).not.toHaveBeenCalled(); expect(mocks.close).not.toHaveBeenCalled();
+    expect(mocks.updates).not.toHaveBeenCalled(); expect(mocks.transaction).not.toHaveBeenCalled();
+  });
   it("连续四次观察故障保存固定原因和同一冻结成果，无发送或重领", async () => {
     mocks.observe.mockRejectedValue(unreadable());
     const originalRun = structuredClone(mocks.run);

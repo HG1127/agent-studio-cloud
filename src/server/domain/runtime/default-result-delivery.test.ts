@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_RESULT_TRACKING_VERSION, type DefaultResultCompletionSource, type DefaultResultDeliveryRecord } from "@/contracts/default-result-delivery";
 import { freezeDefaultResultFrame } from "./default-result-stream";
-import { canClaimDefaultResultOperation, defaultResultDeliveryHookToken, defaultResultDeliveryOwner, defaultResultDeliveryView, requiresDefaultResultDelivery, settledDefaultResultOperation } from "./default-result-delivery";
+import { canClaimDefaultResultOperation, defaultResultDeliveryHookToken, defaultResultDeliveryOwner, defaultResultDeliveryView, defaultResultWorkflowNotificationPending, requiresDefaultResultDelivery, settledDefaultResultOperation } from "./default-result-delivery";
 
 const runId = "11111111-1111-4111-8111-111111111111";
 const workspaceId = "22222222-2222-4222-8222-222222222222";
@@ -67,5 +67,38 @@ describe("成果投递持久状态", () => {
     expect(canClaimDefaultResultOperation(exhausted, "write")).toBe(false);
     expect(canClaimDefaultResultOperation(exhausted, "close")).toBe(true);
     expect(defaultResultDeliveryView(exhausted)).toMatchObject({ canRetry: true, canVerify: true });
+  });
+});
+
+function terminalRecord(status: "confirmed" | "failed", hook = true): DefaultResultDeliveryRecord {
+  return { ...record, status, acknowledgement: status === "confirmed" ? "confirmed" : "none",
+    confirmedAt: status === "confirmed" ? now : null, waitingHookToken: hook ? "private-hook" : null,
+    waitingHookStepId: hook ? "step_one" : null };
+}
+
+describe("成果终态与根流程恢复通知分开", () => {
+  it.each(["confirmed", "failed"] as const)("%s 有等待入口时允许核对但不能再次发送成果", (status) => {
+    const saved = terminalRecord(status), original = structuredClone(saved);
+    expect(defaultResultDeliveryView(saved)).toMatchObject({ status, canRetry: false, canVerify: true });
+    for (const sdkStatus of ["running", "pending", "unknown", null]) {
+      expect(defaultResultWorkflowNotificationPending(saved, sdkStatus)).toBe(true);
+    }
+    expect(saved).toEqual(original);
+  });
+  it.each(["completed", "failed", "cancelled"])("公开引擎已为 %s 不再要求唤醒已经结束的根", (sdkStatus) => {
+    for (const status of ["confirmed", "failed"] as const) {
+      expect(defaultResultWorkflowNotificationPending(terminalRecord(status), sdkStatus)).toBe(false);
+    }
+  });
+  it.each(["confirmed", "failed"] as const)("%s 没有保存等待入口时不虚构待通知状态", (status) => {
+    const saved = terminalRecord(status, false);
+    expect(defaultResultWorkflowNotificationPending(saved, "running")).toBe(false);
+    expect(defaultResultDeliveryView(saved)).toMatchObject({ canRetry: false, canVerify: false });
+  });
+  it("成果仍未终结时不把核对请求变成恢复通知", () => {
+    expect(defaultResultWorkflowNotificationPending({ ...record, waitingHookToken: "private-hook", waitingHookStepId: "step_one" }, "running")).toBe(false);
+  });
+  it("不完整等待身份仍明确拒绝", () => {
+    expect(() => defaultResultWorkflowNotificationPending({ ...terminalRecord("confirmed"), waitingHookStepId: null }, null)).toThrow();
   });
 });

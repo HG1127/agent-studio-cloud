@@ -38,6 +38,27 @@ describe("成果核对接口保持范围与请求边界", () => {
     expect((await POST(request(), context)).status).toBe(200);
     expect(mocks.action).toHaveBeenCalledWith({ runId, mode: "retry" });
   });
+  it("成果已送达但根恢复通知待确认时返回202和明确重试间隔", async () => {
+    const pending = { ok: true, delivery: { ...delivery, canVerify: true }, workflowNotified: false, workflowNotificationPending: true };
+    mocks.action.mockResolvedValue(pending);
+    const response = await POST(request('{"mode":"verify"}'), context);
+    expect(response.status).toBe(202);
+    expect(response.headers.get("retry-after")).toBe("2");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual(pending);
+    expect(mocks.action).toHaveBeenCalledWith({ runId, mode: "verify" });
+  });
+  it("真正恢复后的旧成功回执仍返回200，不带待通知或重试头", async () => {
+    const response = await POST(request(), context);
+    expect(response.status).toBe(200); expect(response.headers.get("retry-after")).toBeNull();
+    expect(await response.json()).toEqual({ ok: true, delivery, workflowNotified: true });
+  });
+  it("矛盾的待通知回执不会被解释为已完成或允许重新发送", async () => {
+    mocks.action.mockResolvedValue({ ok: true, delivery: { ...delivery, canVerify: true }, workflowNotified: true, workflowNotificationPending: true });
+    const response = await POST(request(), context);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ ok: false, error: "成果核对结果暂时无法确认", retryable: true });
+  });
   it.each(["runId", "workspaceId", "sdkRunId", "producerSettled", "frameHash"])("客户端%s会被拒绝而非悄悄覆盖", async (field) => {
     const response = await POST(request(JSON.stringify({ mode: "retry", [field]: "untrusted" })), context);
     expect(response.status).toBe(400);
