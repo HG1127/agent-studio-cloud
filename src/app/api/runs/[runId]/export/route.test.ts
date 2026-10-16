@@ -106,6 +106,37 @@ describe("运行报告导出", () => {
     expect(mocks.listTraceSince).toHaveBeenLastCalledWith(RUN_ID, expect.any(String), 2, 2);
   });
 
+  it("包含扩展汉字的合法助手名在截断边界也能完成真实下载响应编码", async () => {
+    const name = "a".repeat(49) + "𠮷";
+    mocks.getRunView.mockResolvedValueOnce({ ...(await mocks.getRunView()), agentName: name });
+    const response = await GET(new Request("http://localhost"), { params: Promise.resolve({ runId: RUN_ID }) });
+    expect(response.status).toBe(200);
+    const header = response.headers.get("content-disposition")!;
+    expect(decodeURIComponent(header.slice("attachment; filename*=UTF-8''".length))).toBe(`${name}-2026-09-24-运行报告.json`);
+    expect(RunReportFile.parse(await response.json()).run.agentName).toBe(name);
+  });
+
+  it.each(["finance@example.com", "13800000000", "Bearer fixture-private-download-123456"])("文件名与报告正文一致隐藏敏感助手名 %s", async (name) => {
+    mocks.getRunView.mockResolvedValueOnce({ ...(await mocks.getRunView()), agentName: name });
+    const response = await GET(new Request("http://localhost"), { params: Promise.resolve({ runId: RUN_ID }) });
+    expect(response.status).toBe(200);
+    const header = response.headers.get("content-disposition")!;
+    expect(header).toMatch(/^attachment; filename\*=UTF-8''/);
+    expect(decodeURIComponent(header)).toContain("已隐藏敏感信息");
+    expect(decodeURIComponent(header)).not.toContain(name);
+    expect(header).not.toMatch(/[\r\n]/);
+    expect(JSON.stringify(await response.json())).not.toContain(name);
+  });
+
+  it("历史结束时间无效时用合法开始日期命名，但不改写报告内的时间记录", async () => {
+    const finishedAt = "\uD800历史错误时间";
+    mocks.getRunView.mockResolvedValueOnce({ ...(await mocks.getRunView()), finishedAt, startedAt: "2026-09-23T01:00:00.000Z" });
+    const response = await GET(new Request("http://localhost"), { params: Promise.resolve({ runId: RUN_ID }) });
+    expect(response.status).toBe(200);
+    expect(decodeURIComponent(response.headers.get("content-disposition")!)).toContain("2026-09-23-运行报告.json");
+    expect((await response.json()).run.finishedAt).toBe(finishedAt);
+  });
+
   it("下载期间只读取开始时已有的轨迹，不追入后续事件", async () => {
     mocks.getLatestTraceSeq.mockResolvedValueOnce(1);
     mocks.listTraceSince.mockImplementation(async (_runId: string, _workspaceId: string, cursor: number, maxSeq: number) => {
