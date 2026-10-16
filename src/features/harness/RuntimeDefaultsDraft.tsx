@@ -16,7 +16,7 @@ import {
 } from "./harness-runtime-draft";
 
 function focusField(form: HTMLFormElement | null, name: string | undefined) {
-  if (!form || !name) return;
+  if (!form?.isConnected || !name || form.closest('[hidden], [inert], [aria-hidden="true"]')) return;
   const field = form.elements.namedItem(name);
   if (!(field instanceof HTMLElement)) return;
   const disclosure = field.closest("details");
@@ -33,9 +33,16 @@ function useLocalDraft<T extends Record<string, string>>(blank: () => T, schema:
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
   const [confirmation, setConfirmation] = useState<"undo" | "clear" | null>(null);
+  const errorFocusRef = useRef<{ form: HTMLFormElement; name: string | undefined } | null>(null);
+  const [validationAttempt, setValidationAttempt] = useState(0);
   const dirty = Object.values(draft).some((value) => value !== "");
   const canUndo = JSON.stringify(draft) !== JSON.stringify(checkpoint);
 
+  useLayoutEffect(() => {
+    const request = errorFocusRef.current;
+    errorFocusRef.current = null;
+    if (request) focusField(request.form, request.name);
+  }, [validationAttempt]);
   useLayoutEffect(() => { notifyDraftState({ agentId: key, dirty }); }, [key, dirty]);
   useLayoutEffect(() => () => { notifyDraftState({ agentId: key, dirty: false }); }, [key]);
   useEffect(() => {
@@ -46,6 +53,7 @@ function useLocalDraft<T extends Record<string, string>>(blank: () => T, schema:
   }, [dirty]);
 
   function change(name: keyof T, value: string) {
+    errorFocusRef.current = null;
     setDraft((current) => ({ ...current, [name]: value }));
     setMessage("");
     setErrors((current) => {
@@ -56,12 +64,14 @@ function useLocalDraft<T extends Record<string, string>>(blank: () => T, schema:
   }
   function check(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    errorFocusRef.current = null;
     const result = schema.safeParse(draft);
     if (!result.success) {
       const nextErrors = draftErrors(result.error.issues);
+      errorFocusRef.current = { form: event.currentTarget, name: Object.keys(nextErrors)[0] };
       setErrors(nextErrors);
       setMessage("草稿还有填写问题，请按提示修改；尚未保存或生效。");
-      focusField(event.currentTarget, Object.keys(nextErrors)[0]);
+      setValidationAttempt((current) => current + 1);
       return;
     }
     setCheckpoint({ ...draft });
@@ -69,11 +79,13 @@ function useLocalDraft<T extends Record<string, string>>(blank: () => T, schema:
     setMessage("本地草稿检查通过，仅说明填写符合本页要求；未保存，也未改变任何运行。");
   }
   function requestDiscard(kind: "undo" | "clear", target: HTMLButtonElement) {
+    errorFocusRef.current = null;
     returnFocusRef.current = target;
     setConfirmation(kind);
   }
   function discard() {
     if (confirmation === null) return;
+    errorFocusRef.current = null;
     const next = confirmation === "clear" ? blank() : { ...checkpoint };
     setDraft(next);
     if (confirmation === "clear") setCheckpoint(blank());
