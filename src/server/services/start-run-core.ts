@@ -41,6 +41,7 @@ import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { jsonValuesEqual } from "@/server/domain/json-value";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding";
+import { collaborationToolRegistrationIssue } from "@/server/tools/collaboration-tool-binding";
 import { ExecutionResourceRejected, lockExecutionWorkspace, reserveRootExecutionResources } from "@/server/services/execution-resources";
 import { RunExecutionClaim } from "@/contracts/run-execution-binding";
 import { runStartAcknowledgementDisposition } from "@/server/domain/runtime/run-execution-binding";
@@ -128,6 +129,8 @@ async function createRunWithLockedDependencies(args: {
         versions: dependencyVersions,
       });
       if (graph.issue) return { runId: null, error: `${graph.issue}，请重新发布助手后再运行` };
+      const toolIssue = collaborationToolRegistrationIssue(dependencyVersions, graph.versionIds, getToolRegistration);
+      if (toolIssue) return { runId: null, error: toolIssue };
       collaborationAgentIds = graph.agentIds;
       collaborationKnowledgeIds = graph.knowledgeSourceIds;
     }
@@ -487,6 +490,8 @@ async function validateRuntimePreflight(args: {
       versions: dependencyVersions,
     });
     if (graph.issue) return `${graph.issue}，请重新发布助手后再运行`;
+    const toolIssue = collaborationToolRegistrationIssue(dependencyVersions, graph.versionIds, getToolRegistration);
+    if (toolIssue) return toolIssue;
     if (graph.knowledgeSourceIds.length > 0) {
       const availableSources = await db
         .select({ id: knowledgeSources.id })
