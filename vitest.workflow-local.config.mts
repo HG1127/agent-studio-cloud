@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { defineConfig } from "vitest/config";
 import { workflow } from "@workflow/vitest";
@@ -54,7 +54,27 @@ if (fixtureFiles.length !== 1 || fixtureFiles[0] !== "default-result-stream.work
   || lstatSync(path.join(fixtures, fixtureFiles[0])).isSymbolicLink()) {
   throw new Error("Only the reviewed local SDK workflow fixture may be scanned");
 }
-// Native ESM bundles must resolve this checkout's own dependencies, not a borrowed graph.
+const bootstrap = path.join(root, ".vitest/workflow-local-bootstrap", attemptId);
+assertPhysicalAncestors(bootstrap);
+if (!existsSync(bootstrap)
+  || path.resolve(process.cwd()).toLowerCase() !== path.resolve(bootstrap).toLowerCase()
+  || path.resolve(realpathSync(process.cwd())).toLowerCase() !== path.resolve(bootstrap).toLowerCase()) {
+  throw new Error("Local SDK process must start in its owned physical bootstrap directory");
+}
+for (let current = bootstrap; current !== root; current = path.dirname(current)) {
+  for (const name of ["tsconfig.json", "jsconfig.json", "package.json", "node_modules"]) {
+    if (existsSync(path.join(current, name))) throw new Error("Intermediate configuration or dependencies would change local SDK resolution");
+  }
+}
+const bootstrapFiles = readdirSync(bootstrap);
+const fixtureName = "default-result-stream.workflow.ts";
+const bootstrapFixture = path.join(bootstrap, fixtureName);
+if (bootstrapFiles.length !== 1 || bootstrapFiles[0] !== fixtureName
+  || !lstatSync(bootstrapFixture).isFile() || lstatSync(bootstrapFixture).isSymbolicLink()
+  || !readFileSync(bootstrapFixture).equals(readFileSync(path.join(fixtures, fixtureName)))) {
+  throw new Error("Bootstrap must contain only an exact physical copy of the reviewed fixture");
+}
+// Builder side effects and default SWC caches stay in bootstrap, away from tracked fixtures.
 const attemptRoot = path.join(root, ".vitest/workflow-local", attemptId);
 if (existsSync(attemptRoot)) throw new Error("Local SDK attempt directory already exists; preserve evidence and do not reuse it");
 
@@ -62,7 +82,7 @@ export default defineConfig({
   root,
   envDir: false,
   cacheDir: path.join(attemptRoot, "vite-cache"),
-  plugins: [workflow({ cwd: fixtures, rootDir: attemptRoot, dataDir: path.join(attemptRoot, "data"), outDir: path.join(attemptRoot, "bundles") })],
+  plugins: [workflow({ cwd: bootstrap, rootDir: attemptRoot, dataDir: path.join(attemptRoot, "data"), outDir: path.join(attemptRoot, "bundles") })],
   resolve: { alias: { "@": path.join(root, "src") } },
   test: {
     name: "workflow-local-sdk",

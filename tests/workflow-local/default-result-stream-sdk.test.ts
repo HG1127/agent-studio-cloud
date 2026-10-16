@@ -1,11 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { listWorkflowRefs, waitForHook } from "@workflow/vitest";
+import { getWorkflowRef, listWorkflowRefs, waitForHook } from "@workflow/vitest";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { resumeHook, start, type Run } from "workflow/api";
 import { getWorld } from "workflow/runtime";
 import { freezeDefaultResultFrame } from "@/server/domain/runtime/default-result-stream";
 import { observeDefaultResultStream, type DefaultResultStreamSdkMutationInput } from "@/server/services/default-result-stream-sdk";
-import { localDefaultResultHolderWorkflow, localDefaultResultOperationWorkflow } from "./fixtures/default-result-stream.workflow";
 
 const handles: Run<unknown>[] = [];
 const terminal = new Set(["completed", "failed", "cancelled"]);
@@ -39,7 +38,7 @@ afterEach(async () => {
 
 async function holder() {
   const token = `local-default-result-sdk:${randomUUID()}`;
-  const root = await start(localDefaultResultHolderWorkflow, [token]);
+  const root = await start(getWorkflowRef("localDefaultResultHolderWorkflow"), [token]);
   handles.push(root);
   const hook = await waitForHook(root, { token });
   expect(hook.runId).toBe(root.runId);
@@ -55,7 +54,7 @@ async function holder() {
 }
 
 async function operation(input: DefaultResultStreamSdkMutationInput, kind: "write" | "close") {
-  const handle = await start(localDefaultResultOperationWorkflow, [input, kind]);
+  const handle = await start(getWorkflowRef("localDefaultResultOperationWorkflow"), [input, kind]);
   handles.push(handle);
   return handle.returnValue;
 }

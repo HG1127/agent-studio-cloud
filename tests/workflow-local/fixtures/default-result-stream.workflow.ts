@@ -2,7 +2,7 @@ import { createHook, FatalError } from "workflow";
 import {
   closeDefaultResultStream, DefaultResultStreamSdkError, writeDefaultResultStreamFrame,
   type DefaultResultStreamSdkMutationInput,
-} from "../../../src/server/services/default-result-stream-sdk";
+} from "@/server/services/default-result-stream-sdk";
 
 export async function localDefaultResultHolderWorkflow(token: string) {
   "use workflow";
