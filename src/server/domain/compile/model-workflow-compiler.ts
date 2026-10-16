@@ -509,15 +509,16 @@ function compileInlineStep(
   if (type === "human") step.approval = source.approval || { role: source.owner || "业务负责人", reason: `确认“${step.title}”后继续` };
   if (type === "tool") {
     const matched = capabilityTool(source, caps, registryTools);
-    step.tool = toToolSpec(source, matched);
+    const spec = toToolSpec(source, matched);
+    step.tool = spec;
     if (matched) {
       bindings.push({
         stepId: `${parentRef}/${id}`,
         toolId: matched.id,
         title: matched.title || matched.name,
         scope: matched.suggestedScope,
-        protocol: matched.protocol,
-        operationKind: (step.tool as ToolSpecOut).operationKind,
+        protocol: spec.protocol,
+        operationKind: spec.operationKind,
       });
     } else {
       unresolvedTools.push({
@@ -611,7 +612,7 @@ export function compileModelWorkflowPlan(options: {
           toolId: matched.id,
           title: matched.title || matched.name,
           scope: matched.suggestedScope,
-          protocol: matched.protocol,
+          protocol: spec.protocol,
           operationKind: spec.operationKind,
         });
       } else {

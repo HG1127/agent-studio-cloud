@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { WorkflowDraft } from "@/contracts/workflow";
 import { compileIntentWorkflow } from "@/server/domain/intent/intent-compiler";
 import { compileModelWorkflowPlan } from "@/server/domain/compile/model-workflow-compiler";
 
@@ -34,6 +35,29 @@ describe("默认意图编排的 MCP 绑定", () => {
       protocol, operationKind: "action", operationKindConfirmed: false, suggestedScope: "customer.write", risk: "low" }] });
     expect(compiled?.workflow.nodes.record.tool).toMatchObject({ operationKind: "action", protocol: "http-json", registryToolId: "customer.record" });
     expect(compiled?.workflow.nodes.approval_record?.type).toBe("human");
+    expect(compiled?.diagnostics.toolBindings).toEqual([
+      expect.objectContaining({ stepId: "record", protocol: "http-json", operationKind: "action" }),
+    ]);
+    expect(WorkflowDraft.safeParse(compiled?.workflow).success).toBe(true);
+  });
+
+  it.each([undefined, "http-json"])("并行 HTTP 绑定沿用工具快照的默认协议，诊断可保存 %s", (protocol) => {
+    const compiled = compileModelWorkflowPlan({ intent: { orderedSteps: [
+      { id: "work", title: "并行处理客户", type: "parallel", parallel: { branches: [
+        { id: "orders", label: "登记客户", steps: [{ id: "record", title: "查询客户", type: "tool",
+          registryToolId: "customer.record", tool: { operationKind: "read" } }] },
+        { id: "review", label: "整理客户", steps: [{ id: "organize", title: "整理", type: "ai" }] },
+      ] } },
+      { id: "summary", title: "汇总结果", type: "ai" },
+    ] }, registryTools: [{ id: "customer.record", status: "active", connectorId: "crm", name: "record_customer",
+      protocol, operationKind: "action", suggestedScope: "customer.write", risk: "low" }] });
+    expect(compiled?.workflow.nodes.work.parallel?.branches[0].steps?.[0]).toMatchObject({
+      tool: { operationKind: "action", protocol: "http-json", registryToolId: "customer.record" },
+    });
+    expect(compiled?.diagnostics.toolBindings).toEqual([
+      expect.objectContaining({ stepId: "work/orders/record", protocol: "http-json", operationKind: "action" }),
+    ]);
+    expect(WorkflowDraft.safeParse(compiled?.workflow).success).toBe(true);
   });
   it.each(["read", "action"] as const)("工具操作性质 %s 从服务端目录继承，不由自然语言推断", (operationKind) => {
     const compiled = compileIntentWorkflow({ name: "客户助手", text: "查询客户系统中的客户资料，然后整理客户处理方案", sourceType: "idea", humanReasons: [], caps: [{
