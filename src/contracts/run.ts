@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { boundedJsonStorageValue, isPlainJsonObject } from "./json";
+import { boundedJsonStorageValue, isPassiveJsonData, isPlainJsonObject } from "./json";
 import { AgentInputContract } from "./manifest";
 import { RunFeedbackView } from "./run-feedback";
 import { WorkflowDraft } from "./workflow";
@@ -8,6 +8,17 @@ import { ExecutionResourceLimit } from "./execution-resources";
 export const MAX_RUN_INPUT_BYTES = 100 * 1024;
 export const MAX_RUN_RESULT_BYTES = 2 * 1024 * 1024;
 export const MAX_WAIT_EVENT_PAYLOAD_BYTES = 256 * 1024;
+export const RunResultValue = z.preprocess((value, context) => {
+  try {
+    // 数组下标会消耗被动遍历预算，但不计入序列化正文。
+    const charBudget = MAX_RUN_RESULT_BYTES * (String(MAX_RUN_RESULT_BYTES).length + 1);
+    if (isPassiveJsonData(value, charBudget)) return value;
+  } catch { /* 读取异常也按不可展示处理，不暴露原始内容。 */ }
+  context.addIssue({ code: "custom", message: "保存成果必须是普通、无执行行为的有界 JSON 数据" });
+  return z.NEVER;
+}, boundedJsonStorageValue(MAX_RUN_RESULT_BYTES, "保存成果"));
+export type RunResultValue = z.infer<typeof RunResultValue>;
+
 const MAX_RUN_INPUT_DEPTH = 12;
 const MAX_RUN_INPUT_ENTRIES = 2_000;
 const MAX_RUN_INPUT_KEYS = 100;

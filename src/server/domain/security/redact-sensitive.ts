@@ -1,4 +1,4 @@
-import type { RunReportFile } from "@/contracts/run";
+import { RunResultValue, type RunReportFile } from "@/contracts/run";
 
 const SENSITIVE_KEY = /(?:password|passcode|secret|token|api[_-]?key|(?:private|access|secret)[_-]?key|authorization|cookie|credential|session[_-]?id|e-?mail|phone|mobile|ssn|social[_-]?security|credit[_-]?card|card[_-]?number|address|street|postal[_-]?code|密码|密钥|令牌|凭据|身份证|银行卡|手机号|邮箱|电话|住址|地址)/i;
 const CREDENTIAL_KEY = /(?:password|passcode|secret|token|api[_-]?key|(?:private|access|secret)[_-]?key|authorization|cookie|credential|session[_-]?id|密码|密钥|令牌|凭据)/i;
@@ -99,6 +99,14 @@ export function redactStructuredCredentialData(value: unknown): unknown {
 
 export function redactSensitiveData(value: unknown): unknown {
   return redactData(value, isSensitiveFieldName, redactSensitiveText);
+}
+
+export function redactRunResultData(value: unknown): RunResultValue {
+  const stored = RunResultValue.safeParse(value);
+  if (!stored.success) throw new Error("保存的成果无法安全展示，请先核对执行证据");
+  const projected = RunResultValue.safeParse(redactData(stored.data, isSensitiveFieldName, redactSensitiveText, 0, 32));
+  if (!projected.success) throw new Error("脱敏成果超过安全展示范围，不能提供部分内容");
+  return projected.data;
 }
 
 export function redactRunReportData(value: RunReportFile): RunReportFile {
