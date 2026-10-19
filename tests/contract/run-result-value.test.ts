@@ -19,7 +19,7 @@ describe("保存成果的共享展示边界", () => {
     expect(RunResultValue.safeParse({ nested: value }).success).toBe(false);
   });
 
-  it.each([undefined, NaN, Infinity, 1n, () => 0, new Date(), new Map(), /text/].map((value) => ({ value })))("拒绝非JSON值 $value", ({ value }) => {
+  it.each([undefined, NaN, Infinity, BigInt(1), () => 0, new Date(), new Map(), /text/].map((value) => ({ value })))("拒绝非JSON值 $value", ({ value }) => {
     expect(RunResultValue.safeParse(value).success).toBe(false);
   });
 
