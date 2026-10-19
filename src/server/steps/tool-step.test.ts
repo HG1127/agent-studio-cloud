@@ -2,22 +2,24 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkflowNode } from "@/contracts/workflow";
 
 const mocks = vi.hoisted(() => ({
-  persistStep: vi.fn(), appendTrace: vi.fn(), invokeHttpTool: vi.fn(), invokeToolOperation: vi.fn(), getToolRegistration: vi.fn(), attempt: 1, stepId: "step-1",
+  persistStep: vi.fn(), appendTrace: vi.fn(), invokeHttpTool: vi.fn(), invokeMcpTool: vi.fn(), invokeToolOperation: vi.fn(), hasDefaultHttpStepOperation: vi.fn(), getToolRegistration: vi.fn(), attempt: 1, stepId: "step-1", stepStartedAt: new Date(1000),
 }));
 vi.mock("workflow", async (importOriginal) => ({
   ...(await importOriginal<typeof import("workflow")>()),
-  getStepMetadata: () => ({ stepName: "runToolStep", stepId: mocks.stepId, stepStartedAt: new Date(), attempt: mocks.attempt }),
+  getStepMetadata: () => ({ stepName: "runToolStep", stepId: mocks.stepId, stepStartedAt: mocks.stepStartedAt, attempt: mocks.attempt }),
 }));
 vi.mock("@/server/steps/run-state", () => ({ persistStep: mocks.persistStep }));
 vi.mock("@/server/services/harness-policies", () => ({ readRunHarnessPolicy: async () => ({ workspaceId: "00000000-0000-4000-8000-000000000001", snapshot: null }) }));
 vi.mock("@/server/steps/trace-step", () => ({ appendTrace: mocks.appendTrace }));
 vi.mock("@/server/tools/invoke-http-tool", () => ({ invokeHttpTool: mocks.invokeHttpTool }));
-vi.mock("@/server/services/tool-operation", () => ({ invokeToolOperation: mocks.invokeToolOperation }));
+vi.mock("@/server/tools/invoke-mcp-tool", () => ({ invokeMcpTool: mocks.invokeMcpTool }));
+vi.mock("@/server/services/tool-operation", () => ({ invokeToolOperation: mocks.invokeToolOperation, hasDefaultHttpStepOperation: mocks.hasDefaultHttpStepOperation }));
 vi.mock("@/server/tools/tool-registry", () => ({ getToolRegistration: mocks.getToolRegistration }));
 
 import { runToolStep } from "@/server/steps/tool-step";
 import { MAX_STEP_OUTPUT_BYTES, stepOutputStorageIssue } from "@/server/domain/runtime/json-storage";
 import { validateToolOperationReceipt } from "@/server/domain/runtime/tool-operation";
+import { toolStepIdempotencyKey } from "@/server/domain/runtime/tool-step-idempotency-key";
 import { FatalError } from "workflow";
 import type { ToolRegistration } from "@/server/tools/tool-registry";
 
@@ -36,6 +38,160 @@ const registration: ToolRegistration = {
 };
 
 describe("真实工具步骤", () => {
+  it.each([undefined, "http-json"] as const)("明确 HTTP 写入按登记性质启用默认台账，不依赖显式协议 %s", async (protocol) => {
+    const write = WorkflowNode.parse({ ...node, tool: { ...node.tool!, operationKind: "action" } });
+    const current = { ...registration, protocol, operationKind: "action" as const, businessIdempotency: true, businessIdempotencyRetentionMs: 600_000 };
+    mocks.getToolRegistration.mockReturnValue(current);
+    mocks.invokeToolOperation.mockResolvedValue({ ok: true, output: { receiptId: "saved", amount: 0, approved: false }, operationId: "00000000-0000-4000-8000-000000000123", reused: true });
+    const input = { customerId: "c1", amount: 0 };
+    const outputs = { plan: { approved: false } };
+    for (const attempt of [1, 2]) {
+      mocks.attempt = attempt;
+      await expect(runToolStep({ runId: "run-1", node: write, input, outputs })).resolves.toMatchObject({ receipt: { amount: 0, approved: false } });
+    }
+    expect(mocks.invokeToolOperation.mock.calls.map(([call]) => call.defaultHttpStep)).toEqual([
+      { stepId: "step-1", stepStartedAt: mocks.stepStartedAt, attempt: 1 },
+      { stepId: "step-1", stepStartedAt: mocks.stepStartedAt, attempt: 2 },
+    ]);
+    expect(mocks.invokeToolOperation.mock.calls[0][0]).toMatchObject({
+      node: write, tool: current, payload: { action: registration.action, input, outputs },
+    });
+    expect(write.toolOperation).toBeUndefined();
+    expect(mocks.invokeHttpTool).not.toHaveBeenCalled();
+    expect(mocks.hasDefaultHttpStepOperation).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { businessIdempotency: undefined, businessIdempotencyRetentionMs: undefined },
+    { businessIdempotency: false, businessIdempotencyRetentionMs: 600_000 },
+    { businessIdempotency: true, businessIdempotencyRetentionMs: undefined },
+  ])("旧 HTTP 写入未有保证时仅核对现有保护，不凭 POST 生成保证 %#", async (promise) => {
+    const write = WorkflowNode.parse({ ...node, tool: { ...node.tool!, operationKind: "action" } });
+    mocks.getToolRegistration.mockReturnValue({ ...registration, operationKind: "action", ...promise });
+    mocks.invokeHttpTool.mockResolvedValue({ ok: true, output: { receiptId: "legacy" } });
+    await runToolStep({ runId: "run-1", node: write, input: {}, outputs: {} });
+    expect(mocks.hasDefaultHttpStepOperation).toHaveBeenCalledWith({
+      runId: "run-1", nodeId: node.id, toolId: registration.id, action: registration.action, stepId: "step-1",
+    });
+    expect(mocks.invokeHttpTool).toHaveBeenCalledOnce();
+    expect(mocks.invokeToolOperation).not.toHaveBeenCalled();
+  });
+
+  it("已入账的 HTTP 步骤撤回保证后不能降为直接调用", async () => {
+    const write = WorkflowNode.parse({ ...node, tool: { ...node.tool!, operationKind: "action" } });
+    mocks.getToolRegistration.mockReturnValue({ ...registration, operationKind: "action" });
+    mocks.hasDefaultHttpStepOperation.mockResolvedValue(true);
+    await expect(runToolStep({ runId: "run-1", node: write, input: {}, outputs: {} })).rejects.toThrow("已有业务操作保护记录");
+    expect(mocks.invokeHttpTool).not.toHaveBeenCalled();
+    expect(mocks.invokeToolOperation).not.toHaveBeenCalled();
+  });
+
+  it("HTTP 保护记录未知时透传失败，不把读库错误当作没有记录", async () => {
+    const write = WorkflowNode.parse({ ...node, tool: { ...node.tool!, operationKind: "action" } });
+    mocks.getToolRegistration.mockReturnValue({ ...registration, operationKind: "action" });
+    mocks.hasDefaultHttpStepOperation.mockRejectedValue(new FatalError("当前运行归属无法确认"));
+    await expect(runToolStep({ runId: "run-1", node: write, input: {}, outputs: {} })).rejects.toThrow("归属无法确认");
+    expect(mocks.invokeHttpTool).not.toHaveBeenCalled();
+    expect(mocks.invokeToolOperation).not.toHaveBeenCalled();
+  });
+
+  it("HTTP 明确只读保留直接调用，不因 POST 或有防重声明改为写入台账", async () => {
+    const read = WorkflowNode.parse({ ...node, tool: { ...node.tool!, operationKind: "read" } });
+    mocks.getToolRegistration.mockReturnValue({ ...registration, operationKind: "read", businessIdempotency: true, businessIdempotencyRetentionMs: 600_000 });
+    mocks.invokeHttpTool.mockResolvedValue({ ok: true, output: { receiptId: "read" } });
+    await runToolStep({ runId: "run-1", node: read, input: {}, outputs: {} });
+    expect(mocks.invokeHttpTool).toHaveBeenCalledOnce();
+    expect(mocks.invokeToolOperation).not.toHaveBeenCalled();
+    expect(mocks.hasDefaultHttpStepOperation).not.toHaveBeenCalled();
+  });
+
+  it("HTTP 草稿不能用 read 覆盖当前明确 action 登记", async () => {
+    const read = WorkflowNode.parse({ ...node, tool: { ...node.tool!, operationKind: "read" } });
+    mocks.getToolRegistration.mockReturnValue({ ...registration, operationKind: "action", businessIdempotency: true, businessIdempotencyRetentionMs: 600_000 });
+    await expect(runToolStep({ runId: "run-1", node: read, input: {}, outputs: {} })).rejects.toThrow("配置已变化");
+    expect(mocks.invokeHttpTool).not.toHaveBeenCalled();
+    expect(mocks.invokeToolOperation).not.toHaveBeenCalled();
+    expect(mocks.hasDefaultHttpStepOperation).not.toHaveBeenCalled();
+  });
+
+  it("HTTP 显式跨运行业务键不被默认步骤保护替换", async () => {
+    const explicit = WorkflowNode.parse({ ...node, tool: { ...node.tool!, operationKind: "action" },
+      toolOperation: { scope: "orders", key: { kind: "input", path: ["orderId"] } } });
+    mocks.getToolRegistration.mockReturnValue({ ...registration, operationKind: "action", businessIdempotency: true, businessIdempotencyRetentionMs: 600_000 });
+    mocks.invokeToolOperation.mockResolvedValue({ ok: true, output: { receiptId: "saved" }, operationId: "00000000-0000-4000-8000-000000000123", reused: false });
+    await runToolStep({ runId: "run-1", node: explicit, input: { orderId: "o1" }, outputs: {} });
+    expect(mocks.invokeToolOperation.mock.calls[0][0].node.toolOperation).toEqual(explicit.toolOperation);
+    expect(mocks.invokeToolOperation.mock.calls[0][0].defaultHttpStep).toBeUndefined();
+    expect(mocks.invokeToolOperation.mock.calls[0][0].stepInvocation).toBeUndefined();
+    expect(mocks.hasDefaultHttpStepOperation).not.toHaveBeenCalled();
+    expect(mocks.invokeHttpTool).not.toHaveBeenCalled();
+  });
+  it.each(["http-json", "mcp-read", "mcp-action"] as const)("中文内联工具的%s路径在重试时复用安全步骤键", async (path) => {
+    const protocol = path === "http-json" ? "http-json" : "mcp-streamable-http";
+    const operationKind = path === "mcp-action" ? "action" : path === "mcp-read" ? "read" : undefined;
+    const inline = WorkflowNode.parse({ ...node, id: "group.登记", tool: { ...node.tool!, protocol, operationKind } });
+    mocks.getToolRegistration.mockReturnValue({ ...registration, protocol, operationKind, businessIdempotency: true, businessIdempotencyRetentionMs: 600_000 });
+    mocks.invokeHttpTool.mockResolvedValue({ ok: true, output: { receiptId: "saved" } });
+    mocks.invokeMcpTool.mockResolvedValue({ ok: true, output: { receiptId: "saved" } });
+    mocks.invokeToolOperation.mockResolvedValue({ ok: true, output: { receiptId: "saved" }, operationId: "00000000-0000-4000-8000-000000000123", reused: true });
+    for (const attempt of [1, 2]) {
+      mocks.attempt = attempt;
+      await expect(runToolStep({ runId: "run-1", node: inline, input: {}, outputs: {} })).resolves.toMatchObject({ receipt: { receiptId: "saved" } });
+    }
+    const calls = path === "mcp-action" ? mocks.invokeToolOperation.mock.calls : path === "mcp-read" ? mocks.invokeMcpTool.mock.calls : mocks.invokeHttpTool.mock.calls;
+    const keys = calls.map(([call]) => path === "mcp-action" ? call.stepInvocation.idempotencyKey : call.idempotencyKey);
+    expect(keys).toEqual(Array(2).fill(toolStepIdempotencyKey({ runId: "run-1", nodeId: inline.id, stepId: "step-1" })));
+    for (const key of keys) expect(new Headers({ "idempotency-key": key }).get("idempotency-key")).toMatch(/^studio-step-header:v1:[a-f0-9]{64}$/);
+    if (path === "mcp-action") { expect(mocks.invokeMcpTool).not.toHaveBeenCalled(); expect(mocks.invokeHttpTool).not.toHaveBeenCalled(); }
+    else expect(mocks.invokeToolOperation).not.toHaveBeenCalled();
+  });
+  it("MCP写步骤默认进入持久账本，同一步骤重试保持原外部键且不走直连", async () => {
+    const mcp = WorkflowNode.parse({ ...node, tool: { ...node.tool!, protocol: "mcp-streamable-http", operationKind: "action" } });
+    mocks.getToolRegistration.mockReturnValue({ ...registration, protocol: "mcp-streamable-http", operationKind: "action", businessIdempotency: true, businessIdempotencyRetentionMs: 600_000 });
+    mocks.invokeToolOperation.mockResolvedValue({ ok: true, output: { receiptId: "saved" }, operationId: "00000000-0000-4000-8000-000000000123", reused: true });
+    for (const attempt of [1, 2]) {
+      mocks.attempt = attempt;
+      await expect(runToolStep({ runId: "run-1", node: mcp, input: {}, outputs: {} })).resolves.toEqual({ receipt: { ok: true, receiptId: "saved" } });
+    }
+    expect(mocks.invokeToolOperation.mock.calls.map(([call]) => call.stepInvocation)).toEqual([
+      { idempotencyKey: "run-1:update_customer:step-1", mayCreate: true, startedAt: expect.any(Date) },
+      { idempotencyKey: "run-1:update_customer:step-1", mayCreate: false, startedAt: expect.any(Date) },
+    ]);
+    expect(mocks.invokeToolOperation.mock.calls[0][0].node.toolOperation).toEqual({ scope: "studio.mcp-step.v1", key: { kind: "literal", value: '["run-1","step-1"]' } });
+    expect(mcp.toolOperation).toBeUndefined();
+    expect(mocks.invokeMcpTool).not.toHaveBeenCalled(); expect(mocks.invokeHttpTool).not.toHaveBeenCalled();
+  });
+  it("MCP只读保持真实调用路径，不擅自生成业务防重配置", async () => {
+    const mcp = WorkflowNode.parse({ ...node, tool: { ...node.tool!, protocol: "mcp-streamable-http", operationKind: "read" } });
+    mocks.getToolRegistration.mockReturnValue({ ...registration, protocol: "mcp-streamable-http", operationKind: "read" });
+    mocks.invokeMcpTool.mockResolvedValue({ ok: true, output: { receiptId: "read" } });
+    await expect(runToolStep({ runId: "run-1", node: mcp, input: {}, outputs: {} })).resolves.toMatchObject({ receipt: { receiptId: "read" } });
+    expect(mocks.invokeMcpTool).toHaveBeenCalledOnce(); expect(mocks.invokeToolOperation).not.toHaveBeenCalled();
+  });
+  it("MCP写步骤显式业务配置不被自动步骤账本替换", async () => {
+    const mcp = WorkflowNode.parse({ ...node, tool: { ...node.tool!, protocol: "mcp-streamable-http", operationKind: "action" },
+      toolOperation: { scope: "orders", key: { kind: "input", path: ["orderId"] } } });
+    mocks.getToolRegistration.mockReturnValue({ ...registration, protocol: "mcp-streamable-http", operationKind: "action", businessIdempotency: true, businessIdempotencyRetentionMs: 600_000 });
+    mocks.invokeToolOperation.mockResolvedValue({ ok: true, output: { receiptId: "saved" }, operationId: "00000000-0000-4000-8000-000000000123", reused: true });
+    await runToolStep({ runId: "run-1", node: mcp, input: { orderId: "o1" }, outputs: {} });
+    expect(mocks.invokeToolOperation.mock.calls[0][0].node.toolOperation).toEqual(mcp.toolOperation);
+    expect(mocks.invokeToolOperation.mock.calls[0][0].stepInvocation).toBeUndefined();
+    expect(mocks.invokeMcpTool).not.toHaveBeenCalled();
+  });
+  it("MCP写步骤账本需要等待时保留重试但不能退回直连", async () => {
+    const mcp = WorkflowNode.parse({ ...node, tool: { ...node.tool!, protocol: "mcp-streamable-http", operationKind: "action" } });
+    mocks.getToolRegistration.mockReturnValue({ ...registration, protocol: "mcp-streamable-http", operationKind: "action", businessIdempotency: true, businessIdempotencyRetentionMs: 600_000 });
+    mocks.invokeToolOperation.mockResolvedValue({ ok: false, retryable: true, retryAfterMs: 60_000, error: "正在处理" });
+    await expect(runToolStep({ runId: "run-1", node: mcp, input: {}, outputs: {} })).rejects.toMatchObject({ name: "RetryableError" });
+    expect(mocks.invokeMcpTool).not.toHaveBeenCalled(); expect(mocks.invokeHttpTool).not.toHaveBeenCalled();
+  });
+  it("MCP写步骤缺执行定位时停止，不退回无账本直连", async () => {
+    const mcp = WorkflowNode.parse({ ...node, tool: { ...node.tool!, protocol: "mcp-streamable-http", operationKind: "action" } });
+    mocks.getToolRegistration.mockReturnValue({ ...registration, protocol: "mcp-streamable-http", operationKind: "action", businessIdempotency: true, businessIdempotencyRetentionMs: 600_000 });
+    mocks.stepId = "";
+    await expect(runToolStep({ runId: "run-1", node: mcp, input: {}, outputs: {} })).rejects.toThrow("执行标识无效");
+    expect(mocks.invokeToolOperation).not.toHaveBeenCalled(); expect(mocks.invokeMcpTool).not.toHaveBeenCalled();
+  });
   it("真实 HTTP 登记标识 demo 不会返回固定演示回执", async () => {
     const real = WorkflowNode.parse({ ...node, tool: { ...node.tool!, registryToolId: "demo" } });
     mocks.getToolRegistration.mockReturnValue({ ...registration, id: "demo" });
@@ -85,6 +241,7 @@ describe("真实工具步骤", () => {
   });
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.hasDefaultHttpStepOperation.mockResolvedValue(false);
     mocks.persistStep.mockReset();
     mocks.attempt = 1;
     mocks.stepId = "step-1";

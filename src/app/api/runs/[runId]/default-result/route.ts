@@ -36,7 +36,11 @@ export async function POST(request: Request, context: { params: Promise<{ runId:
   try {
     const result = RecoverDefaultResultResult.parse(await recoverDefaultResultAction(parsed.data));
     if (result.ok && result.delivery.runId !== run.data.runId) throw new Error("mismatched delivery");
-    return Response.json(result, { status: result.ok ? 200 : result.retryable ? 503 : 400, headers: noStore });
+    const notificationPending = result.ok && result.workflowNotificationPending;
+    return Response.json(result, {
+      status: result.ok ? notificationPending ? 202 : 200 : result.retryable ? 503 : 400,
+      headers: notificationPending ? { ...noStore, "retry-after": "2" } : noStore,
+    });
   } catch {
     return Response.json({ ok: false, error: "成果核对结果暂时无法确认", retryable: true }, { status: 503, headers: noStore });
   }

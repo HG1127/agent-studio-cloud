@@ -27,7 +27,7 @@ describe("连接配置状态共享契约", () => {
   });
   it("配置状态不混用在线状态，且拒绝私有字段、重复登记和越界数量", () => {
     const result = { status: "configured", connections: [good], message: "配置检查结果" };
-    for (const field of ["endpoint", "headers", "workspaceId", "inputSchema", "reason"]) {
+    for (const field of ["endpoint", "headers", "workspaceId", "inputSchema", "outputSchema", "executionOutputDefinitions", "reason"]) {
       expect(McpConnectionConfigurationResult.safeParse({ ...result, [field]: "private" }).success).toBe(false);
       expect(McpConnectionConfigurationResult.safeParse({ ...result, connections: [{ ...good, [field]: "private" }] }).success).toBe(false);
     }

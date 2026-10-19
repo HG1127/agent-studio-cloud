@@ -1,7 +1,8 @@
 import { RunReportFile, RunStepReport } from "@/contracts/run";
 import { z } from "zod";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
-import { redactSensitiveData } from "@/server/domain/security/redact-sensitive";
+import { redactRunReportData, redactSensitiveData } from "@/server/domain/security/redact-sensitive";
+import { runReportFilename } from "@/server/domain/runtime/run-report-filename";
 import { getRunContext, getRunView, listApprovalsForReport, listRunStepsForReport } from "@/server/queries/runs";
 import { getLatestTraceSeq, listTraceSince } from "@/server/queries/trace";
 import { parseQueryRows } from "@/server/queries/parse-query-rows";
@@ -10,17 +11,13 @@ import { queryUnavailableResponse, SafeQueryError, withSafeQueryError } from "@/
 
 export const dynamic = "force-dynamic";
 
-function safeFilename(value: string): string {
-  return value.replace(/[^\p{L}\p{N}._-]+/gu, "-").slice(0, 50) || "run";
-}
-
 function streamedRunReport(
   report: RunReportFile,
   firstTraceBatch: Awaited<ReturnType<typeof listTraceSince>>,
   maxTraceSeq: number,
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
-  const redacted = redactSensitiveData({ ...report, trace: [] }) as RunReportFile;
+  const redacted = redactRunReportData({ ...report, trace: [] });
   const approvals = redacted.approvals;
   const head = { ...redacted, trace: undefined, approvals: undefined, integrity: undefined };
   let prefix = `${JSON.stringify(head).slice(0, -1)},"trace":[`;
@@ -145,8 +142,7 @@ export async function GET(_request: Request, context: { params: Promise<{ runId:
   if (!report.success) {
     return Response.json({ ok: false, error: "运行报告包含无法导出的历史数据" }, { status: 422 });
   }
-  const date = (run.finishedAt ?? run.startedAt ?? report.data.exportedAt).slice(0, 10);
-  const filename = `${safeFilename(run.agentName)}-${date}-运行报告.json`;
+  const filename = runReportFilename(report.data.run, report.data.exportedAt);
   // 运行上下文与步骤结果可以超过函数的普通响应上限，下载必须保持流式传输。
   return new Response(streamedRunReport(report.data, firstTraceBatch, maxTraceSeq), {
     headers: {

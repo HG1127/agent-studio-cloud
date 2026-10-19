@@ -70,6 +70,12 @@ export function defaultResultDeliveryView(record: DefaultResultDeliveryRecord): 
     runId: record.runId, status: record.status, writeAttempts: record.writeAttempts, error: record.error,
     createdAt: record.createdAt, updatedAt: record.updatedAt, confirmedAt: record.confirmedAt,
     canRetry: canClaimDefaultResultOperation(record, "write") || canClaimDefaultResultOperation(record, "close"),
-    canVerify: !["confirmed", "failed"].includes(record.status),
+    canVerify: !["confirmed", "failed"].includes(record.status) || record.waitingHookToken !== null,
   });
+}
+
+export function defaultResultWorkflowNotificationPending(value: DefaultResultDeliveryRecord, sdkStatus: string | null): boolean {
+  const record = DefaultResultDeliveryRecord.parse(value);
+  return ["confirmed", "failed"].includes(record.status) && record.waitingHookToken !== null
+    && !["completed", "failed", "cancelled"].includes(sdkStatus ?? "");
 }

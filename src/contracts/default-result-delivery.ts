@@ -69,7 +69,15 @@ export type RecoverDefaultResultBody = z.infer<typeof RecoverDefaultResultBody>;
 export const RecoverDefaultResultInput = DefaultResultDeliveryInput.extend(RecoverDefaultResultBody.shape).strict();
 export type RecoverDefaultResultInput = z.infer<typeof RecoverDefaultResultInput>;
 export const RecoverDefaultResultResult = z.discriminatedUnion("ok", [
-  z.object({ ok: z.literal(true), delivery: DefaultResultDeliveryView, workflowNotified: z.boolean() }).strict(),
+  z.object({
+    ok: z.literal(true), delivery: DefaultResultDeliveryView, workflowNotified: z.boolean(),
+    workflowNotificationPending: z.literal(true).optional(),
+  }).strict().superRefine((value, context) => {
+    if (value.workflowNotificationPending && (value.workflowNotified || value.delivery.canRetry
+      || !value.delivery.canVerify || !["confirmed", "failed"].includes(value.delivery.status))) {
+      context.addIssue({ code: "custom", message: "待恢复通知必须保留成果终态，只允许继续核对" });
+    }
+  }),
   z.object({ ok: z.literal(false), error: z.string(), retryable: z.boolean().optional() }).strict(),
 ]);
 export type RecoverDefaultResultResult = z.infer<typeof RecoverDefaultResultResult>;

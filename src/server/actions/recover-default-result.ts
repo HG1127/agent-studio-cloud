@@ -1,11 +1,27 @@
 "use server";
-import { resumeHook } from "workflow/api";
+import { getRun, resumeHook } from "workflow/api";
 import { FatalError } from "workflow";
 import { RecoverDefaultResultInput, RecoverDefaultResultResult, type RecoverDefaultResultResult as RecoveryResult } from "@/contracts/default-result-delivery";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
-import { defaultResultDeliveryHookToken, defaultResultDeliveryView } from "@/server/domain/runtime/default-result-delivery";
+import { defaultResultDeliveryHookToken, defaultResultDeliveryView, defaultResultWorkflowNotificationPending } from "@/server/domain/runtime/default-result-delivery";
 import { deliverDefaultResult, readDefaultResultDelivery } from "@/server/services/default-result-delivery";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
+
+async function readNotificationRunStatus(sdkRunId: string): Promise<string | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const run = getRun(sdkRunId);
+    if (run.runId !== sdkRunId) return null;
+    return await Promise.race([
+      run.status,
+      new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), 2_000); }),
+    ]);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export async function recoverDefaultResultAction(input: RecoverDefaultResultInput): Promise<RecoveryResult> {
   const parsed = RecoverDefaultResultInput.safeParse(input);
@@ -19,15 +35,19 @@ export async function recoverDefaultResultAction(input: RecoverDefaultResultInpu
     if (!record) return { ok: false, error: "成果投递记录不存在或不可访问" };
     if (record.runId !== parsed.data.runId || record.workspaceId !== DEMO_WORKSPACE_ID) throw new FatalError("成果归属不匹配");
     let workflowNotified = false;
+    let workflowNotificationPending = false;
     if (record.waitingHookToken && (record.status === "confirmed" || record.status === "failed")) {
       try {
         await resumeHook(defaultResultDeliveryHookToken(record), { kind: "delivery-updated" });
         workflowNotified = true;
       } catch {
-        // The durable terminal record is read after hook registration; notification failure is not delivery failure.
+        workflowNotificationPending = defaultResultWorkflowNotificationPending(record, await readNotificationRunStatus(record.sdkRunId));
       }
     }
-    return RecoverDefaultResultResult.parse({ ok: true, delivery: defaultResultDeliveryView(record), workflowNotified });
+    return RecoverDefaultResultResult.parse({
+      ok: true, delivery: defaultResultDeliveryView(record), workflowNotified,
+      ...(workflowNotificationPending ? { workflowNotificationPending: true } : {}),
+    });
   } catch (error) {
     console.error("成果核对未完成", safeErrorForLog(error));
     return FatalError.is(error)

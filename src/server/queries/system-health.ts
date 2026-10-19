@@ -6,6 +6,23 @@ import migrationJournal from "@/db/migrations/meta/_journal.json";
 export const LATEST_MIGRATION_WHEN = migrationJournal.entries.at(-1)?.when;
 if (!LATEST_MIGRATION_WHEN) throw new Error("数据库迁移清单为空");
 
+const MVP_TABLE_REQUIREMENTS = [
+  { tableName: "default_result_deliveries", required: ["run_id", "sdk_run_id", "frozen"],
+    optional: ["operation", "operation_token", "waiting_hook_token", "waiting_hook_step_id", "error", "confirmed_at"],
+    defaulted: ["status", "write_attempts", "acknowledgement", "producer_settled"] },
+  { tableName: "public_agent_tools", required: ["name", "description"],
+    optional: ["publication", "archived_at"], defaulted: ["status", "revision"] },
+  { tableName: "public_agent_tool_keys", required: ["tool_id", "name", "token_hash"],
+    optional: ["expires_at", "revoked_at", "archived_at"], defaulted: [] },
+  { tableName: "public_agent_tool_calls", required: ["tool_id", "key_id", "request_id", "request_hash", "origin", "publication"],
+    optional: ["run_id", "archived_at"], defaulted: [] },
+  { tableName: "public_agent_tool_changes", required: ["tool_id", "request_id", "request_hash", "operation", "revision"],
+    optional: ["key_id", "archived_at"], defaulted: [] },
+  { tableName: "harness_policies", required: ["revision"], optional: ["policy", "archived_at"], defaulted: [] },
+  { tableName: "harness_policy_changes", required: ["policy_id", "request_id", "request_hash", "revision", "reason"],
+    optional: ["previous_policy", "policy", "archived_at"], defaulted: [] },
+] as const;
+
 export const REQUIRED_DATABASE_OBJECTS = [
   "drizzle.__drizzle_migrations",
   "public.workspaces",
@@ -69,9 +86,23 @@ export const REQUIRED_DATABASE_OBJECTS = [
   "public.evaluation_runs_workspace_request_unique",
   "public.knowledge_chunks_content_trgm_idx",
   "public.agent_memories_content_trgm_idx",
+  ...MVP_TABLE_REQUIREMENTS.map((table) => `public.${table.tableName}`),
+  "public.default_result_deliveries_workspace_run_unique",
+  "public.default_result_deliveries_workspace_status_created_idx",
+  "public.public_agent_tool_calls_workspace_request_unique",
+  "public.public_agent_tool_calls_run_unique",
+  "public.public_agent_tool_changes_workspace_request_unique",
+  "public.public_agent_tool_keys_hash_unique",
+  "public.public_agent_tool_keys_workspace_tool_idx",
+  "public.public_agent_tools_workspace_created_idx",
+  "public.harness_policies_workspace_unique",
+  "public.harness_policy_changes_workspace_request_unique",
+  "public.harness_policy_changes_workspace_revision_unique",
 ] as const;
 
 export const REQUIRED_DATABASE_COLUMNS = [
+  { tableName: "runs", columnName: "default_result_tracking_version", requireNotNull: false, allowDefault: false },
+  { tableName: "runs", columnName: "harness_policy_snapshot", requireNotNull: false, allowDefault: false },
   { tableName: "evaluation_cases", columnName: "result_schema", requireNotNull: false, allowDefault: false },
   { tableName: "runs", columnName: "model_usage_tracking_version", requireNotNull: false, allowDefault: false },
   { tableName: "runs", columnName: "parent_run_id", requireNotNull: false, allowDefault: false },
@@ -108,6 +139,17 @@ export const REQUIRED_DATABASE_COLUMNS = [
   { tableName: "attention_cases", columnName: "created_by", requireNotNull: true, allowDefault: false },
   { tableName: "attention_cases", columnName: "occurrence", requireNotNull: true, allowDefault: false },
   { tableName: "attention_cases", columnName: "entries", requireNotNull: true, allowDefault: true },
+  ...MVP_TABLE_REQUIREMENTS.flatMap((table) => [
+    ...["workspace_id", "created_by", ...table.required].map((columnName) => ({
+      tableName: table.tableName, columnName, requireNotNull: true, allowDefault: false,
+    })),
+    ...["id", "created_at", "updated_at", ...table.defaulted].map((columnName) => ({
+      tableName: table.tableName, columnName, requireNotNull: true, allowDefault: true,
+    })),
+    ...table.optional.map((columnName) => ({
+      tableName: table.tableName, columnName, requireNotNull: false, allowDefault: false,
+    })),
+  ]),
 ] as const;
 
 export async function isDatabaseReady() {

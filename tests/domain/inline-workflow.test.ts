@@ -18,7 +18,7 @@ function draftWith(node: Record<string, unknown>) {
 
 describe("内嵌流程发布前校验", () => {
   it.each(["ai", "parallel", "subflow"])("%s 内的模型结果契约同样在保存、发布、恢复和导入前校验", (type) => {
-    const step = { id: "extract", title: "提取金额", type: "ai", modelOutput: { format: "json", schema: { type: "object", oneOf: [] } } };
+    const step = { id: "extract", title: "提取金额", type: "ai", modelOutput: { format: "json", schema: { type: "object", $ref: "unsupported" } } };
     const node = type === "ai" ? { ...step, id: "work", next: "done" } : type === "subflow"
       ? { id: "work", title: "一组步骤", type, next: "done", subflow: { name: "处理金额", steps: [step] } }
       : { id: "work", title: "并行处理", type, next: "done", parallel: { strategy: "all", failurePolicy: "fail_fast", branches: [

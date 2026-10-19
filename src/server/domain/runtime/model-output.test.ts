@@ -10,7 +10,7 @@ const schema = {
 
 describe("模型结果字段校验", () => {
   it.each(["ai", "parallel", "subflow"])("%s 中的结果配置在运行启动前同样校验", (type) => {
-    const step = { id: "extract", title: "提取金额", type: "ai", modelOutput: { format: "json", schema: { type: "object", oneOf: [] } } };
+    const step = { id: "extract", title: "提取金额", type: "ai", modelOutput: { format: "json", schema: { type: "object", $ref: "unsupported" } } };
     const work = type === "ai" ? { ...step, id: "work" } : type === "subflow"
       ? { id: "work", title: "处理金额", type, subflow: { name: "步骤组", steps: [step] } }
       : { id: "work", title: "处理金额", type, parallel: { strategy: "all", failurePolicy: "fail_fast", branches: [
@@ -68,8 +68,24 @@ describe("模型结果字段校验", () => {
   });
 
   it("发布前拒绝运行时不支持的字段规则", () => {
-    const modelOutput = ModelOutputConfig.parse({ format: "json", schema: { type: "object", oneOf: [] } });
+    const modelOutput = ModelOutputConfig.parse({ format: "json", schema: { type: "object", $ref: "unsupported" } });
     expect(validateModelOutputConfiguration({ title: "提取金额", modelOutput })).toContain("使用了暂不支持的规则");
+  });
+
+  it("空组合仍在发布前拒绝，不能借新增支持跳过结构校验", () => {
+    const modelOutput = ModelOutputConfig.parse({ format: "json", schema: { type: "object", oneOf: [] } });
+    expect(validateModelOutputConfiguration({ title: "提取金额", modelOutput })).toContain("oneOf 必须包含");
+  });
+
+  it("可空组合同时用于发布模拟样例和真实结构化结果校验", () => {
+    const composed = { type: "object", required: ["amount", "approved"], properties: {
+      amount: { anyOf: [{ type: "number", minimum: 0 }, { type: "null" }] },
+      approved: { oneOf: [{ const: true }, { const: false }] },
+    } };
+    const modelOutput = ModelOutputConfig.parse({ format: "json", schema: composed, mockOutput: { amount: null, approved: false } });
+    expect(validateModelOutputConfiguration({ title: "提取金额", modelOutput })).toBeNull();
+    expect(validateModelJsonOutput({ amount: null, approved: false }, composed)).toEqual({ ok: true, value: { amount: null, approved: false } });
+    expect(validateModelJsonOutput({ amount: "wrong", approved: false }, composed).ok).toBe(false);
   });
 
   it("显式模拟样例也必须满足完整结果契约", () => {

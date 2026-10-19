@@ -2,16 +2,10 @@ import type { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
 import { prepareParallelBranches } from "@/server/domain/runtime/parallel-runtime";
 import { prepareSubflow } from "@/server/domain/runtime/subflow-runtime";
 import type { ToolRegistration } from "@/server/tools/tool-registry";
-import { mcpToolInputDefinitionIssue } from "@/server/domain/runtime/mcp-tool";
+import { mcpToolInputDefinitionIssue, mcpToolLocalOutputDefinitionIssue } from "@/server/domain/runtime/mcp-tool";
+import { toolDefinitionsEqual } from "@/server/domain/tool-definition-equality";
 
 type ToolSnapshot = NonNullable<WorkflowNode["tool"]>;
-
-function canonicalJson(value: unknown): string {
-  return JSON.stringify(value, (_key, item) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) return item;
-    return Object.fromEntries(Object.entries(item).sort(([left], [right]) => left.localeCompare(right)));
-  });
-}
 
 export function toolRegistrationCompatibilityIssue(
   snapshot: ToolSnapshot,
@@ -20,7 +14,8 @@ export function toolRegistrationCompatibilityIssue(
   if (
     snapshot.registryToolId !== registration.id
     || snapshot.protocol !== (registration.protocol ?? "http-json")
-    || registration.protocol === "mcp-streamable-http" && snapshot.operationKind !== registration.operationKind
+    || (registration.protocol === "mcp-streamable-http" || registration.operationKind !== undefined)
+      && snapshot.operationKind !== registration.operationKind
     || snapshot.action !== registration.action
     || snapshot.scope !== registration.scope
     || snapshot.risk !== registration.risk
@@ -28,11 +23,12 @@ export function toolRegistrationCompatibilityIssue(
     return "绑定的业务工具配置已变化，请重新发布助手";
   }
   if (registration.protocol === "mcp-streamable-http") {
-    const issue = mcpToolInputDefinitionIssue(snapshot.inputSchema) ?? mcpToolInputDefinitionIssue(registration.inputSchema);
+    const issue = mcpToolInputDefinitionIssue(snapshot.inputSchema) ?? mcpToolInputDefinitionIssue(registration.inputSchema)
+      ?? mcpToolLocalOutputDefinitionIssue(snapshot.outputSchema) ?? mcpToolLocalOutputDefinitionIssue(registration.outputSchema);
     if (issue) return issue;
   }
-  if (canonicalJson(snapshot.inputSchema) !== canonicalJson(registration.inputSchema)
-    || canonicalJson(snapshot.outputSchema) !== canonicalJson(registration.outputSchema)) {
+  if (!toolDefinitionsEqual(snapshot.inputSchema, registration.inputSchema)
+    || !toolDefinitionsEqual(snapshot.outputSchema, registration.outputSchema)) {
     return "绑定的业务工具配置已变化，请重新发布助手";
   }
   return null;
