@@ -16,6 +16,7 @@ vi.mock("@/server/security/query-error", () => ({ withSafeQueryError: async (ope
   try { return await operation(); } catch { throw new Error("相关记录暂时无法读取"); }
 } }));
 vi.mock("@/features/runs/use-run-stream", () => ({ useRunStream: (_runId: string, events: TraceEventView[]) => events }));
+vi.mock("@/features/runs/DefaultResultRecoveryPanel", () => ({ DefaultResultRecoveryPanel: ({ runId }: { runId: string }) => <section aria-label="主流程成果确认" data-run={runId} /> }));
 vi.mock("@/server/actions/decide-approval", () => ({ decideApprovalAction: mocks.decide }));
 vi.mock("@/server/actions/cancel-run", () => ({ cancelRunAction: mocks.cancel }));
 vi.mock("@/server/actions/retry-run", () => ({ retryRunAction: mocks.retry }));
@@ -74,6 +75,25 @@ function expectMainEvidence(container: HTMLElement) {
 }
 
 describe("任务详情的独立读取与合法操作边界", () => {
+  it("坏成果只关闭成果区，任务状态、输入、步骤、轨迹及专用确认入口仍保留", async () => {
+    let value: unknown = "private-too-deep-result"; for (let index = 0; index < 33; index += 1) value = { 内容: value };
+    mocks.view.mockResolvedValue({ ...baseRun, result: value });
+    const { container } = render(await RunDetail({ runId: RUN_ID }));
+    expect(within(container.querySelector("#result") as HTMLElement).getByRole("alert")).toHaveTextContent("无法安全展示");
+    expect(container.textContent).not.toContain("private-too-deep-result");
+    expect(screen.queryByRole("button", { name: "复制最终结果" })).not.toBeInTheDocument();
+    expect(screen.queryByText("这次运行没有产出内容。")).not.toBeInTheDocument();
+    expect(within(container.querySelector("#input") as HTMLElement).getByText("核对客户咨询")).toBeVisible();
+    expect(screen.getAllByText("已完成").length).toBeGreaterThan(0);
+    expect(screen.getByText("本次流程执行完成")).toBeVisible();
+    expect(screen.getByRole("region", { name: "主流程成果确认" })).toHaveAttribute("data-run", RUN_ID);
+    expectNoWrites();
+  });
+  it("子任务不误用仅主流程的默认成果确认入口", async () => {
+    mocks.view.mockResolvedValue({ ...baseRun, sourceType: "agent_call", parentRunId: APPROVAL_ID });
+    render(await RunDetail({ runId: RUN_ID }));
+    expect(screen.queryByRole("region", { name: "主流程成果确认" })).not.toBeInTheDocument(); expectNoWrites();
+  });
   it("同一助手的验收来源可按原范围返回验收中心", async () => {
     mocks.view.mockResolvedValue({ ...baseRun, sourceType: "evaluation" });
     const href = acceptanceEvidenceHref({ query: "客户", page: 2 }, AcceptanceEvidenceSelection.parse({ agentId: AGENT_ID, batchId: RUN_ID, caseId: APPROVAL_ID, query: "未通过", status: "failed" }));

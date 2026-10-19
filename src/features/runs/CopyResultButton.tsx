@@ -8,8 +8,8 @@ export function CopyResultButton({ result, text, label = "复制最终结果" }:
   async function copy() {
     setStatus("idle");
     try {
-      const content = text || (typeof result === "string" ? result : JSON.stringify(result, null, 2));
-      if (!content) throw new Error("empty result");
+      const content = text ?? (typeof result === "string" ? result : JSON.stringify(result, null, 2));
+      if (content === undefined) throw new Error("unavailable result");
       await navigator.clipboard.writeText(content);
       setStatus("copied");
     } catch {

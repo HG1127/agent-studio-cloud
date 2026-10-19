@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RunDeliveryResult, RunDeliveryRetryBody, RunDeliveryRetryResult, RunDeliveryView } from "@/contracts/run-delivery";
 import { RunView } from "@/contracts/run";
+import { DefaultResultDeliveryQueryResult } from "@/contracts/default-result-delivery";
 import { RunDeliveryPanel } from "@/features/runs/RunDeliveryPanel";
 import { RunDetail } from "@/features/runs/RunDetail";
 import { BusinessResultExportButtons } from "@/features/runs/BusinessResultExportButtons";
@@ -87,9 +88,10 @@ beforeEach(() => {
 });
 afterEach(() => {
   for (const [url, options] of request.mock.calls) {
-    expect(url).toMatch(/^\/api\/runs\/[0-9a-f-]{36}\/delivery$/);
+    expect(url).toMatch(/^\/api\/runs\/[0-9a-f-]{36}\/(delivery|default-result)$/);
     expect(options).toMatchObject({ cache: "no-store", credentials: "same-origin", redirect: "error" });
     expect(["GET", "POST"]).toContain(options?.method);
+    if (String(url).endsWith("/default-result")) expect(options?.method).toBe("GET");
   }
   vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
@@ -164,12 +166,16 @@ describe("实际运行详情的成果投递面板", () => {
   });
 
   it("真实父页面挂载导航和叶子；投递读取失败不破坏已保存结果及其他证据", async () => {
-    request.mockRejectedValue(new Error("DATABASE_URL private-secret"));
+    request.mockImplementation(async (url) => {
+      if (String(url).endsWith("/default-result")) return Response.json(DefaultResultDeliveryQueryResult.parse({ delivery: null }), { status: 404 });
+      throw new Error("DATABASE_URL private-secret");
+    });
     const user = userEvent.setup();
     render(await RunDetail({ runId: A }));
     expect(screen.getByRole("navigation", { name: "运行详情区块" }).querySelector('a[href="#delivery"]')).toHaveTextContent("成果投递");
     expect(screen.getByText("本次已保存的业务成果")).toBeInTheDocument();
     await within(panel()).findByText("投递状态暂时无法核对");
+    await screen.findByText(/当前没有读到可核对的主流程成果记录/);
     expect(within(panel()).queryByText(/尚无已保存/)).not.toBeInTheDocument();
     expect(within(panel()).queryByRole("textbox")).not.toBeInTheDocument();
     await user.click(within(panel()).getByRole("button", { name: "重新读取投递状态" }));

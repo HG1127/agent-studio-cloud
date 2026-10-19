@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RunView } from "@/contracts/run";
+import { DefaultResultDeliveryQueryResult } from "@/contracts/default-result-delivery";
 import { chainFixture, completeUsage, usageRunId } from "../fixtures/model-usage";
 
 const mocks = vi.hoisted(() => ({ run: vi.fn(), refresh: vi.fn() }));
@@ -26,6 +27,7 @@ const saved = RunView.parse({ id: usageRunId, agentId: "00000000-0000-4000-8000-
 const usageUrl = "/api/runs/" + usageRunId + "/usage";
 const chainUrl = usageUrl + "/chain";
 const deliveryUrl = "/api/runs/" + usageRunId + "/delivery";
+const defaultResultUrl = "/api/runs/" + usageRunId + "/default-result";
 function usageRequests(calls: [url: string, init: RequestInit][]) {
   return calls.filter(([url]) => url === usageUrl || url === chainUrl);
 }
@@ -33,10 +35,12 @@ function expectReadOnlyRequests(calls: [url: string, init: RequestInit][]) {
   const deliveryRequests = calls.filter(([url]) => url === deliveryUrl);
   expect(deliveryRequests).toHaveLength(1);
   expect(deliveryRequests[0][1].method).toBe("GET");
+  expect(calls.filter(([url]) => url === defaultResultUrl)).toHaveLength(1);
   expect(calls.every(([, init]) => init.method === "GET")).toBe(true);
-  expect(calls.every(([url]) => [usageUrl, chainUrl, deliveryUrl].includes(url))).toBe(true);
+  expect(calls.every(([url]) => [usageUrl, chainUrl, deliveryUrl, defaultResultUrl].includes(url))).toBe(true);
 }
 function savedReadResponse(url: string) {
+  if (url === defaultResultUrl) return Response.json(DefaultResultDeliveryQueryResult.parse({ delivery: null }), { status: 404 });
   if (url === deliveryUrl) return Response.json({ ok: true, runId: usageRunId, delivery: null });
   if (url === usageUrl) return Response.json({ ok: true, summary: completeUsage() });
   if (url === chainUrl) return Response.json({ ok: true, summary: chainFixture() });
@@ -72,7 +76,7 @@ describe("运行详情实际父组装中的模型用量", () => {
     expectReadOnlyRequests(fetcher.mock.calls);
   });
   it("任务状态变化重建统计读取，取消旧读取且不新建任务", async () => {
-    const fetcher = vi.fn<(url: string, init: RequestInit) => Promise<Response>>((url) => url === deliveryUrl ? Promise.resolve(savedReadResponse(url)) : new Promise<Response>(() => {})); vi.stubGlobal("fetch", fetcher);
+    const fetcher = vi.fn<(url: string, init: RequestInit) => Promise<Response>>((url) => url === deliveryUrl || url === defaultResultUrl ? Promise.resolve(savedReadResponse(url)) : new Promise<Response>(() => {})); vi.stubGlobal("fetch", fetcher);
     mocks.run.mockResolvedValue({ ...saved, status: "running", finishedAt: null });
     const view = render(await RunDetail({ runId: usageRunId }));
     mocks.run.mockResolvedValue(saved);

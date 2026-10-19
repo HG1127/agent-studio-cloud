@@ -16,6 +16,7 @@ vi.mock("@/server/queries/runs", () => ({
 vi.mock("@/server/queries/trace", () => ({ listRecentTrace: async () => [] }));
 vi.mock("@/server/queries/run-feedback", () => ({ getRunFeedback: async () => null }));
 vi.mock("@/features/runs/TraceTimeline", () => ({ TraceTimeline: () => null }));
+vi.mock("@/features/runs/DefaultResultRecoveryPanel", () => ({ DefaultResultRecoveryPanel: () => null }));
 vi.mock("@/features/runs/ApprovalPanel", () => ({ ApprovalPanel: () => null }));
 vi.mock("@/features/runs/CancelRunButton", () => ({ CancelRunButton: () => null }));
 vi.mock("@/features/runs/RetryRunButton", () => ({ RetryRunButton: () => <button type="button">重新运行</button> }));

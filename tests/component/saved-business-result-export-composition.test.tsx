@@ -57,6 +57,20 @@ function blobText(index: number) {
 }
 
 describe("真实服务端导出叶子→真实下载按钮（未执行作者规格）", () => {
+  it("32层投影完整送到下载按钮，脱敏或容量不安全时连客户端载荷也不生成", () => {
+    let value: unknown = { tokenizer: "业务分词", tokenUnit: "字符", 金额: 0, 已核对: false, 联系: "buyer@example.test" };
+    for (let index = 0; index < 30; index += 1) value = { 内容: value };
+    const { rerender } = render(<SavedBusinessResultExport run={{ ...run(), result: { report: value } }} />);
+    const props = tracked.clientProps.mock.lastCall?.[0];
+    expect(props.markdown).toContain("业务分词"); expect(props.csv).toContain("金额：0");
+    expect(JSON.stringify(props)).not.toContain("buyer@example.test"); expect(Object.keys(props).sort()).toEqual(["csv", "markdown"]);
+    tracked.clientProps.mockClear();
+    let invalid: unknown = "private-invalid-result"; for (let index = 0; index < 33; index += 1) invalid = { 内容: invalid };
+    rerender(<SavedBusinessResultExport run={{ ...run(), result: invalid }} />);
+    expect(tracked.clientProps).not.toHaveBeenCalled(); expect(createUrl).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "导出业务成果文档" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/private-invalid-result/)).not.toBeInTheDocument();
+  });
   it("StrictMode渲染不下载、不生成URL；客户端边界只得到安全MD/CSV字符串", () => {
     render(<StrictMode><SavedBusinessResultExport run={run("联系 buyer@example.test，密钥 sk-privatecredential123456")} /></StrictMode>);
     expect(screen.getByRole("button", { name: "导出业务成果文档" })).toBeEnabled();

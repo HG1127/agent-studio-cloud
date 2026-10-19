@@ -1,5 +1,5 @@
 import { isPassiveJsonData } from "@/contracts/json";
-import { MAX_RUN_RESULT_BYTES, RunSourceType, RunStatus, type RunStepView, type RunView } from "@/contracts/run";
+import { MAX_RUN_RESULT_BYTES, RunResultValue, RunSourceType, RunStatus, type RunStepView, type RunView } from "@/contracts/run";
 import { redactSensitiveData, redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 import { presentBusinessOutput } from "./present-business-output";
 import { savedRunResultView } from "./run-result-view";
@@ -74,7 +74,7 @@ function businessText(value: string, knownUUIDs: ReadonlySet<string>) {
 }
 
 function displayText(value: unknown, context: ReturnType<typeof references>, depth = 0): string {
-  if (depth > 12) throw new UnavailableExport(UNKNOWN_CONTENT);
+  if (depth > 32) throw new UnavailableExport(UNKNOWN_CONTENT);
   if (value === null) return "空值（已保存）";
   if (typeof value === "string") return businessText(value, context.knownUUIDs);
   if (typeof value === "boolean") return value ? "是" : "否";
@@ -177,12 +177,13 @@ export function savedBusinessResultExport(run: ExportRun, steps: readonly RunSte
     const source = RunSourceType.safeParse(run.sourceType);
     if (!status.success || !source.success) return { available: false as const, message: "运行状态或发起方式暂时无法核对，整份导出已停用。" };
     if (run.result === null || run.result === undefined) return { available: false as const, message: "当前没有可导出的已保存结果。" };
-    if (!isPassiveJsonData(run.result, MAX_RUN_RESULT_BYTES, 12) || !isPassiveJsonData(run.outputContract, MAX_RUN_RESULT_BYTES)) {
+    if (!RunResultValue.safeParse(run.result).success || !isPassiveJsonData(run.outputContract, MAX_RUN_RESULT_BYTES)) {
       throw new UnavailableExport(UNKNOWN_CONTENT);
     }
     const ownSteps = stepsUnavailable ? [] : steps.filter((step) => sameIdentity(step.runId, run.id));
     const titles = new Map(ownSteps.map((step) => [step.nodeId, step.nodeTitle?.trim() && step.nodeTitle.trim() !== step.nodeId ? step.nodeTitle.trim() : null]));
     const result = savedRunResultView(run, titles);
+    if (result.unavailable) throw new UnavailableExport(UNKNOWN_CONTENT);
     if (!result.outputs.length) return { available: false as const, message: "当前没有可导出的业务展示内容。" };
     const context = references(run, ownSteps);
     const rows = result.outputs.map((output, index) => ({

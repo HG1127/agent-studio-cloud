@@ -29,6 +29,7 @@ import { CopyResultButton } from "@/features/runs/CopyResultButton";
 import { RunStepRecord } from "@/features/runs/RunStepRecord";
 import { RunModelUsagePanel } from "@/features/runs/RunModelUsagePanel";
 import { RunDeliveryPanel } from "@/features/runs/RunDeliveryPanel";
+import { DefaultResultRecoveryPanel } from "@/features/runs/DefaultResultRecoveryPanel";
 import { SavedRunResultValue } from "@/features/runs/SavedRunResultValue";
 import { SavedBusinessResultExport } from "@/features/runs/SavedBusinessResultExport";
 import { ResumeRunStartButton } from "@/features/runs/ResumeRunStartButton";
@@ -205,7 +206,8 @@ export async function RunDetail({ runId, backHref = "/runs", collaboration = col
   const inputs = contractedInputs.length > 0
     ? contractedInputs
     : Object.entries(redactedInput).map(([name, value], index) => ({ name, label: runValueLabel(name, index), value }));
-  const { hasResult, redactedResult, outputs, copyText: recordedCopyText } = savedRunResultView(run, stepTitleByNode);
+  const savedResult = savedRunResultView(run, stepTitleByNode);
+  const { hasResult, redactedResult, outputs, copyText: recordedCopyText } = savedResult;
   const copyText = recordedCopyText === undefined ? undefined : outputs.map(({ label, output }) => `${label}\n${typeof output === "string" ? presentBusinessOutput(output).text : JSON.stringify(output, null, 2) ?? ""}`).join("\n\n");
   const completedSteps = steps?.filter((step) => step.status === "succeeded").length;
   const guidance = run.sourceType === "evaluation" && ["failed", "cancelled"].includes(run.status)
@@ -357,7 +359,7 @@ export async function RunDetail({ runId, backHref = "/runs", collaboration = col
 
       <RunCollaborationSection runId={runId} runs={childRuns} backHref={backHref} state={collaboration.state} invalidState={collaboration.invalidState} parent={verifiedParent} />
 
-      {hasResult ? (
+      {savedResult.unavailable ? <section id="result" className="content-card scroll-mt-32"><RunSectionUnavailable title="成果暂时无法安全展示" message={savedResult.message!} /></section> : hasResult ? (
         <section id="result" className="content-card scroll-mt-32 flex flex-col gap-3 border-emerald-200/80">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-sm font-semibold">最终结果</h2>
@@ -388,6 +390,7 @@ export async function RunDetail({ runId, backHref = "/runs", collaboration = col
       ) : null}
 
       <RunDeliveryPanel runId={run.id} />
+      {run.parentRunId === null && ["manual", "schedule", "evaluation"].includes(run.sourceType) ? <DefaultResultRecoveryPanel runId={run.id} /> : null}
 
       {run.status === "completed" ? (
         <div id="feedback" className="scroll-mt-32"><RunFeedbackReadBoundary key={runId} readable={feedbackResult.status === "fulfilled"}>{feedbackResult.status === "fulfilled" ?

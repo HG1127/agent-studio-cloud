@@ -88,6 +88,27 @@ describe("网页工具内部结果的真实性与读取边界", () => {
 });
 
 describe("网页交付内容呈现", () => {
+  it("非法成果保留任务状态与证据入口，不回退到空交付或开放复制", () => {
+    let value: unknown = "private-invalid-web-result"; for (let index = 0; index < 33; index += 1) value = { 内容: value };
+    const { container } = render(saved({ ...baseRun, result: value }));
+    expect(screen.getByRole("alert")).toHaveTextContent("任务状态和执行证据仍保留");
+    expect(screen.queryByRole("heading", { name: "完成状态已记录，但尚无最终结果" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "复制已保存内容" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "查看本次任务与执行证据" })).toHaveAttribute("href", webToolRunHref(versionId, runId));
+    expect(container.textContent).not.toContain("private-invalid-web-result"); expect(mocks.start).not.toHaveBeenCalled();
+  });
+  it("深层展示与复制共用32层安全值，保留零否与普通分词字段", async () => {
+    const user = userEvent.setup();
+    let value: unknown = { tokenizer: "业务分词", tokenUnit: "字符", 金额: 0, 已核对: false, 联系: "buyer@example.test" };
+    for (let index = 0; index < 31; index += 1) value = { 内容: value };
+    const { container } = render(saved({ ...baseRun, result: value, outputContract: { fields: [] } }));
+    const write = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+    await user.click(screen.getByRole("button", { name: "复制已保存内容" }));
+    expect(write).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('"tokenizer": "业务分词"'));
+    expect(write.mock.calls[0][0]).toContain('"金额": 0'); expect(write.mock.calls[0][0]).toContain('"已核对": false');
+    expect(container.textContent).not.toContain("buyer@example.test"); expect(container.textContent).not.toContain("层级过深，已省略");
+    write.mockRestore();
+  });
   it("共享结构已核验的版本UUID大小写相同不误报不同版本，未改变原URL", () => {
     const id = "abcdef05-abcd-4abc-8abc-abcdefabcdef";
     render(saved(RunView.parse({ ...baseRun, versionId: id }), { selectedVersionId: id.toUpperCase() }));

@@ -13,6 +13,28 @@ const response = (data: unknown) => ({ ok: true, json: async () => data });
 function mount() { return render(<EvaluationRunEvidence agentId={agentId} version={4} result={result} navigation={navigation} onClose={close} />); }
 
 describe("按需读取实际验收运行证据", () => {
+  it("成果安全投影失败不击穿报告，判定、状态和步骤证据保留且原文不能从开发者数据泄出", async () => {
+    let value: unknown = "private-invalid-result"; for (let index = 0; index < 33; index += 1) value = { 内容: value };
+    fetchMock.mockResolvedValue(response({ ...report, run: { ...report.run, result: value } }));
+    const { container } = mount();
+    const section = await screen.findByLabelText("本次运行保存的结果");
+    expect(within(section).getByRole("alert")).toHaveTextContent("任务状态和执行证据仍保留");
+    expect(screen.getByLabelText("已保存的样例判定")).toHaveTextContent("未通过");
+    expect(screen.getByLabelText("关联任务的实际状态")).toHaveTextContent("已完成");
+    expect(screen.getByText("本次报告中的执行证据")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "复制本次结果" })).not.toBeInTheDocument();
+    expect(container.textContent).not.toContain("private-invalid-result");
+    expect(container.textContent).not.toContain("尚未读到保存的最终结果");
+  });
+  it("深层成果的开发者数据保留同一完整安全值，不再次按上下文12层截断", async () => {
+    let value: unknown = { tokenizer: "业务分词", tokenUnit: "字符", 金额: 0, 已核对: false, 联系: "buyer@example.test" };
+    for (let index = 0; index < 31; index += 1) value = { 内容: value };
+    fetchMock.mockResolvedValue(response({ ...report, run: { ...report.run, result: value, outputContract: { fields: [] } } }));
+    const { container } = mount(); await screen.findByLabelText("本次运行保存的结果");
+    expect(container.textContent).toContain("业务分词"); expect(container.textContent).toContain("tokenUnit");
+    expect(container.textContent).not.toContain("buyer@example.test"); expect(container.textContent).not.toContain("层级过深，已省略");
+    expect(screen.getByRole("button", { name: "复制本次结果" })).toBeEnabled();
+  });
   it("验收中心复用同一真实报告，详情返回原列表和已应用筛选", async () => {
     const overview = { query: "合同", page: 4 };
     render(<EvaluationRunEvidence agentId={agentId} version={4} result={result} navigation={navigation} onClose={close} overviewScope={overview} />);

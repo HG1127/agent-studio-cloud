@@ -1,7 +1,9 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RunStepView, RunView } from "@/contracts/run";
 import { RunDeliveryResult } from "@/contracts/run-delivery";
+import { DefaultResultDeliveryQueryResult } from "@/contracts/default-result-delivery";
 import { RunDetail } from "@/features/runs/RunDetail";
 
 const io = vi.hoisted(() => ({ run: vi.fn(), steps: vi.fn(), approvals: vi.fn(), trace: vi.fn(), wait: vi.fn(), children: vi.fn(), feedback: vi.fn(), refresh: vi.fn(), saveFeedback: vi.fn(), regression: vi.fn(), cancel: vi.fn(), retry: vi.fn(), resume: vi.fn(), approve: vi.fn() }));
@@ -43,6 +45,7 @@ async function show(run = saved()) {
   io.run.mockResolvedValue(run);
   const rendered = render(await RunDetail({ runId: run.id }));
   await screen.findByText(/尚无已保存的投递记录/);
+  await screen.findByText(/当前没有读到可核对的主流程成果记录/);
   return rendered;
 }
 
@@ -59,8 +62,9 @@ beforeEach(() => {
   createUrl.mockImplementation(() => "blob:business-parent-" + String(createUrl.mock.calls.length));
   vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { links.push({ filename: this.download, href: this.href, connected: this.isConnected }); });
   request.mockImplementation(async (url) => {
-    const reference = /^\/api\/runs\/([0-9a-f-]{36})\/delivery$/.exec(String(url));
+    const reference = /^\/api\/runs\/([0-9a-f-]{36})\/(delivery|default-result)$/.exec(String(url));
     if (!reference) throw new Error("父页导出不得新增接口读取");
+    if (reference[2] === "default-result") return Response.json(DefaultResultDeliveryQueryResult.parse({ delivery: null }), { status: 404 });
     return Response.json(RunDeliveryResult.parse({ ok: true, runId: reference[1], delivery: null }));
   });
   vi.stubGlobal("fetch", request);
@@ -68,7 +72,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   for (const [url, options] of request.mock.calls) {
-    expect(url).toMatch(/^\/api\/runs\/[0-9a-f-]{36}\/delivery$/);
+    expect(url).toMatch(/^\/api\/runs\/[0-9a-f-]{36}\/(delivery|default-result)$/);
     expect(options).toMatchObject({ method: "GET", cache: "no-store", credentials: "same-origin", redirect: "error" });
   }
   for (const value of [io.saveFeedback, io.regression, io.cancel, io.retry, io.resume, io.approve, io.refresh]) expect(value).not.toHaveBeenCalled();
@@ -76,6 +80,31 @@ afterEach(() => {
 });
 
 describe("真实RunDetail→真实已保存成果叶子→真实下载按钮（作者规格，未执行）", () => {
+  it("两个真实确认面板初始化后，32层成果复制与导出不再读取或写入后端", async () => {
+    let value: unknown = { tokenizer: "业务分词", tokenUnit: "字符", 金额: 0, 已核对: false, 联系: "buyer@example.test" };
+    for (let index = 0; index < 30; index += 1) value = { 内容: value };
+    await show(saved({ result: { report: value } }));
+    expect(request.mock.calls.map(([url]) => String(url)).sort()).toEqual([`/api/runs/${A}/default-result`, `/api/runs/${A}/delivery`].sort());
+    const readCount = request.mock.calls.length;
+    const user = userEvent.setup(); const clipboard = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+    await user.click(screen.getByRole("button", { name: "复制最终结果" }));
+    expect(clipboard).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('"tokenizer": "业务分词"'));
+    expect(clipboard.mock.calls[0][0]).not.toContain("buyer@example.test");
+    fireEvent.click(within(exportPanel()).getByRole("button", { name: "导出业务成果文档" }));
+    expect(blobText(0)).toContain("业务分词"); expect(blobText(0)).toContain("金额：0"); expect(blobText(0)).toContain("已核对：否");
+    expect(blobText(0)).not.toContain("buyer@example.test"); expect(blobText(0)).not.toContain("层级过深");
+    expect(request).toHaveBeenCalledTimes(readCount);
+  });
+  it("非法成果不影响两个真实只读确认面板，也不开放任何复制或下载", async () => {
+    let value: unknown = "private-invalid-result"; for (let index = 0; index < 33; index += 1) value = { 内容: value };
+    await show(saved({ result: value }));
+    expect(document.querySelector("#result")).toHaveTextContent("成果暂时无法安全展示");
+    expect(screen.queryByRole("button", { name: "复制最终结果" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "已保存业务成果导出" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "主流程成果确认" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "接收状态与人工补投" })).toBeVisible();
+    expect(document.body.textContent).not.toContain("private-invalid-result"); expect(createUrl).not.toHaveBeenCalled();
+  });
   it("保存结果区块内只在手动点击导出安全文档与清单，复制和开发者报告入口保留", async () => {
     const run = saved({ result: { report: BODY + " 联系 buyer@example.test，凭据 sk-privatecredential123456", private_unselected: PRIVATE_UNSELECTED } });
     const original = structuredClone(run);
@@ -177,6 +206,7 @@ describe("真实RunDetail→真实已保存成果叶子→真实下载按钮（�
     const nextPage = await RunDetail({ runId: B });
     act(() => view.rerender(nextPage));
     await waitFor(() => expect(screen.getByText(/尚无已保存的投递记录/)).toBeInTheDocument());
+    await screen.findByText(/当前没有读到可核对的主流程成果记录/);
     expect(within(exportPanel()).queryByText(/已发起下载/)).not.toBeInTheDocument();
     expect(revokeUrl).toHaveBeenCalledExactlyOnceWith("blob:business-parent-1");
     expect(createUrl).toHaveBeenCalledTimes(1); expect(links).toHaveLength(1);
@@ -186,6 +216,7 @@ describe("真实RunDetail→真实已保存成果叶子→真实下载按钮（�
     const returnPage = await RunDetail({ runId: A });
     act(() => view.rerender(returnPage));
     await waitFor(() => expect(screen.getByText(/尚无已保存的投递记录/)).toBeInTheDocument());
+    await screen.findByText(/当前没有读到可核对的主流程成果记录/);
     expect(within(exportPanel()).queryByText(/已发起下载/)).not.toBeInTheDocument();
     expect(revokeUrl).toHaveBeenCalledTimes(2);
     expect(createUrl).toHaveBeenCalledTimes(2); expect(links).toHaveLength(2);

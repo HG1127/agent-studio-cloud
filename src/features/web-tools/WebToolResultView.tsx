@@ -7,6 +7,7 @@ import type { savedRunResultView } from "@/features/runs/run-result-view";
 
 export function WebToolResultView({ result, valuePreviews }: { result: ReturnType<typeof savedRunResultView>; valuePreviews?: readonly ReactNode[] }) {
   const [view, setView] = useState<"cards" | "list">("cards");
+  if (result.unavailable) return <p role="alert" className="text-sm leading-6 text-amber-900">{result.message}</p>;
   return <div className="min-w-0 space-y-4">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div role="group" aria-label="已保存结果布局" className="flex gap-1 rounded-lg border border-slate-200 bg-white p-1">

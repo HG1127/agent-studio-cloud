@@ -68,6 +68,21 @@ function selectedNextRun(style: "explicit" | "legacy", value: unknown = "private
 }
 
 describe("已保存业务成果的纯导出投影（未执行作者规格）", () => {
+  it("32层成果经同一安全投影导出，保留分词计量与零否并隐藏个人信息", () => {
+    let value: unknown = { tokenizer: "业务分词", tokenUnit: "字符", 金额: 0, 已核对: false, 联系: "buyer@example.test" };
+    for (let index = 0; index < 30; index += 1) value = { 内容: value };
+    const saved = run({ result: { report: value } }); const original = JSON.stringify(saved.result);
+    const result = exported(saved);
+    for (const text of [result.markdown, result.csv]) {
+      expect(text).toContain("业务分词"); expect(text).toContain("字符"); expect(text).toContain("金额：0"); expect(text).toContain("已核对：否");
+      expect(text).not.toContain("buyer@example.test"); expect(text).not.toContain("层级过深");
+    }
+    expect(JSON.stringify(saved.result)).toBe(original);
+  });
+  it("脱敏膨胀越界时整份停用，不退回未脱敏值", () => {
+    const value = Object.fromEntries(Array.from({ length: 30_000 }, (_, index) => [`phone_designed_business_contact_field_${index}`, "x"]));
+    expect(expectUnavailable(run({ result: value, outputContract: { fields: [] } }))).toContain("整份导出已停用");
+  });
   it("复用真实已保存结果与脱敏，不导出输入、步骤原值、内部路径或当前草稿", () => {
     const saved = run({ result: { report: { 内容: "联系 buyer@example.test，凭据 sk-privatecredential123456", runId, nodeId: "private-source", fieldId: "report" }, private_unselected: "private-developer-data" } });
     const original = structuredClone(saved);
@@ -313,7 +328,7 @@ describe("已保存业务成果的纯导出投影（未执行作者规格）", (
 
   it("渲染后文本超过共享字节上限也停用，不把内容层级省略提示当作业务原文", () => {
     expect(expectUnavailable(run({ result: { report: "界".repeat(MAX_RUN_RESULT_BYTES / 2) } }))).toContain("整份导出已停用");
-    let deep: unknown = "private-too-deep-body"; for (let index = 0; index < 14; index += 1) deep = { 内容: deep };
+    let deep: unknown = "private-too-deep-body"; for (let index = 0; index < 33; index += 1) deep = { 内容: deep };
     expect(expectUnavailable(run({ result: { report: deep } }))).toContain("整份导出已停用");
   });
 });
