@@ -5,6 +5,8 @@ import { listMemories, listMemoryAgentOptions } from "@/server/queries/memory";
 import { listImprovementFeedback } from "@/server/queries/run-feedback";
 import { firstSearchParam, pageFromSearchParam } from "@/lib/search-params";
 import { withSafeQueryError } from "@/server/security/query-error";
+import { PageHeader } from "@/components/ui/page-header";
+import { PageRefreshButton } from "@/components/ui/PageRefreshButton";
 
 export const dynamic = "force-dynamic";
 
@@ -43,12 +45,10 @@ export default async function MemoryPage({ searchParams }: {
   const archivedHasNext = archivedRows.length > PAGE_SIZE;
   const feedbackHasNext = improvementFeedbackRows.length > PAGE_SIZE;
   const filtered = Boolean(agentId || query);
-  return <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 p-8">
-    <header>
-      <h1 className="text-2xl font-bold">经验库</h1>
-      <p className="mt-1 text-sm text-gray-500">集中处理运行改进意见，并管理助手明确保存的长期经验。</p>
-    </header>
-    <form method="get" className="flex flex-wrap items-end gap-3 rounded-lg border border-gray-200 bg-white p-4">
+  return <main className="page-shell">
+    <PageHeader eyebrow="持续改进" title="成长中心" description="集中处理需要改进的运行结果，并管理助手明确保存的长期经验。" action={<PageRefreshButton />} />
+    <p className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm leading-6 text-indigo-950">长期经验由流程中的“保存经验”步骤产生，只供原助手在后续运行中检索。停用后不再参与检索，来源运行记录仍可查看。</p>
+    <form method="get" className="content-card flex flex-wrap items-end gap-3">
       <label className="flex min-w-44 flex-1 flex-col gap-1 text-xs text-gray-600">助手
         <select name="agent" defaultValue={agentId ?? ""} className="rounded-md border border-gray-300 px-2 py-2 text-sm">
           <option value="">全部助手</option>
@@ -61,7 +61,7 @@ export default async function MemoryPage({ searchParams }: {
       <button type="submit" className="rounded-md bg-gray-900 px-3 py-2 text-sm text-white">筛选</button>
       {filtered ? <Link href="/memory" className="px-1 py-2 text-sm text-gray-500 hover:text-gray-800">清除筛选</Link> : null}
     </form>
-    <section className="flex flex-col gap-3">
+    <section className="content-card flex flex-col gap-3">
       <div>
         <h2 className="text-lg font-semibold">待改进结果</h2>
         <p className="mt-1 text-xs text-gray-500">需要改进的运行反馈；加入验收后可继续补充期望结果。</p>
@@ -75,9 +75,9 @@ export default async function MemoryPage({ searchParams }: {
         label="待改进结果翻页"
       />
     </section>
-    <section className="flex flex-col gap-3 border-t border-gray-200 pt-6">
-      <h2 className="text-lg font-semibold">长期经验</h2>
-    <MemoryList memories={memories} />
+    <section className="content-card flex flex-col gap-3">
+      <div><h2 className="text-lg font-semibold">长期经验</h2><p className="mt-1 text-xs text-slate-500">先阅读摘要；展开可查看完整保存内容，再决定是否停用。</p></div>
+    <MemoryList memories={memories} filtered={filtered} />
     <MemoryPagination
       page={page}
       hasNext={hasNext}
@@ -86,9 +86,9 @@ export default async function MemoryPage({ searchParams }: {
       label="在用经验翻页"
     />
     </section>
-    {archivedMemories.length > 0 || archivedPage > 1 ? <section className="border-t border-gray-200 pt-6">
+    {archivedMemories.length > 0 || archivedPage > 1 ? <section className="content-card">
       <h2 className="mb-3 text-sm font-semibold text-gray-700">已停用经验</h2>
-      <MemoryList memories={archivedMemories} archived />
+      <MemoryList memories={archivedMemories} archived filtered={filtered} />
       <div className="mt-4">
         <MemoryPagination
           page={archivedPage}

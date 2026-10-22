@@ -1,5 +1,5 @@
 // 实时轨迹流 hook：EventSource 消费 /api/runs/[runId]/events，按 seq 去重合并，
-// 收到等待状态变化（状态卡由服务端渲染）或 done（运行终态）后刷新服务端数据；
+// 状态轨迹与结束通知触发权威状态重读，不由客户端推断运行终态；
 // SSE 不可用或断流时降级为低频刷新，恢复连接后自动停止轮询。
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -38,7 +38,7 @@ export function useRunStream(runId: string, initialEvents: TraceEventView[], liv
     const source = new EventSource(`/api/runs/${runId}/events?after=${after}`);
     let closedByDone = false;
     const onTrace = (event: MessageEvent<string>) => {
-      if (!active) return;
+      if (!active || closedByDone) return;
       try {
         const parsed = TraceEventView.safeParse(JSON.parse(event.data));
         if (parsed.success) {
@@ -47,14 +47,15 @@ export function useRunStream(runId: string, initialEvents: TraceEventView[], liv
             runId,
             events: mergeEvents([prev.runId === runId ? prev.events : [], [parsed.data]]),
           }));
-          // 状态卡与审批面板不在客户端组件里，进入或离开等待态时须刷新服务端渲染层
-          if (["approval.requested", "wait.started", "run.resumed"].includes(parsed.data.kind)) router.refresh();
+          // 结束通知可能滞后；收到状态轨迹即重读，不等于按轨迹直接改状态。
+          if (parsed.data.seq > after && ["run.started", "run.completed", "run.failed", "run.cancelled", "approval.requested", "wait.started", "run.resumed"].includes(parsed.data.kind)) router.refresh();
         }
       } catch {
         // 单条坏消息不中断整个流
       }
     };
     const onDone = (event: MessageEvent<string>) => {
+      if (!active || closedByDone) return;
       try {
         const payload = RunStreamDone.parse(JSON.parse(event.data));
         if (payload.status === "error") {
@@ -72,8 +73,8 @@ export function useRunStream(runId: string, initialEvents: TraceEventView[], liv
       source.close();
       router.refresh();
     };
-    const onOpen = () => stopFallback();
-    const onError = () => startFallback();
+    const onOpen = () => { if (active && !closedByDone) stopFallback(); };
+    const onError = () => { if (active && !closedByDone) startFallback(); };
     source.addEventListener("trace", onTrace as EventListener);
     source.addEventListener("done", onDone as EventListener);
     source.addEventListener("open", onOpen);

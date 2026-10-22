@@ -2,6 +2,7 @@
 
 import { MAX_VISIBLE_TRACE_EVENTS, TraceEventView } from "@/contracts/run";
 import { useRunStream } from "@/features/runs/use-run-stream";
+const EMPTY_EVENTS: TraceEventView[] = [];
 
 // 轨迹时间线：kind 用图标 + 中文 title（写入侧已产出中文标题），SSE 增量上屏。
 // 界面不出现 seq/kind 码值等内部标识。
@@ -64,15 +65,16 @@ export function TraceTimeline({
   live,
 }: {
   runId: string;
-  initialEvents: TraceEventView[];
+  initialEvents: TraceEventView[] | null;
   live: boolean;
 }) {
-  const events = useRunStream(runId, initialEvents, live);
-  if (events.length === 0) {
+  const events = useRunStream(runId, initialEvents ?? EMPTY_EVENTS, live);
+  if (events.length === 0 && initialEvents !== null) {
     return <p className="text-sm text-gray-500">暂无执行轨迹</p>;
   }
   return (
     <>
+      {initialEvents === null ? <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950"><p className="font-semibold">初始执行轨迹暂时无法读取</p><p className="mt-1">{live ? "实时连接仍会接收事件；下方仅显示本页后续收到的真实记录，不代表已读取完整轨迹。" : "不能将读取失败当作没有轨迹。当前页面未启用实时连接，需重新读取已保存的轨迹。"}可使用页面上方的“重新读取状态”核对。</p></div> : null}
       {events.length >= MAX_VISIBLE_TRACE_EVENTS ? (
         <p className="rounded-md bg-amber-50 p-2 text-xs text-amber-700">
           轨迹较多，页面仅显示最近 {MAX_VISIBLE_TRACE_EVENTS} 条；下载运行报告可查看完整记录。

@@ -67,6 +67,31 @@ class FakeEventSource {
 }
 
 describe("TraceTimeline", () => {
+  it("初始读取失败与成功空数组分别反馈，静态页面不补出轨迹", () => {
+    const { rerender } = render(<TraceTimeline runId={RUN_ID} initialEvents={null} live={false} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("初始执行轨迹暂时无法读取");
+    expect(screen.queryByText("暂无执行轨迹")).not.toBeInTheDocument();
+    expect(FakeEventSource.instances).toHaveLength(0);
+    rerender(<TraceTimeline runId={RUN_ID} initialEvents={[]} live={false} />);
+    expect(screen.getByText("暂无执行轨迹")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+  it("初始轨迹未知时仍接收真实事件并刷新等待状态，恢复读取后合并不重复", () => {
+    (globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
+    const { rerender } = render(<TraceTimeline runId={RUN_ID} initialEvents={null} live />);
+    const source = FakeEventSource.instances[0];
+    expect(source.url).toBe(`/api/runs/${RUN_ID}/events?after=0`);
+    act(() => {
+      source.emit("trace", makeEvent({ seq: 2, kind: "approval.requested", title: "这次需要核对" }));
+    });
+    expect(screen.getByText("这次需要核对")).toBeInTheDocument();
+    expect(refreshMock).toHaveBeenCalledOnce();
+    expect(screen.getByRole("alert")).toHaveTextContent("不代表已读取完整轨迹");
+    rerender(<TraceTimeline runId={RUN_ID} initialEvents={[EVENTS[0], makeEvent({ seq: 2, kind: "approval.requested", title: "这次需要核对" })]} live />);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getAllByText("这次需要核对")).toHaveLength(1);
+    expect(screen.getByText("流程开始执行")).toBeInTheDocument();
+  });
   afterEach(() => {
     vi.useRealTimers();
     delete (globalThis as { EventSource?: unknown }).EventSource;
@@ -107,7 +132,7 @@ describe("TraceTimeline", () => {
     expect(screen.getByText("开始「生成回复方案」")).toBeInTheDocument();
     expect(screen.getAllByText("流程开始执行")).toHaveLength(1);
     expect(screen.getAllByText(/开始「分析投诉原因」|步骤「分析投诉原因」完成|流程开始执行|开始「生成回复方案」/)).toHaveLength(4);
-    // 普通轨迹不触发页面刷新，刷新只由等待确认/完成信号驱动
+    // 重放已读状态与普通步骤事件不触发重复状态读取。
     expect(refreshMock).not.toHaveBeenCalled();
   });
 
