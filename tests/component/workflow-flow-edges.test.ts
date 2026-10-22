@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { WorkflowDraft } from "@/contracts/workflow";
-import { applyConnection, clearEdge, connectionReplacesHiddenControl, outgoingSpecs, removeNode, supportsErrorRoute, visibleOutgoingSpecs } from "@/features/workflow-canvas/flow-edges";
+import { applyConnection, clearEdge, connectionReplacesHiddenControl, editableRouteSlots, linearDeletionContinuation, outgoingSpecs, removeNode, supportsErrorRoute, visibleOutgoingSpecs } from "@/features/workflow-canvas/flow-edges";
 
 function draft() {
   return WorkflowDraft.parse({
@@ -24,6 +24,48 @@ function draft() {
 }
 
 describe("画布等待超时连线", () => {
+  it("路径设置只列出节点真正支持的出口，包括未接线的分支与超时出口", () => {
+    expect(editableRouteSlots(draft().nodes.start).map((slot) => slot.handle)).toEqual(["next"]);
+    expect(editableRouteSlots(draft().nodes.done)).toEqual([]);
+    expect(editableRouteSlots(draft().nodes.wait).map((slot) => slot.handle)).toEqual(["next", "timeout"]);
+    const condition = WorkflowDraft.parse({
+      ...draft(),
+      nodes: {
+        ...draft().nodes,
+        check: { id: "check", title: "分情况", type: "condition", condition: { source: "input.kind", operator: "eq", branches: [{ label: "符合", value: "yes", next: null }], defaultNext: "done" } },
+      },
+    });
+    expect(editableRouteSlots(condition.nodes.check).map((slot) => slot.handle)).toEqual(["error", "branch-0", "default"]);
+  });
+
+  it("删除单一路径上的普通步骤时接续前后步骤，不改变原草稿", () => {
+    const original = draft();
+    expect(linearDeletionContinuation(original, "wait")).toBe("done");
+    const removed = removeNode(original, "wait");
+    expect(removed.nodes.start.next).toBe("done");
+    expect(removed.nodes.wait).toBeUndefined();
+    expect(original.nodes.start.next).toBe("wait");
+  });
+
+  it("多条输出、侧向输入和隐藏检查存在时不自动绕过路径", () => {
+    const branched = applyConnection(draft(), {
+      source: "wait", target: "fallback", sourceHandle: "timeout", targetHandle: "in",
+    });
+    expect(linearDeletionContinuation(branched, "wait")).toBeNull();
+    expect(removeNode(branched, "wait").nodes.start.next).toBeNull();
+    expect(linearDeletionContinuation(branched, "fallback")).toBeNull();
+
+    const withHiddenCheck = WorkflowDraft.parse({
+      ...draft(),
+      nodes: {
+        ...draft().nodes,
+        receipt: { id: "receipt", title: "核对回执", type: "rule", next: "done", rule: { kind: "tool_result", sourceNodeId: "wait" }, controlPlane: { kind: "receipt", hiddenByDefault: true } },
+      },
+    });
+    expect(linearDeletionContinuation(withHiddenCheck, "wait")).toBeNull();
+    expect(removeNode(withHiddenCheck, "wait").nodes.start.next).toBeNull();
+  });
+
   it("为运行时支持备用处理的步骤开放未完成句柄", () => {
     for (const type of [
       "ai", "tool", "knowledge", "condition", "system", "rule", "loop", "memory",

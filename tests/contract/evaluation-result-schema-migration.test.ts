@@ -15,6 +15,7 @@ describe("验收结果字段规则追加迁移", () => {
     expect(readFileSync(new URL("../../src/db/migrations/0034_evaluation-result-schema.sql", import.meta.url), "utf8").trim())
       .toBe('ALTER TABLE "evaluation_cases" ADD COLUMN "result_schema" jsonb;');
     const journal = JSON.parse(readFileSync(new URL("../../src/db/migrations/meta/_journal.json", import.meta.url), "utf8"));
-    expect(journal.entries.at(-1)).toMatchObject({ idx: 34, tag: "0034_evaluation-result-schema" });
+    expect(journal.entries[34]).toMatchObject({ idx: 34, tag: "0034_evaluation-result-schema" });
+    expect(journal.entries.filter((entry: { tag: string }) => entry.tag === "0034_evaluation-result-schema")).toHaveLength(1);
   });
 });

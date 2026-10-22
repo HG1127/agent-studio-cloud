@@ -1,29 +1,64 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import { ArrowDown, ArrowUp, X } from "lucide-react";
 import type { AgentTargetOption } from "@/contracts/agent";
 import type { KnowledgeSourceView } from "@/contracts/knowledge";
 import type { ToolRegistryOption } from "@/contracts/tool-registry";
+import { toolBindingStatus } from "./tool-binding-status";
+import { selectedRegistryToolSpec as inlineToolSpec } from "./tool-registry-selection";
+import { ToolRebindNotice } from "./ToolRebindNotice";
+import { AgentVersionPicker } from "./AgentVersionPicker";
+import { HandoffContractEditor } from "./HandoffContractEditor";
 import {
   MAX_CONDITION_BRANCHES,
   MAX_PARALLEL_BRANCHES,
   MAX_PARALLEL_STEPS,
   MAX_SUBFLOW_STEPS,
   MAX_WAIT_DURATION_MS,
+  HandoffContract,
+  ToolSpec,
+  type WorkflowDraft,
   type WorkflowNode,
 } from "@/contracts/workflow";
 import { validateJsonSchemaDefinition } from "@/server/domain/json-schema";
 import { NODE_TYPE_LABELS } from "./CustomNodes";
 import { isHiddenControlNode } from "@/lib/workflow-node-visibility";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { BusinessEvidenceCard } from "./BusinessEvidenceCard";
+import { NodeRoutesEditor } from "./NodeRoutesEditor";
+import { ConditionValueEditor } from "./ConditionValueEditor";
+import { MemorySettingsEditor } from "./MemorySettingsEditor";
+import { NodeContractEditors } from "./NodeContractEditors";
+import { NodeQualityRules } from "./NodeQualityRules";
+import { LoopPathOverview } from "./LoopPathOverview";
+import { InlineStepContracts } from "./InlineStepContracts";
+import { inlineSequenceIssue, moveInlineStep, precedingInlineSources, removeInlineStep, stabilizeInlineSteps } from "./inline-step-editing";
+import { ADDABLE_NODE_TYPES } from "./create-workflow-node";
+import type { ChangeableNodeType } from "./change-workflow-node-type";
 
 interface NodeInspectorProps {
   node: WorkflowNode;
+  workflow?: WorkflowDraft;
+  qualitySourcesComplete?: boolean;
   workflowNodes?: Record<string, WorkflowNode>;
   agentTargets?: AgentTargetOption[];
   toolOptions?: ToolRegistryOption[];
   knowledgeSources?: KnowledgeSourceView[];
-  onNodeChange: (node: WorkflowNode) => void;
+  onNodeChange: (node: WorkflowNode) => void | boolean;
   onNodeDelete: (nodeId: string) => void;
+  onRequestTypeChange?: (type: ChangeableNodeType) => void;
+  showControlNodes?: boolean;
+  onRouteChange?: (handle: string, targetId: string | null) => void;
+  onDisconnectIncoming?: (sourceId: string, handle: string, targetId: string) => void;
+  onRevealControlNodes?: () => void;
+  onFocusNode?: (nodeId: string) => void;
+  deletionContinuationTitle?: string | null;
+  canMoveUp?: boolean;
+  canMoveDown?: boolean;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
+  onClose?: () => void;
 }
 
 const DEFAULT_HANDOFF_PROHIBITED = ["密钥和访问令牌", "与本次任务无关的个人隐私", "未确认的内部草稿"];
@@ -77,7 +112,7 @@ const CONDITION_OPERATORS = [
 function changeInlineStepType(steps: Array<Record<string, unknown>>, index: number, type: InlineStepType) {
   return steps.map((step, stepIndex) => {
     if (stepIndex !== index) return step;
-    if (type === "tool") return { ...step, type, tool: step.tool ?? { connector: "demo", action: "demo", scope: "demo", risk: "low", maxRetries: 1, registryToolId: "demo", protocol: "demo", inputSchema: { type: "object" }, outputSchema: { type: "object" } } };
+    if (type === "tool") return { ...step, type, tool: step.tool ?? { connector: "unbound", action: "", scope: "", risk: "high", maxRetries: 3, registryToolId: null, protocol: "unbound", unresolved: true, inputSchema: { type: "object" }, outputSchema: { type: "object" } } };
     if (type === "knowledge") return { ...step, type, knowledge: step.knowledge ?? { space: "业务资料库", query: "" } };
     if (type === "memory") return { ...step, type, memory: step.memory ?? { mode: "read", limit: 5 } };
     if (type === "agent_call") return { ...step, type, agentCall: step.agentCall ?? { targetAgentId: "", versionId: "" } };
@@ -89,21 +124,6 @@ function changeInlineStepType(steps: Array<Record<string, unknown>>, index: numb
 function boundedNumber(value: string, fallback: number, min: number, max: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
-}
-
-function inlineToolSpec(toolId: string, currentAction: string, options: ToolRegistryOption[]) {
-  const selected = options.find((item) => item.id === toolId);
-  if (!selected) return {
-    connector: "demo", action: currentAction || "demo", scope: "demo", risk: "low" as const,
-    maxRetries: 1, registryToolId: "demo", protocol: "demo", unresolved: false,
-    inputSchema: { type: "object" }, outputSchema: { type: "object" },
-  };
-  return {
-    connector: selected.name, action: selected.action, scope: selected.scope, risk: selected.risk,
-    maxRetries: 3, registryToolId: selected.id, protocol: "http-json", unresolved: false,
-    operationKind: selected.risk === "low" ? "read" as const : "action" as const,
-    inputSchema: selected.inputSchema, outputSchema: selected.outputSchema,
-  };
 }
 
 function agentCallSelection(target: AgentTargetOption | undefined) {
@@ -135,7 +155,7 @@ function handoffSelection(target: AgentTargetOption | undefined) {
   };
 }
 
-function InlineStepEditor({ label, steps, index, toolOptions, agentTargets, knowledgeSources, removable, onChange, onDelete }: {
+function InlineStepEditor({ label, steps, index, toolOptions, agentTargets, knowledgeSources, removable, runtimePrefix, memorySources, contractEditor, onChange }: {
   label: string;
   steps: Array<Record<string, unknown>>;
   index: number;
@@ -143,43 +163,75 @@ function InlineStepEditor({ label, steps, index, toolOptions, agentTargets, know
   agentTargets: AgentTargetOption[];
   knowledgeSources: KnowledgeSourceView[];
   removable: boolean;
+  runtimePrefix: string;
+  memorySources: Array<{ id: string; title: string }>;
+  contractEditor?: ReactNode;
   onChange: (steps: Array<Record<string, unknown>>) => void;
-  onDelete: () => void;
 }) {
   const step = steps[index];
-  const type = INLINE_STEP_TYPES.includes(step.type as InlineStepType) ? step.type as InlineStepType : "ai";
+  const type = String(step.type || "ai");
+  const supportedType = INLINE_STEP_TYPES.includes(type as InlineStepType);
+  const sequenceIssue = inlineSequenceIssue(steps);
   const tool = step.tool && typeof step.tool === "object" ? step.tool as Record<string, unknown> : null;
+  const parsedTool = ToolSpec.safeParse(step.tool);
+  const toolSnapshot = parsedTool.success ? parsedTool.data : undefined;
+  const toolStatus = type === "tool" ? toolBindingStatus({ tool: toolSnapshot }, toolOptions) : null;
+  const selectedTool = toolOptions.find((option) => option.id === toolSnapshot?.registryToolId);
+  const unavailableToolId = toolStatus === "unavailable" && toolSnapshot?.registryToolId
+    && !selectedTool ? toolSnapshot.registryToolId : null;
   const retry = step.retry && typeof step.retry === "object" ? step.retry as Record<string, unknown> : null;
   const knowledge = step.knowledge && typeof step.knowledge === "object" ? step.knowledge as Record<string, unknown> : null;
   const maxAttempts = Number(retry?.maxAttempts ?? tool?.maxRetries ?? 1);
   const backoffMs = Number(retry?.backoffMs ?? 5_000);
-  return <div className="grid gap-1 rounded-md bg-gray-50 p-2 md:grid-cols-[110px_1fr_2fr_auto]">
-    <select aria-label={`${label} 类型`} value={type}
+  return <div className="grid min-w-0 gap-2 rounded-md bg-gray-50 p-2">
+    <label className="flex min-w-0 flex-col gap-1 text-xs text-gray-600">处理类型<select aria-label={`${label} 类型`} value={type}
       onChange={(event) => onChange(changeInlineStepType(steps, index, event.target.value as InlineStepType))}
-      className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs">
+      className="w-full min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs">
+      {!supportedType ? <option value={type}>原处理类型暂不支持（配置已保留）</option> : null}
       <option value="ai">智能处理</option><option value="system">自动记录</option><option value="tool">业务工具</option>
       <option value="knowledge">读取资料</option><option value="memory">参考经验</option>
       <option value="agent_call">呼叫其他助手</option><option value="handoff">交给其他助手</option>
-    </select>
-    <input aria-label={`${label} 名称`} value={String(step.title ?? "")}
+    </select></label>
+    <label className="flex min-w-0 flex-col gap-1 text-xs text-gray-600">步骤名称<input aria-label={`${label} 名称`} value={String(step.title ?? "")}
       onChange={(event) => onChange(changeInlineStep(steps, index, "title", event.target.value))}
-      className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
-    <input aria-label={`${label} 说明`} value={String(step.description ?? "")}
+      className="w-full min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" /></label>
+    <label className="flex min-w-0 flex-col gap-1 text-xs text-gray-600">步骤说明<input aria-label={`${label} 说明`} value={String(step.description ?? "")}
       onChange={(event) => onChange(changeInlineStep(steps, index, "description", event.target.value))}
-      className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
-    {removable ? <button type="button" aria-label={`删除${label}`} onClick={onDelete} className="text-xs text-red-600">删除</button> : <span />}
-    {type === "tool" ? <div className="grid gap-2 md:col-span-4 md:grid-cols-3">
-      <select aria-label={`${label} 业务工具`} value={tool?.unresolved === true ? "" : String(tool?.registryToolId ?? "demo")}
+      className="w-full min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" /></label>
+    <InlineLegacyInstruction label={label} value={step.instruction} />
+    {!supportedType ? <p role="status" className="text-xs text-amber-700">当前执行器不支持原处理类型；请选择支持的类型，原配置不会自动替换。</p> : null}
+    <div className="flex flex-wrap gap-1">
+      <button type="button" aria-label={`上移${label}`} disabled={!!sequenceIssue || index === 0}
+        onClick={() => onChange(moveInlineStep(steps, index, -1))}
+        className="inline-flex min-h-9 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 disabled:cursor-not-allowed disabled:text-slate-400"><ArrowUp className="size-3" />上移</button>
+      <button type="button" aria-label={`下移${label}`} disabled={!!sequenceIssue || index === steps.length - 1}
+        onClick={() => onChange(moveInlineStep(steps, index, 1))}
+        className="inline-flex min-h-9 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 disabled:cursor-not-allowed disabled:text-slate-400"><ArrowDown className="size-3" />下移</button>
+      {removable ? <button type="button" aria-label={`删除${label}`} disabled={!!sequenceIssue} onClick={() => onChange(removeInlineStep(steps, index))}
+        className="ml-auto min-h-9 rounded-lg px-2 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:text-slate-400">删除</button> : null}
+    </div>
+    {type === "memory" ? <MemorySettingsEditor label={label} value={step.memory}
+      sources={[...precedingInlineSources(steps, index, runtimePrefix), ...memorySources.map((source) => ({ ...source, title: `流程步骤：${source.title}` }))]}
+      onChange={(memory) => onChange(steps.map((item, itemIndex) => itemIndex === index ? { ...item, memory } : item))} /> : null}
+    {type === "tool" ? <div className="grid min-w-0 gap-2">
+      <select aria-label={`${label} 业务工具`} value={unavailableToolId ?? (!toolSnapshot || toolSnapshot.unresolved === true ? "" : toolSnapshot.registryToolId ?? "")}
         onChange={(event) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
           ...item,
-          tool: inlineToolSpec(event.target.value, String(tool?.action ?? "demo"), toolOptions),
+          tool: inlineToolSpec(event.target.value, String(tool?.action ?? ""), toolOptions, toolSnapshot?.maxRetries ?? 3),
         } : item))}
-        className="rounded-md border border-gray-300 px-2 py-1.5 text-xs">
-        <option value="" disabled>请选择业务工具</option>
+        className="w-full min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs">
+        <option value="">未绑定业务工具</option>
+        {unavailableToolId ? <option value={unavailableToolId}>原工具当前不可用（请重新选择）</option> : null}
         <option value="demo">演示工具（不连接业务系统）</option>
         {toolOptions.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
       </select>
-      {tool?.unresolved === true ? <p className="text-xs text-amber-700 md:col-span-3">导入文件中的业务工具在当前环境不可用，请重新选择。</p> : null}
+      {tool?.unresolved === true ? <p className="text-xs text-amber-700">{tool.connector === "unbound" ? "尚未绑定可用的业务工具，请选择服务端工具；也可明确选择不连接业务系统的演示工具。" : "导入文件中的业务工具在当前环境不可用，请重新选择。"}</p> : null}
+      {tool?.protocol === "demo" && tool?.unresolved !== true ? <p className="text-xs text-amber-700">当前是演示工具，不会连接业务系统或执行真实业务操作。</p> : null}
+      {!toolSnapshot && tool ? <p className="text-xs text-amber-700">工具绑定不完整，请从当前清单重新选择。原配置不会自动改动。</p> : null}
+      {toolStatus === "unavailable" && tool?.unresolved !== true ? <p className="text-xs text-amber-700">原业务工具在当前服务端不可用，请重新选择。保存前不会自动替换原绑定。</p> : null}
+      {toolStatus === "changed" && toolSnapshot && selectedTool ? <ToolRebindNotice snapshot={toolSnapshot} option={selectedTool} onConfirm={() => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
+        ...item, tool: inlineToolSpec(selectedTool.id, toolSnapshot.action, toolOptions, toolSnapshot.maxRetries),
+      } : item))} /> : null}
       <label className="flex items-center gap-2 text-xs text-gray-600">最多尝试
         <input aria-label={`${label} 最多尝试次数`} type="number" min={1} max={8} value={maxAttempts}
           onChange={(event) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
@@ -197,13 +249,13 @@ function InlineStepEditor({ label, steps, index, toolOptions, agentTargets, know
           className="min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />秒
       </label>
     </div> : null}
-    {type === "knowledge" ? <div className="space-y-2 md:col-span-4">
+    {type === "knowledge" ? <div className="min-w-0 space-y-2">
       <input aria-label={`${label} 检索内容`} value={String(knowledge?.query ?? "")} placeholder="留空则使用本次运行输入"
         onChange={(event) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
           ...item,
           knowledge: { ...(knowledge ?? { space: "业务资料库" }), query: event.target.value },
         } : item))}
-        className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
+        className="w-full min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
       <KnowledgeSourcePicker label={`${label} 资料范围`} sourceIds={Array.isArray(knowledge?.sourceIds) ? knowledge.sourceIds.filter((id): id is string => typeof id === "string") : []}
         selectionRequired={knowledge?.selectionRequired === true}
         sources={knowledgeSources}
@@ -212,16 +264,14 @@ function InlineStepEditor({ label, steps, index, toolOptions, agentTargets, know
           knowledge: { ...(knowledge ?? { space: "业务资料库" }), sourceIds, selectionRequired: false },
         } : item))} compact />
     </div> : null}
-    {type === "agent_call" ? <select aria-label={`${label} 协作助手`}
-      value={String((step.agentCall as Record<string, unknown> | undefined)?.versionId ?? "")}
-      onChange={(event) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
+    {type === "agent_call" ? <AgentVersionPicker label={`${label} 协作助手`} targets={agentTargets}
+      versionId={String((step.agentCall as Record<string, unknown> | undefined)?.versionId ?? "")}
+      agentName={String((step.agentCall as Record<string, unknown> | undefined)?.targetAgentName ?? "")}
+      onSelect={(target) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
         ...item,
-        agentCall: agentCallSelection(agentTargets.find((target) => target.versionId === event.target.value)),
+        agentCall: agentCallSelection(target),
       } : item))}
-      className="rounded-md border border-gray-300 px-2 py-1.5 text-xs md:col-span-4">
-      <option value="">请选择已发布助手</option>
-      {agentTargets.map((target) => <option key={target.versionId} value={target.versionId}>{target.agentName}（版本 {target.version}）</option>)}
-    </select> : null}
+    /> : null}
     {type === "agent_call" ? <select aria-label={`${label} 经验共享范围`}
       value={String(((step.agentCall as Record<string, unknown> | undefined)?.memoryAccess as Record<string, unknown> | undefined)?.mode ?? "none")}
       onChange={(event) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
@@ -231,22 +281,50 @@ function InlineStepEditor({ label, steps, index, toolOptions, agentTargets, know
           memoryAccess: { mode: event.target.value as "none" | "self" | "team" },
         },
       } : item))}
-      className="rounded-md border border-gray-300 px-2 py-1.5 text-xs md:col-span-4">
-      <option value="none">不传递长期经验</option>
-      <option value="self">仅使用目标助手自身经验</option>
-      <option value="team">共享当前助手已读取的经验</option>
+      className="w-full min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs">
+      <option value="none">不传递上游经验步骤结果</option>
+      <option value="self">不传递上游经验（保留原设置）</option>
+      <option value="team">允许传递上游经验步骤结果</option>
     </select> : null}
-    {type === "handoff" ? <select aria-label={`${label} 接收助手`}
-      value={String((step.toAgent as Record<string, unknown> | undefined)?.versionId ?? "")}
-      onChange={(event) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
+    {type === "agent_call" ? <p className="text-xs leading-5 text-slate-500">只控制本次传入的上游经验步骤结果，不控制目标助手自身流程的经验读取。</p> : null}
+    {type === "handoff" ? <AgentVersionPicker label={`${label} 接收助手`} targets={agentTargets}
+      versionId={String((step.toAgent as Record<string, unknown> | undefined)?.versionId ?? "")}
+      agentName={String((step.toAgent as Record<string, unknown> | undefined)?.name ?? "")}
+      onSelect={(target) => onChange(steps.map((item, itemIndex) => itemIndex === index ? {
         ...item,
-        ...handoffSelection(agentTargets.find((target) => target.versionId === event.target.value)),
+        ...handoffSelection(target),
       } : item))}
-      className="rounded-md border border-gray-300 px-2 py-1.5 text-xs md:col-span-4">
-      <option value="">请选择已发布助手</option>
-      {agentTargets.map((target) => <option key={target.versionId} value={target.versionId}>{target.agentName}（版本 {target.version}）</option>)}
-    </select> : null}
+    /> : null}
+    {type === "handoff" ? <InlineHandoffContract label={`${label} 交接约定`} value={step.contract}
+      onChange={(contract) => onChange(steps.map((item, itemIndex) => itemIndex === index ? { ...item, contract } : item))} /> : null}
+    {contractEditor}
   </div>;
+}
+
+function InlineLegacyInstruction({ label, value }: { label: string; value: unknown }) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const instruction = value as Record<string, unknown>;
+  const fields = ([["objective", "工作目标"], ["prompt", "执行说明"], ["outputRequirement", "预期结果"]] as const)
+    .filter(([key]) => instruction[key] !== undefined);
+  if (fields.length === 0) return null;
+  return <section aria-label={`${label} 原工作说明`} className="min-w-0 rounded-md border border-amber-200 bg-amber-50 p-2">
+    <p className="text-xs leading-5 text-amber-800">原定义的旧版工作说明未接入当前执行器；原文保留只读，上方步骤说明的修改不会改写这些字段。</p>
+    <details className="mt-1 min-w-0">
+      <summary className="cursor-pointer text-xs font-medium text-amber-900">查看旧版工作说明（只读）</summary>
+      <dl className="mt-2 grid min-w-0 gap-2 text-xs">
+        {fields.map(([key, title]) => <div key={key} className="min-w-0">
+          <dt className="font-semibold text-slate-700">{title}</dt>
+          <dd className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words text-slate-600">{typeof instruction[key] === "string" ? instruction[key] || "未填写" : "格式暂不能直接展示，原配置已保留。"}</dd>
+        </div>)}
+      </dl>
+    </details>
+  </section>;
+}
+
+function InlineHandoffContract({ label, value, onChange }: { label: string; value: unknown; onChange: (contract: HandoffContract) => void }) {
+  const parsed = value === undefined ? null : HandoffContract.safeParse(value);
+  if (parsed && !parsed.success) return <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs leading-5 text-amber-900">原交接约定格式不完整，原值已保留。请重新选择接收助手，再核对交接内容。</p>;
+  return <HandoffContractEditor label={label} value={parsed?.success ? parsed.data : undefined} onChange={onChange} />;
 }
 
 function KnowledgeSourcePicker({ label, sourceIds, sources, onChange, compact = false, selectionRequired = false }: {
@@ -323,9 +401,14 @@ function WaitPayloadSchemaEditor({ node, onNodeChange }: {
 }
 
 // 通用标题/说明与各节点专属配置集中在同一检查面板；condition 的说明以「判断说明」呈现。
-export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agentTargets = [], toolOptions = [], knowledgeSources = [], onNodeChange, onNodeDelete }: NodeInspectorProps) {
+export function NodeInspector({ node, workflow, qualitySourcesComplete = false, workflowNodes = { [node.id]: node }, agentTargets = [], toolOptions = [], knowledgeSources = [], onNodeChange, onNodeDelete, onRequestTypeChange, showControlNodes = false, onRouteChange, onDisconnectIncoming, onRevealControlNodes, onFocusNode, deletionContinuationTitle, canMoveUp = false, canMoveDown = false, onMoveUp, onMoveDown, onClose }: NodeInspectorProps) {
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const isHuman = node.type === "human";
   const isCondition = node.type === "condition";
+  const toolStatus = node.type === "tool" ? toolBindingStatus(node, toolOptions) : null;
+  const selectedTool = toolOptions.find((option) => option.id === node.tool?.registryToolId);
+  const unavailableToolId = toolStatus === "unavailable" && node.tool?.registryToolId
+    && !toolOptions.some((option) => option.id === node.tool?.registryToolId) ? node.tool.registryToolId : null;
   const knowledge = node.knowledge;
   const deletable = node.type !== "trigger" && node.type !== "end";
   const memorySources = Object.values(workflowNodes).filter((candidate) =>
@@ -335,11 +418,40 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
     && !isHiddenControlNode(candidate),
   );
   return (
-    <aside aria-label="节点详情" className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4">
-      <div className="flex items-center gap-2">
-        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">{NODE_TYPE_LABELS[node.type]}</span>
-        <h2 className="text-sm font-semibold text-gray-900">节点详情</h2>
+    <aside aria-label="节点详情" className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-xl shadow-slate-950/5 xl:shadow-sm">
+      <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
+        <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">{NODE_TYPE_LABELS[node.type]}</span>
+        <h2 className="text-sm font-bold text-slate-950">节点详情</h2>
+        {onClose ? <button type="button" aria-label="关闭节点详情" onClick={onClose}
+          className="ml-auto grid size-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+          <X className="size-4" />
+        </button> : null}
       </div>
+      {onRequestTypeChange ? <div className="grid gap-1">
+        <label htmlFor="node-processing-type" className="text-sm font-medium">处理类型</label>
+        <select id="node-processing-type" value={node.type} disabled={!deletable || isHiddenControlNode(node)}
+          onChange={(event) => onRequestTypeChange(event.target.value as ChangeableNodeType)}
+          className="h-10 min-w-0 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 disabled:bg-slate-100 disabled:text-slate-500">
+          {!ADDABLE_NODE_TYPES.some((type) => type === node.type) ? <option value={node.type}>{NODE_TYPE_LABELS[node.type]}</option> : null}
+          {ADDABLE_NODE_TYPES.map((type) => <option key={type} value={type}>{NODE_TYPE_LABELS[type]}</option>)}
+        </select>
+        {!deletable || isHiddenControlNode(node) ? <p className="text-xs text-slate-500">启动、完成和控制检查步骤不能更改类型。</p>
+          : <p className="text-xs text-slate-500">更改类型会重建这一步的专属设置；确认前会说明受影响的路径和交付字段。</p>}
+      </div> : null}
+      {onMoveUp && onMoveDown ? <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <p className="text-xs font-semibold text-slate-700">调整执行顺序</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button type="button" disabled={!canMoveUp} onClick={onMoveUp} title="与前一个普通步骤交换顺序"
+            className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:border-slate-400 disabled:cursor-not-allowed disabled:text-slate-400">
+            <ArrowUp className="size-4" />上移步骤
+          </button>
+          <button type="button" disabled={!canMoveDown} onClick={onMoveDown} title="与后一个普通步骤交换顺序"
+            className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:border-slate-400 disabled:cursor-not-allowed disabled:text-slate-400">
+            <ArrowDown className="size-4" />下移步骤
+          </button>
+        </div>
+        {!canMoveUp && !canMoveDown ? <p className="mt-2 text-xs leading-5 text-slate-500">只有同一条单一路径上的相邻普通步骤可以换序。分支或控制检查请调整流程线。</p> : null}
+      </div> : null}
       <div className="flex flex-col gap-1">
         <label htmlFor="node-title" className="text-sm font-medium">
           节点名称
@@ -365,42 +477,37 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
           className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
         />
       </div>
+      {onRouteChange && onDisconnectIncoming && onRevealControlNodes && onFocusNode ? <NodeRoutesEditor node={node} nodes={workflowNodes} showControlNodes={showControlNodes}
+        onRouteChange={onRouteChange} onDisconnectIncoming={onDisconnectIncoming} onRevealControlNodes={onRevealControlNodes} onFocusNode={onFocusNode} /> : null}
+      {node.type !== "trigger" && node.type !== "end" && !isHiddenControlNode(node) ? <BusinessEvidenceCard node={node} /> : null}
+      {node.type === "rule" && node.rule?.kind === "business_rule" && node.quality === undefined ? <p className="text-xs leading-5 text-slate-600">此类业务规则由模型根据步骤说明判断；需要固定条件时，请使用“分情况处理”。</p> : null}
+      {node.type === "system" ? <p className="text-xs leading-5 text-slate-600">这一步只在本次运行中生成文字记录，不会更新外部业务系统。</p> : null}
+      <NodeContractEditors node={node} workflow={workflow} toolOptions={toolOptions} onNodeChange={onNodeChange} />
+      {node.type === "rule" || Object.hasOwn(node, "quality") ? <NodeQualityRules node={node} workflow={workflow} sourcesComplete={qualitySourcesComplete} onLocateStep={onFocusNode} /> : null}
       {node.type === "tool" ? (
         <div className="flex flex-col gap-2">
           <label htmlFor="node-tool-target" className="text-sm font-medium">业务工具</label>
           <select
             id="node-tool-target"
-            value={node.tool?.unresolved === true ? "" : node.tool?.registryToolId ?? ""}
+            value={unavailableToolId ?? (node.tool?.unresolved === true ? "" : node.tool?.registryToolId ?? "")}
             onChange={(event) => {
-              const selected = toolOptions.find((item) => item.id === event.target.value);
               onNodeChange({
                 ...node,
-                tool: selected ? {
-                  connector: selected.name,
-                  action: selected.action,
-                  scope: selected.scope,
-                  risk: selected.risk,
-                  maxRetries: node.tool?.maxRetries ?? 3,
-                  registryToolId: selected.id,
-                  protocol: "http-json",
-                  operationKind: selected.risk === "low" ? "read" : "action",
-                  unresolved: false,
-                  inputSchema: selected.inputSchema,
-                  outputSchema: selected.outputSchema,
-                } : {
-                  connector: "demo", action: node.tool?.action || "demo", scope: "demo", risk: "low",
-                  maxRetries: 1, registryToolId: "demo", protocol: "demo", unresolved: false,
-                  inputSchema: { type: "object" }, outputSchema: { type: "object" },
-                },
+                tool: inlineToolSpec(event.target.value, node.tool?.action ?? "", toolOptions, node.tool?.maxRetries ?? 3),
               });
             }}
             className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
           >
-            <option value="" disabled>请选择业务工具</option>
+            <option value="">未绑定业务工具</option>
+            {unavailableToolId ? <option value={unavailableToolId}>原工具当前不可用（请重新选择）</option> : null}
             <option value="demo">演示工具（不连接业务系统）</option>
             {toolOptions.map((tool) => <option key={tool.id} value={tool.id}>{tool.name}</option>)}
           </select>
-          {node.tool?.unresolved === true ? <p className="text-xs text-amber-700">导入文件中的业务工具在当前环境不可用，请重新选择。</p> : null}
+          {toolStatus === "unbound" ? <p className="text-xs text-amber-700">尚未绑定可用的业务工具，请选择服务端工具；也可明确选择不连接业务系统的演示工具。</p> : null}
+          {toolStatus === "unavailable" ? <p className="text-xs text-amber-700">原业务工具在当前服务端不可用，请重新选择。保存前不会自动替换原绑定。</p> : null}
+          {toolStatus === "demo" ? <p className="text-xs text-amber-700">当前是演示工具，不会连接业务系统或执行真实业务操作。</p> : null}
+          {toolStatus === "changed" && node.tool && selectedTool ? <ToolRebindNotice snapshot={node.tool} option={selectedTool}
+            onConfirm={() => onNodeChange({ ...node, tool: inlineToolSpec(selectedTool.id, node.tool?.action ?? "", toolOptions, node.tool?.maxRetries ?? 3) })} /> : null}
           {toolOptions.length === 0 ? <p className="text-xs text-gray-500">服务端还没有配置可用的业务工具</p> : null}
           {toolOptions.find((tool) => tool.id === node.tool?.registryToolId)?.description ? (
             <p className="text-xs text-gray-500">{toolOptions.find((tool) => tool.id === node.tool?.registryToolId)?.description}</p>
@@ -466,6 +573,7 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
           </div>
           <div className="flex flex-col gap-2">
             <span className="text-sm font-medium">满足的情况</span>
+            <p className="text-xs leading-5 text-slate-500">按下列顺序判断，命中第一种情况后继续；都不满足时走“其他情况”。调整顺序会保留各自的条件和去向，可通过画布撤销。</p>
             {node.condition.branches.map((branch, index) => {
               const rules = branch.rules ?? [];
               const updateBranch = (next: typeof branch) => onNodeChange({
@@ -484,10 +592,21 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
                     onClick={() => onNodeChange({ ...node, condition: { ...node.condition!, branches: node.condition!.branches.filter((_, itemIndex) => itemIndex !== index) } })}
                     className="px-1 text-xs text-red-600">删除</button>
                 </div>
-                {rules.length === 0 ? <div className="grid grid-cols-[1fr_auto] gap-2">
-                  <input aria-label={`情况 ${index + 1} 比较值`} value={branch.value === null ? "null" : String(branch.value ?? "")} placeholder="比较值"
-                    onChange={(event) => updateBranch({ ...branch, value: parseConditionValue(event.target.value) })}
-                    className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="mr-auto text-xs text-slate-500">判断顺序 {index + 1}</span>
+                  {([-1, 1] as const).map((offset) => <button key={offset} type="button" aria-label={`${offset < 0 ? "提前" : "延后"}判断情况 ${index + 1}`}
+                    disabled={index + offset < 0 || index + offset >= node.condition!.branches.length}
+                    onClick={() => {
+                      const branches = [...node.condition!.branches];
+                      [branches[index], branches[index + offset]] = [branches[index + offset], branches[index]];
+                      onNodeChange({ ...node, condition: { ...node.condition!, branches } });
+                    }} className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-slate-200 px-2 text-xs text-slate-700 hover:bg-slate-50 disabled:text-slate-300">
+                    {offset < 0 ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />}{offset < 0 ? "提前判断" : "延后判断"}
+                  </button>)}
+                </div>
+                {rules.length === 0 ? <div className="grid min-w-0 gap-2">
+                  <ConditionValueEditor label={`情况 ${index + 1} 比较值`} operator={node.condition!.operator} value={branch.value}
+                    onChange={(value) => updateBranch({ ...branch, value })} />
                   <button type="button" onClick={() => updateBranch({
                     ...branch,
                     mode: "all",
@@ -501,22 +620,21 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
                       <option value="all">全部满足</option><option value="any">任一满足</option>
                     </select>
                   </label>
-                  {rules.map((rule, ruleIndex) => <div key={ruleIndex} className="grid gap-1 md:grid-cols-[1.5fr_1fr_1fr_auto]">
-                    <input aria-label={`情况 ${index + 1} 条件 ${ruleIndex + 1} 数据`} value={rule.source} placeholder="input.status"
+                  {rules.map((rule, ruleIndex) => <div key={ruleIndex} className="grid min-w-0 gap-2 rounded-lg border border-slate-100 bg-slate-50/70 p-2">
+                    <label className="flex min-w-0 flex-col gap-1 text-xs text-gray-600">判断数据<input aria-label={`情况 ${index + 1} 条件 ${ruleIndex + 1} 数据`} value={rule.source} placeholder="input.status"
                       onChange={(event) => updateBranch({ ...branch, rules: rules.map((item, itemIndex) => itemIndex === ruleIndex ? { ...item, source: event.target.value } : item) })}
-                      className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
-                    <select aria-label={`情况 ${index + 1} 条件 ${ruleIndex + 1} 判断方式`} value={rule.operator}
+                      className="w-full min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" /></label>
+                    <label className="flex min-w-0 flex-col gap-1 text-xs text-gray-600">判断方式<select aria-label={`情况 ${index + 1} 条件 ${ruleIndex + 1} 判断方式`} value={rule.operator}
                       onChange={(event) => updateBranch({ ...branch, rules: rules.map((item, itemIndex) => itemIndex === ruleIndex ? { ...item, operator: event.target.value } : item) })}
-                      className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs">
+                      className="w-full min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs">
                       {CONDITION_OPERATORS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                    </select>
-                    <input aria-label={`情况 ${index + 1} 条件 ${ruleIndex + 1} 比较值`} value={rule.value === null ? "null" : String(rule.value ?? "")} placeholder="比较值"
-                      onChange={(event) => updateBranch({ ...branch, rules: rules.map((item, itemIndex) => itemIndex === ruleIndex ? { ...item, value: parseConditionValue(event.target.value) } : item) })}
-                      className="min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-xs" />
+                    </select></label>
+                    <ConditionValueEditor label={`情况 ${index + 1} 条件 ${ruleIndex + 1} 比较值`} operator={rule.operator} value={rule.value}
+                      onChange={(value) => updateBranch({ ...branch, rules: rules.map((item, itemIndex) => itemIndex === ruleIndex ? { ...item, value } : item) })} />
                     <button type="button" aria-label={`删除情况 ${index + 1} 条件 ${ruleIndex + 1}`}
                       disabled={rules.length === 1}
                       onClick={() => updateBranch({ ...branch, rules: rules.filter((_, itemIndex) => itemIndex !== ruleIndex) })}
-                      className="text-xs text-red-600 disabled:text-gray-300">删除</button>
+                      className="min-h-9 justify-self-end rounded-lg px-2 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:text-gray-300">删除</button>
                   </div>)}
                   <div className="flex gap-3">
                     <button type="button" disabled={rules.length >= MAX_CONDITION_BRANCHES}
@@ -560,16 +678,18 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
                   onClick={() => onNodeChange({ ...node, parallel: { ...node.parallel!, branches: node.parallel!.branches.filter((_, index) => index !== branchIndex) } })}
                   className="text-xs text-red-600">删除</button> : null}
               </div>
+              {inlineSequenceIssue(branch.steps) ? <p role="status" className="mt-2 text-xs leading-5 text-amber-700">{inlineSequenceIssue(branch.steps)}</p> : null}
               <div className="mt-2 space-y-2">
                 {branch.steps.map((step, stepIndex) => (
                   <InlineStepEditor key={String(step.id ?? stepIndex)}
                     label={`并行工作 ${branchIndex + 1} 步骤 ${stepIndex + 1}`}
                     steps={branch.steps} index={stepIndex} toolOptions={toolOptions} agentTargets={agentTargets} knowledgeSources={knowledgeSources} removable={branch.steps.length > 1}
-                    onChange={(steps) => onNodeChange({ ...node, parallel: { ...node.parallel!, branches: node.parallel!.branches.map((item, index) => index === branchIndex ? { ...item, steps } : item) } })}
-                    onDelete={() => onNodeChange({ ...node, parallel: { ...node.parallel!, branches: node.parallel!.branches.map((item, index) => index === branchIndex ? { ...item, steps: item.steps.filter((_, index2) => index2 !== stepIndex) } : item) } })} />
+                    runtimePrefix={`${node.id}.${branch.id}`} memorySources={memorySources}
+                    contractEditor={<InlineStepContracts parent={node} workflow={workflow} toolOptions={toolOptions} location={{ branchId: branch.id, stepIndex }} label={`并行工作 ${branchIndex + 1} 步骤 ${stepIndex + 1}`} onNodeChange={onNodeChange} />}
+                    onChange={(steps) => onNodeChange({ ...node, parallel: { ...node.parallel!, branches: node.parallel!.branches.map((item, index) => index === branchIndex ? { ...item, steps } : item) } })} />
                 ))}
               </div>
-              <button type="button" disabled={branch.steps.length >= MAX_PARALLEL_STEPS} onClick={() => onNodeChange({ ...node, parallel: { ...node.parallel!, branches: node.parallel!.branches.map((item, index) => index === branchIndex ? { ...item, steps: [...item.steps, inlineStep(item.steps, `处理${item.label}的新步骤`)] } : item) } })}
+              <button type="button" disabled={branch.steps.length >= MAX_PARALLEL_STEPS || !!inlineSequenceIssue(branch.steps)} onClick={() => onNodeChange({ ...node, parallel: { ...node.parallel!, branches: node.parallel!.branches.map((item, index) => index === branchIndex ? { ...item, steps: [...stabilizeInlineSteps(item.steps), inlineStep(item.steps, `处理${item.label}的新步骤`)] } : item) } })}
                 className="mt-2 text-xs text-blue-700 disabled:text-gray-400">添加步骤</button>
             </div>
           ))}
@@ -595,25 +715,28 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
               <option value="checkpoint">停止整个流程</option><option value="continue">记录问题后继续</option>
             </select>
           </label>
-          <label className="flex flex-col gap-1 text-sm font-medium">需要的数据
+          <label className="flex flex-col gap-1 text-sm font-medium">需要的数据（说明）
             <textarea aria-label="步骤组输入" rows={2} value={node.subflow.inputs.join("\n")} placeholder="每行一项，可不填"
               onChange={(event) => onNodeChange({ ...node, subflow: { ...node.subflow!, inputs: lines(event.target.value) } })}
               className="rounded-md border border-gray-300 px-3 py-2 text-sm font-normal" />
           </label>
-          <label className="flex flex-col gap-1 text-sm font-medium">产出的数据
+          <label className="flex flex-col gap-1 text-sm font-medium">预期产出（说明）
             <textarea aria-label="步骤组输出" rows={2} value={node.subflow.outputs.join("\n")} placeholder="每行一项，可不填"
               onChange={(event) => onNodeChange({ ...node, subflow: { ...node.subflow!, outputs: lines(event.target.value) } })}
               className="rounded-md border border-gray-300 px-3 py-2 text-sm font-normal" />
           </label>
+          <p className="text-xs leading-5 text-slate-500">这两项只记录需求与预期产出。组内按列表顺序执行；具体传入字段请在对应步骤的“输入与结果约定”中设置，未设置时保留执行器原有输入方式。</p>
+          {inlineSequenceIssue(node.subflow.steps) ? <p role="status" className="text-xs leading-5 text-amber-700">{inlineSequenceIssue(node.subflow.steps)}</p> : null}
           <div className="space-y-2">
             {node.subflow.steps.map((step, stepIndex) => (
               <InlineStepEditor key={String(step.id ?? stepIndex)} label={`步骤组步骤 ${stepIndex + 1}`}
                 steps={node.subflow!.steps} index={stepIndex} toolOptions={toolOptions} agentTargets={agentTargets} knowledgeSources={knowledgeSources} removable={node.subflow!.steps.length > 1}
-                onChange={(steps) => onNodeChange({ ...node, subflow: { ...node.subflow!, steps } })}
-                onDelete={() => onNodeChange({ ...node, subflow: { ...node.subflow!, steps: node.subflow!.steps.filter((_, index) => index !== stepIndex) } })} />
+                runtimePrefix={node.id} memorySources={memorySources}
+                contractEditor={<InlineStepContracts parent={node} workflow={workflow} toolOptions={toolOptions} location={{ stepIndex }} label={`步骤组步骤 ${stepIndex + 1}`} onNodeChange={onNodeChange} />}
+                onChange={(steps) => onNodeChange({ ...node, subflow: { ...node.subflow!, steps } })} />
             ))}
           </div>
-          <button type="button" disabled={node.subflow.steps.length >= MAX_SUBFLOW_STEPS} onClick={() => onNodeChange({ ...node, subflow: { ...node.subflow!, steps: [...node.subflow!.steps, inlineStep(node.subflow!.steps, "处理下一步")] } })}
+          <button type="button" disabled={node.subflow.steps.length >= MAX_SUBFLOW_STEPS || !!inlineSequenceIssue(node.subflow.steps)} onClick={() => onNodeChange({ ...node, subflow: { ...node.subflow!, steps: [...stabilizeInlineSteps(node.subflow!.steps), inlineStep(node.subflow!.steps, "处理下一步")] } })}
             className="w-fit text-xs text-blue-700 disabled:text-gray-400">添加步骤</button>
         </div>
       ) : null}
@@ -637,6 +760,7 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
           <p className="text-xs text-gray-500">从“逐项处理”和“完成”两个圆点分别连接循环步骤和后续步骤。</p>
         </div>
       ) : null}
+      {node.type === "loop" ? <LoopPathOverview nodeId={node.id} nodes={workflowNodes} onFocusNode={onFocusNode} /> : null}
       {node.type === "wait" && node.wait ? (
         <div className="flex flex-col gap-2 border-t border-gray-100 pt-3">
           <label htmlFor="wait-mode" className="text-sm font-medium">等待方式</label>
@@ -671,35 +795,10 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
           </> : null}
         </div>
       ) : null}
-      {node.type === "memory" && node.memory ? (
+      {node.type === "memory" ? (
         <div className="flex flex-col gap-2 border-t border-gray-100 pt-3">
-          <label htmlFor="memory-mode" className="text-sm font-medium">经验操作</label>
-          <select id="memory-mode" value={node.memory.mode}
-            onChange={(event) => onNodeChange({ ...node, memory: event.target.value === "read" ? { mode: "read", query: "", limit: 5 } : { mode: "write", contentFrom: "run_summary" } })}
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm">
-            <option value="read">读取相关经验</option><option value="write">保存本次经验</option>
-          </select>
-          {node.memory.mode === "read" ? <>
-            <label className="flex flex-col gap-1 text-sm font-medium">查找内容
-              <input aria-label="查找内容" value={node.memory.query ?? ""} placeholder="留空则使用本次输入"
-                onChange={(event) => onNodeChange({ ...node, memory: { ...node.memory!, query: event.target.value } })}
-                className="rounded-md border border-gray-300 px-3 py-2 text-sm font-normal" />
-            </label>
-            <label className="flex flex-col gap-1 text-sm font-medium">最多参考条数
-              <input aria-label="最多参考条数" type="number" min={1} max={20} value={node.memory.limit ?? 5}
-                onChange={(event) => onNodeChange({ ...node, memory: { ...node.memory!, limit: Math.max(1, Math.min(20, Number(event.target.value) || 1)) } })}
-                className="rounded-md border border-gray-300 px-3 py-2 text-sm font-normal" />
-            </label>
-          </> : <label className="flex flex-col gap-1 text-sm font-medium">保存内容来源
-            <select aria-label="保存内容来源" value={node.memory.contentFrom || "run_summary"}
-              onChange={(event) => onNodeChange({ ...node, memory: { ...node.memory!, contentFrom: event.target.value } })}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm font-normal">
-              <option value="run_summary">本次输入和全部结果</option>
-              {node.memory.contentFrom && node.memory.contentFrom !== "run_summary" && !memorySources.some((source) => source.id === node.memory!.contentFrom)
-                ? <option value={node.memory.contentFrom}>来源已不可用</option> : null}
-              {memorySources.map((source) => <option key={source.id} value={source.id}>{source.title}</option>)}
-            </select>
-          </label>}
+          <MemorySettingsEditor value={node.memory} sources={memorySources}
+            onChange={(memory) => onNodeChange({ ...node, memory })} />
         </div>
       ) : null}
       {isHuman ? (
@@ -742,24 +841,14 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
       ) : null}
       {node.type === "agent_call" ? (
         <div className="flex flex-col gap-2">
-          <label htmlFor="node-agent-target" className="text-sm font-medium">协作助手</label>
-          <select
-            id="node-agent-target"
-            value={node.agentCall?.versionId ?? ""}
-            onChange={(event) => {
-              const target = agentTargets.find((item) => item.versionId === event.target.value);
+          <AgentVersionPicker label="协作助手" targets={agentTargets} versionId={node.agentCall?.versionId} agentName={node.agentCall?.targetAgentName}
+            onSelect={(target) => {
               onNodeChange({
                 ...node,
                 agentCall: agentCallSelection(target),
               });
             }}
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
-          >
-            <option value="">请选择已发布助手</option>
-            {agentTargets.map((target) => (
-              <option key={target.versionId} value={target.versionId}>{target.agentName}（版本 {target.version}）</option>
-            ))}
-          </select>
+          />
           <label htmlFor="agent-call-memory" className="text-sm font-medium">经验共享范围</label>
           <select id="agent-call-memory" aria-label="经验共享范围"
             value={node.agentCall?.memoryAccess?.mode ?? "none"}
@@ -768,75 +857,48 @@ export function NodeInspector({ node, workflowNodes = { [node.id]: node }, agent
               agentCall: { ...node.agentCall!, memoryAccess: { mode: event.target.value as "none" | "self" | "team" } },
             })}
             className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none">
-            <option value="none">不传递长期经验</option>
-            <option value="self">仅使用目标助手自身经验</option>
-            <option value="team">共享当前助手已读取的经验</option>
+            <option value="none">不传递上游经验步骤结果</option>
+            <option value="self">不传递上游经验（保留原设置）</option>
+            <option value="team">允许传递上游经验步骤结果</option>
           </select>
-          {agentTargets.length === 0 ? <p className="text-xs text-gray-500">还没有其他已发布助手可供选择</p> : null}
+          <p className="text-xs leading-5 text-slate-500">只控制本次传入的上游经验步骤结果，不控制目标助手自身流程的经验读取。</p>
         </div>
       ) : null}
       {node.type === "handoff" ? (
         <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1">
-            <label htmlFor="node-handoff-target" className="text-sm font-medium">接收助手</label>
-            <select
-              id="node-handoff-target"
-              value={node.toAgent?.versionId ?? ""}
-              onChange={(event) => {
-                const target = agentTargets.find((item) => item.versionId === event.target.value);
+          <AgentVersionPicker label="接收助手" targets={agentTargets} versionId={node.toAgent?.versionId} agentName={node.toAgent?.name}
+              onSelect={(target) => {
                 onNodeChange({
                   ...node,
                   ...handoffSelection(target),
                 });
               }}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
-            >
-              <option value="">请选择已发布助手</option>
-              {agentTargets.map((target) => (
-                <option key={target.versionId} value={target.versionId}>{target.agentName}（版本 {target.version}）</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex flex-col gap-1">
-            <label htmlFor="node-handoff-deliverables" className="text-sm font-medium">必须交付</label>
-            <textarea
-              id="node-handoff-deliverables"
-              value={(node.contract?.deliverables ?? []).join("\n")}
-              rows={3}
-              placeholder="每行一项"
-              onChange={(event) => onNodeChange({
-                ...node,
-                contract: { ...node.contract, deliverables: lines(event.target.value), mustNotInclude: node.contract?.mustNotInclude ?? DEFAULT_HANDOFF_PROHIBITED, inputSchema: node.contract?.inputSchema ?? [], outputSchema: node.contract?.outputSchema ?? [] },
-              })}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label htmlFor="node-handoff-prohibited" className="text-sm font-medium">禁止传递</label>
-            <textarea
-              id="node-handoff-prohibited"
-              value={(node.contract?.mustNotInclude ?? []).join("\n")}
-              rows={3}
-              placeholder="每行一项"
-              onChange={(event) => onNodeChange({
-                ...node,
-                contract: { ...node.contract, deliverables: node.contract?.deliverables ?? [], mustNotInclude: lines(event.target.value), inputSchema: node.contract?.inputSchema ?? [], outputSchema: node.contract?.outputSchema ?? [] },
-              })}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
-            />
-          </div>
-          <p className="text-xs text-gray-500">交接时会冻结助手版本，并自动移除密钥、令牌等敏感字段。</p>
+          />
+          <HandoffContractEditor value={node.contract} onChange={(contract) => onNodeChange({ ...node, contract })} />
         </div>
       ) : null}
       {deletable ? (
         <button
           type="button"
-          onClick={() => onNodeDelete(node.id)}
+          onClick={() => setDeleteOpen(true)}
           className="w-fit rounded-md border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:border-red-400"
         >
           删除节点
         </button>
       ) : null}
+      <ConfirmDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title="删除这个节点？"
+        description={deletionContinuationTitle
+          ? `将删除“${node.title}”，前一步会直接接到“${deletionContinuationTitle}”。相关配置和引用也会移除；可撤销，保存草稿后生效。`
+          : `将删除“${node.title}”，所连路径会断开，可能需要重新连线。相关控制检查和引用也可能移除；可撤销，保存草稿后生效。`}
+        confirmLabel="删除节点"
+        onConfirm={() => {
+          setDeleteOpen(false);
+          onNodeDelete(node.id);
+        }}
+      />
     </aside>
   );
 }

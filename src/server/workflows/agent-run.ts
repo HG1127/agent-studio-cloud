@@ -6,6 +6,7 @@ import type { InlineOutputReferences } from "@/contracts/inline-output-reference
 import { buildInlineOutputCatalog, selectInlineOutputReferences, selectWorkflowOutputReferences } from "@/server/domain/runtime/inline-output-references";
 import { requestApproval, recordDecision } from "@/server/steps/approval-step";
 import { awaitApprovalDecision } from "@/server/workflows/approval-hook";
+import { awaitDefaultResultDelivery } from "@/server/workflows/default-result-delivery-hook";
 import { MAX_COLLABORATION_DEPTH } from "@/server/domain/runtime/collaboration-chain";
 import { resolveLoopCollection, workflowExecutionLimit } from "@/server/domain/runtime/loop-runtime";
 import { prepareParallelBranches, resolveParallelOutcome, type PreparedParallelBranch } from "@/server/domain/runtime/parallel-runtime";
@@ -232,11 +233,15 @@ export async function agentRunWorkflow(
       if (node.type === "end") {
         const rejected = rejectedWorkflowResult(lastHumanDecision);
         if (rejected) {
-          await finalizeRun(runId, rejected, outputs);
+          const completed = await finalizeRun(runId, rejected, outputs, "not_approved");
+          if (completed.kind === "stopped") return { status: "failed" };
+          if (completed.deliveryRequired) await awaitDefaultResultDelivery(runId);
           return { status: "completed" };
         }
         const fields = manifest.outputContract?.fields ?? [];
-        await finalizeWorkflowResult({ runId, outputs, fields, inlineReferences: selectWorkflowOutputReferences(inlineCatalog, fields) });
+        const completed = await finalizeWorkflowResult({ runId, outputs, fields, inlineReferences: selectWorkflowOutputReferences(inlineCatalog, fields) });
+        if (completed.kind === "stopped") return { status: "failed" };
+        if (completed.deliveryRequired) await awaitDefaultResultDelivery(runId);
         return { status: "completed" };
       }
       if (node.type === "ai") {

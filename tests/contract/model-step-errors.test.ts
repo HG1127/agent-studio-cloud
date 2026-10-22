@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FatalError, RetryableError } from "workflow";
 import { AgentManifest } from "@/contracts/manifest";
 import { WorkflowNode } from "@/contracts/workflow";
@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({ generateText: vi.fn(), persistStep: vi.fn(), s
 vi.mock("ai", async (original) => ({ ...await original<typeof import("ai")>(), generateText: mocks.generateText }));
 vi.mock("@ai-sdk/openai-compatible", () => ({ createOpenAICompatible: () => () => ({}) }));
 vi.mock("@/lib/db", () => ({ db: { select: mocks.select } }));
+vi.mock("@/server/services/harness-policies", () => ({ readRunHarnessPolicy: async () => ({ workspaceId: "00000000-0000-4000-8000-000000000001", snapshot: null }) }));
 vi.mock("@/server/steps/run-state", () => ({ persistStep: mocks.persistStep }));
 vi.mock("@/server/steps/trace-step", () => ({ appendTrace: vi.fn() }));
 vi.mock("@/server/model/recorded-run-model", () => ({ recordRunModel: (model: unknown) => model }));
@@ -21,6 +22,13 @@ const manifest = AgentManifest.parse({
   inputContract: { fields: [] }, outputContract: { fields: [] }, designAudit: { status: "passed", issueCount: 0, criticalCount: 0 },
 });
 
+beforeEach(() => {
+  vi.stubEnv("HARNESS_POLICY_JSON", "");
+  vi.stubEnv("HARNESS_MAX_PROMPT_CHARS", "");
+  mocks.generateText.mockReset();
+  mocks.persistStep.mockReset().mockResolvedValue(undefined);
+  mocks.select.mockReset();
+});
 afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks(); vi.restoreAllMocks(); });
 
 describe("运行模型错误脱敏", () => {

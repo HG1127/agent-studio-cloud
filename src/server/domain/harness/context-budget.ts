@@ -1,5 +1,5 @@
 import { isPassiveJsonData } from "@/contracts/json";
-import { buildStepPrompt, MAX_STEP_SYSTEM_PROMPT_CHARS, MAX_STEP_USER_PROMPT_CHARS, type BuildStepPromptInput } from "@/server/domain/runtime/step-prompt";
+import { buildStepPromptWithBudget, MAX_STEP_SYSTEM_PROMPT_CHARS, MAX_STEP_USER_PROMPT_CHARS, type BuildStepPromptInput } from "@/server/domain/runtime/step-prompt";
 
 export const MAX_HARNESS_PROMPT_CHARS = MAX_STEP_SYSTEM_PROMPT_CHARS + MAX_STEP_USER_PROMPT_CHARS;
 export function parseHarnessPromptLimit(raw: string | undefined): number | null {
@@ -20,7 +20,8 @@ export function assessHarnessContext(args: BuildStepPromptInput, maxChars: numbe
   if (JSON.stringify(args.input, null, 2).length > 32_000) return fail();
   const upstream = Object.entries(args.upstreamOutputs).map(([id, value]) => `- ${id}：${typeof value === "string" ? value : JSON.stringify(value, null, 2)}`).join("\n");
   if (upstream.length > 64_000) return fail();
-  const prompt = buildStepPrompt(args);
+  const prompt = buildStepPromptWithBudget(args);
+  if (prompt.truncated) return fail();
   const usedChars = prompt.system.length + prompt.user.length;
   if (usedChars > maxChars) return fail();
   return { ok: true as const, usedChars, maxChars };

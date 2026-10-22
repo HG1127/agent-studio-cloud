@@ -1,8 +1,13 @@
 "use client";
 
 import { Handle, Position, type Node, type NodeProps, type NodeTypes } from "@xyflow/react";
+import {
+  AlarmClock, BookOpen, Bot, Braces, BrainCircuit, Check, GitBranch, Handshake,
+  ListRestart, Network, Repeat2, Send, Sparkles, UserCheck, Wrench, type LucideIcon,
+} from "lucide-react";
 import type { WorkflowNode, WorkflowNodeType } from "@/contracts/workflow";
 import { supportsErrorRoute } from "./flow-edges";
+import { recordedBusinessObjective } from "./business-evidence";
 
 // 中文标签沿用旧系统画布的叫法，用户看到的类型名与旧版一致
 export const NODE_TYPE_LABELS: Record<WorkflowNodeType, string> = {
@@ -25,22 +30,41 @@ export const NODE_TYPE_LABELS: Record<WorkflowNodeType, string> = {
 };
 
 const NODE_TYPE_BADGES: Record<WorkflowNodeType, string> = {
-  trigger: "bg-emerald-600",
-  end: "bg-gray-700",
-  ai: "bg-violet-600",
-  human: "bg-amber-500",
-  tool: "bg-sky-600",
-  knowledge: "bg-teal-600",
-  condition: "bg-blue-600",
-  system: "bg-slate-500",
-  rule: "bg-rose-500",
-  loop: "bg-indigo-600",
-  parallel: "bg-fuchsia-600",
-  wait: "bg-cyan-600",
-  memory: "bg-lime-600",
-  subflow: "bg-purple-600",
-  agent_call: "bg-blue-500",
-  handoff: "bg-orange-500",
+  trigger: "bg-emerald-50 text-emerald-700",
+  end: "bg-slate-100 text-slate-700",
+  ai: "bg-violet-50 text-violet-700",
+  human: "bg-amber-50 text-amber-700",
+  tool: "bg-sky-50 text-sky-700",
+  knowledge: "bg-teal-50 text-teal-700",
+  condition: "bg-blue-50 text-blue-700",
+  system: "bg-slate-100 text-slate-600",
+  rule: "bg-rose-50 text-rose-700",
+  loop: "bg-indigo-50 text-indigo-700",
+  parallel: "bg-fuchsia-50 text-fuchsia-700",
+  wait: "bg-cyan-50 text-cyan-700",
+  memory: "bg-lime-50 text-lime-700",
+  subflow: "bg-purple-50 text-purple-700",
+  agent_call: "bg-blue-50 text-blue-700",
+  handoff: "bg-orange-50 text-orange-700",
+};
+
+const NODE_TYPE_ICONS: Record<WorkflowNodeType, LucideIcon> = {
+  trigger: AlarmClock,
+  end: Check,
+  ai: Sparkles,
+  human: UserCheck,
+  tool: Wrench,
+  knowledge: BookOpen,
+  condition: GitBranch,
+  system: Braces,
+  rule: ListRestart,
+  loop: Repeat2,
+  parallel: Network,
+  wait: AlarmClock,
+  memory: BrainCircuit,
+  subflow: Network,
+  agent_call: Bot,
+  handoff: Handshake,
 };
 
 export type WorkflowFlowNodeData = { node: WorkflowNode };
@@ -49,13 +73,12 @@ export type WorkflowFlowNode = Node<WorkflowFlowNodeData>;
 const HANDLE_STYLE = { width: 9, height: 9, background: "#e5e7eb", border: "1px solid #6b7280" } as const;
 
 function isToolUnbound(node: WorkflowNode): boolean {
-  return node.type === "tool" && (Boolean(node.tool?.unresolved) || !node.tool?.registryToolId);
+  return node.type === "tool" && (Boolean(node.tool?.unresolved) || (node.tool?.protocol !== "demo" && !node.tool?.registryToolId));
 }
 
-// 演示绑定（registryToolId/protocol 为 demo）的工具节点明确标注「演示」；
-// 未绑定判定保留在前，真正未绑定的节点仍显示「未绑定工具」
+// 失效优先；明确演示协议无需真实登记标识，同名标识不决定能力。
 function isDemoTool(node: WorkflowNode): boolean {
-  return node.type === "tool" && (node.tool?.registryToolId === "demo" || node.tool?.protocol === "demo");
+  return node.type === "tool" && node.tool?.protocol === "demo";
 }
 
 // 出边句柄与草稿字段一一对应：next/reject/error/default/body/exit/timeout/branch-N
@@ -65,13 +88,15 @@ export function WorkflowNodeView(props: NodeProps) {
   const isCondition = node.type === "condition";
   const isLoop = node.type === "loop";
   const branchCount = node.condition?.branches.length ?? 0;
+  const NodeIcon = NODE_TYPE_ICONS[node.type] ?? Send;
+  const businessObjective = recordedBusinessObjective(node);
   const plainNextVisible = isCondition || isLoop ? Boolean(node.next) : node.type !== "end";
   const targetVisible = !isTrigger;
 
   return (
     <div
-      className={`min-w-[190px] max-w-[230px] rounded-lg border bg-white px-3 py-2 shadow-sm ${
-        isTrigger ? "border-emerald-500" : "border-gray-200"
+      className={`min-w-[190px] max-w-[230px] rounded-xl border bg-white px-3 py-2.5 shadow-sm transition-shadow ${
+        props.selected ? "border-indigo-500 ring-2 ring-indigo-100 shadow-md" : isTrigger ? "border-emerald-400" : "border-slate-200"
       }`}
     >
       {targetVisible ? <Handle id="in" type="target" position={Position.Left} style={HANDLE_STYLE} /> : null}
@@ -121,11 +146,11 @@ export function WorkflowNodeView(props: NodeProps) {
       <div className="flex items-center gap-1.5">
         <span
           aria-hidden
-          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-medium text-white ${NODE_TYPE_BADGES[node.type]}`}
+          className={`flex size-7 shrink-0 items-center justify-center rounded-lg ${NODE_TYPE_BADGES[node.type]}`}
         >
-          {NODE_TYPE_LABELS[node.type].slice(0, 1)}
+          <NodeIcon className="size-3.5" />
         </span>
-        <span className="text-xs text-gray-400">{NODE_TYPE_LABELS[node.type]}</span>
+        <span className="text-xs font-medium text-slate-500">{NODE_TYPE_LABELS[node.type]}</span>
         {node.type === "human" ? (
           <span className="ml-auto rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-700">
             {node.approval?.role || "业务负责人"}
@@ -138,6 +163,7 @@ export function WorkflowNodeView(props: NodeProps) {
         ) : null}
       </div>
       <p className="mt-1 text-sm font-medium leading-snug text-gray-900">{node.title}</p>
+      {businessObjective && businessObjective !== node.title && businessObjective !== node.description ? <p className="mt-1 line-clamp-2 text-xs leading-5 text-indigo-800">业务目标：{businessObjective}</p> : null}
       {node.description ? <p className="mt-0.5 line-clamp-2 text-xs text-gray-500">{node.description}</p> : null}
     </div>
   );

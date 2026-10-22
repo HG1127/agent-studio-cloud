@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({ generateText: vi.fn(), persistStep: vi.fn(), a
 vi.mock("ai", async (importOriginal) => ({ ...await importOriginal<typeof import("ai")>(), generateText: mocks.generateText }));
 vi.mock("@ai-sdk/openai-compatible", () => ({ createOpenAICompatible: mocks.provider }));
 vi.mock("@/lib/db", () => ({ db: {} }));
+vi.mock("@/server/services/harness-policies", () => ({ readRunHarnessPolicy: async () => ({ workspaceId: "00000000-0000-4000-8000-000000000001", snapshot: null }) }));
 vi.mock("@/server/steps/run-state", () => ({ persistStep: mocks.persistStep }));
 vi.mock("@/server/steps/trace-step", () => ({ appendTrace: mocks.appendTrace }));
 vi.mock("@/server/model/recorded-run-model", () => ({ recordRunModel: (model: unknown) => model }));
@@ -42,6 +43,19 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 describe("结构化模型执行", () => {
+  it("合法各段组合会裁剪时，在创建模型连接前阻止真实调用", async () => {
+    vi.stubEnv("HARNESS_POLICY_JSON", "");
+    vi.stubEnv("HARNESS_MAX_PROMPT_CHARS", "");
+    const node = nodeFor({ schema: { type: "object", description: "s".repeat(30_000) } });
+    await expect(runModelStep({
+      runId: "00000000-0000-4000-8000-000000000001", node, manifest: manifestFor(node),
+      input: { text: "i".repeat(31_900) }, outputs: { report: "u".repeat(63_900) },
+    })).rejects.toThrow("本步骤上下文超过运行边界");
+    expect(mocks.provider).not.toHaveBeenCalled();
+    expect(mocks.generateText).not.toHaveBeenCalled();
+    expect(mocks.persistStep).toHaveBeenLastCalledWith(expect.objectContaining({ status: "failed" }));
+    expect(mocks.appendTrace).toHaveBeenCalledWith(expect.objectContaining({ kind: "harness.context", level: "warn" }));
+  });
   it("下游模型使用冻结内部来源，保留零与否定值，不发送定位或其他成果", async () => {
     const node = WorkflowNode.parse({ ...nodeFor(), inputMapping: { fields: [
       { target: ["amount"], source: { kind: "output", nodeId: "group.extract", path: ["amount"] } },

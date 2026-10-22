@@ -387,6 +387,98 @@ describe("运行启动句柄恢复", () => {
     expect(stored.workflowRunId).toBe("wrun_test_handle");
   });
 
+  it.each([
+    { label: "当前协作", sourceType: "agent_call", parentRunId: AGENT_ID, executionRootRunId: AGENT_ID },
+    { label: "当前交接", sourceType: "handoff", parentRunId: AGENT_ID, executionRootRunId: AGENT_ID },
+    { label: "旧协作", sourceType: "agent_call", parentRunId: null, executionRootRunId: null },
+    { label: "旧交接", sourceType: "handoff", parentRunId: null, executionRootRunId: null },
+    { label: "父关联冲突", sourceType: "manual", parentRunId: AGENT_ID, executionRootRunId: null },
+    { label: "执行链归属冲突", sourceType: "schedule", parentRunId: null, executionRootRunId: AGENT_ID },
+    { label: "未知来源", sourceType: "future-source", parentRunId: null, executionRootRunId: null },
+  ])("$label的排队记录不能被手动或自动根恢复独立启动", async (scope) => {
+    const staleAt = new Date(Date.now() - RUN_START_LEASE_MS * 4);
+    const [child] = await db.insert(runs).values({
+      workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, agentId: AGENT_ID, versionId: VERSION_ID,
+      status: "queued", input: {}, sourceType: scope.sourceType, parentRunId: scope.parentRunId,
+      executionRootRunId: scope.executionRootRunId,
+      sourceKey: `${scope.sourceType}:${AGENT_ID}:queued-child`,
+      stepStates: withRunStartLease({ preserved: true }, createRunStartLease(staleAt, MAX_RUN_START_ATTEMPTS)),
+      updatedAt: staleAt,
+    }).returning();
+
+    expect((await resumeQueuedRunStartCore(child.id)).ok).toBe(false);
+    await recoverStaleQueuedRuns();
+
+    const [after] = await db.select().from(runs).where(eq(runs.id, child.id));
+    expect(after).toEqual(child);
+    expect(startMock).not.toHaveBeenCalled();
+    expect(cancelMock).not.toHaveBeenCalled();
+  });
+
+  it.each(["manual", "schedule", "evaluation"] as const)("显式归属自己的%s主任务仍可恢复", async (sourceType) => {
+    const id = crypto.randomUUID();
+    await db.insert(runs).values({
+      id, workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, agentId: AGENT_ID, versionId: VERSION_ID,
+      sourceType, parentRunId: null, executionRootRunId: id, status: "queued", input: {},
+      stepStates: { preserved: true }, updatedAt: new Date(Date.now() - RUN_START_LEASE_MS * 2),
+    });
+
+    expect(await resumeQueuedRunStartCore(id)).toEqual({ ok: true, runId: id });
+    const [after] = await db.select().from(runs).where(eq(runs.id, id));
+    expect(after).toMatchObject({ status: "queued", workflowRunId: "wrun_test_handle", sourceType, parentRunId: null, executionRootRunId: id });
+    expect(after.stepStates.preserved).toBe(true);
+    expect(startMock).toHaveBeenCalledOnce();
+  });
+
+  it("先创建的大量内联子任务不占自动恢复的主任务名额", async () => {
+    const oldChildAt = new Date(Date.now() - RUN_START_LEASE_MS * 4);
+    const children = await db.insert(runs).values(Array.from({ length: MAX_STALE_RUNS_PER_TICK + 2 }, (_, index) => ({
+      workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, agentId: AGENT_ID, versionId: VERSION_ID,
+      sourceType: index % 2 === 0 ? "agent_call" : "handoff", status: "queued", input: {},
+      stepStates: { preserved: true }, updatedAt: oldChildAt,
+    }))).returning();
+    const roots = await db.insert(runs).values(Array.from({ length: MAX_STALE_RUNS_PER_TICK }, () => ({
+      workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, agentId: AGENT_ID, versionId: VERSION_ID,
+      status: "queued", input: {}, updatedAt: new Date(Date.now() - RUN_START_LEASE_MS * 2),
+    }))).returning({ id: runs.id });
+
+    await recoverStaleQueuedRuns();
+
+    const afterChildren = await db.select().from(runs).where(inArray(runs.id, children.map((row) => row.id)));
+    expect(afterChildren).toHaveLength(children.length);
+    for (const child of children) expect(afterChildren.find((row) => row.id === child.id)).toEqual(child);
+    const afterRoots = await db.select().from(runs).where(inArray(runs.id, roots.map((row) => row.id)));
+    expect(afterRoots.every((row) => row.workflowRunId === "wrun_test_handle")).toBe(true);
+    expect(afterRoots).toHaveLength(MAX_STALE_RUNS_PER_TICK);
+    expect(startMock).toHaveBeenCalledTimes(MAX_STALE_RUNS_PER_TICK);
+  });
+
+  it.each([{ exhausted: false }, { exhausted: true }])("读后归属改变时，领取和次数上限终结均不能改写子任务：上限=$exhausted", async ({ exhausted }) => {
+    const staleAt = new Date(Date.now() - RUN_START_LEASE_MS * 2);
+    const [pending] = await db.insert(runs).values({
+      workspaceId: DEMO_WORKSPACE_ID, createdBy: DEMO_USER_ID, agentId: AGENT_ID, versionId: VERSION_ID,
+      status: "queued", input: {}, sourceType: "manual",
+      stepStates: withRunStartLease({}, createRunStartLease(staleAt, exhausted ? MAX_RUN_START_ATTEMPTS : 1)), updatedAt: staleAt,
+    }).returning();
+    const originalSelect = db.select.bind(db);
+    const candidate = {
+      from: () => candidate, leftJoin: () => candidate, where: () => candidate,
+      limit: async () => {
+        await db.update(runs).set({ sourceType: "agent_call", parentRunId: AGENT_ID }).where(eq(runs.id, pending.id));
+        return [{ ...pending, manifest, existingAgentId: AGENT_ID, agentArchivedAt: null }];
+      },
+    };
+    const select = vi.spyOn(db, "select").mockImplementationOnce(() => candidate as unknown as ReturnType<typeof db.select>);
+    try {
+      expect(await resumeQueuedRunStartCore(pending.id)).toEqual({ ok: true, runId: pending.id });
+    } finally {
+      select.mockRestore();
+    }
+    const [after] = await originalSelect().from(runs).where(eq(runs.id, pending.id));
+    expect(after).toEqual({ ...pending, sourceType: "agent_call", parentRunId: AGENT_ID });
+    expect(startMock).not.toHaveBeenCalled();
+  });
+
   it("自动接管达到启动次数上限后终结排队运行", async () => {
     const staleAt = new Date(Date.now() - RUN_START_LEASE_MS * 2);
     const [pending] = await db.insert(runs).values({

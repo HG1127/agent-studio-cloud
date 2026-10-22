@@ -5,6 +5,8 @@ export const AuditIssueView = z.object({
   severity: z.enum(["critical", "warning", "info"]),
   title: z.string(),
   detail: z.string(),
+  // 保留旧五字段调用方类型，缺失的真实步骤关联仍归为未知。
+  nodeId: z.string().nullable().default(null).optional(),
   fixable: z.boolean(),
 });
 export type AuditIssueView = z.infer<typeof AuditIssueView>;

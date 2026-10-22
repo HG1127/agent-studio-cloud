@@ -9,6 +9,8 @@ const nextConfig: NextConfig = {
   // PDF 解析改用 unpdf（serverless 版 pdfjs，无 DOMMatrix 依赖），可直接打包
   serverExternalPackages: ["mammoth"],
   experimental: {
+    // 编译完成后释放子进程内存，避免与后续类型检查叠加。
+    webpackBuildWorker: true,
     // 助手导入的有效流程最多 1MB；为导出包装与 Server Action 编码预留空间，同时不越过平台请求上限。
     serverActions: { bodySizeLimit: "3mb" },
   },

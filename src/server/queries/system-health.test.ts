@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import migrationJournal from "@/db/migrations/meta/_journal.json";
+import currentSnapshot from "@/db/migrations/meta/0035_snapshot.json";
+import previousSnapshot from "@/db/migrations/meta/0034_snapshot.json";
 
 const mocks = vi.hoisted(() => ({ execute: vi.fn() }));
 
@@ -9,6 +11,30 @@ import { isDatabaseReady, LATEST_MIGRATION_WHEN, REQUIRED_DATABASE_COLUMNS, REQU
 
 describe("数据库就绪检查", () => {
   beforeEach(() => mocks.execute.mockReset());
+
+  it("检查新增工具、规则与成果表的全部列和索引，而非只信任迁移时间", () => {
+    for (const [name, table] of Object.entries(currentSnapshot.tables)) {
+      if (Object.hasOwn(previousSnapshot.tables, name)) continue;
+      expect(REQUIRED_DATABASE_OBJECTS).toContain(name);
+      for (const index of Object.keys(table.indexes)) expect(REQUIRED_DATABASE_OBJECTS).toContain(`public.${index}`);
+      for (const [columnName, column] of Object.entries(table.columns)) {
+        expect(REQUIRED_DATABASE_COLUMNS).toContainEqual({
+          tableName: table.name, columnName, requireNotNull: column.notNull, allowDefault: Object.hasOwn(column, "default"),
+        });
+      }
+    }
+    for (const columnName of ["default_result_tracking_version", "harness_policy_snapshot"]) {
+      expect(REQUIRED_DATABASE_COLUMNS).toContainEqual({ tableName: "runs", columnName, requireNotNull: false, allowDefault: false });
+    }
+    expect(new Set(REQUIRED_DATABASE_OBJECTS).size).toBe(REQUIRED_DATABASE_OBJECTS.length);
+    expect(new Set(REQUIRED_DATABASE_COLUMNS.map((column) => `${column.tableName}.${column.columnName}`)).size).toBe(REQUIRED_DATABASE_COLUMNS.length);
+  });
+
+  it.each([false, null, undefined])("新增结构探针不就绪时不读取迁移和租户：%s", async (ready) => {
+    mocks.execute.mockResolvedValueOnce([{ ready }]);
+    await expect(isDatabaseReady()).resolves.toBe(false);
+    expect(mocks.execute).toHaveBeenCalledOnce();
+  });
 
   it("覆盖基础租户表、运行反馈、等待消息回执及最新关键索引", () => {
     expect(REQUIRED_DATABASE_OBJECTS).toEqual(expect.arrayContaining([

@@ -25,6 +25,7 @@ import { validateInlineWorkflows } from "@/server/domain/runtime/inline-workflow
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { getToolRegistration } from "@/server/tools/tool-registry";
 import { workflowToolRegistrationIssue } from "@/server/tools/tool-binding";
+import { collaborationToolRegistrationIssue } from "@/server/tools/collaboration-tool-binding";
 import { isDuplicatePublishedVersion } from "@/server/domain/publish-idempotency";
 import { revalidatePathsAfterCommit } from "@/server/actions/revalidate-paths";
 
@@ -169,6 +170,8 @@ export async function publishVersionAction(agentId: string, modelSelection?: Pub
           if (collaborationGraph.issue) {
             return { kind: "collaboration_invalid" as const, error: collaborationGraph.issue };
           }
+          const collaborationToolIssue = collaborationToolRegistrationIssue(dependencyVersions, collaborationGraph.versionIds, getToolRegistration);
+          if (collaborationToolIssue) return { kind: "collaboration_invalid" as const, error: collaborationToolIssue };
           const requiredKnowledgeSourceIds = [...new Set([
             ...knowledgeSnapshot.sourceIds,
             ...collaborationGraph.knowledgeSourceIds,

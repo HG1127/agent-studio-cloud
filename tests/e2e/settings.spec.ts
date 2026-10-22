@@ -21,7 +21,9 @@ test("手机端导航按整项换行，表单不横向溢出", async ({ page }) 
 
 test("模型连接页可从导航进入，空表单不能提交", async ({ page }) => {
   await page.goto("/agents");
-  await page.getByRole("link", { name: "模型连接", exact: true }).click();
+  const navigation = page.getByRole("navigation", { name: "主导航" });
+  await navigation.getByRole("button", { name: "资料与应用", exact: true }).click();
+  await navigation.getByRole("link", { name: "模型连接", exact: true }).click();
   await expect(page.getByRole("heading", { name: "模型连接", exact: true })).toBeVisible();
   for (const label of ["连接名称", "服务地址", "密钥", "模型列表"]) {
     await expect(page.getByLabel(label, { exact: true })).toBeVisible();
@@ -107,6 +109,7 @@ test("连接增改测删与发布选模可贯通，运行保留模型名和用�
     expect(outputs.length).toBeGreaterThan(0);
     expect(outputs.every((row) => row.output.usage.inputTokens === 12 && row.output.usage.outputTokens === 6)).toBe(true);
     const modelData = page.locator("details").filter({ hasText: '"inputTokens": 12' }).first();
+    await modelData.getByText("查看执行记录与步骤产出").click();
     await modelData.getByText("查看步骤数据（开发者数据）").click();
     await expect(modelData.locator("pre")).toBeVisible();
     await expect(modelData.locator("pre")).toContainText('"outputTokens": 6');

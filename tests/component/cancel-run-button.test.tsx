@@ -15,32 +15,32 @@ describe("CancelRunButton", () => {
   });
 
   it("确认后取消工作流并刷新状态", async () => {
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     cancelMock.mockResolvedValue({ ok: true });
     const user = userEvent.setup();
     render(<CancelRunButton runId="00000000-0000-4000-8000-000000000051" />);
     await user.click(screen.getByRole("button", { name: "取消运行" }));
+    await user.click(screen.getByRole("button", { name: "确认取消" }));
     await waitFor(() => expect(cancelMock).toHaveBeenCalled());
     expect(refreshMock).toHaveBeenCalledTimes(1);
   });
 
   it("取消失败时展示错误", async () => {
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     cancelMock.mockResolvedValue({ ok: false, error: "运行已经结束" });
     const user = userEvent.setup();
     render(<CancelRunButton runId="00000000-0000-4000-8000-000000000051" />);
     await user.click(screen.getByRole("button", { name: "取消运行" }));
+    await user.click(screen.getByRole("button", { name: "确认取消" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("运行已经结束");
   });
 
   it("从协作子任务取消时明确提示会停止整条执行链", async () => {
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     const user = userEvent.setup();
     render(<CancelRunButton runId="00000000-0000-4000-8000-000000000051" cancelsChain />);
 
     await user.click(screen.getByRole("button", { name: "取消运行" }));
 
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("同时停止上级任务和同一执行链中的其他子任务"));
+    expect(screen.getByText(/同时停止上级任务和同一执行链中的其他子任务/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "确认停止整条任务" })).toBeInTheDocument();
     expect(cancelMock).not.toHaveBeenCalled();
   });
 });

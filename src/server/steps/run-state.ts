@@ -4,6 +4,8 @@
 import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { FatalError, getStepMetadata, getWorkflowMetadata } from "workflow";
 import { RunExecutionClaim } from "@/contracts/run-execution-binding";
+import { DEFAULT_RESULT_TRACKING_VERSION, type RunCompletionOutcome } from "@/contracts/default-result-delivery";
+import type { HarnessPolicySnapshot } from "@/contracts/harness-management";
 import type { WorkflowDraft, WorkflowOutputField } from "@/contracts/workflow";
 import type { InlineOutputReferences } from "@/contracts/inline-output-reference";
 import { projectWorkflowResult } from "@/server/domain/runtime/output-contract";
@@ -23,6 +25,9 @@ import { redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { withSafeWorkflowError } from "@/server/security/workflow-error";
 import { runInitializationIssue } from "@/server/domain/runtime/run-execution-binding";
+import { completeRunResult } from "@/server/services/complete-run-result";
+import { HarnessPolicyDataError } from "@/server/domain/harness/management";
+import { freezeRunHarnessPolicy } from "@/server/services/harness-policies";
 
 function workflowStepId(): string {
   try {
@@ -51,19 +56,35 @@ export async function initializeRun(runId: string, draft: WorkflowDraft, startTo
   const issue = runInitializationIssue({ status: run.status, sdkRunId: run.workflowRunId, startToken: lease?.token ?? (Object.hasOwn(run.stepStates, RUN_START_LEASE_KEY) ? undefined : null) }, claim);
   if (issue) throw new FatalError(issue);
   const now = new Date();
-  const updated = await withSafeWorkflowError(() => db
-    .update(runs)
-    .set({ status: "running", workflowRunId: claim.sdkRunId, startedAt: now, updatedAt: now, modelUsageTrackingVersion: "v1", collaborationTrackingVersion: "v1" })
-    .where(and(
-      eq(runs.id, runId),
-      eq(runs.workspaceId, run.workspaceId),
-      eq(runs.status, "queued"),
-      or(isNull(runs.workflowRunId), eq(runs.workflowRunId, claim.sdkRunId)),
-      startToken
-        ? sql<boolean>`${runs.stepStates} -> ${RUN_START_LEASE_KEY} ->> 'token' = ${startToken}`
-        : sql<boolean>`${runs.stepStates} -> ${RUN_START_LEASE_KEY} is null`,
-    ))
-    .returning({ id: runs.id }), "运行状态暂时无法更新，请稍后重试");
+  const updated = await withSafeWorkflowError(() => db.transaction(async (tx) => {
+    const [locked] = await tx.select({ workspaceId: runs.workspaceId, status: runs.status, stepStates: runs.stepStates,
+      workflowRunId: runs.workflowRunId, parentRunId: runs.parentRunId, sourceType: runs.sourceType, harnessPolicySnapshot: runs.harnessPolicySnapshot })
+      .from(runs).where(and(eq(runs.id, runId), eq(runs.workspaceId, run.workspaceId))).for("update").limit(1);
+    if (!locked) throw new FatalError("运行记录不存在，无法继续执行");
+    const lockedLease = readRunStartLease(locked.stepStates);
+    const lockedIssue = runInitializationIssue({ status: locked.status, sdkRunId: locked.workflowRunId,
+      startToken: lockedLease?.token ?? (Object.hasOwn(locked.stepStates, RUN_START_LEASE_KEY) ? undefined : null) }, claim);
+    if (lockedIssue) throw new FatalError(lockedIssue);
+    if (locked.status === "running") return [];
+    let harnessPolicySnapshot: HarnessPolicySnapshot | null;
+    try {
+      harnessPolicySnapshot = await freezeRunHarnessPolicy(tx, locked, now);
+    } catch (error) {
+      if (error instanceof HarnessPolicyDataError) throw new FatalError(error.message);
+      throw error;
+    }
+    return tx.update(runs)
+      .set({ status: "running", workflowRunId: claim.sdkRunId, startedAt: now, updatedAt: now, modelUsageTrackingVersion: "v1", collaborationTrackingVersion: "v1", defaultResultTrackingVersion: DEFAULT_RESULT_TRACKING_VERSION, harnessPolicySnapshot })
+      .where(and(
+        eq(runs.id, runId),
+        eq(runs.workspaceId, run.workspaceId),
+        eq(runs.status, "queued"),
+        or(isNull(runs.workflowRunId), eq(runs.workflowRunId, claim.sdkRunId)),
+        startToken
+          ? sql<boolean>`${runs.stepStates} -> ${RUN_START_LEASE_KEY} ->> 'token' = ${startToken}`
+          : sql<boolean>`${runs.stepStates} -> ${RUN_START_LEASE_KEY} is null`,
+      )).returning({ id: runs.id });
+  }), "运行状态或运行规则暂时无法更新，请稍后重试");
   if (updated.length === 0) {
     const [current] = await withSafeWorkflowError(() => db
       .select({ status: runs.status, stepStates: runs.stepStates, workflowRunId: runs.workflowRunId })
@@ -230,9 +251,10 @@ export async function finalizeRun(
   runId: string,
   result: Record<string, unknown>,
   contextOutputs: Record<string, unknown> = result,
-): Promise<void> {
+  outcome: "completed" | "not_approved" = "completed",
+): Promise<RunCompletionOutcome> {
   "use step";
-  await persistCompletedRun(runId, result, contextOutputs);
+  return persistCompletedRun(runId, result, contextOutputs, outcome);
 }
 
 export async function finalizeWorkflowResult(args: {
@@ -240,49 +262,41 @@ export async function finalizeWorkflowResult(args: {
   outputs: Record<string, unknown>;
   fields: WorkflowOutputField[];
   inlineReferences?: InlineOutputReferences;
-}): Promise<void> {
+}): Promise<RunCompletionOutcome> {
   "use step";
   const projected = projectWorkflowResult(args.outputs, args.fields, args.inlineReferences);
   if (!projected.ok) throw new FatalError(`缺少必需交付内容：${projected.missing.join("、")}`);
-  await persistCompletedRun(args.runId, projected.result, args.outputs);
+  return persistCompletedRun(args.runId, projected.result, args.outputs);
 }
 
-async function persistCompletedRun(runId: string, result: Record<string, unknown>, contextOutputs: Record<string, unknown>): Promise<void> {
+async function persistCompletedRun(runId: string, result: Record<string, unknown>, contextOutputs: Record<string, unknown>, outcome: "completed" | "not_approved" = "completed"): Promise<RunCompletionOutcome> {
   const resultIssue = jsonStorageIssue(result, MAX_RUN_RESULT_BYTES, "运行结果");
   if (resultIssue) throw new FatalError(resultIssue);
   const contextIssue = jsonStorageIssue({ outputs: contextOutputs }, MAX_RUN_CONTEXT_BYTES, "运行完整上下文");
   if (contextIssue) throw new FatalError(contextIssue);
-  const now = new Date();
-  const updated = await withSafeWorkflowError(() => db
-    .update(runs)
-    .set({ status: "completed", result, context: { outputs: contextOutputs }, finishedAt: now, updatedAt: now })
-    .where(and(eq(runs.id, runId), inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"])))
-    .returning({ id: runs.id }), "运行结果暂时无法保存，请稍后重试");
-  if (updated.length === 0) {
-    const [current] = await withSafeWorkflowError(() => db
-      .select({ status: runs.status })
-      .from(runs)
-      .where(eq(runs.id, runId))
-      .limit(1), "运行状态暂时无法读取，请稍后重试");
-    if (current?.status !== "completed") return;
+  const completed = await completeRunResult({ runId, result, contextOutputs, outcome, expectedSdkRunId: getWorkflowMetadata().workflowRunId });
+  if (completed.outcome.kind === "stopped") return completed.outcome;
+  const savedResult = completed.result ?? {};
+  if (!completed.newlyCompleted) {
     // 终态写入后若验收汇总瞬时失败，Workflow 会重试本步骤；重入时仍需完成对账。
-    await appendTrace({ runId, kind: "run.completed", title: "流程执行完成", detail: `共 ${Object.keys(result).length} 个步骤产出` });
+    await appendTrace({ runId, kind: "run.completed", title: "流程执行完成", detail: `共 ${Object.keys(savedResult).length} 个步骤产出` });
     await withSafeWorkflowError(
       () => reconcileTerminalEvaluationRun(runId),
       "验收结果暂时无法汇总，请稍后重试",
     );
-    return;
+    return completed.outcome;
   }
   await appendTrace({
     runId,
     kind: "run.completed",
     title: "流程执行完成",
-    detail: `共 ${Object.keys(result).length} 个步骤产出`,
+    detail: `共 ${Object.keys(savedResult).length} 个步骤产出`,
   });
   await withSafeWorkflowError(
-    () => completeEvaluationForRun(runId, result),
+    () => completeEvaluationForRun(runId, savedResult),
     "验收结果暂时无法汇总，请稍后重试",
   );
+  return completed.outcome;
 }
 
 export async function failRun(runId: string, error: string): Promise<void> {

@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { DRAFT_STATE_EVENT, type DraftStateDetail } from "@/lib/draft-state";
 
-const LEAVE_MESSAGE = "流程还有未保存修改，确定离开当前页面吗？";
+const LEAVE_MESSAGE = "页面还有未保存修改，确定离开当前页面吗？";
 
 function navigatesWithinApp(anchor: HTMLAnchorElement): boolean {
   if (anchor.hasAttribute("download") || (anchor.target && anchor.target !== "_self")) return false;
