@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => {
   const selectResults: unknown[][] = [];
   const insertValues = vi.fn();
   const writerWrite = vi.fn();
-  const writerClose = vi.fn();
+  const writerRelease = vi.fn();
   const insert = vi.fn(() => ({
     values: (values: unknown) => {
       insertValues(values);
@@ -31,7 +31,7 @@ const mocks = vi.hoisted(() => {
     insert,
     insertValues,
     writerWrite,
-    writerClose,
+    writerRelease,
     getWritable: vi.fn(),
     transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
   };
@@ -40,8 +40,9 @@ const mocks = vi.hoisted(() => {
 vi.mock("@/lib/db", () => ({ db: { transaction: mocks.transaction } }));
 vi.mock("workflow", () => ({
   FatalError: class FatalError extends Error {},
-  getWritable: mocks.getWritable,
+  getWorkflowMetadata: () => ({ workflowRunId: "wrun_trace_step" }),
 }));
+vi.mock("workflow/api", () => ({ getRun: () => ({ getWritable: mocks.getWritable }) }));
 
 import { appendTrace } from "@/server/steps/trace-step";
 
@@ -50,9 +51,9 @@ describe("终态轨迹幂等写入", () => {
     vi.clearAllMocks();
     mocks.selectResults.length = 0;
     mocks.writerWrite.mockResolvedValue(undefined);
-    mocks.writerClose.mockResolvedValue(undefined);
+    mocks.writerRelease.mockResolvedValue(undefined);
     mocks.getWritable.mockReturnValue({
-      getWriter: () => ({ write: mocks.writerWrite, close: mocks.writerClose }),
+      getWriter: () => ({ write: mocks.writerWrite, releaseLock: mocks.writerRelease }),
     });
   });
 

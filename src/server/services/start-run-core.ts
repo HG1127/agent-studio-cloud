@@ -4,6 +4,7 @@ import { start } from "workflow/api";
 import { AgentManifest } from "@/contracts/manifest";
 import { RunInputPayload, type StartRunResult } from "@/contracts/run";
 import { agentVersions, agents, knowledgeSources, runDeliveries, runs } from "@/db/schema";
+import { rootRunStartScope } from "@/db/queries/root-run-start-scope";
 import { RUN_DELIVERY_INTENT_KEY, type RunDeliveryBinding } from "@/contracts/run-delivery-config";
 import { deliveryTargetBinding, getDeliveryTarget } from "@/server/delivery/target-registry";
 import { runDeliveryIntentMatches } from "@/server/domain/runtime/run-delivery";
@@ -40,6 +41,7 @@ import { safeErrorForLog } from "@/server/domain/security/safe-log-error";
 import { jsonValuesEqual } from "@/server/domain/json-value";
 import type { WorkflowNode } from "@/contracts/workflow";
 import { toolRegistrationCompatibilityIssue } from "@/server/tools/tool-binding";
+import { collaborationToolRegistrationIssue } from "@/server/tools/collaboration-tool-binding";
 import { ExecutionResourceRejected, lockExecutionWorkspace, reserveRootExecutionResources } from "@/server/services/execution-resources";
 import { RunExecutionClaim } from "@/contracts/run-execution-binding";
 import { runStartAcknowledgementDisposition } from "@/server/domain/runtime/run-execution-binding";
@@ -127,6 +129,8 @@ async function createRunWithLockedDependencies(args: {
         versions: dependencyVersions,
       });
       if (graph.issue) return { runId: null, error: `${graph.issue}，请重新发布助手后再运行` };
+      const toolIssue = collaborationToolRegistrationIssue(dependencyVersions, graph.versionIds, getToolRegistration);
+      if (toolIssue) return { runId: null, error: toolIssue };
       collaborationAgentIds = graph.agentIds;
       collaborationKnowledgeIds = graph.knowledgeSourceIds;
     }
@@ -207,6 +211,7 @@ async function markRunStartFailed(
       eq(runs.workspaceId, DEMO_WORKSPACE_ID),
       eq(runs.status, "queued"),
       isNull(runs.workflowRunId),
+      rootRunStartScope,
       ownsRunStartLease(token),
     ))
     .returning({ id: runs.id });
@@ -252,6 +257,7 @@ export async function launchClaimedRun(args: {
       .where(and(
         eq(runs.id, args.runId),
         eq(runs.workspaceId, DEMO_WORKSPACE_ID),
+        rootRunStartScope,
         ownsRunStartLease(args.lease.token),
         inArray(runs.status, ["queued", "running", "waiting_approval", "waiting_event"]),
         or(isNull(runs.workflowRunId), eq(runs.workflowRunId, claim.sdkRunId)),
@@ -318,6 +324,7 @@ export async function resumeQueuedRunStartCore(runId: string): Promise<StartRunR
         eq(runs.workspaceId, DEMO_WORKSPACE_ID),
         eq(runs.status, "queued"),
         isNull(runs.workflowRunId),
+        rootRunStartScope,
       ))
       .limit(1);
     if (!candidate) return { ok: false, error: "这次运行已经开始或结束，请刷新页面查看状态" };
@@ -339,6 +346,7 @@ export async function resumeQueuedRunStartCore(runId: string): Promise<StartRunR
         eq(runs.workspaceId, DEMO_WORKSPACE_ID),
         eq(runs.status, "queued"),
         isNull(runs.workflowRunId),
+        rootRunStartScope,
         // Date 会丢失 Postgres 微秒；比较完整启动状态，既保留领取互斥也避免永远领不到。
         eq(runs.stepStates, candidate.stepStates),
       ))
@@ -482,6 +490,8 @@ async function validateRuntimePreflight(args: {
       versions: dependencyVersions,
     });
     if (graph.issue) return `${graph.issue}，请重新发布助手后再运行`;
+    const toolIssue = collaborationToolRegistrationIssue(dependencyVersions, graph.versionIds, getToolRegistration);
+    if (toolIssue) return toolIssue;
     if (graph.knowledgeSourceIds.length > 0) {
       const availableSources = await db
         .select({ id: knowledgeSources.id })

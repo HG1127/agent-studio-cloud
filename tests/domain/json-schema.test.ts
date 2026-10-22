@@ -81,7 +81,8 @@ describe("外部消息字段校验", () => {
   });
 
   it("拒绝不支持或格式错误的契约规则", () => {
-    expect(validateJsonObjectSchema({}, { type: "object", allOf: [] })).toContain("暂不支持的规则“allOf”");
+    expect(validateJsonObjectSchema({}, { type: "object", $ref: "unsupported" })).toContain("暂不支持的规则“$ref”");
+    expect(validateJsonObjectSchema({}, { type: "object", allOf: [] })).toContain("allOf 必须包含");
     expect(validateJsonObjectSchema({}, { type: "object", properties: { code: { type: "string", pattern: "[" } } })).toContain("不是有效正则表达式");
     expect(validateJsonObjectSchema({}, { type: "object", maxProperties: -1 })).toContain("必须是非负整数");
   });

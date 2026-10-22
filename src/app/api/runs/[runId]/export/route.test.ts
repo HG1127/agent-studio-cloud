@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { boundedJsonStorageValue, type JsonStorageRecord } from "@/contracts/json";
+import { MAX_RUN_RESULT_BYTES, RunReportFile } from "@/contracts/run";
 
 const mocks = vi.hoisted(() => ({
   getRunView: vi.fn(),
@@ -104,6 +106,37 @@ describe("运行报告导出", () => {
     expect(mocks.listTraceSince).toHaveBeenLastCalledWith(RUN_ID, expect.any(String), 2, 2);
   });
 
+  it("包含扩展汉字的合法助手名在截断边界也能完成真实下载响应编码", async () => {
+    const name = "a".repeat(49) + "𠮷";
+    mocks.getRunView.mockResolvedValueOnce({ ...(await mocks.getRunView()), agentName: name });
+    const response = await GET(new Request("http://localhost"), { params: Promise.resolve({ runId: RUN_ID }) });
+    expect(response.status).toBe(200);
+    const header = response.headers.get("content-disposition")!;
+    expect(decodeURIComponent(header.slice("attachment; filename*=UTF-8''".length))).toBe(`${name}-2026-09-24-运行报告.json`);
+    expect(RunReportFile.parse(await response.json()).run.agentName).toBe(name);
+  });
+
+  it.each(["finance@example.com", "13800000000", "Bearer fixture-private-download-123456"])("文件名与报告正文一致隐藏敏感助手名 %s", async (name) => {
+    mocks.getRunView.mockResolvedValueOnce({ ...(await mocks.getRunView()), agentName: name });
+    const response = await GET(new Request("http://localhost"), { params: Promise.resolve({ runId: RUN_ID }) });
+    expect(response.status).toBe(200);
+    const header = response.headers.get("content-disposition")!;
+    expect(header).toMatch(/^attachment; filename\*=UTF-8''/);
+    expect(decodeURIComponent(header)).toContain("已隐藏敏感信息");
+    expect(decodeURIComponent(header)).not.toContain(name);
+    expect(header).not.toMatch(/[\r\n]/);
+    expect(JSON.stringify(await response.json())).not.toContain(name);
+  });
+
+  it("历史结束时间无效时用合法开始日期命名，但不改写报告内的时间记录", async () => {
+    const finishedAt = "\uD800历史错误时间";
+    mocks.getRunView.mockResolvedValueOnce({ ...(await mocks.getRunView()), finishedAt, startedAt: "2026-09-23T01:00:00.000Z" });
+    const response = await GET(new Request("http://localhost"), { params: Promise.resolve({ runId: RUN_ID }) });
+    expect(response.status).toBe(200);
+    expect(decodeURIComponent(response.headers.get("content-disposition")!)).toContain("2026-09-23-运行报告.json");
+    expect((await response.json()).run.finishedAt).toBe(finishedAt);
+  });
+
   it("下载期间只读取开始时已有的轨迹，不追入后续事件", async () => {
     mocks.getLatestTraceSeq.mockResolvedValueOnce(1);
     mocks.listTraceSince.mockImplementation(async (_runId: string, _workspaceId: string, cursor: number, maxSeq: number) => {
@@ -131,6 +164,31 @@ describe("运行报告导出", () => {
     expect(response.body).toBeInstanceOf(ReadableStream);
     expect(response.headers.get("content-length")).toBeNull();
     expect((await response.json()).context.outputs.large).toBe(content);
+  });
+
+  it.each(["input", "result", "step", "context"] as const)("流式下载完整保留 %s 中合法32层成果及零值，不漏出深层敏感信息", async (slot) => {
+    let value: JsonStorageRecord = { amount: 0, approved: false, apiKey: "fixture-deep-export-key", contact: "finance@example.com" };
+    for (let index = 0; index < 31; index += 1) value = { nested: value };
+    expect(boundedJsonStorageValue(MAX_RUN_RESULT_BYTES, "报告业务数据").safeParse(value).success).toBe(true);
+    if (slot === "input" || slot === "result") mocks.getRunView.mockResolvedValueOnce({ ...(await mocks.getRunView()), [slot]: value });
+    else if (slot === "context") mocks.getRunContext.mockResolvedValueOnce({ outputs: { lookup: value } });
+    else mocks.listRunStepsForReport.mockResolvedValueOnce({ steps: [{
+      nodeId: "lookup", nodeTitle: "查询业务", nodeType: "tool", status: "succeeded", attempt: 1,
+      output: value, error: null, startedAt: null, finishedAt: null,
+    }], omittedCount: 0 });
+
+    const response = await GET(new Request("http://localhost"), { params: Promise.resolve({ runId: RUN_ID }) });
+    expect(response.status).toBe(200);
+    expect(response.body).toBeInstanceOf(ReadableStream);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const report = RunReportFile.parse(await response.json());
+    let current = (slot === "input" ? report.run.input : slot === "result" ? report.run.result
+      : slot === "step" ? report.steps[0].output : (report.context!.outputs as Record<string, unknown>).lookup) as JsonStorageRecord;
+    for (let index = 0; index < 31; index += 1) current = current.nested as JsonStorageRecord;
+    expect(current).toEqual({ amount: 0, approved: false, apiKey: "[已隐藏敏感信息]", contact: "[已隐藏敏感信息]" });
+    expect(JSON.stringify(report)).not.toMatch(/已省略|fixture-deep-export-key|finance@example/);
+    expect(report.integrity).toEqual({ omittedSteps: 0, omittedTraceEvents: 0, omittedApprovals: 0, omittedFeedback: 0 });
+    expect(JSON.stringify(value)).toContain("fixture-deep-export-key");
   });
 
   it("找不到运行时返回中文错误", async () => {

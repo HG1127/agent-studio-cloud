@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import type { ExecutionResourceSnapshot } from "@/contracts/execution-resources";
+import type { HarnessPolicySnapshot } from "@/contracts/harness-management";
 
 export const runs = pgTable(
   "runs",
@@ -11,9 +12,11 @@ export const runs = pgTable(
     agentId: uuid("agent_id").notNull(),
     versionId: uuid("version_id").notNull(),
     workflowRunId: text("workflow_run_id"),
+    defaultResultTrackingVersion: text("default_result_tracking_version"),
     modelUsageTrackingVersion: text("model_usage_tracking_version"),
     parentRunId: uuid("parent_run_id"),
     collaborationTrackingVersion: text("collaboration_tracking_version"),
+    harnessPolicySnapshot: jsonb("harness_policy_snapshot").$type<HarnessPolicySnapshot>(),
     executionRootRunId: uuid("execution_root_run_id"),
     executionResources: jsonb("execution_resources").$type<ExecutionResourceSnapshot>(),
     status: text("status").notNull().default("queued"),

@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { invokeHttpTool } from "@/server/tools/invoke-http-tool";
 import { parseToolRegistry } from "@/server/tools/tool-registry";
+import { toolStepIdempotencyKey } from "@/server/domain/runtime/tool-step-idempotency-key";
+import { startToolOperationServer } from "../../../tests/helpers/tool-operation-server";
 
 const tool = parseToolRegistry(JSON.stringify([{
   id: "crm.update",
@@ -22,6 +24,17 @@ function invokeWithResponse(response: Response) {
 }
 
 describe("业务工具回执编码", () => {
+  it("中文内联步骤通过真实HTTP发送稳定键，丢首个回执后的重试不重复写入", async () => {
+    const server = await startToolOperationServer(true);
+    try {
+      const idempotencyKey = toolStepIdempotencyKey({ runId: "run-1", nodeId: "group.登记", stepId: "step-1" });
+      const invoke = () => invokeHttpTool({ tool: { ...tool, endpoint: server.endpoint }, idempotencyKey, action: tool.action, input: {}, outputs: {} });
+      await expect(invoke()).resolves.toMatchObject({ ok: false, retryable: true });
+      await expect(invoke()).resolves.toMatchObject({ ok: true, output: { receiptId: "receipt-1" } });
+      expect(server.requests.map((request) => request.key)).toEqual([idempotencyKey, idempotencyKey]);
+      expect(server.effectCount()).toBe(1);
+    } finally { await server.close(); }
+  });
   it("接受有效 UTF-8 JSON 回执", async () => {
     await expect(invokeWithResponse(Response.json({ message: "退款成功" }))).resolves.toEqual({
       ok: true,

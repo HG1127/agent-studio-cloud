@@ -11,6 +11,12 @@ const RUN_ID = "00000000-0000-4000-8000-000000000061";
 const NEW_RUN_ID = "00000000-0000-4000-8000-000000000062";
 const REQUEST_ID = "00000000-0000-4000-8000-000000000063";
 
+async function confirmRetry(user = userEvent.setup()) {
+  await user.click(screen.getByRole("button", { name: "按原输入再次运行" }));
+  expect(screen.getByRole("dialog", { name: "按原输入创建一次新运行？" })).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "创建新运行" }));
+}
+
 describe("再次运行", () => {
   beforeEach(() => {
     vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(REQUEST_ID);
@@ -24,14 +30,16 @@ describe("再次运行", () => {
 
   it("成功后打开新运行记录", async () => {
     actionMock.mockResolvedValue({ ok: true, runId: NEW_RUN_ID });
-    await userEvent.click(render(<RetryRunButton runId={RUN_ID} />).getByRole("button"));
+    render(<RetryRunButton runId={RUN_ID} />);
+    await confirmRetry();
     await waitFor(() => expect(actionMock).toHaveBeenCalledWith(RUN_ID, REQUEST_ID));
     expect(pushMock).toHaveBeenCalledWith(`/runs/${NEW_RUN_ID}`);
   });
 
   it("失败时保留当前页面并显示原因", async () => {
     actionMock.mockResolvedValue({ ok: false, error: "原版本已不可用" });
-    await userEvent.click(render(<RetryRunButton runId={RUN_ID} />).getByRole("button"));
+    render(<RetryRunButton runId={RUN_ID} />);
+    await confirmRetry();
     expect(await screen.findByRole("alert")).toHaveTextContent("原版本已不可用");
     expect(pushMock).not.toHaveBeenCalled();
   });
@@ -41,9 +49,9 @@ describe("再次运行", () => {
     const user = userEvent.setup();
     render(<RetryRunButton runId={RUN_ID} />);
 
-    await user.click(screen.getByRole("button"));
+    await confirmRetry(user);
     await screen.findByRole("alert");
-    await user.click(screen.getByRole("button"));
+    await confirmRetry(user);
 
     await waitFor(() => expect(actionMock).toHaveBeenCalledTimes(2));
     expect(actionMock.mock.calls[0]).toEqual([RUN_ID, REQUEST_ID]);
@@ -53,7 +61,8 @@ describe("再次运行", () => {
   it("连续点击只发起一次再次运行", async () => {
     actionMock.mockImplementation(() => new Promise(() => undefined));
     render(<RetryRunButton runId={RUN_ID} />);
-    const button = screen.getByRole("button");
+    fireEvent.click(screen.getByRole("button", { name: "按原输入再次运行" }));
+    const button = screen.getByRole("button", { name: "创建新运行" });
 
     fireEvent.click(button);
     fireEvent.click(button);

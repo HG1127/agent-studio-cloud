@@ -3,27 +3,30 @@ import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import type { WorkflowDraft } from "@/contracts/workflow";
 import { createRunStartLease, readRunStartLease, withRunStartLease } from "@/server/services/run-start-lease";
+import { HarnessPolicyDataError } from "@/server/domain/harness/management";
 
-const mocks = vi.hoisted(() => ({ metadata: vi.fn(), rows: vi.fn(), update: vi.fn(), trace: vi.fn(), filters: [] as SQL[], values: [] as Record<string, unknown>[] }));
+const mocks = vi.hoisted(() => ({ metadata: vi.fn(), rows: vi.fn(), update: vi.fn(), trace: vi.fn(), freezeHarness: vi.fn(), filters: [] as SQL[], values: [] as Record<string, unknown>[] }));
 vi.mock("workflow", async (original) => ({ ...await original<typeof import("workflow")>(), getWorkflowMetadata: mocks.metadata }));
 vi.mock("@/server/steps/trace-step", () => ({ appendTrace: mocks.trace }));
-vi.mock("@/lib/db", () => ({ db: {
-  select: () => ({ from: () => ({ where: () => ({ limit: mocks.rows }) }) }),
+vi.mock("@/server/services/harness-policies", () => ({ freezeRunHarnessPolicy: mocks.freezeHarness }));
+vi.mock("@/lib/db", () => { const client = {
+  select: () => { const query = { from: () => query, where: () => query, for: () => query, limit: mocks.rows }; return query; },
   update: () => ({ set: (values: Record<string, unknown>) => ({ where: (filter: SQL) => {
     mocks.filters.push(filter); mocks.values.push(values);
     return { returning: () => mocks.update(values, filter) };
   } }) }),
-} }));
+}; return { db: { ...client, transaction: async (callback: (tx: typeof client) => unknown) => callback(client) } }; });
 
 import { initializeRun } from "./run-state";
 
 const RUN = "123e4567-e89b-42d3-a456-426614174000", WORKSPACE = "123e4567-e89b-42d3-a456-426614174001";
 const draft = { startNodeId: "start", rootAgent: { name: "测试助手" } } as WorkflowDraft;
-const fixture = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({ id: RUN, workspaceId: WORKSPACE, status: "queued", workflowRunId: null, stepStates: {}, ...overrides });
+const fixture = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({ id: RUN, workspaceId: WORKSPACE, status: "queued", workflowRunId: null, stepStates: {}, parentRunId: null, sourceType: "manual", harnessPolicySnapshot: null, ...overrides });
 beforeEach(() => {
   mocks.metadata.mockReset().mockReturnValue({ workflowRunId: "wrun_A" });
   mocks.rows.mockReset(); mocks.update.mockReset().mockResolvedValue([{ id: RUN }]); mocks.trace.mockReset().mockResolvedValue(undefined);
   mocks.filters = []; mocks.values = [];
+  mocks.freezeHarness.mockReset().mockResolvedValue(null);
 });
 
 describe("初始化执行者原子绑定", () => {
@@ -63,7 +66,7 @@ describe("初始化执行者原子绑定", () => {
     mocks.rows.mockResolvedValue([row]); mocks.update.mockResolvedValue([]);
     await initializeRun(RUN, draft);
     expect(row.startedAt).toEqual(startedAt); expect(row.modelUsageTrackingVersion).toBeNull(); expect(mocks.trace).toHaveBeenCalledOnce();
-    expect(new PgDialect().sqlToQuery(mocks.filters[0]).params).toContain("queued");
+    expect(mocks.update).not.toHaveBeenCalled(); expect(mocks.freezeHarness).not.toHaveBeenCalled();
   });
   it.each([
     { status: "running", workflowRunId: null, message: "尚未确认" },
@@ -97,5 +100,15 @@ describe("初始化执行者原子绑定", () => {
     await initializeRun(RUN, draft);
     expect(mocks.values[0].workflowRunId).toBe("wrun_A");
     expect(new PgDialect().sqlToQuery(mocks.filters[0]).sql).toContain("is null");
+  });
+  it("首次启动将快照与实际身份一并提交，冻结失败不写任何开始状态", async () => {
+    const snapshot = { version: 1, workspaceId: WORKSPACE, revision: 0, policy: null, frozenAt: "2026-10-12T00:00:00.000Z" };
+    mocks.rows.mockResolvedValue([fixture()]); mocks.freezeHarness.mockResolvedValueOnce(snapshot);
+    await initializeRun(RUN, draft);
+    expect(mocks.values[0]).toMatchObject({ workflowRunId: "wrun_A", harnessPolicySnapshot: snapshot });
+    mocks.values = []; mocks.update.mockClear(); mocks.trace.mockClear();
+    mocks.freezeHarness.mockRejectedValueOnce(new HarnessPolicyDataError());
+    await expect(initializeRun(RUN, draft)).rejects.toThrow("冻结记录无效");
+    expect(mocks.update).not.toHaveBeenCalled(); expect(mocks.trace).not.toHaveBeenCalled();
   });
 });

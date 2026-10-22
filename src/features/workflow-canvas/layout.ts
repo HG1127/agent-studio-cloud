@@ -26,6 +26,7 @@ function successorIds(draft: WorkflowDraft, id: string, includedIds?: ReadonlySe
     node.condition?.defaultNext,
     node.loop?.bodyNext,
     node.loop?.exitNext,
+    node.wait?.onTimeoutNext,
   ];
   const seen = new Set<string>();
   for (const target of targets) {

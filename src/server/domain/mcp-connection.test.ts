@@ -1,12 +1,36 @@
 import { describe, expect, it, vi } from "vitest";
 import { McpConnectionCheckInput, McpConnectionRegistration } from "@/contracts/mcp-connection";
-import { compareMcpDirectory, parseMcpConnections } from "./mcp-connection";
+import { compareMcpDirectory, mcpHeadersAreValid, parseMcpConnections } from "./mcp-connection";
 import { mcpToolDefinitionIssue } from "@/server/domain/runtime/mcp-tool";
 const registration = McpConnectionRegistration.parse({
   id: "service", name: "查询服务", workspaceId: "00000000-0000-4000-8000-000000000001", endpoint: "https://service.example/mcp",
   headers: { Authorization: "Bearer secret" }, tools: [{ registryToolId: "lookup", name: "查询记录", action: "lookup", inputSchema: { type: "object", properties: { term: { type: "string" } } } }],
 });
 const definition = { name: "lookup", inputSchema: { properties: { term: { type: "string" } }, type: "object" } };
+describe("MCP 登记、检查与执行复用请求头规则", () => {
+  const allowed: Array<Record<string, string>> = [
+    {}, { Authorization: "Bearer fixture-only", "X-API-Key": "fixture-only" },
+    Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`X-Fixture-${index}`, "fixture-only"])),
+  ];
+  it.each(allowed)("允许合法认证及数量边界 %#", (headers) => {
+    const before = JSON.stringify(headers);
+    expect(mcpHeadersAreValid(headers)).toBe(true);
+    expect(parseMcpConnections(JSON.stringify([{ ...registration, headers }]))?.[0].headers).toEqual(headers);
+    expect(JSON.stringify(headers)).toBe(before);
+  });
+  const rejected: Array<Record<string, string>> = [
+    { Cookie: "header-private" }, { "cOoKiE": "header-private" }, { "SET-cookie": "header-private" },
+    { Host: "header-private" }, { Connection: "header-private" }, { "Proxy-Authorization": "header-private" },
+    { "Content-Length": "1" }, { "bad header": "header-private" }, { "bad\r\nheader": "header-private" },
+    { Authorization: "header-private\r\ninjection" }, { Authorization: "header-private", authorization: "other-private" },
+    Object.fromEntries(Array.from({ length: 21 }, (_, index) => [`X-Fixture-${index}`, "header-private"])),
+    { Authorization: "x".repeat(4001) },
+  ];
+  it.each(rejected)("禁止非法、环境凭据及重复请求头 %#", (headers) => {
+    expect(mcpHeadersAreValid(headers)).toBe(false);
+    expect(parseMcpConnections(JSON.stringify([{ ...registration, headers }]))).toBeNull();
+  });
+});
 describe("MCP 安全连接契约", () => {
   it("拒绝客户端地址、凭据与工作区覆盖", () => {
     expect(McpConnectionCheckInput.safeParse({ connectionId: "service" }).success).toBe(true);

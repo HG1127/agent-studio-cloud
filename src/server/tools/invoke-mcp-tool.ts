@@ -2,7 +2,8 @@ import { createMCPClient, MCPClientError, type MCPClient } from "@ai-sdk/mcp";
 import { McpToolArguments, MAX_MCP_ARGUMENT_BYTES, MAX_MCP_DIRECTORY_PAGES, MAX_MCP_DIRECTORY_PAGE_TOOLS, MAX_MCP_RESPONSE_BYTES, MAX_MCP_SESSION_BYTES, MAX_MCP_TRANSPORT_REQUESTS } from "@/contracts/mcp-tool";
 import { isPassiveJsonData } from "@/contracts/json";
 import { validateJsonObjectSchema } from "@/server/domain/json-schema";
-import { mcpToolDefinitionIssue, mcpToolInputDefinitionIssue, normalizeMcpToolResult } from "@/server/domain/runtime/mcp-tool";
+import { mcpHeadersAreValid } from "@/server/domain/mcp-connection";
+import { mcpToolDefinitionIssue, mcpToolInputDefinitionIssue, mcpToolLocalOutputDefinitionIssue, mcpToolOutputDefinitionIssue, normalizeMcpToolResult } from "@/server/domain/runtime/mcp-tool";
 import type { ToolRegistration } from "@/server/tools/tool-registry";
 import type { ToolInvocationResult } from "@/server/tools/invoke-http-tool";
 
@@ -18,7 +19,8 @@ export async function invokeMcpTool(args: {
     || tool.operationKind === "action" && (tool.businessIdempotency !== true || !tool.businessIdempotencyRetentionMs)) {
     return fail("远端工具尚未确认操作性质或重复调用防重保证");
   }
-  const definitionIssue = mcpToolInputDefinitionIssue(tool.inputSchema);
+  if (!mcpHeadersAreValid(tool.headers)) return fail("远端工具连接配置无效，请检查服务端登记");
+  const definitionIssue = mcpToolInputDefinitionIssue(tool.inputSchema) ?? mcpToolLocalOutputDefinitionIssue(tool.outputSchema);
   if (definitionIssue) return fail(definitionIssue);
   if (!isPassiveJsonData(args.input, MAX_MCP_ARGUMENT_BYTES)) return fail("工具参数无效或超过容量限制");
   const input = McpToolArguments.safeParse(args.input);
@@ -39,6 +41,7 @@ export async function invokeMcpTool(args: {
   const boundedFetch: typeof fetch = async (url, options) => {
     if (String(url) !== endpoint || ++requestCount > MAX_MCP_TRANSPORT_REQUESTS) { boundaryFailure = true; throw new McpBoundaryError(); }
     const headers = new Headers(options?.headers);
+    headers.delete("cookie");
     headers.delete("idempotency-key");
     if (typeof options?.body === "string") {
       if (new TextEncoder().encode(options.body).byteLength > MAX_MCP_ARGUMENT_BYTES + 1024) { boundaryFailure = true; throw new McpBoundaryError(); }
@@ -48,7 +51,7 @@ export async function invokeMcpTool(args: {
     }
     let response: Response;
     try {
-      response = await (args.fetchImpl ?? fetch)(url, { ...options, headers, redirect: "error",
+      response = await (args.fetchImpl ?? fetch)(url, { ...options, headers, redirect: "error", credentials: "omit",
         signal: options?.signal ? AbortSignal.any([controller.signal, options.signal]) : controller.signal });
     } catch (error) { networkFailure = true; throw error; }
     const declared = Number(response.headers.get("content-length") ?? 0);
@@ -84,23 +87,24 @@ export async function invokeMcpTool(args: {
     });
     let cursor: string | undefined;
     let matched: Record<string, unknown> | undefined;
+    let matchedOutput: Record<string, unknown> | undefined;
     const cursors = new Set<string>();
     for (let page = 0; page < MAX_MCP_DIRECTORY_PAGES; page += 1) {
       const list = await client.listTools({ params: cursor ? { cursor } : undefined, options: { signal: controller.signal, timeout: MCP_TIMEOUT_MS } });
       if (list.tools.length > MAX_MCP_DIRECTORY_PAGE_TOOLS) return fail("远端工具目录超过允许范围");
       const matches = list.tools.filter((definition) => definition.name === tool.action);
       if (matches.length > 1 || matched && matches.length > 0) return fail("远端工具名称重复，已停止调用");
-      if (matches[0]) matched = matches[0].inputSchema;
+      if (matches[0]) { matched = matches[0].inputSchema; matchedOutput = matches[0].outputSchema; }
       cursor = list.nextCursor;
       if (!cursor) break;
       if (cursors.has(cursor) || page === MAX_MCP_DIRECTORY_PAGES - 1) return fail("远端工具目录分页无效或超过允许范围");
       cursors.add(cursor);
     }
     if (!matched) return fail("已登记的工具未在远端目录中找到");
-    const issue = mcpToolDefinitionIssue(matched, tool.inputSchema);
+    const issue = mcpToolDefinitionIssue(matched, tool.inputSchema) ?? mcpToolOutputDefinitionIssue(matchedOutput, tool.outputSchema);
     if (issue) return fail(issue);
     const result = await client.callTool({ name: tool.action, arguments: input.data, options: { signal: controller.signal, timeout: MCP_TIMEOUT_MS } });
-    return normalizeMcpToolResult(result, tool.outputSchema);
+    return normalizeMcpToolResult(result, tool.outputSchema, { operationKind: tool.operationKind, hasOutputDefinition: matchedOutput !== undefined });
   } catch (error) {
     if (boundaryFailure || error instanceof McpBoundaryError) return fail("远端工具传输内容无效或超过运行边界");
     if (MCPClientError.isInstance(error) && (error.statusCode === 401 || error.statusCode === 403)) return fail("远端工具拒绝访问，请检查服务端凭据");

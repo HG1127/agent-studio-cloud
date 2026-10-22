@@ -2,7 +2,7 @@
 // 轨迹步骤：双写——trace_events 表（seq 按 run 递增）+ workflow 命名空间流（namespace: trace）。
 // 供其余步骤"先写轨迹再干活"时调用；步骤内互调按普通函数执行，不产生嵌套 step 事件。
 import { and, eq, sql } from "drizzle-orm";
-import { FatalError, getWritable } from "workflow";
+import { FatalError } from "workflow";
 import { db } from "@/lib/db";
 import { runs, traceEvents } from "@/db/schema";
 import { JsonStorageRecord } from "@/contracts/json";
@@ -10,6 +10,7 @@ import { writeTraceStreamBestEffort } from "@/server/domain/trace-stream";
 import { canAppendTraceToRun, isTerminalTraceKind } from "@/server/domain/trace-state";
 import { redactSensitiveData, redactSensitiveText } from "@/server/domain/security/redact-sensitive";
 import { withSafeWorkflowError } from "@/server/security/workflow-error";
+import { writeTraceStreamWithOwnOperations } from "@/server/services/trace-stream-sdk";
 
 export type TraceLevel = "info" | "warn" | "error";
 
@@ -103,8 +104,6 @@ export async function appendTrace(event: AppendTraceInput): Promise<void> {
   const payload = { seq, ...base, data: observableTraceData(base.data), at: at.toISOString() };
   const observablePayload = redactSensitiveData(payload);
   await writeTraceStreamBestEffort(async () => {
-    const writer = getWritable({ namespace: "trace" }).getWriter();
-    await writer.write(JSON.stringify(observablePayload));
-    await writer.close();
+    await writeTraceStreamWithOwnOperations(JSON.stringify(observablePayload));
   });
 }

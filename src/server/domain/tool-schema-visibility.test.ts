@@ -2,6 +2,21 @@ import { describe, expect, it, vi } from "vitest";
 import { isToolSchemaSafeToExpose } from "./tool-schema-visibility";
 
 describe("工具字段定义的公开凭据边界", () => {
+  it.each(["allOf", "anyOf", "oneOf", "not"])("%s 内的凭据声明可公开，但固定值和示例仍不能泄露", (keyword) => {
+    const wrap = (rule: Record<string, unknown>) => keyword === "not" ? { not: rule } : { [keyword]: [rule] };
+    const safe = { type: "object", properties: { apiKey: wrap({ type: "string" }) } };
+    const before = JSON.stringify(safe);
+    expect(isToolSchemaSafeToExpose(safe)).toBe(true);
+    expect(JSON.stringify(safe)).toBe(before);
+    for (const literal of ["default", "const", "enum", "examples"]) {
+      const rule = { type: "string", [literal]: ["enum", "examples"].includes(literal) ? ["private-fake-value"] : "private-fake-value" };
+      expect(isToolSchemaSafeToExpose({ type: "object", properties: { apiKey: wrap(rule) } })).toBe(false);
+    }
+    expect(isToolSchemaSafeToExpose(wrap({ type: "object", properties: { apiKey: { const: "private-fake-value" } } }))).toBe(false);
+  });
+  it("组合下的普通业务值、布尔子规则及空凭据值保留", () => {
+    expect(isToolSchemaSafeToExpose({ type: "object", properties: { value: { anyOf: [true, false, { const: "business-code" }] }, apiKey: { anyOf: [{ type: "null" }, { type: "string", const: "" }] } } })).toBe(true);
+  });
   it.each(["default", "const", "enum", "examples"])("识别 %s 内嵌套的凭据，不修改定义", (keyword) => {
     const secret = { nested: [{ authorization: "private-fake-value" }] };
     const schema = { type: "object", [keyword]: ["enum", "examples"].includes(keyword) ? [secret] : secret };

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { WorkflowNode } from "@/contracts/workflow";
+import { RunInputPayload } from "@/contracts/run";
 import { HarnessPolicy } from "@/contracts/harness";
 import { evaluateHarnessPolicy, parseHarnessPolicy } from "./policy";
 import { assessHarnessContext, MAX_HARNESS_PROMPT_CHARS, parseHarnessPromptLimit } from "./context-budget";
@@ -37,6 +38,17 @@ describe("确定性运行边界", () => {
   it("实际提示与字段规则一起计算，容量不足时不调用模型", () => {
     const node = WorkflowNode.parse({ ...args.node, modelOutput: { format: "json", schema: { type: "object", description: "x".repeat(1500) } } });
     expect(assessHarnessContext({ ...args, node }, 1000).ok).toBe(false);
+  });
+  it("每段合法也拒绝因完整输出字段挤占而裁剪组合正文", () => {
+    const node = WorkflowNode.parse({ ...args.node, modelOutput: { format: "json", schema: { type: "object", description: "x".repeat(30_000) } } });
+    const input = RunInputPayload.parse({ text: "i".repeat(31_900) });
+    const upstreamOutputs = { report: "u".repeat(63_900) };
+    expect(JSON.stringify(input, null, 2).length).toBeLessThan(32_000);
+    expect(`- report：${upstreamOutputs.report}`.length).toBeLessThan(64_000);
+    expect(assessHarnessContext({ ...args, node, input, upstreamOutputs }, MAX_HARNESS_PROMPT_CHARS).ok).toBe(false);
+  });
+  it("业务正文中的截断字样不是实际容量裁剪", () => {
+    expect(assessHarnessContext({ ...args, input: { text: "\n…[内容过长，已截断]…\n" } }, MAX_HARNESS_PROMPT_CHARS).ok).toBe(true);
   });
   it("访问器不能参与上下文组装", () => {
     const getter = vi.fn();

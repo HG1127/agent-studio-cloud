@@ -1,5 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "git": {
+    "deploymentEnabled": {
+      "codex/ci-github-backend-basic": false,
+      "codex/ci-github-frontend-basic": false
+    }
+  },
   "buildCommand": "pnpm build",
   "crons": [
     { "path": "/api/schedules/tick", "schedule": "0 18 * * *" }

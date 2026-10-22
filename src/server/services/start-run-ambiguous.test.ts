@@ -85,6 +85,9 @@ describe("启动句柄回写与初始化身份竞争", () => {
     expect(query.sql).toMatch(/"workflow_run_id" is null or "runs"\."workflow_run_id" = \$\d+/);
     expect(query.sql).toContain('"runs"."workspace_id"');
     expect(query.sql).toContain('"runs"."status" in');
+    expect(query.sql).toContain('"runs"."source_type" in (\'manual\', \'schedule\', \'evaluation\')');
+    expect(query.sql).toContain('"runs"."parent_run_id" is null');
+    expect(query.sql).toContain('"runs"."execution_root_run_id" is null or "runs"."execution_root_run_id" = "runs"."id"');
     expect(query.params).toEqual(expect.arrayContaining([RUN_ID, request.lease.token, "wrun_owner", "queued", "running", "waiting_approval", "waiting_event"]));
     expect(cancel).not.toHaveBeenCalled();
   });
