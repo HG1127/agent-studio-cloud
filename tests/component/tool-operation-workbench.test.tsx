@@ -88,7 +88,7 @@ describe("人工核对提交与不确定结果", () => {
     submit.mockResolvedValue(uncertain); read.mockResolvedValue({ ok: true, operation: { ...operation, status: "completed", receipt: { 数量: 0 }, resolutions: [record()] } });
     const user = userEvent.setup(); const { observed } = renderForm(); await saveReceipt(user);
     await user.click(screen.getByRole("button", { name: "核对最新记录" }));
-    expect(screen.getByRole("status")).toHaveTextContent("已在最新历史中找到本次核对记录");
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("已在最新历史中找到本次核对记录"));
     expect(submit).toHaveBeenCalledOnce(); expect(observed).toHaveBeenCalledOnce(); expect(screen.queryByRole("button", { name: "重发同一次核对请求" })).not.toBeInTheDocument();
   });
   it("读取失败禁止重发，保留固定请求；下一次成功读取后才允许原请求确认", async () => {
