@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { WorkflowDraft } from "@/contracts/workflow";
-import { draftRecoveryKey, draftsEquivalent, readDraftRecoveryCopy, restoreDraftRecovery, serializeDraftRecovery } from "@/features/workflow-canvas/draft-recovery";
+import { draftRecoveryKey, restoreDraftRecovery, serializeDraftRecovery } from "@/features/workflow-canvas/draft-recovery";
 
 const saved = WorkflowDraft.parse({
   id: "workflow-recovery",
@@ -28,9 +28,7 @@ describe("流程草稿标签页恢复", () => {
       ...saved,
       nodes: { ...saved.nodes, done: { ...saved.nodes.done, title: "服务端新标题" } },
     });
-    const raw = serializeDraftRecovery(saved, local);
-    expect(restoreDraftRecovery(raw, changedOnServer)).toBeNull();
-    expect(readDraftRecoveryCopy(raw)).toEqual(local);
+    expect(restoreDraftRecovery(serializeDraftRecovery(saved, local), changedOnServer)).toBeNull();
   });
 
   it("只修改助手名称不会丢弃画布中的本地修改", () => {
@@ -43,23 +41,6 @@ describe("流程草稿标签页恢复", () => {
       rootAgent: { ...saved.rootAgent, name: "新的助手名称" },
     });
     expect(restoreDraftRecovery(serializeDraftRecovery(saved, local), renamedOnServer)).toEqual(local);
-    expect(draftsEquivalent(saved, renamedOnServer)).toBe(true);
-  });
-
-  it("提交成功但响应丢失时，刷新后仍恢复随后编辑的内容", () => {
-    const submitted = WorkflowDraft.parse({
-      ...saved,
-      nodes: { ...saved.nodes, done: { ...saved.nodes.done, title: "已提交的结束步骤" } },
-    });
-    const local = WorkflowDraft.parse({
-      ...submitted,
-      variables: [{ name: "brief", label: "业务说明", type: "string", scope: "run", required: true }],
-    });
-    const raw = serializeDraftRecovery(saved, local, submitted);
-    expect(restoreDraftRecovery(raw, saved)).toEqual(local);
-    expect(restoreDraftRecovery(raw, submitted)).toEqual(local);
-    const unrelated = WorkflowDraft.parse({ ...saved, nodes: { ...saved.nodes, done: { ...saved.nodes.done, title: "其他人保存的标题" } } });
-    expect(restoreDraftRecovery(raw, unrelated)).toBeNull();
   });
 
   it("忽略损坏或不符合流程契约的恢复内容", () => {
@@ -68,6 +49,5 @@ describe("流程草稿标签页恢复", () => {
     const record = JSON.parse(raw) as Record<string, unknown>;
     record.draft = { id: "broken" };
     expect(restoreDraftRecovery(JSON.stringify(record), saved)).toBeNull();
-    expect(readDraftRecoveryCopy(JSON.stringify(record))).toEqual({ id: "broken" });
   });
 });

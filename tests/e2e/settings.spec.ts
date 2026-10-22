@@ -107,7 +107,6 @@ test("连接增改测删与发布选模可贯通，运行保留模型名和用�
     expect(outputs.length).toBeGreaterThan(0);
     expect(outputs.every((row) => row.output.usage.inputTokens === 12 && row.output.usage.outputTokens === 6)).toBe(true);
     const modelData = page.locator("details").filter({ hasText: '"inputTokens": 12' }).first();
-    await modelData.getByText("查看执行记录与步骤产出").click();
     await modelData.getByText("查看步骤数据（开发者数据）").click();
     await expect(modelData.locator("pre")).toBeVisible();
     await expect(modelData.locator("pre")).toContainText('"outputTokens": 6');

@@ -1,6 +1,4 @@
-import { AgentCreateInput } from "@/contracts/agent";
-
-export const MAX_AGENT_INTENT_LENGTH = AgentCreateInput.shape.intentText.maxLength!;
+export const MAX_AGENT_INTENT_LENGTH = 2_000;
 
 export interface AgentBlueprintFields {
   objective: string;

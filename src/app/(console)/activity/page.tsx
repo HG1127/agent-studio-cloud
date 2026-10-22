@@ -1,12 +1,10 @@
 import Link from "next/link";
-import { AuditEventFilters, AuditTargetType } from "@/contracts/audit-event";
+import { AuditEventFilters } from "@/contracts/audit-event";
 import { AuditEventList, AuditEventPagination } from "@/features/activity/AuditEventList";
-import { PageRefreshButton } from "@/components/ui/PageRefreshButton";
 import { DEMO_WORKSPACE_ID } from "@/lib/constants";
 import { firstSearchParam, pageFromSearchParam } from "@/lib/search-params";
 import { listAuditEvents } from "@/server/queries/audit-events";
 import { withSafeQueryError } from "@/server/security/query-error";
-import { PageHeader } from "@/components/ui/page-header";
 
 export const dynamic = "force-dynamic";
 const PAGE_SIZE = 25;
@@ -15,10 +13,9 @@ export default async function ActivityPage({ searchParams }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  const parsedType = AuditTargetType.safeParse(firstSearchParam(params.type));
   const parsedFilters = AuditEventFilters.safeParse({
-    targetType: parsedType.success ? parsedType.data : undefined,
-    query: firstSearchParam(params.q)?.trim().slice(0, 200) || undefined,
+    targetType: firstSearchParam(params.type) || undefined,
+    query: firstSearchParam(params.q)?.trim() || undefined,
   });
   const filters = parsedFilters.success ? parsedFilters.data : {};
   const page = pageFromSearchParam(params.page);
@@ -28,9 +25,12 @@ export default async function ActivityPage({ searchParams }: {
   }), "activity-page");
   const hasNext = rows.length > PAGE_SIZE;
   const filtered = Boolean(filters.targetType || filters.query);
-  return <main className="page-shell">
-    <PageHeader eyebrow="审计与追踪" title="操作记录" description="查看助手、流程、版本、资料、经验、运行反馈和自动验收的关键变更。时间按北京时间显示。" action={<PageRefreshButton />} />
-    <form method="get" className="content-card flex flex-wrap items-end gap-3">
+  return <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 p-8">
+    <header>
+      <h1 className="text-2xl font-bold">操作记录</h1>
+      <p className="mt-1 text-sm text-gray-500">查看助手、流程、版本、知识资料、经验、运行反馈和自动验收的关键变更。</p>
+    </header>
+    <form method="get" className="flex flex-wrap items-end gap-3 rounded-lg border border-gray-200 bg-white p-4">
       <label className="flex min-w-40 flex-1 flex-col gap-1 text-xs text-gray-600">记录类型
         <select name="type" defaultValue={filters.targetType ?? ""} className="rounded-md border border-gray-300 px-2 py-2 text-sm">
           <option value="">全部类型</option>
@@ -49,7 +49,7 @@ export default async function ActivityPage({ searchParams }: {
       <button type="submit" className="rounded-md bg-gray-900 px-3 py-2 text-sm text-white">筛选</button>
       {filtered ? <Link href="/activity" className="px-1 py-2 text-sm text-gray-500 hover:text-gray-800">清除筛选</Link> : null}
     </form>
-    <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900">这里只展示已写入的关键变更；被系统拒绝的操作尚无完整记录，不能当作全部安全审计依据。</p>
-    <section className="content-card"><AuditEventList events={rows.slice(0, PAGE_SIZE)} filtered={filtered} page={page} filters={filters} /><div className="mt-4"><AuditEventPagination page={page} hasNext={hasNext} filters={filters} /></div></section>
+    <AuditEventList events={rows.slice(0, PAGE_SIZE)} />
+    <AuditEventPagination page={page} hasNext={hasNext} filters={filters} />
   </main>;
 }

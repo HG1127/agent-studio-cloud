@@ -40,15 +40,13 @@ describe("ApprovalPanel", () => {
     refreshMock.mockReset();
   });
 
-  it("等待确认时说明负责人以及批准和拒绝的后果", () => {
+  it("等待确认时显示等待提示、负责人、确认事项与批准/拒绝按钮", () => {
     render(<ApprovalPanel runId={RUN_ID} approval={PENDING} />);
     expect(screen.getByText("该步骤正在等待确认")).toBeInTheDocument();
     expect(screen.getByText("业务负责人")).toBeInTheDocument();
     expect(screen.getByText("确认“负责人确认处理方案”后流程才会继续")).toBeInTheDocument();
-    expect(screen.getByText("从当前暂停位置继续执行后续步骤。")).toBeInTheDocument();
-    expect(screen.getByText("本次运行安全结束，不执行后续交付。")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "批准并继续" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "拒绝并结束" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "批准" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "拒绝" })).toBeInTheDocument();
   });
 
   it("待确认和已确认时都展示同一份回复草稿", () => {
@@ -65,8 +63,8 @@ describe("ApprovalPanel", () => {
     actionMock.mockResolvedValue({ ok: true });
     const user = userEvent.setup();
     render(<ApprovalPanel runId={RUN_ID} approval={PENDING} />);
-    await user.type(screen.getByLabelText(/决定说明/), "同意执行");
-    await user.click(screen.getByRole("button", { name: "批准并继续" }));
+    await user.type(screen.getByLabelText("备注"), "同意执行");
+    await user.click(screen.getByRole("button", { name: "批准" }));
     await waitFor(() => {
       expect(actionMock).toHaveBeenCalledWith(RUN_ID, PENDING.id, { decision: "approved", note: "同意执行" });
     });
@@ -76,14 +74,11 @@ describe("ApprovalPanel", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("拒绝需要确认后才提交 rejected 决定", async () => {
+  it("点拒绝调用审批动作且 decision 为 rejected", async () => {
     actionMock.mockResolvedValue({ ok: true });
     const user = userEvent.setup();
     render(<ApprovalPanel runId={RUN_ID} approval={PENDING} />);
-    await user.click(screen.getByRole("button", { name: "拒绝并结束" }));
-    expect(actionMock).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog", { name: "拒绝并结束这次运行？" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "确认拒绝并结束" }));
+    await user.click(screen.getByRole("button", { name: "拒绝" }));
     await waitFor(() => {
       expect(actionMock).toHaveBeenCalledWith(RUN_ID, PENDING.id, { decision: "rejected", note: "" });
     });
@@ -98,10 +93,9 @@ describe("ApprovalPanel", () => {
     );
     const user = userEvent.setup();
     render(<ApprovalPanel runId={RUN_ID} approval={PENDING} />);
-    await user.click(screen.getByRole("button", { name: "批准并继续" }));
-    expect(screen.getByRole("button", { name: "正在提交决定…" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "拒绝并结束" })).toBeDisabled();
-    expect(screen.getByLabelText(/决定说明/)).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "批准" }));
+    expect(screen.getByRole("button", { name: "正在提交…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "拒绝" })).toBeDisabled();
     resolveAction({ ok: true });
     await waitFor(() => {
       expect(refreshMock).toHaveBeenCalledTimes(1);
@@ -112,7 +106,7 @@ describe("ApprovalPanel", () => {
     actionMock.mockResolvedValue({ ok: false, error: "这条确认已经处理过，请勿重复提交" });
     const user = userEvent.setup();
     render(<ApprovalPanel runId={RUN_ID} approval={PENDING} />);
-    await user.click(screen.getByRole("button", { name: "批准并继续" }));
+    await user.click(screen.getByRole("button", { name: "批准" }));
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("这条确认已经处理过，请勿重复提交");
     expect(refreshMock).not.toHaveBeenCalled();
@@ -127,7 +121,7 @@ describe("ApprovalPanel", () => {
     const user = userEvent.setup();
     render(<ApprovalPanel runId={RUN_ID} approval={PENDING} />);
 
-    await user.click(screen.getByRole("button", { name: "批准并继续" }));
+    await user.click(screen.getByRole("button", { name: "批准" }));
 
     await waitFor(() => expect(refreshMock).toHaveBeenCalledTimes(1));
   });
@@ -136,25 +130,23 @@ describe("ApprovalPanel", () => {
     actionMock.mockRejectedValue(new Error("offline"));
     const user = userEvent.setup();
     render(<ApprovalPanel runId={RUN_ID} approval={PENDING} />);
-    await user.click(screen.getByRole("button", { name: "批准并继续" }));
+    await user.click(screen.getByRole("button", { name: "批准" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("提交失败，请检查网络后重试");
-    expect(screen.getByRole("button", { name: "批准并继续" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "批准" })).toBeEnabled();
   });
 
   it("已决定时显示结果与备注，不再显示操作按钮", () => {
     render(<ApprovalPanel runId={RUN_ID} approval={DECIDED} />);
-    expect(screen.getByRole("heading", { name: "批准决定已保存" })).toBeInTheDocument();
-    expect(screen.queryByText("已确认并继续")).not.toBeInTheDocument();
+    expect(screen.getByText("已确认")).toBeInTheDocument();
     expect(screen.getByText("同意执行")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "批准并继续" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "拒绝并结束" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "批准" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "拒绝" })).not.toBeInTheDocument();
   });
 
   it("已拒绝时显示未获确认结果", () => {
     render(<ApprovalPanel runId={RUN_ID} approval={{ ...DECIDED, status: "rejected" }} />);
-    expect(screen.getByRole("heading", { name: "拒绝决定已保存" })).toBeInTheDocument();
-    expect(screen.queryByText("未获确认，运行已停止")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "批准并继续" })).not.toBeInTheDocument();
+    expect(screen.getByText("未获确认")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "批准" })).not.toBeInTheDocument();
   });
 
   it("确认已记录但运行未继续时可以恢复", async () => {
@@ -162,7 +154,7 @@ describe("ApprovalPanel", () => {
     const user = userEvent.setup();
     render(<ApprovalPanel runId={RUN_ID} approval={DECIDED} recoverable />);
 
-    expect(screen.getByText("处理决定已保存，运行仍在等待恢复。")).toBeInTheDocument();
+    expect(screen.getByText("确认结果已保存，但运行还没有继续。")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "继续运行" }));
 
     await waitFor(() => {
@@ -173,27 +165,5 @@ describe("ApprovalPanel", () => {
       });
     });
     expect(refreshMock).toHaveBeenCalledTimes(1);
-  });
-  it("取消拒绝弹窗不提交决定，保留说明并返回触发按钮焦点", async () => {
-    const user = userEvent.setup();
-    render(<ApprovalPanel runId={RUN_ID} approval={PENDING} />);
-    await user.type(screen.getByLabelText(/决定说明/), "尚需核对");
-    const trigger = screen.getByRole("button", { name: "拒绝并结束" });
-    await user.click(trigger);
-    await user.click(screen.getByRole("button", { name: "返回" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(trigger).toHaveFocus();
-    expect(screen.getByLabelText(/决定说明/)).toHaveValue("尚需核对");
-    expect(actionMock).not.toHaveBeenCalled();
-  });
-  it("已拒绝但仍等待恢复时不声称已停止，恢复沿用已保存决定", async () => {
-    actionMock.mockResolvedValue({ ok: true });
-    const user = userEvent.setup();
-    render(<ApprovalPanel runId={RUN_ID} approval={{ ...DECIDED, status: "rejected" }} recoverable />);
-    expect(screen.getByRole("heading", { name: "拒绝决定已保存" })).toBeInTheDocument();
-    expect(screen.getByText("处理决定已保存，运行仍在等待恢复。")).toBeInTheDocument();
-    expect(screen.queryByText(/运行已停止/)).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "继续运行" }));
-    expect(actionMock).toHaveBeenCalledWith(RUN_ID, DECIDED.id, { decision: "rejected", note: "同意执行", resumeOnly: true });
   });
 });

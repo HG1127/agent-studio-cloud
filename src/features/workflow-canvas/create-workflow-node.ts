@@ -5,8 +5,6 @@ export const ADDABLE_NODE_TYPES = [
   "human",
   "tool",
   "knowledge",
-  "rule",
-  "system",
   "condition",
   "parallel",
   "subflow",
@@ -22,8 +20,6 @@ const TITLES: Record<(typeof ADDABLE_NODE_TYPES)[number], string> = {
   human: "新增员工确认",
   tool: "新增业务操作",
   knowledge: "新增资料读取",
-  rule: "新增规则检查",
-  system: "新增运行记录",
   condition: "新增情况判断",
   parallel: "新增同时处理",
   subflow: "新增一组步骤",
@@ -53,13 +49,9 @@ export function createWorkflowNode(draft: WorkflowDraft, type: (typeof ADDABLE_N
   const specific = type === "human"
     ? { approval: { role: "业务负责人", reason: "确认内容无误后继续" } }
     : type === "tool"
-      ? { tool: { connector: "unbound", action: "", scope: "", risk: "high" as const, maxRetries: 3, registryToolId: null, protocol: "unbound", unresolved: true, inputSchema: { type: "object" }, outputSchema: { type: "object" } } }
+      ? { tool: { connector: "demo", action: "demo", scope: "当前工作区", risk: "low" as const, maxRetries: 1, registryToolId: "demo", protocol: "demo", inputSchema: { type: "object" }, outputSchema: { type: "object" } } }
       : type === "knowledge"
         ? { knowledge: { space: "业务资料库", query: "" } }
-        : type === "rule"
-          ? { rule: { kind: "business_rule" } }
-          : type === "system"
-            ? { system: { kind: "summary" } }
         : type === "condition"
           ? { condition: { source: "input.input", operator: "eq", branches: [{ label: "满足", value: "是", next: null }], defaultNext: null } }
           : type === "parallel"
@@ -92,37 +84,4 @@ export function createWorkflowNode(draft: WorkflowDraft, type: (typeof ADDABLE_N
                     : {};
   const node = WorkflowNode.parse({ ...base, ...specific });
   return { draft: { ...draft, nodes: { ...draft.nodes, [id]: node } }, nodeId: id };
-}
-
-export function insertWorkflowNodeAfter(
-  draft: WorkflowDraft,
-  type: (typeof ADDABLE_NODE_TYPES)[number],
-  parentId: string,
-): { draft: WorkflowDraft; nodeId: string } | { error: string } {
-  const parent = draft.nodes[parentId];
-  if (!parent) return { error: "找不到插入位置，请重新选择步骤" };
-  if (parent.type === "end") return { error: "完成步骤之后不能再插入步骤" };
-  if (!canAddWorkflowNode(draft)) return { error: `流程步骤不能超过 ${MAX_WORKFLOW_NODES} 个` };
-  if (parent.type === "condition" && !parent.condition) return { error: "请先配置判断步骤的后续路径" };
-  if (parent.type === "loop" && !parent.loop) return { error: "请先配置逐项处理的完成路径" };
-
-  const created = createWorkflowNode(draft, type);
-  const continuation = parent.type === "condition"
-    ? parent.condition!.defaultNext
-    : parent.type === "loop" ? parent.loop!.exitNext : parent.next;
-  const inserted = created.draft.nodes[created.nodeId];
-  const connected = inserted.type === "condition" && inserted.condition
-    ? { ...inserted, next: null, condition: { ...inserted.condition, defaultNext: continuation } }
-    : inserted.type === "loop" && inserted.loop
-      ? { ...inserted, next: null, loop: { ...inserted.loop, exitNext: continuation } }
-      : { ...inserted, next: continuation };
-  const updatedParent = parent.type === "condition" && parent.condition
-    ? { ...parent, condition: { ...parent.condition, defaultNext: created.nodeId } }
-    : parent.type === "loop" && parent.loop
-      ? { ...parent, loop: { ...parent.loop, exitNext: created.nodeId } }
-      : { ...parent, next: created.nodeId };
-  return {
-    draft: { ...created.draft, nodes: { ...created.draft.nodes, [parentId]: updatedParent, [created.nodeId]: connected } },
-    nodeId: created.nodeId,
-  };
 }

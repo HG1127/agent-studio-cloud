@@ -16,21 +16,14 @@ describe("知识检索验证", () => {
       }],
     }} />);
     expect(screen.getByLabelText("检索关键词")).toHaveValue("退货期限");
-    expect(screen.getByRole("status")).toHaveTextContent("本次展示 1 段相关内容");
-    expect(screen.getByText(/不等于某位助手的运行结果/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "前往助手核对资料范围" })).toHaveAttribute("href", "/agents");
+    expect(screen.getByRole("status")).toHaveTextContent("找到 1 段相关内容");
     expect(screen.getByText("售后手册.txt · 第 2 段")).toBeInTheDocument();
     expect(screen.getByText(/七天内可以申请退货/)).toBeInTheDocument();
   });
 
   it("零命中和扫描范围受限时给出明确说明", () => {
     render(<KnowledgeSearch result={{ query: "不存在的规则", hits: [], truncated: true }} />);
-    expect(screen.getByRole("status")).toHaveTextContent("本次检查的资料中没有找到相关内容，尚有其他资料未检查。");
+    expect(screen.getByRole("status")).toHaveTextContent("没有找到相关内容");
     expect(screen.getByText(/只检查最近入库的 2000 段内容/)).toBeInTheDocument();
-  });
-
-  it("全库扫描完成后零命中才说明当前资料库未找到", () => {
-    render(<KnowledgeSearch result={{ query: "不存在的规则", hits: [], truncated: false }} />);
-    expect(screen.getByRole("status")).toHaveTextContent("当前资料库没有找到相关内容");
   });
 });

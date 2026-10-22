@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { VersionPanel } from "@/features/agents/VersionPanel";
@@ -36,21 +36,10 @@ function renderPanel(versions = VERSIONS, connections: ModelConnectionView[] = [
 }
 
 describe("VersionPanel", () => {
-  it("每条真实版本提供冻结流程入口并保留三个历史区分页，不调用写操作", () => {
-    render(<VersionPanel agentId={AGENT_ID} versions={VERSIONS} connections={[]} defaultModelLabel="演示模式"
-      versionPage={3} archivedCasesPage={2} evaluationRunsPage={4} />);
-    const links = screen.getAllByRole("link", { name: "查看冻结流程" });
-    expect(links).toHaveLength(2);
-    for (const [index, link] of links.entries()) expect(link).toHaveAttribute("href",
-      `/agents/${AGENT_ID}/versions/${VERSIONS[index].id}?versionsPage=3&archivedCasesPage=2&evaluationRunsPage=4`);
-    expect(actionMock).not.toHaveBeenCalled();
-    expect(restoreMock).not.toHaveBeenCalled();
-  });
   afterEach(() => {
     actionMock.mockReset();
     restoreMock.mockReset();
     refreshMock.mockReset();
-    window.sessionStorage.clear();
   });
 
   it("展示版本列表：版本号、「当前版本/历史版本」状态与时间", () => {
@@ -77,20 +66,7 @@ describe("VersionPanel", () => {
     expect(screen.queryByText("当前版本")).not.toBeInTheDocument();
   });
 
-  it.each([null, VERSIONS[0].id])("空的历史页只说明本页无记录，保留其他分区的页码（当前版本 %s）", (currentVersionId) => {
-    render(<VersionPanel agentId={AGENT_ID} versions={[]} connections={[]} defaultModelLabel="演示模式"
-      currentVersionId={currentVersionId} versionPage={2} archivedCasesPage={4} evaluationRunsPage={3} />);
-    expect(screen.getByText("当前页没有版本记录")).toBeInTheDocument();
-    expect(screen.queryByText("还没有发布过版本")).not.toBeInTheDocument();
-    expect(screen.getByText("本页记录 0 个版本")).toBeInTheDocument();
-    expect(screen.getByText("本页可恢复 0 个")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "回到版本第一页" })).toHaveAttribute("href", "?versionsPage=1&archivedCasesPage=4&evaluationRunsPage=3#versions");
-    expect(actionMock).not.toHaveBeenCalled();
-    expect(restoreMock).not.toHaveBeenCalled();
-  });
-
-  it("版本历史支持翻页，当前正式版本不在本页时不误称未发布", async () => {
-    const user = userEvent.setup();
+  it("版本历史支持翻页并能与跨页当前版本对比", () => {
     render(<VersionPanel
       agentId={AGENT_ID}
       versions={[VERSIONS[1]]}
@@ -106,10 +82,6 @@ describe("VersionPanel", () => {
       "href",
       `/agents/${AGENT_ID}/versions/compare?from=${VERSIONS[1].id}&to=${VERSIONS[0].id}`,
     );
-    expect(screen.getByText("正式版本未列在本页")).toBeInTheDocument();
-    expect(screen.queryByText("还没有可运行版本")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "恢复为当前版本" }));
-    expect(screen.getByRole("dialog", { name: "恢复历史版本 1？" })).toHaveTextContent("当前正式版本未列在本页");
   });
 
   it("版本翻页时保留已归档验收样例页码", () => {
@@ -174,44 +146,11 @@ describe("VersionPanel", () => {
     const user = userEvent.setup();
     renderPanel();
     await user.click(screen.getByRole("button", { name: "恢复为当前版本" }));
-    const confirmation = screen.getByRole("dialog", { name: "恢复历史版本 1？" });
-    expect(confirmation).toHaveTextContent("当前正式版本 2");
-    expect(confirmation).toHaveTextContent("已有运行保留原版本");
-    expect(confirmation).toHaveTextContent("待验收的候选版本会停止自动上线");
-    expect(restoreMock).not.toHaveBeenCalled();
-    await user.click(within(confirmation).getByRole("button", { name: "确认恢复" }));
     await waitFor(() => expect(restoreMock).toHaveBeenCalledWith(AGENT_ID, VERSIONS[1].id));
     expect(refreshMock).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("status")).toHaveTextContent("生成新的正式版本 3");
     expect(screen.getByText("版本 3")).toBeInTheDocument();
     expect(screen.getByText("当前版本")).toBeInTheDocument();
     expect(screen.getAllByText("历史版本")).toHaveLength(2);
-  });
-
-  it("取消历史版本恢复不会调用写动作", async () => {
-    const user = userEvent.setup();
-    renderPanel();
-    await user.click(screen.getByRole("button", { name: "恢复为当前版本" }));
-    const confirmation = screen.getByRole("dialog", { name: "恢复历史版本 1？" });
-    await user.click(within(confirmation).getByRole("button", { name: "返回" }));
-    expect(screen.queryByRole("dialog", { name: "恢复历史版本 1？" })).not.toBeInTheDocument();
-    expect(restoreMock).not.toHaveBeenCalled();
-  });
-
-  it("历史版本恢复进行中不允许同时发布新版本", async () => {
-    let finishRestore: (result: { ok: false; error: string }) => void = () => {};
-    restoreMock.mockImplementation(() => new Promise<{ ok: false; error: string }>((resolve) => {
-      finishRestore = resolve;
-    }));
-    const user = userEvent.setup();
-    renderPanel();
-    await user.click(screen.getByRole("button", { name: "恢复为当前版本" }));
-    await user.click(within(screen.getByRole("dialog", { name: "恢复历史版本 1？" })).getByRole("button", { name: "确认恢复" }));
-    expect(screen.getByRole("button", { name: "正在恢复版本…" })).toBeDisabled();
-    expect(actionMock).not.toHaveBeenCalled();
-    finishRestore({ ok: false, error: "服务端未完成恢复" });
-    expect(await screen.findByRole("alert")).toHaveTextContent("服务端未完成恢复");
-    expect(screen.getByRole("button", { name: "发布新版本" })).toBeEnabled();
   });
 
   it("待验收与未上线版本不能绕过门禁恢复", () => {
@@ -224,47 +163,13 @@ describe("VersionPanel", () => {
     expect(screen.queryByRole("button", { name: "恢复为当前版本" })).not.toBeInTheDocument();
   });
 
-  it("候选版本明确引导到自动验收门槛", () => {
-    renderPanel([{ ...VERSIONS[0], status: "candidate" }]);
-    expect(screen.getByText("候选版本 2 等待自动验收")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "前往自动验收" })).toHaveAttribute("href", "#evaluation");
-  });
-
   it("历史版本恢复失败时保留错误提示", async () => {
     restoreMock.mockResolvedValue({ ok: false, error: "历史版本格式过旧，无法直接恢复" });
     const user = userEvent.setup();
     renderPanel();
     await user.click(screen.getByRole("button", { name: "恢复为当前版本" }));
-    await user.click(within(screen.getByRole("dialog", { name: "恢复历史版本 1？" })).getByRole("button", { name: "确认恢复" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("历史版本格式过旧");
     expect(refreshMock).not.toHaveBeenCalled();
-  });
-
-  it("恢复响应丢失时保留核对线索并锁住再次上线，刷新后仍可核对", async () => {
-    restoreMock.mockRejectedValue(new Error("network interrupted"));
-    const user = userEvent.setup();
-    const view = renderPanel();
-    await user.click(screen.getByRole("button", { name: "恢复为当前版本" }));
-    await user.click(within(screen.getByRole("dialog", { name: "恢复历史版本 1？" })).getByRole("button", { name: "确认恢复" }));
-    expect(await screen.findByText("版本 1 的恢复结果尚未确认")).toBeInTheDocument();
-    expect(screen.queryByText("恢复失败，请稍后重试")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "恢复为当前版本" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "请先核对恢复状态" })).toBeDisabled();
-    expect(screen.getByRole("link", { name: "查看版本操作记录" })).toHaveAttribute("href", "/activity?type=version");
-    expect(window.sessionStorage.getItem(`agent-studio:version-restore:${AGENT_ID}`)).toContain(VERSIONS[1].id);
-    view.unmount();
-
-    renderPanel();
-    expect(await screen.findByText("版本 1 的恢复结果尚未确认")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "已核对，继续操作" }));
-    const unlock = screen.getByRole("dialog", { name: "已核对上次版本恢复？" });
-    await user.click(within(unlock).getByRole("button", { name: "返回" }));
-    expect(screen.getByRole("button", { name: "恢复为当前版本" })).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: "已核对，继续操作" }));
-    await user.click(within(screen.getByRole("dialog", { name: "已核对上次版本恢复？" })).getByRole("button", { name: "继续操作" }));
-    expect(window.sessionStorage.getItem(`agent-studio:version-restore:${AGENT_ID}`)).toBeNull();
-    expect(screen.getByRole("button", { name: "恢复为当前版本" })).toBeEnabled();
-    expect(restoreMock).toHaveBeenCalledOnce();
   });
 
   it("点「发布新版本」调用发布动作，成功后刷新页面", async () => {

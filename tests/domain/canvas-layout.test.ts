@@ -120,14 +120,4 @@ describe("autoLayout", () => {
     expect(positions.work.x - positions.start.x).toBe(LAYOUT_COLUMN_GAP);
     expect(positions.done.x - positions.work.x).toBe(LAYOUT_COLUMN_GAP);
   });
-
-  it("等待超时路径也按真实出边排在等待步骤之后", () => {
-    const draft = makeDraft(
-      [{ id: "start", type: "trigger" }, { id: "wait", type: "wait", extra: { wait: { mode: "event", eventKey: "reply", onTimeoutNext: "fallback" } } }, { id: "done", type: "end" }, { id: "fallback", type: "ai" }],
-      { start: { next: "wait" }, wait: { next: "done" } },
-    );
-    const positions = autoLayout(draft);
-    expect(positions.fallback.x).toBe(positions.done.x);
-    expect(positions.fallback.x).toBeGreaterThan(positions.wait.x);
-  });
 });

@@ -1,9 +1,8 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CreateAgentForm } from "@/features/agents/CreateAgentForm";
 import { AGENT_BLUEPRINT_DRAFT_KEY, serializeAgentBlueprintDraft } from "@/features/agents/agent-blueprint";
-import { AGENT_CREATE_REQUEST_KEY, serializeAgentCreateRequest } from "@/features/agents/agent-create-request";
 
 const { actionMock, pushMock } = vi.hoisted(() => ({
   actionMock: vi.fn(),
@@ -40,25 +39,17 @@ describe("CreateAgentForm", () => {
     await waitFor(() => {
       expect(pushMock).toHaveBeenCalledWith("/agents/00000000-0000-4000-8000-000000000009");
     });
-    expect(window.sessionStorage.getItem(AGENT_CREATE_REQUEST_KEY)).toBeNull();
   });
 
-  it("服务端未确认结果时保留原请求，明确允许核对或确认后修改", async () => {
+  it("创建失败时显示后端返回的可读错误并退出提交态", async () => {
     actionMock.mockResolvedValue({ ok: false, error: "暂时无法根据这段描述生成流程草稿，请换个说法再试一次" });
     await fillAndSubmit();
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "暂时无法根据这段描述生成流程草稿，请换个说法再试一次",
     );
-    expect(screen.getByRole("button", { name: "核对上次创建" })).toBeEnabled();
-    expect(screen.getByLabelText("助手名称")).toBeDisabled();
-    expect(window.sessionStorage.getItem(AGENT_CREATE_REQUEST_KEY)).not.toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: "放弃核对并继续修改" }));
-    const dialog = screen.getByRole("dialog", { name: "放弃核对上次创建？" });
-    expect(dialog).toHaveTextContent("可能产生另一位助手");
-    await userEvent.click(within(dialog).getByRole("button", { name: "继续修改" }));
-    expect(screen.getByRole("button", { name: "创建助手" })).toBeVisible();
-    expect(screen.getByLabelText("助手名称")).toBeEnabled();
-    expect(window.sessionStorage.getItem(AGENT_CREATE_REQUEST_KEY)).toBeNull();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "创建助手" })).toBeEnabled();
+    });
     expect(pushMock).not.toHaveBeenCalled();
   });
 
@@ -84,70 +75,19 @@ describe("CreateAgentForm", () => {
         "必须遵守：发送前必须由负责人确认",
       ].join("\n"),
     }, expect.any(String)));
-  }, 15_000);
-
-  it("完整工作说明可核对，超出共享契约上限时不误报可以创建", async () => {
-    const user = userEvent.setup();
-    render(<CreateAgentForm />);
-    fireEvent.change(screen.getByLabelText("助手名称"), { target: { value: "售后助手" } });
-    const objective = screen.getByLabelText(/想让助手完成什么/);
-    fireEvent.change(objective, { target: { value: "工".repeat(1995) } });
-    await user.click(screen.getByText("补充业务蓝图（推荐）"));
-    fireEvent.change(screen.getByLabelText("什么时候开始"), { target: { value: "收到新工单后" } });
-    expect(screen.getByText(/完整工作说明超出 \d+ 个字/)).toBeInTheDocument();
-    expect(screen.getByText("完整说明过长，暂不能创建")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "创建助手" })).toBeDisabled();
-    await user.click(screen.getByText("核对完整工作说明"));
-    expect(screen.getByText(/触发条件：收到新工单后/)).toBeInTheDocument();
-    expect(screen.getByText(/不是已生成的流程/)).toBeInTheDocument();
-    expect(actionMock).not.toHaveBeenCalled();
-
-    fireEvent.change(objective, { target: { value: "收到新工单后整理资料并生成处理建议" } });
-    expect(screen.queryByText(/完整工作说明超出 \d+ 个字/)).not.toBeInTheDocument();
-    expect(screen.getByText("已经可以创建")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "创建助手" })).toBeEnabled();
   });
 
-  it("创建请求中断时锁住原内容，沿用原请求标识核对", async () => {
+  it("创建请求中断时显示网络错误并允许重试", async () => {
     actionMock.mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce({
       ok: true,
       agentId: "00000000-0000-4000-8000-000000000009",
     });
     await fillAndSubmit();
-    expect(await screen.findByRole("alert")).toHaveTextContent("暂时无法确认助手是否已创建");
-    expect(screen.getByLabelText("助手名称")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "核对上次创建" })).toBeEnabled();
-    await userEvent.click(screen.getByRole("button", { name: "核对上次创建" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("创建请求失败，请检查网络后重试");
+    expect(screen.getByRole("button", { name: "创建助手" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: "创建助手" }));
     await waitFor(() => expect(actionMock).toHaveBeenCalledTimes(2));
     expect(actionMock.mock.calls[1][1]).toBe(actionMock.mock.calls[0][1]);
-  }, 15_000);
-
-  it("浏览器无法保留请求时提醒保持页面打开", async () => {
-    const realSetItem = Storage.prototype.setItem;
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
-      if (key === AGENT_CREATE_REQUEST_KEY) throw new Error("storage unavailable");
-      realSetItem.call(this, key, value);
-    });
-    actionMock.mockRejectedValue(new Error("offline"));
-    await fillAndSubmit();
-    expect(await screen.findByText(/浏览器未能保留本次请求/)).toBeVisible();
-    expect(screen.getByRole("button", { name: "核对上次创建" })).toBeEnabled();
-  });
-
-  it("刷新后恢复待核对请求，继续使用原标识和原内容", async () => {
-    const requestId = "00000000-0000-4000-8000-000000000099";
-    window.sessionStorage.setItem(AGENT_CREATE_REQUEST_KEY, serializeAgentCreateRequest({
-      requestId, name: "客服助手", intentText: INTENT_TEXT,
-    }));
-    actionMock.mockResolvedValue({ ok: true, agentId: requestId });
-    render(<CreateAgentForm />);
-    expect(await screen.findByRole("button", { name: "核对上次创建" })).toBeVisible();
-    expect(screen.getByLabelText("助手名称")).toBeDisabled();
-    expect(screen.getByRole("status")).toHaveTextContent("已恢复上次创建请求");
-    await userEvent.click(screen.getByRole("button", { name: "核对上次创建" }));
-    await waitFor(() => expect(actionMock).toHaveBeenCalledWith({ name: "客服助手", intentText: INTENT_TEXT }, requestId));
-    await waitFor(() => expect(pushMock).toHaveBeenCalledWith(`/agents/${requestId}`));
-    expect(window.sessionStorage.getItem(AGENT_CREATE_REQUEST_KEY)).toBeNull();
   });
 
   it("连续提交时只创建一次助手", async () => {
@@ -173,11 +113,11 @@ describe("CreateAgentForm", () => {
       outputs: "处理结果",
       constraints: "不得泄露隐私",
     }));
+    vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<CreateAgentForm />);
     expect(await screen.findByDisplayValue("恢复助手")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("已恢复本标签页中未提交的业务蓝图");
     await userEvent.click(screen.getByRole("button", { name: "清空内容" }));
-    await userEvent.click(screen.getByRole("button", { name: "确认清空" }));
     expect(screen.getByLabelText("助手名称")).toHaveValue("");
     expect(window.sessionStorage.getItem(AGENT_BLUEPRINT_DRAFT_KEY)).toBeNull();
   });

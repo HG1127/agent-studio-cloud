@@ -2,7 +2,6 @@ import type { Connection } from "@xyflow/react";
 import type { WorkflowDraft, WorkflowNode } from "@/contracts/workflow";
 import { updateWorkflowNode } from "./update-workflow-node";
 import { isHiddenControlNode } from "@/lib/workflow-node-visibility";
-import { outputSourceOptions } from "./workflow-output-editing";
 
 export type EdgeKind = "next" | "reject" | "error" | "branch" | "body" | "timeout";
 
@@ -46,33 +45,6 @@ export function outgoingSpecs(node: WorkflowNode): EdgeSpec[] {
   }
   if (node.next) specs.push({ handle: "next", target: node.next, kind: "next" });
   return specs;
-}
-
-export function editableRouteSlots(node: WorkflowNode): Array<{ handle: string; label: string; target: string | null; editable: boolean }> {
-  if (node.type === "end") return [];
-  const slots: Array<{ handle: string; label: string; target: string | null; editable: boolean }> = [];
-  if (node.type !== "condition" && node.type !== "loop" || node.next) {
-    slots.push({ handle: "next", label: "完成后", target: node.next, editable: true });
-  }
-  if (node.type === "human") slots.push({ handle: "reject", label: "未通过时", target: node.rejectNext, editable: true });
-  if (supportsErrorRoute(node)) slots.push({ handle: "error", label: "未完成时", target: node.onErrorNext, editable: true });
-  if (node.type === "condition") {
-    node.condition?.branches.forEach((branch, index) => slots.push({
-      handle: `branch-${index}`, label: branch.label || `情况 ${index + 1}`, target: branch.next, editable: true,
-    }));
-    slots.push({ handle: "default", label: "其余情况", target: node.condition?.defaultNext ?? null, editable: true });
-  }
-  if (node.type === "loop") {
-    slots.push({ handle: "body", label: "逐项处理", target: node.loop?.bodyNext ?? null, editable: true });
-    slots.push({ handle: "exit", label: "全部完成后", target: node.loop?.exitNext ?? null, editable: true });
-  }
-  if (node.type === "wait" && node.wait && (node.wait.mode === "event" && node.wait.timeoutMs > 0 || node.wait.onTimeoutNext)) {
-    slots.push({
-      handle: "timeout", label: "等待超时后", target: node.wait.onTimeoutNext,
-      editable: node.wait.mode === "event" && node.wait.timeoutMs > 0,
-    });
-  }
-  return slots;
 }
 
 export function visibleOutgoingSpecs(
@@ -126,30 +98,9 @@ function patchNode(draft: WorkflowDraft, nodeId: string, node: WorkflowNode): Wo
   return updateWorkflowNode(draft, nodeId, node);
 }
 
-export function linearDeletionContinuation(draft: WorkflowDraft, nodeId: string): string | null {
-  const target = draft.nodes[nodeId];
-  if (!target || draft.startNodeId === nodeId || ["trigger", "end", "condition", "loop"].includes(target.type) || isHiddenControlNode(target)) return null;
-  const routes = outgoingSpecs(target);
-  if (routes.length !== 1 || routes[0].handle !== "next") return null;
-  const continuation = draft.nodes[routes[0].target];
-  if (!continuation || continuation.id === nodeId || isHiddenControlNode(continuation)) return null;
-  const incoming = Object.values(draft.nodes).flatMap((node) => outgoingSpecs(node)
-    .filter((route) => route.target === nodeId)
-    .map((route) => ({ node, handle: route.handle })));
-  if (incoming.length !== 1 || incoming[0].handle !== "next") return null;
-  const predecessor = incoming[0].node;
-  if (predecessor.id === continuation.id || isHiddenControlNode(predecessor)
-    || outgoingSpecs(predecessor).length !== 1 || predecessor.next !== nodeId) return null;
-  if (Object.values(draft.nodes).some((node) => isHiddenControlNode(node)
-    && ((node.type === "rule" && node.rule?.sourceNodeId === nodeId)
-      || (node.type === "human" && node.controlPlane?.kind === "governance" && node.next === nodeId)))) return null;
-  return continuation.id;
-}
-
 export function removeNode(draft: WorkflowDraft, nodeId: string): WorkflowDraft {
   const target = draft.nodes[nodeId];
   if (!target || target.type === "trigger" || target.type === "end" || draft.startNodeId === nodeId) return draft;
-  const continuationId = linearDeletionContinuation(draft, nodeId);
   const removedIds = new Set([nodeId]);
   for (const [id, node] of Object.entries(draft.nodes)) {
     if (!isHiddenControlNode(node)) continue;
@@ -162,7 +113,7 @@ export function removeNode(draft: WorkflowDraft, nodeId: string): WorkflowDraft 
     if (removedIds.has(id)) continue;
     const cleaned: WorkflowNode = {
       ...node,
-      next: node.next && removedIds.has(node.next) ? (continuationId && node.next === nodeId ? continuationId : null) : node.next,
+      next: node.next && removedIds.has(node.next) ? null : node.next,
       rejectNext: node.rejectNext && removedIds.has(node.rejectNext) ? null : node.rejectNext,
       onErrorNext: node.onErrorNext && removedIds.has(node.onErrorNext) ? null : node.onErrorNext,
     };
@@ -196,9 +147,7 @@ export function removeNode(draft: WorkflowDraft, nodeId: string): WorkflowDraft 
   }
   const positions = { ...draft.ui.positions };
   for (const id of removedIds) delete positions[id];
-  const sourceOwners = new Map(outputSourceOptions(draft.nodes).map((option) => [option.node.id, option.ownerId]));
-  const outputFields = draft.outputContract?.fields.filter((field) => !field.sourceNodeId
-    || !removedIds.has(sourceOwners.get(field.sourceNodeId) ?? field.sourceNodeId));
+  const outputFields = draft.outputContract?.fields.filter((field) => !field.sourceNodeId || !removedIds.has(field.sourceNodeId));
   return {
     ...draft,
     nodes,

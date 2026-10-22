@@ -17,11 +17,6 @@
     "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
-    "lucide-react": "^1.48.0",
-    "clsx": "^2.1.1",
-    "@radix-ui/react-dialog": "^1.1.23",
-    "tailwind-merge": "^3.7.0",
-    "class-variance-authority": "^0.7.1",
     "@ai-sdk/mcp": "^2.0.73",
     "@ai-sdk/openai-compatible": "^3.0.53",
     "@vercel/blob": "^2.8.0",
