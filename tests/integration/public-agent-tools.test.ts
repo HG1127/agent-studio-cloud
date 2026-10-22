@@ -45,9 +45,11 @@ beforeEach(async () => {
   const created = PublicToolManageResult.parse(await managePublicToolAction(admin, { operation: "create", requestId: randomUUID(), confirmed: true, name: "公开工具回归", description: "" }));
   if (!created.ok) throw new Error(created.error);
   toolId = created.tool.toolId; revision = created.tool.revision;
-  await manage({ operation: "publish", agentId, versionId });
+  const published = await manage({ operation: "publish", agentId, versionId });
+  if (!published.ok) throw new Error(published.error);
   const minted = await manage({ operation: "mint-key", name: "回归调用方", expiresAt: null });
-  if (!minted.ok || !minted.token || !minted.key) throw new Error("未取得测试密钥");
+  if (!minted.ok) throw new Error(minted.error);
+  if (!minted.token || !minted.key) throw new Error("未取得测试密钥");
   credential = minted.token; keyId = minted.key.keyId;
 });
 afterEach(async () => {

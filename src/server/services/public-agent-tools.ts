@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
 import {
   PublicToolManageResult, PublicToolPublication, PublicToolStoredCall, PublicToolKeyView,
   type PublicToolManageInput, type PublicToolFailure, type PublicToolCallInput, type PublicToolStoredCall as StoredCall,
@@ -73,7 +73,7 @@ export async function managePublicTool(input: PublicToolManageInput): Promise<Pu
         const [active] = await tx.select({ value: sql<number>`count(*)`.mapWith(Number) }).from(publicAgentToolKeys)
           .where(and(eq(publicAgentToolKeys.workspaceId, DEMO_WORKSPACE_ID), eq(publicAgentToolKeys.toolId, current.id),
             isNull(publicAgentToolKeys.revokedAt), isNull(publicAgentToolKeys.archivedAt),
-            or(isNull(publicAgentToolKeys.expiresAt), sql`${publicAgentToolKeys.expiresAt} > ${now}`)));
+            or(isNull(publicAgentToolKeys.expiresAt), gt(publicAgentToolKeys.expiresAt, now))));
         if (active.value >= 20) throw new PublicToolRejected("resource_limit", "工具有效凭据数量已达到上限，请先撤销旧凭据");
         token = `pat_${randomBytes(32).toString("hex")}`;
         const [savedKey] = await tx.insert(publicAgentToolKeys).values({ toolId: current.id, workspaceId: DEMO_WORKSPACE_ID,

@@ -54,6 +54,11 @@ describe("公开工具事务服务 mock", () => {
     expect(values.some((value) => value.tokenHash === publicToolHash(token))).toBe(true);
     expect(JSON.stringify(values)).not.toContain(token);
     expect(JSON.stringify(result.key)).not.toContain("tokenHash");
+    const activeKeysQuery = new PgDialect().sqlToQuery(mocks.where.mock.calls[2][0]);
+    expect(activeKeysQuery.sql).toContain('"expires_at" >');
+    expect(activeKeysQuery.params).toEqual([
+      DEMO_WORKSPACE_ID, ids.tool, expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+    ]);
   });
   it("同一管理请求键序重排仍回放原记录，Unicode 文字保留且不依赖地区比较", async () => {
     const input = { operation: "create" as const, requestId: ids.request, confirmed: true as const, name: "\u00e9", description: "e\u0301" };
